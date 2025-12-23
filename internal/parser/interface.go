@@ -28,10 +28,17 @@ type Subgroup struct {
 	Name string
 }
 
+// MikanDashboard 代表蜜柑主页展示的季节性番剧面板
+type MikanDashboard struct {
+	Season string
+	Days   map[string][]SearchResult // 0-6: 星期日到星期六, 7: OVA, 8: 剧场版
+}
+
 // RSSParser 定义解析器接口
 type RSSParser interface {
 	Name() string
 	Parse(url string) ([]Episode, error)
 	Search(keyword string) ([]SearchResult, error)
 	GetSubgroups(bangumiID string) ([]Subgroup, error)
+	GetDashboard(year, season string) (*MikanDashboard, error)
 }

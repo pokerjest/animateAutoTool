@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -94,10 +95,23 @@ func CreateSubscriptionHandler(c *gin.Context) {
 		return
 	}
 
-	// if sub.FilterRule == "" {
-	// 	sub.FilterRule = "1080p,简体" // Default
-	// }
+	if err := createSubscriptionInternal(&sub); err != nil {
+		if err.Error() == "exists" {
+			c.String(http.StatusConflict, "Subscription with this RSS URL already exists")
+		} else {
+			c.String(http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
 
+	// User requested "silky smooth" transition, wait 1s
+	time.Sleep(1 * time.Second)
+
+	c.Header("HX-Redirect", "/subscriptions")
+	c.Status(http.StatusOK)
+}
+
+func createSubscriptionInternal(sub *model.Subscription) error {
 	sub.IsActive = true
 
 	// Check if already exists (including soft-deleted)
@@ -112,50 +126,58 @@ func CreateSubscriptionHandler(c *gin.Context) {
 			existing.ExcludeRule = sub.ExcludeRule
 			existing.IsActive = true
 			if err := db.DB.Save(&existing).Error; err != nil {
-				log.Printf("Failed to restore subscription: %v", err)
-				c.String(http.StatusInternalServerError, "Failed to restore: "+err.Error())
-				return
+				return fmt.Errorf("failed to restore: %v", err)
 			}
-			sub = existing // Use existing for ID
+			*sub = existing // Update caller's pointer
 		} else {
-			// Already active/exists
-			c.String(http.StatusConflict, "Subscription with this RSS URL already exists")
-			return
+			return fmt.Errorf("exists")
 		}
 	} else {
 		// New creation
-		if err := db.DB.Create(&sub).Error; err != nil {
-			log.Printf("Failed to create subscription: %v", err)
-			c.String(http.StatusInternalServerError, "Failed to create: "+err.Error())
-			return
+		if err := db.DB.Create(sub).Error; err != nil {
+			return fmt.Errorf("failed to create: %v", err)
 		}
 	}
 
 	// Trigger run asynchronously
-	// Trigger run asynchronously
 	go func() {
 		log.Printf("DEBUG: Async ProcessSubscription started for %s", sub.Title)
-
-		// Fetch QB Config using helper
 		qbUrl, qbUser, qbPass := fetchQBConfig()
-
-		log.Printf("DEBUG: Async QB Config: URL=%s User=%s", qbUrl, qbUser)
-
 		qbt := downloader.NewQBittorrentClient(qbUrl)
 		if err := qbt.Login(qbUser, qbPass); err != nil {
 			log.Printf("ERROR: Async QB Login failed: %v", err)
 			return
 		}
-
 		mgr := service.NewSubscriptionManager(qbt)
-		mgr.ProcessSubscription(&sub)
+		mgr.ProcessSubscription(sub)
 	}()
 
-	// User requested "silky smooth" transition, wait 1s
-	time.Sleep(1 * time.Second)
+	return nil
+}
 
-	c.Header("HX-Redirect", "/subscriptions")
-	c.Status(http.StatusOK)
+func CreateBatchSubscriptionHandler(c *gin.Context) {
+	var subs []model.Subscription
+	if err := c.ShouldBindJSON(&subs); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid JSON format"})
+		return
+	}
+
+	added := 0
+	failed := 0
+	for i := range subs {
+		if err := createSubscriptionInternal(&subs[i]); err != nil {
+			log.Printf("Batch add failed for %s: %v", subs[i].Title, err)
+			failed++
+		} else {
+			added++
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Batch process completed",
+		"added":   added,
+		"failed":  failed,
+	})
 }
 
 func ToggleSubscriptionHandler(c *gin.Context) {
@@ -451,4 +473,19 @@ func PreviewRSSHandler(c *gin.Context) {
 	c.HTML(http.StatusOK, "preview_results.html", gin.H{
 		"Episodes": episodes,
 	})
+}
+
+func GetMikanDashboardHandler(c *gin.Context) {
+	year := c.Query("year")
+	season := c.Query("season")
+
+	p := parser.NewMikanParser()
+	dashboard, err := p.GetDashboard(year, season)
+	if err != nil {
+		log.Printf("GetMikanDashboard error: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, dashboard)
 }

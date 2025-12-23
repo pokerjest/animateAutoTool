@@ -25,6 +25,7 @@ func InitRoutes(r *gin.Engine) {
 
 		// Subscriptions
 		apiGroup.POST("/subscriptions", CreateSubscriptionHandler)
+		apiGroup.POST("/subscriptions/batch", CreateBatchSubscriptionHandler)
 		apiGroup.POST("/subscriptions/:id/toggle", ToggleSubscriptionHandler)
 		apiGroup.POST("/subscriptions/:id/run", RunSubscriptionHandler)
 		apiGroup.PUT("/subscriptions/:id", UpdateSubscriptionHandler)
@@ -32,6 +33,7 @@ func InitRoutes(r *gin.Engine) {
 		apiGroup.GET("/search", SearchAnimeHandler)
 		apiGroup.GET("/search/subgroups", GetSubgroupsHandler)
 		apiGroup.GET("/preview", PreviewRSSHandler)
+		apiGroup.GET("/mikan/dashboard", GetMikanDashboardHandler)
 
 		// Settings
 		apiGroup.POST("/settings", UpdateSettingsHandler)

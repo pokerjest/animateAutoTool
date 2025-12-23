@@ -202,9 +202,73 @@ func (p *MikanParser) GetSubgroups(bangumiID string) ([]Subgroup, error) {
 	return subgroups, nil
 }
 
+func (p *MikanParser) GetDashboard(year, season string) (*MikanDashboard, error) {
+	baseUrl := "https://mikanani.me/"
+	if year != "" && season != "" {
+		baseUrl = fmt.Sprintf("https://mikanani.me/Home/BangumiCoverFlowByDayOfWeek?year=%s&seasonStr=%s", year, url.QueryEscape(season))
+	}
+
+	resp, err := p.client.R().Get(baseUrl)
+	if err != nil {
+		return nil, err
+	}
+
+	htmlContent := string(resp.Body())
+
+	dashboard := &MikanDashboard{
+		Days: make(map[string][]SearchResult),
+	}
+
+	// 1. Extract Season
+	// Example: <div class="sk-col date-text"> 2025 &#x79CB;&#x5B63;&#x756B;&#x7EC4; <span class="caret"></span> </div>
+	// If it's the AJAX endpoint, it might not have the full container, but we can still try
+	seasonRegex := regexp.MustCompile(`(?s)<div class="sk-col date-text">\s*(.*?)\s*<span class="caret">`)
+	if match := seasonRegex.FindStringSubmatch(htmlContent); len(match) > 1 {
+		dashboard.Season = htmlUnescape(match[1])
+	} else if year != "" && season != "" {
+		// Fallback for AJAX response which might just be the grid
+		dashboard.Season = fmt.Sprintf("%s %s季番组", year, season)
+	}
+
+	// 2. Extract Days and Anime
+	// Mikan uses <div class="sk-bangumi" data-dayofweek="X">
+	// Use a more inclusive regex for days that captures everything until the next sk-bangumi or end of content
+
+	// Actually, a simpler way to split by day might be better
+	daysSplit := regexp.MustCompile(`(?s)<div class="sk-bangumi" data-dayofweek="(\d+)">`).FindAllStringSubmatchIndex(htmlContent, -1)
+	for i, matchIdx := range daysSplit {
+		dayID := htmlContent[matchIdx[2]:matchIdx[3]]
+		start := matchIdx[1]
+		end := len(htmlContent)
+		if i+1 < len(daysSplit) {
+			end = daysSplit[i+1][0]
+		}
+		dayContent := htmlContent[start:end]
+
+		// Extract anime items in this day
+		// Selector: span.js-expand_bangumi for ID/Image, a.an-text for Title
+		// We use a more flexible regex that allows other tags between the attributes
+		animeRegex := regexp.MustCompile(`(?s)data-src="([^"]+)"[^{}]*?data-bangumiid="(\d+)"[^{}]*?class="an-text"[^{}]*?title="([^"]+)"`)
+		animeMatches := animeRegex.FindAllStringSubmatch(dayContent, -1)
+
+		for _, animeMatch := range animeMatches {
+			img := animeMatch[1]
+			// Handle relative URLs
+			if len(img) > 0 && img[0] == '/' {
+				img = "https://mikanani.me" + img
+			}
+			dashboard.Days[dayID] = append(dashboard.Days[dayID], SearchResult{
+				MikanID: animeMatch[2],
+				Image:   img,
+				Title:   htmlUnescape(animeMatch[3]),
+			})
+		}
+	}
+
+	return dashboard, nil
+}
+
 // Simple wrapper for html.UnescapeString if we don't want to import "html" everywhere,
-// but actually we should just import "html" at the top.
-// Let's add the import to the file imports first.
 func htmlUnescape(s string) string {
 	return html.UnescapeString(s)
 }
