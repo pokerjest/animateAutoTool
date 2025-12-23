@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -178,6 +179,53 @@ func CreateBatchSubscriptionHandler(c *gin.Context) {
 		"added":   added,
 		"failed":  failed,
 	})
+}
+
+// BatchPreviewHandler 并发地为批量添加提供预览
+func BatchPreviewHandler(c *gin.Context) {
+	var subs []model.Subscription
+	if err := c.ShouldBindJSON(&subs); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid Data"})
+		return
+	}
+
+	type PreviewResult struct {
+		Title    string           `json:"title"`
+		RSSUrl   string           `json:"rss_url"`
+		Episodes []parser.Episode `json:"episodes,omitempty"`
+		Error    string           `json:"error,omitempty"`
+	}
+
+	results := make([]PreviewResult, len(subs))
+	var wg sync.WaitGroup
+
+	for i, sub := range subs {
+		wg.Add(1)
+		go func(i int, s model.Subscription) {
+			defer wg.Done()
+			res := PreviewResult{Title: s.Title, RSSUrl: s.RSSUrl}
+
+			if s.RSSUrl == "" {
+				res.Error = "缺少 RSS 链接"
+			} else {
+				p := parser.NewMikanParser()
+				eps, err := p.Parse(s.RSSUrl)
+				if err != nil {
+					res.Error = err.Error()
+				} else {
+					// 只取前 5 集预览
+					if len(eps) > 5 {
+						eps = eps[:5]
+					}
+					res.Episodes = eps
+				}
+			}
+			results[i] = res
+		}(i, sub)
+	}
+
+	wg.Wait()
+	c.JSON(http.StatusOK, results)
 }
 
 func ToggleSubscriptionHandler(c *gin.Context) {

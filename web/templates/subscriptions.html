@@ -54,6 +54,8 @@
     showDeleteModal: false,
     showBatchAddModal: false,
     batchInput: '',
+    batchPreviewData: null,
+    isPreviewingBatch: false,
     isSubmittingBatch: false,
     deleteId: 0,
     toast: { show: false, message: '', type: 'success' },
@@ -63,8 +65,10 @@
     selectedAnime: null,
     showSubgroupList: false,
     loadingSubgroups: false,
+    fromDashboard: false,
     // Search & Select Logic
     async selectAnime(title, mikanId, image) {
+        this.fromDashboard = this.showDashboardModal;
         this.selectedAnime = { title, mikanId, image };
         this.loadingSubgroups = true;
         this.showSubgroupList = true;
@@ -185,6 +189,58 @@
         } finally {
             this.isSubmittingBatch = false;
         }
+    },
+    addToBatch(subgroup) {
+        const anime = this.selectedAnime;
+        const rssUrl = 'https://mikanani.me/RSS/Bangumi?bangumiId=' + anime.mikanId + (subgroup.ID ? '&subgroupid=' + subgroup.ID : '');
+        const title = `[${subgroup.Name}] ${anime.title}`;
+        const line = `${title} | ${rssUrl}`;
+        
+        if (this.batchInput.trim()) {
+            this.batchInput += '\n' + line;
+        } else {
+            this.batchInput = line;
+        }
+        
+        this.showToast(`✅ 已添加到批量列表: ${subgroup.Name}`);
+    },
+    async previewBatch() {
+        if (!this.batchInput.trim()) return;
+
+        const lines = this.batchInput.split('\n').filter(l => l.trim());
+        const subs = lines.map(line => {
+            const parts = line.split('|');
+            if (parts.length >= 2) {
+                return { title: parts[0].trim(), rss_url: parts[1].trim() };
+            } else if (line.trim().startsWith('http')) {
+                return { title: '未命名', rss_url: line.trim() };
+            }
+            return null;
+        }).filter(s => s !== null);
+
+        if (subs.length === 0) return;
+
+        this.isPreviewingBatch = true;
+        this.batchPreviewData = null;
+        try {
+            const response = await fetch('/api/subscriptions/batch-preview', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(subs)
+            });
+            if (response.ok) {
+                this.batchPreviewData = await response.json();
+            } else {
+                this.showToast('❌ 预览失败', 'error');
+            }
+        } catch (e) {
+            this.showToast('❌ 网络错误', 'error');
+        } finally {
+            this.isPreviewingBatch = false;
+        }
+    },
+    get batchCount() {
+        return this.batchInput.split('\n').filter(l => l.trim()).length;
     }
 }" @edit-subscription.window="
     editForm.id = $event.detail.id;
@@ -208,9 +264,11 @@
                 class="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600 transition shadow-md flex items-center gap-2">
                 <span>🔍</span> 搜索番剧
             </button>
-            <button @click="showBatchAddModal = true; batchInput = ''"
-                class="bg-indigo-500 text-white px-4 py-2 rounded-lg hover:bg-indigo-600 transition shadow-md flex items-center gap-2">
+            <button @click="showBatchAddModal = true"
+                class="bg-indigo-500 text-white px-4 py-2 rounded-lg hover:bg-indigo-600 transition shadow-md flex items-center gap-2 relative">
                 <span>📦</span> 批量添加
+                <span x-show="batchCount > 0" x-text="batchCount"
+                    class="absolute -top-2 -right-2 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full shadow-sm animate-bounce"></span>
             </button>
             <button
                 @click="showAddModal = true; addForm = {title:'', rss:''}; document.getElementById('add-preview-results').innerHTML = ''"
@@ -334,17 +392,75 @@
             </div>
 
             <textarea x-model="batchInput"
-                class="w-full h-64 px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-400 outline-none font-mono text-sm resize-none"
+                class="w-full h-48 px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-400 outline-none font-mono text-sm resize-none mb-4"
                 placeholder="葬送的芙莉莲 | https://mikanani.me/RSS/Bangumi?bangumiId=3141&#10;迷宫饭 | https://mikanani.me/RSS/Bangumi?bangumiId=3154"></textarea>
 
-            <div class="mt-6 flex justify-end gap-3">
-                <button @click="showBatchAddModal = false"
-                    class="px-4 py-2 rounded-lg text-gray-500 hover:bg-gray-100 transition font-medium">取消</button>
-                <button @click="submitBatch()" :disabled="isSubmittingBatch"
-                    class="bg-indigo-500 text-white px-6 py-2 rounded-lg hover:bg-indigo-600 transition shadow-lg flex items-center gap-2 disabled:opacity-50">
-                    <span x-show="isSubmittingBatch" class="animate-spin text-sm">⌛</span>
-                    <span x-text="isSubmittingBatch ? '正在处理...' : '确认批量添加' "></span>
-                </button>
+            <!-- Preview Section -->
+            <div x-show="batchPreviewData || isPreviewingBatch"
+                class="mb-4 max-h-64 overflow-y-auto rounded-xl border border-gray-100 bg-gray-50/50">
+                <template x-if="isPreviewingBatch">
+                    <div class="p-8 text-center text-gray-400 flex flex-col items-center gap-2">
+                        <div class="animate-spin h-6 w-6 border-2 border-indigo-500 border-t-transparent rounded-full">
+                        </div>
+                        <span class="text-xs">解析资源中...</span>
+                    </div>
+                </template>
+
+                <template x-if="batchPreviewData">
+                    <div class="divide-y divide-gray-100">
+                        <template x-for="(item, index) in batchPreviewData" :key="index">
+                            <div x-data="{ expanded: false }" class="bg-white">
+                                <button @click="expanded = !expanded"
+                                    class="w-full px-4 py-3 flex items-center justify-between hover:bg-gray-50 transition">
+                                    <div class="flex items-center gap-3 overflow-hidden">
+                                        <span class="font-bold text-gray-700 text-sm truncate"
+                                            x-text="item.title"></span>
+                                        <span class="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-500"
+                                            x-text="item.error ? '⚠️ 错误' : (item.episodes?.length || 0) + ' 集'"></span>
+                                    </div>
+                                    <span class="text-gray-400 text-xs transform transition-transform duration-200"
+                                        :class="expanded ? 'rotate-180' : ''">▼</span>
+                                </button>
+
+                                <div x-show="expanded" x-collapse class="px-4 pb-3 bg-gray-50/50 text-xs">
+                                    <template x-if="item.error">
+                                        <div class="text-red-500 py-2" x-text="item.error"></div>
+                                    </template>
+                                    <template x-if="!item.error && item.episodes">
+                                        <ul class="space-y-1.5 pt-2">
+                                            <template x-for="ep in item.episodes">
+                                                <li class="flex items-start gap-2">
+                                                    <span class="text-indigo-500 shrink-0">📄</span>
+                                                    <span class="text-gray-600 break-all" x-text="ep.title"></span>
+                                                </li>
+                                            </template>
+                                        </ul>
+                                    </template>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+                </template>
+            </div>
+
+            <div class="mt-6 flex justify-between items-center">
+                <div class="flex gap-4 items-center">
+                    <button @click="batchInput = ''; batchPreviewData = null"
+                        class="text-xs text-red-300 hover:text-red-500 hover:underline transition">清空列表</button>
+                    <button @click="previewBatch()" :disabled="!batchInput.trim() || isPreviewingBatch"
+                        class="text-xs font-bold text-indigo-500 hover:text-indigo-600 flex items-center gap-1 disabled:opacity-50 transition">
+                        <span>👀</span> 预览内容
+                    </button>
+                </div>
+                <div class="flex gap-3">
+                    <button @click="showBatchAddModal = false"
+                        class="px-4 py-2 rounded-lg text-gray-500 hover:bg-gray-100 transition font-medium">取消</button>
+                    <button @click="submitBatch()" :disabled="isSubmittingBatch"
+                        class="bg-indigo-500 text-white px-6 py-2 rounded-lg hover:bg-indigo-600 transition shadow-lg flex items-center gap-2 disabled:opacity-50">
+                        <span x-show="isSubmittingBatch" class="animate-spin text-sm">⌛</span>
+                        <span x-text="isSubmittingBatch ? '正在处理...' : '确认批量添加' "></span>
+                    </button>
+                </div>
             </div>
         </div>
     </div>
@@ -482,7 +598,8 @@
             @click.away="showSearchModal = false">
             <div class="p-6 border-b flex justify-between items-center bg-gray-50 rounded-t-2xl">
                 <div class="flex items-center gap-4">
-                    <button x-show="showSubgroupList" @click="showSubgroupList = false"
+                    <button x-show="showSubgroupList"
+                        @click="if (fromDashboard) { showSearchModal = false; showDashboardModal = true; fromDashboard = false; } else { showSubgroupList = false; }"
                         class="text-gray-500 hover:text-primary transition p-2 hover:bg-white rounded-full">
                         <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7">
@@ -539,17 +656,25 @@
 
                             <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                                 <template x-for="group in subgroups" :key="group.ID || 'all'">
-                                    <button @click="selectSubgroup(group)"
-                                        class="flex items-center justify-between p-4 bg-white border border-gray-100 rounded-xl hover:border-primary hover:shadow-md hover:bg-pink-50/30 transition group text-left">
-                                        <div class="flex flex-col">
-                                            <span class="font-bold text-gray-700 group-hover:text-primary transition"
-                                                x-text="group.Name"></span>
-                                            <span class="text-xs text-gray-400 mt-1"
-                                                x-text="group.ID ? '专属 RSS 频道' : '聚合所有字幕组结果'"></span>
+                                    <div
+                                        class="p-4 bg-white border border-gray-100 rounded-xl hover:border-primary hover:shadow-md hover:bg-pink-50/30 transition group flex flex-col gap-2">
+                                        <div class="flex items-center justify-between cursor-pointer"
+                                            @click="selectSubgroup(group)">
+                                            <div>
+                                                <span
+                                                    class="font-bold text-gray-700 group-hover:text-primary transition"
+                                                    x-text="group.Name"></span>
+                                                <div class="text-xs text-gray-400 mt-0.5"
+                                                    x-text="group.ID ? '专属 RSS 频道' : '聚合所有字幕组结果'"></div>
+                                            </div>
+                                            <span
+                                                class="text-primary opacity-0 group-hover:opacity-100 transition">➡️</span>
                                         </div>
-                                        <span
-                                            class="text-primary opacity-0 group-hover:opacity-100 transition">➡️</span>
-                                    </button>
+                                        <button @click.stop="addToBatch(group)"
+                                            class="w-full text-xs font-bold text-primary bg-primary/5 hover:bg-primary hover:text-white py-1.5 rounded-lg transition text-center opacity-60 group-hover:opacity-100">
+                                            + 添加到批量列表
+                                        </button>
+                                    </div>
                                 </template>
                             </div>
                         </div>

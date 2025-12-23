@@ -4,15 +4,15 @@ import "time"
 
 // Episode 代表从 RSS 解析出的单集信息
 type Episode struct {
-	Title         string    // 原始标题
-	AnimeIdentify string    // 用于识别番剧的标识(如番名)
-	EpisodeNum    string    // 集数字符串 "01", "12.5"
-	Season        string    // 季度 S01, S02...
-	Magnet        string    // 磁力链接
-	TorrentURL    string    // 种子文件链接
-	PubDate       time.Time // 发布时间
-	SubGroup      string    // 字幕组
-	Resolution    string    // 分辨率 1080p, 4k...
+	Title         string    `json:"title"`          // 原始标题
+	AnimeIdentify string    `json:"anime_identify"` // 用于识别番剧的标识(如番名)
+	EpisodeNum    string    `json:"episode_num"`    // 集数字符串 "01", "12.5"
+	Season        string    `json:"season"`         // 季度 S01, S02...
+	Magnet        string    `json:"magnet"`         // 磁力链接
+	TorrentURL    string    `json:"torrent_url"`    // 种子文件链接
+	PubDate       time.Time `json:"pub_date"`       // 发布时间
+	SubGroup      string    `json:"sub_group"`      // 字幕组
+	Resolution    string    `json:"resolution"`     // 分辨率 1080p, 4k...
 }
 
 // SearchResult 代表搜索结果 (番剧维度)
