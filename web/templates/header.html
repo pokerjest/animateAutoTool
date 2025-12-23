@@ -1,0 +1,92 @@
+{{ define "header.html" }}
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Animate Auto Tool</title>
+    <!-- Tailwind CSS -->
+    <script src="/static/js/tailwindcss.js?v=2"></script>
+    <!-- HTMX -->
+    <script src="/static/js/htmx.min.js?v=2"></script>
+    <!-- Alpine.js -->
+    <script defer src="/static/js/alpine.min.js?v=2"></script>
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#ffb6c1', // 浅粉色
+                        secondary: '#87ceeb', // 天蓝色
+                        accent: '#ff69b4', // 热粉红
+                        glass: 'rgba(255, 255, 255, 0.7)',
+                    },
+                    fontFamily: {
+                        sans: ['"Noto Sans SC"', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+    <style type="text/tailwindcss">
+        body {
+             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(10px);
+            border-radius: 1rem;
+            border: 1px solid rgba(255, 255, 255, 0.5);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        .nav-link {
+            @apply px-4 py-2 rounded-lg transition-colors duration-200 hover:bg-primary hover:text-white font-medium text-gray-700 block;
+        }
+        .nav-link.active {
+            @apply bg-primary text-white;
+        }
+        
+        /* HTMX Indicator Support */
+        .htmx-indicator {
+            display: none;
+        }
+        .htmx-request .htmx-indicator,
+        .htmx-request.htmx-indicator {
+            display: inline-block;
+        }
+    </style>
+</head>
+
+<body class="min-h-screen text-gray-800"
+    style="background: url('https://w.wallhaven.cc/full/wy/wallhaven-wyw6px.png') no-repeat center center fixed; background-size: cover;">
+
+    <div class="container mx-auto px-4 py-8 flex gap-6 h-screen overflow-hidden">
+        <!-- Sidebar -->
+        <div class="w-64 glass-panel h-full p-6 flex flex-col shrink-0">
+            <h1 class="text-2xl font-bold text-accent mb-8 flex items-center gap-2">
+                <span>🌸</span> AnimateTool
+            </h1>
+
+            <nav class="flex flex-col gap-2 flex-1">
+                <a href="/" class="nav-link" hx-get="/" hx-target="#main-content" hx-push-url="true">
+                    📊 仪表盘
+                </a>
+                <a href="/subscriptions" class="nav-link" hx-get="/subscriptions" hx-target="#main-content"
+                    hx-push-url="true">
+                    📺 订阅管理
+                </a>
+                <a href="/settings" class="nav-link" hx-get="/settings" hx-target="#main-content" hx-push-url="true">
+                    ⚙️ 系统设置
+                </a>
+            </nav>
+
+            <div class="text-xs text-gray-500 text-center mt-4">
+                v0.1.0 Beta
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <main id="main-content" class="flex-1 glass-panel h-full p-8 overflow-y-auto">
+            {{ end }}
