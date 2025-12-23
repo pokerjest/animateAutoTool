@@ -29,6 +29,9 @@ func InitRoutes(r *gin.Engine) {
 		apiGroup.POST("/subscriptions/:id/run", RunSubscriptionHandler)
 		apiGroup.PUT("/subscriptions/:id", UpdateSubscriptionHandler)
 		apiGroup.DELETE("/subscriptions/:id", DeleteSubscriptionHandler)
+		apiGroup.GET("/search", SearchAnimeHandler)
+		apiGroup.GET("/search/subgroups", GetSubgroupsHandler)
+		apiGroup.GET("/preview", PreviewRSSHandler)
 
 		// Settings
 		apiGroup.POST("/settings", UpdateSettingsHandler)

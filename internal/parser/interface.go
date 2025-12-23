@@ -15,8 +15,23 @@ type Episode struct {
 	Resolution    string    // 分辨率 1080p, 4k...
 }
 
+// SearchResult 代表搜索结果 (番剧维度)
+type SearchResult struct {
+	MikanID string // 蜜柑 ID (BangumiID)
+	Title   string // 番剧标题
+	Image   string // 封面图 URL
+}
+
+// Subgroup 代表字幕组信息
+type Subgroup struct {
+	ID   string
+	Name string
+}
+
 // RSSParser 定义解析器接口
 type RSSParser interface {
 	Name() string
 	Parse(url string) ([]Episode, error)
+	Search(keyword string) ([]SearchResult, error)
+	GetSubgroups(bangumiID string) ([]Subgroup, error)
 }

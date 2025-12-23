@@ -10,6 +10,7 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/downloader"
 	"github.com/pokerjest/animateAutoTool/internal/model"
+	"github.com/pokerjest/animateAutoTool/internal/parser"
 	"github.com/pokerjest/animateAutoTool/internal/service"
 	"gorm.io/gorm"
 )
@@ -388,4 +389,66 @@ func TestConnectionHandler(c *gin.Context) {
 
 	log.Printf("DEBUG: Connection successful, version: %s", version)
 	c.String(http.StatusOK, `<div class="text-emerald-600 bg-emerald-50 px-3 py-1.5 rounded-lg text-sm font-medium flex items-center gap-2 border border-emerald-200 shadow-sm transition-all duration-300 transform scale-100">✅ 连接成功! (`+version+`)</div>`)
+}
+
+func SearchAnimeHandler(c *gin.Context) {
+	keyword := c.Query("q")
+	if keyword == "" {
+		c.Header("Content-Type", "text/html")
+		c.String(http.StatusOK, `<div class="p-4 text-center text-gray-500">请输入关键词进行搜索</div>`)
+		return
+	}
+
+	p := parser.NewMikanParser()
+	results, err := p.Search(keyword)
+	if err != nil {
+		log.Printf("Search error: %v", err)
+		c.Header("Content-Type", "text/html")
+		c.String(http.StatusOK, `<div class="p-4 text-center text-red-500">搜索失败: `+err.Error()+`</div>`)
+		return
+	}
+
+	c.HTML(http.StatusOK, "search_results.html", gin.H{
+		"Results": results,
+	})
+}
+
+func GetSubgroupsHandler(c *gin.Context) {
+	bangumiID := c.Query("id")
+	if bangumiID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "id is required"})
+		return
+	}
+
+	p := parser.NewMikanParser()
+	subgroups, err := p.GetSubgroups(bangumiID)
+	if err != nil {
+		log.Printf("GetSubgroups error: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, subgroups)
+}
+
+func PreviewRSSHandler(c *gin.Context) {
+	url := c.Query("RSSUrl")
+	if url == "" {
+		c.Header("Content-Type", "text/html")
+		c.String(http.StatusOK, `<div class="p-4 text-center text-gray-500">请输入有效 RSS 链接</div>`)
+		return
+	}
+
+	p := parser.NewMikanParser()
+	episodes, err := p.Parse(url)
+	if err != nil {
+		log.Printf("Preview error: %v", err)
+		c.Header("Content-Type", "text/html")
+		c.String(http.StatusOK, `<div class="p-4 text-center text-red-500">解析失败: `+err.Error()+`</div>`)
+		return
+	}
+
+	c.HTML(http.StatusOK, "preview_results.html", gin.H{
+		"Episodes": episodes,
+	})
 }

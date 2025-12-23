@@ -3,6 +3,9 @@ package parser
 import (
 	"encoding/xml"
 	"fmt"
+	"html"
+	"log"
+	"net/url"
 	"regexp"
 	"time"
 
@@ -14,8 +17,12 @@ type MikanParser struct {
 }
 
 func NewMikanParser() *MikanParser {
+	client := resty.New().
+		SetTimeout(10*time.Second).
+		SetHeader("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+
 	return &MikanParser{
-		client: resty.New().SetTimeout(10 * time.Second),
+		client: client,
 	}
 }
 
@@ -112,4 +119,92 @@ func parseTitle(title string) Episode {
 	}
 
 	return ep
+}
+
+func (p *MikanParser) Search(keyword string) ([]SearchResult, error) {
+	// Search URL: https://mikanani.me/Home/Search?searchstr={keyword}
+	encodedKeyword := url.QueryEscape(keyword)
+	url := fmt.Sprintf("https://mikanani.me/Home/Search?searchstr=%s", encodedKeyword)
+
+	resp, err := p.client.R().Get(url)
+	if err != nil {
+		log.Printf("Search Request Failed: %v", err)
+		return nil, err
+	}
+
+	htmlContent := string(resp.Body())
+	log.Printf("DEBUG: Mikan Search HTML Len: %d", len(htmlContent))
+
+	// Regex to extract anime entries
+	// Structure: <a href="/Home/Bangumi/3141" ...> ... <span data-src="..."> ... <div class="an-text" title="...">
+	// We use `(?s)` to allow . to match newlines
+	// Relaxed Regex: Look for the Bangumi ID link, then image, then title
+	// We handle potential variation in attribute order for the title div by just looking for title="..." inside the block
+	re := regexp.MustCompile(`(?s)href="/Home/Bangumi/(\d+)".*?data-src="([^"]+)".*?class="an-text".*?title="([^"]+)"`)
+
+	matches := re.FindAllStringSubmatch(htmlContent, -1)
+	log.Printf("DEBUG: Mikan Search Matches Found: %d", len(matches))
+
+	var results []SearchResult
+	for _, match := range matches {
+		if len(match) < 4 {
+			continue
+		}
+
+		img := match[2]
+		if len(img) > 0 && img[0] == '/' {
+			img = "https://mikanani.me" + img
+		}
+
+		results = append(results, SearchResult{
+			MikanID: match[1],
+			Image:   img,
+			Title:   htmlUnescape(match[3]),
+		})
+	}
+
+	return results, nil
+}
+
+func (p *MikanParser) GetSubgroups(bangumiID string) ([]Subgroup, error) {
+	url := fmt.Sprintf("https://mikanani.me/Home/Bangumi/%s", bangumiID)
+
+	resp, err := p.client.R().Get(url)
+	if err != nil {
+		return nil, err
+	}
+
+	htmlContent := string(resp.Body())
+
+	// Regex to find subgroups
+	// Structure: <div class="subgroup-text" id="(\d+)"> followed by the subgroup name link
+	// We look for the link that doesn't have the mikan-rss class and contains the name
+	re := regexp.MustCompile(`(?s)<div class="subgroup-text" id="(\d+)">.*?<a[^>]*style="color:[^>]*>(.*?)</a>`)
+	matches := re.FindAllStringSubmatch(htmlContent, -1)
+
+	var subgroups []Subgroup
+	// Always add "全部" as the first option
+	subgroups = append(subgroups, Subgroup{ID: "", Name: "全部 (All)"})
+
+	seen := make(map[string]bool)
+	for _, match := range matches {
+		if len(match) < 3 {
+			continue
+		}
+		id := match[1]
+		name := htmlUnescape(match[2])
+		if !seen[id] {
+			subgroups = append(subgroups, Subgroup{ID: id, Name: name})
+			seen[id] = true
+		}
+	}
+
+	return subgroups, nil
+}
+
+// Simple wrapper for html.UnescapeString if we don't want to import "html" everywhere,
+// but actually we should just import "html" at the top.
+// Let's add the import to the file imports first.
+func htmlUnescape(s string) string {
+	return html.UnescapeString(s)
 }

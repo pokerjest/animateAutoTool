@@ -1,0 +1,30 @@
+<div class="mt-4 border rounded-xl overflow-hidden bg-white shadow-sm">
+    <div class="px-4 py-3 bg-gray-50 border-b flex justify-between items-center">
+        <h4 class="text-sm font-bold text-gray-700">RSS 预览 (最新剧集)</h4>
+        <span class="text-xs text-gray-400">{{len .Episodes}} 条结果</span>
+    </div>
+    <div class="max-h-64 overflow-y-auto">
+        {{ range .Episodes }}
+        <div class="p-3 border-b last:border-b-0 hover:bg-gray-50 transition-colors">
+            <div class="text-sm font-medium text-gray-800 line-clamp-2" title="{{ .Title }}">
+                {{ .Title }}
+            </div>
+            <div class="mt-1.5 flex items-center gap-4 text-[10px] text-gray-500 font-medium">
+                <span class="flex items-center gap-1">
+                    <span class="text-gray-300">📅</span> {{ .PubDate.Format "2006-01-02 15:04" }}
+                </span>
+                {{ if .Resolution }}
+                <span class="px-1.5 py-0.5 rounded bg-blue-50 text-blue-500 border border-blue-100 uppercase">
+                    {{ .Resolution }}
+                </span>
+                {{ end }}
+            </div>
+        </div>
+        {{ else }}
+        <div class="p-8 text-center text-gray-400">
+            <p class="text-4xl mb-2">📄</p>
+            <p class="text-sm">暂无数据</p>
+        </div>
+        {{ end }}
+    </div>
+</div>
