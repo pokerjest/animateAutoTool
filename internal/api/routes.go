@@ -26,6 +26,8 @@ func InitRoutes(r *gin.Engine) {
 		// Subscriptions
 		apiGroup.POST("/subscriptions", CreateSubscriptionHandler)
 		apiGroup.POST("/subscriptions/:id/toggle", ToggleSubscriptionHandler)
+		apiGroup.POST("/subscriptions/:id/run", RunSubscriptionHandler)
+		apiGroup.PUT("/subscriptions/:id", UpdateSubscriptionHandler)
 		apiGroup.DELETE("/subscriptions/:id", DeleteSubscriptionHandler)
 
 		// Settings

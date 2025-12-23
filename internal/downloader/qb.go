@@ -3,7 +3,9 @@ package downloader
 import (
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -13,6 +15,7 @@ import (
 type QBittorrentClient struct {
 	client  *resty.Client
 	baseURL string
+	cookies []*http.Cookie // Manually store cookies
 }
 
 func NewQBittorrentClient(baseURL string) *QBittorrentClient {
@@ -20,11 +23,26 @@ func NewQBittorrentClient(baseURL string) *QBittorrentClient {
 	baseURL = strings.TrimSuffix(baseURL, "/")
 
 	client := resty.New().
-		SetTimeout(30 * time.Second).
-		SetBaseURL(baseURL)
+		SetTimeout(30*time.Second).
+		SetBaseURL(baseURL).
+		SetHeader("Referer", baseURL).
+		SetHeader("Origin", baseURL).
+		SetHeader("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36").
+		SetCookieJar(nil) // Keep Jar just in case, but we will manual override
 
-	// 自动重试
 	client.SetRetryCount(3).SetRetryWaitTime(2 * time.Second)
+
+	// Middleware to log requests
+	client.OnBeforeRequest(func(c *resty.Client, req *resty.Request) error {
+		log.Printf("DEBUG: Outgoing Request: %s %s", req.Method, req.URL)
+		log.Printf("DEBUG: Outgoing Headers: %v", req.Header)
+		if c.GetClient().Jar != nil {
+			u, _ := url.Parse(baseURL)
+			cookies := c.GetClient().Jar.Cookies(u)
+			log.Printf("DEBUG: Jar Cookies for %s: %v", baseURL, cookies)
+		}
+		return nil
+	})
 
 	return &QBittorrentClient{
 		client:  client,
@@ -44,13 +62,20 @@ func (q *QBittorrentClient) Login(username, password string) error {
 		return err
 	}
 
+	// Log everything
+	log.Printf("DEBUG: Login Status: %s", resp.Status())
+	log.Printf("DEBUG: Login Body: %s", resp.String())
+	log.Printf("DEBUG: Login Headers: %v", resp.Header())
+	log.Printf("DEBUG: Login Cookies: %v", resp.Cookies())
+
+	// Store cookies manually
+	q.cookies = resp.Cookies()
+
 	// qBit 登录失败在 body 返回 "Fails."
 	if resp.String() == "Fails." {
 		return errors.New("login failed: invalid credentials")
 	}
 
-	// 虽然 resty 会自动处理 cookie，但确认一下
-	// 只要 resp header Set-Cookie 有 SID 即可
 	return nil
 }
 
@@ -60,9 +85,7 @@ func (q *QBittorrentClient) AddTorrent(torrentURL, savePath, category string, pa
 		pausedStr = "true"
 	}
 
-	// 这里的 AddTorrent 使用 urls 参数 (磁力链或 HTTP 链接)
-	// 如果需要上传种子文件，需要用 SetFileReader
-	resp, err := q.client.R().
+	req := q.client.R().
 		SetFormData(map[string]string{
 			"urls":        torrentURL,
 			"savepath":    savePath,
@@ -71,14 +94,25 @@ func (q *QBittorrentClient) AddTorrent(torrentURL, savePath, category string, pa
 			"autoTMM":     "false", // 禁用自动种子管理，以便使用自定义路径
 			"root_folder": "true",  // 创建根目录
 		}).
-		Post("/api/v2/torrents/add")
+		SetHeader("Referer", q.baseURL+"/"). // Add trailing slash to match browser
+		SetHeader("Origin", q.baseURL)
+
+	// Manually attach cookies
+	if len(q.cookies) > 0 {
+		req.SetCookies(q.cookies)
+		log.Printf("DEBUG: Manually attaching %d cookies", len(q.cookies))
+	} else {
+		log.Printf("WARNING: No cookies to attach! Login might have failed silently or didn't set cookies.")
+	}
+
+	resp, err := req.Post("/api/v2/torrents/add")
 
 	if err != nil {
 		return err
 	}
 
 	if resp.StatusCode() != http.StatusOK {
-		return fmt.Errorf("failed to add torrent, status: %s", resp.Status())
+		return fmt.Errorf("failed to add torrent, status: %s, body: %s", resp.Status(), resp.String())
 	}
 
 	return nil
@@ -95,7 +129,7 @@ func (q *QBittorrentClient) GetVersion() (string, error) {
 		return "", err
 	}
 	if resp.StatusCode() != 200 {
-		return "", fmt.Errorf("ping failed: %s", resp.Status())
+		return "", fmt.Errorf("ping failed: %s, body: %s", resp.Status(), resp.String())
 	}
 	return resp.String(), nil
 }

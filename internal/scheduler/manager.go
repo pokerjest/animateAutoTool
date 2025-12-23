@@ -5,8 +5,9 @@ import (
 	"time"
 
 	"github.com/pokerjest/animateAutoTool/internal/db"
+	"github.com/pokerjest/animateAutoTool/internal/downloader"
 	"github.com/pokerjest/animateAutoTool/internal/model"
-	"github.com/pokerjest/animateAutoTool/pkg/rss"
+	"github.com/pokerjest/animateAutoTool/internal/service"
 )
 
 type Manager struct {
@@ -53,46 +54,38 @@ func (m *Manager) CheckUpdates() {
 		return
 	}
 
+	// Fetch QB Config once
+	// We need to fetch it manually here as we are not in a handler context
+	var qbUrl, qbUser, qbPass string
+
+	// Helper fetch (inline for now as we can't easily import private handler helper)
+	// Or we can just use GORM
+	var c1 model.GlobalConfig
+	if err := db.DB.First(&c1, "key = 'qb_url'").Error; err == nil {
+		qbUrl = c1.Value
+	} else {
+		qbUrl = "http://localhost:8080"
+	}
+	var c2 model.GlobalConfig
+	if err := db.DB.First(&c2, "key = 'qb_username'").Error; err == nil {
+		qbUser = c2.Value
+	}
+	var c3 model.GlobalConfig
+	if err := db.DB.First(&c3, "key = 'qb_password'").Error; err == nil {
+		qbPass = c3.Value
+	}
+
+	// Initialize Service Manager
+	qbt := downloader.NewQBittorrentClient(qbUrl)
+	if err := qbt.Login(qbUser, qbPass); err != nil {
+		log.Printf("Scheduler Error: QB Login failed: %v", err)
+		return // Can't do anything without QB
+	}
+
+	mgr := service.NewSubscriptionManager(qbt)
+
 	for _, sub := range subs {
 		log.Printf("Scheduler: Checking sub %s (%s)", sub.Title, sub.RSSUrl)
-
-		// 1. Parse RSS
-		items, err := rss.ParseMikan(sub.RSSUrl)
-		if err != nil {
-			log.Printf("Scheduler: Failed to parse RSS for %s: %v", sub.Title, err)
-			continue
-		}
-
-		for _, item := range items {
-			// 2. Filter (Simple Check)
-			// TODO: Implement regex filter from sub.FilterRule
-
-			// 3. Check Deduplication (Magnet Link)
-			var count int64
-			db.DB.Model(&model.DownloadLog{}).Where("magnet = ?", item.Link).Count(&count)
-			if count > 0 {
-				// Skip existing
-				continue
-			}
-
-			// 4. New Item Found
-			log.Printf("Scheduler: New Item Found: %s", item.Title)
-
-			// 5. Add to qBittorrent (Mock for now)
-			// downloader.Add(item.Link, sub.SavePath...)
-
-			// 6. Record Log
-			newLog := model.DownloadLog{
-				SubscriptionID: sub.ID,
-				Title:          item.Title,
-				Magnet:         item.Link,
-				Status:         "downloading", // Initial status
-			}
-			if err := db.DB.Create(&newLog).Error; err != nil {
-				log.Printf("Scheduler: Failed to create log: %v", err)
-			} else {
-				log.Printf("Scheduler: DownloadLog created for %s", item.Title)
-			}
-		}
+		mgr.ProcessSubscription(&sub)
 	}
 }

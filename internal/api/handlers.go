@@ -10,6 +10,8 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/downloader"
 	"github.com/pokerjest/animateAutoTool/internal/model"
+	"github.com/pokerjest/animateAutoTool/internal/service"
+	"gorm.io/gorm"
 )
 
 type DashboardData struct {
@@ -25,6 +27,27 @@ type SubscriptionsData struct {
 
 func isHTMX(c *gin.Context) bool {
 	return c.GetHeader("HX-Request") == "true"
+}
+
+// Helper to reliably fetch QB config without GORM scope issues
+func fetchQBConfig() (string, string, string) {
+	var configs []model.GlobalConfig
+	// Fetch all to avoid scope pollution from sequential First() calls
+	if err := db.DB.Find(&configs).Error; err != nil {
+		log.Printf("Error fetching configs: %v", err)
+		return "http://localhost:8080", "", ""
+	}
+
+	cfgMap := make(map[string]string)
+	for _, c := range configs {
+		cfgMap[c.Key] = c.Value
+	}
+
+	url := cfgMap[model.ConfigKeyQBUrl]
+	if url == "" {
+		url = "http://localhost:8080"
+	}
+	return url, cfgMap[model.ConfigKeyQBUsername], cfgMap[model.ConfigKeyQBPassword]
 }
 
 // === Dashboard ===
@@ -70,15 +93,65 @@ func CreateSubscriptionHandler(c *gin.Context) {
 		return
 	}
 
-	if sub.FilterRule == "" {
-		sub.FilterRule = "1080p,简体" // Default
-	}
+	// if sub.FilterRule == "" {
+	// 	sub.FilterRule = "1080p,简体" // Default
+	// }
 
 	sub.IsActive = true
-	if err := db.DB.Create(&sub).Error; err != nil {
-		c.String(http.StatusInternalServerError, "Failed to create: "+err.Error())
-		return
+
+	// Check if already exists (including soft-deleted)
+	var existing model.Subscription
+	if err := db.DB.Unscoped().Where("rss_url = ?", sub.RSSUrl).First(&existing).Error; err == nil {
+		// Found existing
+		if existing.DeletedAt.Valid {
+			// Restore it
+			existing.DeletedAt = gorm.DeletedAt{} // Restore
+			existing.Title = sub.Title
+			existing.FilterRule = sub.FilterRule
+			existing.ExcludeRule = sub.ExcludeRule
+			existing.IsActive = true
+			if err := db.DB.Save(&existing).Error; err != nil {
+				log.Printf("Failed to restore subscription: %v", err)
+				c.String(http.StatusInternalServerError, "Failed to restore: "+err.Error())
+				return
+			}
+			sub = existing // Use existing for ID
+		} else {
+			// Already active/exists
+			c.String(http.StatusConflict, "Subscription with this RSS URL already exists")
+			return
+		}
+	} else {
+		// New creation
+		if err := db.DB.Create(&sub).Error; err != nil {
+			log.Printf("Failed to create subscription: %v", err)
+			c.String(http.StatusInternalServerError, "Failed to create: "+err.Error())
+			return
+		}
 	}
+
+	// Trigger run asynchronously
+	// Trigger run asynchronously
+	go func() {
+		log.Printf("DEBUG: Async ProcessSubscription started for %s", sub.Title)
+
+		// Fetch QB Config using helper
+		qbUrl, qbUser, qbPass := fetchQBConfig()
+
+		log.Printf("DEBUG: Async QB Config: URL=%s User=%s", qbUrl, qbUser)
+
+		qbt := downloader.NewQBittorrentClient(qbUrl)
+		if err := qbt.Login(qbUser, qbPass); err != nil {
+			log.Printf("ERROR: Async QB Login failed: %v", err)
+			return
+		}
+
+		mgr := service.NewSubscriptionManager(qbt)
+		mgr.ProcessSubscription(&sub)
+	}()
+
+	// User requested "silky smooth" transition, wait 1s
+	time.Sleep(1 * time.Second)
 
 	c.Header("HX-Redirect", "/subscriptions")
 	c.Status(http.StatusOK)
@@ -94,6 +167,8 @@ func ToggleSubscriptionHandler(c *gin.Context) {
 
 	sub.IsActive = !sub.IsActive
 	db.DB.Save(&sub)
+
+	time.Sleep(1 * time.Second) // Smooth transition
 
 	btnClass := "bg-green-500 hover:bg-green-600"
 	btnText := "Running"
@@ -113,9 +188,106 @@ func ToggleSubscriptionHandler(c *gin.Context) {
 }
 
 func DeleteSubscriptionHandler(c *gin.Context) {
-	id := c.Param("id")
-	db.DB.Delete(&model.Subscription{}, id)
+	idStr := c.Param("id")
+	id, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		c.String(http.StatusBadRequest, "无效的 ID")
+		return
+	}
+
+	log.Printf("DEBUG: Deleting subscription ID: %d", id)
+
+	// Start transaction for cascading delete
+	tx := db.DB.Begin()
+
+	// 1. Delete associated logs (Hard Delete)
+	if err := tx.Unscoped().Where("subscription_id = ?", id).Delete(&model.DownloadLog{}).Error; err != nil {
+		tx.Rollback()
+		log.Printf("ERROR: Delete logs failed for subID %d: %v", id, err)
+		c.String(http.StatusInternalServerError, "删除关联日志失败: "+err.Error())
+		return
+	}
+
+	// 2. Delete subscription (Hard Delete)
+	if err := tx.Unscoped().Delete(&model.Subscription{}, id).Error; err != nil {
+		tx.Rollback()
+		log.Printf("ERROR: Delete sub failed for ID %d: %v", id, err)
+		c.String(http.StatusInternalServerError, "删除订阅失败: "+err.Error())
+		return
+	}
+
+	if err := tx.Commit().Error; err != nil {
+		log.Printf("ERROR: Commit failed: %v", err)
+		c.String(http.StatusInternalServerError, "事务提交失败")
+		return
+	}
+
+	time.Sleep(200 * time.Millisecond) // Slight delay for UI feel
 	c.Status(http.StatusOK)
+}
+
+func RunSubscriptionHandler(c *gin.Context) {
+	id := c.Param("id")
+	var sub model.Subscription
+	if err := db.DB.First(&sub, id).Error; err != nil {
+		c.String(http.StatusNotFound, "Not Found")
+		return
+	}
+
+	// Fetch QB Config
+	qbUrl, qbUser, qbPass := fetchQBConfig()
+
+	// Init Downloader
+	qbt := downloader.NewQBittorrentClient(qbUrl)
+	if err := qbt.Login(qbUser, qbPass); err != nil {
+		log.Printf("RunSubscription: QB Login failed: %v", err)
+		c.Header("Content-Type", "text/html")
+		c.String(http.StatusOK, `<script>alert("QBittorrent 连接失败: `+err.Error()+`")</script>`)
+		return
+	}
+
+	// Init Manager and Run
+	// Init Manager and Run
+	mgr := service.NewSubscriptionManager(qbt)
+	// Let's do Sync for now as it shouldn't be too long for RSS parse.
+	mgr.ProcessSubscription(&sub)
+
+	c.Header("Content-Type", "text/html")
+	// Return a toast notification using OOB swap or just a script?
+	// Since we swapped "none", we can just return a script or empty.
+	// But to show feedback, let's use a little script or alert.
+	// But to show feedback, let's use a little script or alert.
+	// c.String(http.StatusOK, `<script>alert("已触发订阅检查: `+sub.Title+`")</script>`)
+	time.Sleep(1 * time.Second) // Smooth transition
+	c.Status(http.StatusOK)
+}
+
+func UpdateSubscriptionHandler(c *gin.Context) {
+	id := c.Param("id")
+	var sub model.Subscription
+	if err := db.DB.First(&sub, id).Error; err != nil {
+		c.String(http.StatusNotFound, "Not Found")
+		return
+	}
+
+	if err := c.ShouldBind(&sub); err != nil {
+		c.String(http.StatusBadRequest, "Invalid Data")
+		return
+	}
+
+	// Update specific fields avoids overwriting others if not present in form
+	// But `ShouldBind` maps form to struct.
+	// We should be careful about zero values if form is partial.
+	// Here the form contains all editable fields.
+
+	if err := db.DB.Save(&sub).Error; err != nil {
+		c.String(http.StatusInternalServerError, "Error saving: "+err.Error())
+		return
+	}
+
+	time.Sleep(1 * time.Second) // Smooth transition
+
+	c.HTML(http.StatusOK, "subscription_card.html", sub)
 }
 
 // === Settings ===

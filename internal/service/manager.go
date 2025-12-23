@@ -3,6 +3,7 @@ package service
 import (
 	"log"
 	"regexp"
+	"strconv"
 
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/downloader"
@@ -34,16 +35,20 @@ func (m *SubscriptionManager) CheckUpdate() {
 	}
 
 	for _, sub := range subs {
-		m.processSubscription(&sub)
+		m.ProcessSubscription(&sub)
 	}
 }
 
-func (m *SubscriptionManager) processSubscription(sub *model.Subscription) {
+func (m *SubscriptionManager) ProcessSubscription(sub *model.Subscription) {
+	log.Printf("DEBUG: Processing subscription %s (URL: %s)", sub.Title, sub.RSSUrl)
+
 	episodes, err := m.RSSParser.Parse(sub.RSSUrl)
 	if err != nil {
 		log.Printf("Failed to parse RSS for %s: %v", sub.Title, err)
 		return
 	}
+
+	log.Printf("DEBUG: Fetched %d episodes from RSS", len(episodes))
 
 	// 编译正则
 	var filterRe, excludeRe *regexp.Regexp
@@ -57,26 +62,20 @@ func (m *SubscriptionManager) processSubscription(sub *model.Subscription) {
 	for _, ep := range episodes {
 		// 1. 规则过滤
 		if filterRe != nil && !filterRe.MatchString(ep.Title) {
+			log.Printf("DEBUG: Filter skipped: %s (Rule: %s)", ep.Title, sub.FilterRule)
 			continue
 		}
 		if excludeRe != nil && excludeRe.MatchString(ep.Title) {
+			log.Printf("DEBUG: Exclude skipped: %s (Rule: %s)", ep.Title, sub.ExcludeRule)
 			continue
 		}
 
-		// 2. 去重: 检查是否已下载 (通过 InfoHash 或 唯一 Title)
-		// RSS 中可能没有 InfoHash，只能靠 Title 或 Unique Link。
-		// Mikan 的 Enclosure URL 是唯一的。
-		// 这里简单用 Title + SubID 查重，或者用 URL 查重。
-		// 为了更严谨，我们可以用 URL 作为去重键。
-
-		// 修正：如果使用 Title 去重，可能会有 v2 (修正版) 问题，v2 标题通常不同。可以接受。
-
+		// 2. 去重
 		var count int64
 		// 查重逻辑：同一个订阅下，TargetFile或者Source URL不能重复
-		// 由于RSS并没有InfoHash，我们暂时无法用InfoHash查重，除非下载开始后更新。
-		// 这里用 Title 是否已存在于该订阅的历史中来判断
 		m.DB.Model(&model.DownloadLog{}).Where("subscription_id = ? AND title = ?", sub.ID, ep.Title).Count(&count)
 		if count > 0 {
+			log.Printf("DEBUG: Duplicate check skipped: %s (Already exists in logs)", ep.Title)
 			continue // 已存在
 		}
 
@@ -88,6 +87,7 @@ func (m *SubscriptionManager) processSubscription(sub *model.Subscription) {
 			savePath = "downloads/" + sub.Title
 		}
 
+		log.Printf("DEBUG: Adding torrent to QB: %s -> %s", ep.Title, savePath)
 		err := m.Downloader.AddTorrent(ep.TorrentURL, savePath, "Anime", false)
 		if err != nil {
 			log.Printf("Failed to add torrent for %s - %s: %v", sub.Title, ep.Title, err)
@@ -100,11 +100,31 @@ func (m *SubscriptionManager) processSubscription(sub *model.Subscription) {
 		logEntry := model.DownloadLog{
 			SubscriptionID: sub.ID,
 			Title:          ep.Title,
-			Magnet:         ep.TorrentURL, // 或 Magnet
+			Magnet:         ep.TorrentURL,
 			Episode:        ep.EpisodeNum,
 			SeasonVal:      ep.Season,
-			Status:         "downloading",
+			// InfoHash:       ep.InfoHash, // Undefined in parser.Episode
+			Status: "downloading",
 		}
-		m.DB.Create(&logEntry)
+		if err := m.DB.Create(&logEntry).Error; err != nil {
+			log.Printf("Failed to create log for %s: %v", ep.Title, err)
+		} else {
+			// Update LastEp
+			if val, err := strconv.Atoi(ep.EpisodeNum); err == nil {
+				if val > sub.LastEp {
+					sub.LastEp = val
+					m.DB.Model(sub).Update("last_ep", val)
+				}
+			} else {
+				// Try float roughly
+				if f, err := strconv.ParseFloat(ep.EpisodeNum, 64); err == nil {
+					val = int(f)
+					if val > sub.LastEp {
+						sub.LastEp = val
+						m.DB.Model(sub).Update("last_ep", val)
+					}
+				}
+			}
+		}
 	}
 }

@@ -29,7 +29,7 @@ type DownloadLog struct {
 	Episode        string // 解析出的集数 (如 "01", "12.5")
 	SeasonVal      string // 解析出的季度 (如 "S01")
 	Status         string // "downloading", "completed", "failed", "renamed"
-	InfoHash       string `gorm:"uniqueIndex"` // 种子唯一标识
+	InfoHash       string // 种子唯一标识 (由于RSS可能拿不到，不设唯一索引)
 	TargetFile     string // 最终重命名后的文件路径
 }
 

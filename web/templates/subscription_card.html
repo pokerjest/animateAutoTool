@@ -1,0 +1,63 @@
+{{ define "subscription_card.html" }}
+<div id="sub-card-{{.ID}}"
+    class="bg-white/60 p-5 rounded-xl border border-white/70 shadow-sm hover:shadow-md transition relative group">
+    <div class="flex justify-between items-start mb-2">
+        <h3 class="font-bold text-lg text-gray-800 line-clamp-1" title="{{ .Title }}">{{ .Title }}</h3>
+        <div class="flex gap-2">
+            <!-- Run Now Button -->
+            <button hx-post="/api/subscriptions/{{ .ID }}/run" hx-swap="none"
+                class="text-gray-400 hover:text-blue-500 transition-colors" title="立即运行">
+                ▶️
+            </button>
+
+            <!-- Edit Button -->
+            <!-- We trigger the edit modal with data populated. 
+                 Using data attributes to avoid JS syntax errors with quotes in Go templates. -->
+            <button data-id="{{.ID}}" data-title="{{.Title}}" data-rss="{{.RSSUrl}}" data-filter="{{.FilterRule}}"
+                data-exclude="{{.ExcludeRule}}" @click.stop="$dispatch('edit-subscription', { 
+                    id: $el.dataset.id, 
+                    title: $el.dataset.title, 
+                    rss: $el.dataset.rss, 
+                    filter: $el.dataset.filter, 
+                    exclude: $el.dataset.exclude 
+                })" class="text-gray-400 hover:text-amber-500 transition-colors" title="编辑">
+                ✏️
+            </button>
+
+            <!-- Toggle Button -->
+            <!-- Note: ID needs to be unique if we have multiple buttons, but here we are inside a card. 
+                 The handler returns a button with specific ID. -->
+            {{ if .IsActive }}
+            <button id="toggle-{{.ID}}" hx-post="/api/subscriptions/{{ .ID }}/toggle" hx-swap="outerHTML"
+                hx-indicator="#toggle-{{.ID}}"
+                class="px-3 py-1 rounded text-white text-xs bg-green-500 hover:bg-green-600 transition-colors flex items-center gap-1 disabled:opacity-70">
+                <span class="htmx-indicator hidden animate-spin">⌛</span>
+                <span>Running</span>
+            </button>
+            {{ else }}
+            <button id="toggle-{{.ID}}" hx-post="/api/subscriptions/{{ .ID }}/toggle" hx-swap="outerHTML"
+                hx-indicator="#toggle-{{.ID}}"
+                class="px-3 py-1 rounded text-white text-xs bg-gray-400 hover:bg-gray-500 transition-colors flex items-center gap-1 disabled:opacity-70">
+                <span class="htmx-indicator hidden animate-spin">⌛</span>
+                <span>Paused</span>
+            </button>
+            {{ end }}
+        </div>
+    </div>
+
+    <div class="text-xs text-gray-500 space-y-1 mb-4">
+        <p>RSS: <span class="text-blue-500 break-all select-all">{{ .RSSUrl }}</span></p>
+        <p>Filter: <span class="bg-gray-200 px-1 rounded">{{ .FilterRule }}</span></p>
+        <p>Exclude: <span class="bg-gray-200 px-1 rounded">{{ .ExcludeRule }}</span></p>
+        <p>Last Ep: {{ .LastEp }}</p>
+    </div>
+
+    <!-- Delete Button (Hidden by default, shown on hover) -->
+    <!-- Delete Button (Hidden by default, shown on hover) -->
+    <button data-id="{{.ID}}" @click.stop="$dispatch('delete-subscription', { id: $el.dataset.id })"
+        class="absolute bottom-2 right-2 text-red-400 hover:text-red-600 transition-colors flex items-center gap-1 disabled:opacity-70 z-10 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
+        title="删除订阅">
+        <span>🗑️</span>
+    </button>
+</div>
+{{ end }}
