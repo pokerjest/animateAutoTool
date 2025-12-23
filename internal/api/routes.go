@@ -1,10 +1,24 @@
 package api
 
 import (
+	"fmt"
+	"html/template"
+
 	"github.com/gin-gonic/gin"
 )
 
 func InitRoutes(r *gin.Engine) {
+	// 注册模板函数
+	r.SetFuncMap(template.FuncMap{
+		"div": func(a, b float64) float64 {
+			return a / b
+		},
+		"toGB": func(size int64) string {
+			gb := float64(size) / 1024 / 1024 / 1024
+			return fmt.Sprintf("%.2f GB", gb)
+		},
+	})
+
 	// 加载模板，注意路径问题，在此我们假设运行在项目根目录
 	// 匹配 web/templates 下的所有 html
 	// 注意：嵌套 define 需要全部加载
@@ -14,6 +28,7 @@ func InitRoutes(r *gin.Engine) {
 	r.GET("/", DashboardHandler)
 	r.GET("/subscriptions", SubscriptionsHandler)
 	r.GET("/settings", SettingsHandler)
+	r.GET("/local-anime", LocalAnimePageHandler)
 
 	// API
 	apiGroup := r.Group("/api")
@@ -39,5 +54,10 @@ func InitRoutes(r *gin.Engine) {
 		// Settings
 		apiGroup.POST("/settings", UpdateSettingsHandler)
 		apiGroup.POST("/settings/test-connection", TestConnectionHandler)
+
+		// Local Anime
+		apiGroup.POST("/local-directories", AddLocalDirectoryHandler)
+		apiGroup.DELETE("/local-directories/:id", DeleteLocalDirectoryHandler)
+		apiGroup.POST("/local-directories/scan", ScanLocalDirectoryHandler)
 	}
 }

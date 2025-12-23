@@ -48,3 +48,20 @@ const (
 	ConfigKeyQBPassword = "qb_password"
 	ConfigKeyBaseDir    = "base_download_dir"
 )
+
+// LocalAnimeDirectory 用户配置的本地番剧目录根路径
+type LocalAnimeDirectory struct {
+	gorm.Model
+	Path        string `json:"path" gorm:"uniqueIndex"` // 目录绝对路径
+	Description string `json:"description"`             // 备注描述 (可选)
+}
+
+// LocalAnime 扫描出的本地番剧系列
+type LocalAnime struct {
+	gorm.Model
+	DirectoryID uint   `json:"directory_id" gorm:"index"` // 所属根目录ID
+	Title       string `json:"title"`                     // 剧集标题 (通常是文件夹名)
+	Path        string `json:"path"`                      // 系列绝对路径
+	FileCount   int    `json:"file_count"`                // 视频文件数量 (mkv, mp4, etc.)
+	TotalSize   int64  `json:"total_size"`                // 总大小 (bytes)
+}

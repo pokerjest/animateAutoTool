@@ -27,7 +27,13 @@ func InitDB(storagePath string) {
 	}
 
 	// 自动迁移模式
-	err = DB.AutoMigrate(&model.Subscription{}, &model.DownloadLog{}, &model.GlobalConfig{})
+	err = DB.AutoMigrate(
+		&model.Subscription{},
+		&model.DownloadLog{},
+		&model.GlobalConfig{},
+		&model.LocalAnimeDirectory{},
+		&model.LocalAnime{},
+	)
 	if err != nil {
 		log.Fatalf("failed to migrate database: %v", err)
 	}
