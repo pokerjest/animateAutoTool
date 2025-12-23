@@ -60,16 +60,16 @@
     deleteId: 0,
     toast: { show: false, message: '', type: 'success' },
     showSearchModal: false,
-    addForm: { title: '', rss: '' },
+    addForm: { title: '', rss: '', image: '', subtitle_group: '', season: '' },
     subgroups: [],
     selectedAnime: null,
     showSubgroupList: false,
     loadingSubgroups: false,
     fromDashboard: false,
     // Search & Select Logic
-    async selectAnime(title, mikanId, image) {
+    async selectAnime(title, mikanId, image, season) {
         this.fromDashboard = this.showDashboardModal;
-        this.selectedAnime = { title, mikanId, image };
+        this.selectedAnime = { title, mikanId, image, season };
         this.loadingSubgroups = true;
         this.showSubgroupList = true;
         this.showSearchModal = true;
@@ -98,6 +98,9 @@
             rss += '&subgroupid=' + subgroup.ID;
         }
         this.addForm.rss = rss;
+        this.addForm.image = anime.image || '';
+        this.addForm.season = anime.season || '';
+        this.addForm.subtitle_group = subgroup.Name || '';
         
         this.showSearchModal = false;
         this.showSubgroupList = false;
@@ -302,6 +305,9 @@
             <form hx-post="/api/subscriptions" hx-swap="none"
                 @htmx:after-request="if(event.detail.successful && event.detail.elt.tagName === 'FORM') { showAddModal = false; window.location.reload() }">
                 <div class="space-y-4">
+                    <input type="hidden" name="Image" x-model="addForm.image">
+                    <input type="hidden" name="SubtitleGroup" x-model="addForm.subtitle_group">
+                    <input type="hidden" name="Season" x-model="addForm.season">
                     <div>
                         <label class="block text-sm font-medium text-gray-700 mb-1">番剧标题</label>
                         <input type="text" name="Title" required x-model="addForm.title"
@@ -552,7 +558,7 @@
                         <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-5">
                             <template x-for="anime in (dashboardData?.Days[activeDay] || [])" :key="anime.MikanID">
                                 <div class="group relative bg-white rounded-2xl overflow-hidden shadow-sm hover:shadow-2xl transition-all duration-500 border border-gray-100 hover:-translate-y-2 cursor-pointer flex flex-col"
-                                    @click="selectAnime(anime.Title, anime.MikanID, anime.Image)">
+                                    @click="selectAnime(anime.Title, anime.MikanID, anime.Image, dashboardData.Season)">
                                     <div class="aspect-[3/4.2] overflow-hidden relative">
                                         <img :src="anime.Image" :alt="anime.Title"
                                             class="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110">

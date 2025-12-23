@@ -82,6 +82,13 @@ func SubscriptionsHandler(c *gin.Context) {
 		log.Printf("Error fetching subscriptions: %v", err)
 	}
 
+	// Populate DownloadedCount
+	for i := range subs {
+		var count int64
+		db.DB.Model(&model.DownloadLog{}).Where("subscription_id = ?", subs[i].ID).Count(&count)
+		subs[i].DownloadedCount = count
+	}
+
 	data := SubscriptionsData{
 		SkipLayout:    skip,
 		Subscriptions: subs,
