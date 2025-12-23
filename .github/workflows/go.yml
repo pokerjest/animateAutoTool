@@ -34,12 +34,14 @@ jobs:
       run: go vet ./...
 
     - name: Run golangci-lint
-      uses: golangci/golangci-lint-action@v4
+      uses: golangci/golangci-lint-action@v6
       with:
-        version: latest
+        version: v1.60
         args: --timeout=5m
 
     - name: Run tests
+      env:
+        CGO_ENABLED: 1
       run: go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
 
     - name: Upload coverage to Codecov
