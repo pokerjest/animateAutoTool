@@ -1,7 +1,7 @@
 # This workflow will build a golang project
 # For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-go
 
-name: Go
+name: Go CI/CD
 
 on:
   push:
@@ -10,19 +10,53 @@ on:
     branches: [ "main" ]
 
 jobs:
-
   build:
     runs-on: ubuntu-latest
+    
     steps:
-    - uses: actions/checkout@v4
+    - name: Checkout code
+      uses: actions/checkout@v4
 
     - name: Set up Go
-      uses: actions/setup-go@v4
+      uses: actions/setup-go@v5
       with:
-        go-version: '1.20'
+        go-version: '1.23'
+        cache: true
 
-    - name: Build
-      run: go build -v ./...
+    - name: Download dependencies
+      run: go mod download
 
-    - name: Test
-      run: go test -v ./...
+    - name: Verify dependencies
+      run: go mod verify
+
+    - name: Run go vet
+      run: go vet ./...
+
+    - name: Run golangci-lint
+      uses: golangci/golangci-lint-action@v4
+      with:
+        version: latest
+        args: --timeout=5m
+
+    - name: Run tests
+      run: go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v4
+      with:
+        files: ./coverage.out
+        flags: unittests
+        name: codecov-umbrella
+        fail_ci_if_error: false
+
+    - name: Build server binary
+      run: |
+        go build -v -o bin/animate-server cmd/server/main.go
+        chmod +x bin/animate-server
+
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: animate-server-${{ github.sha }}
+        path: bin/animate-server
+        retention-days: 7
