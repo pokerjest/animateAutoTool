@@ -235,9 +235,7 @@ func generateRenamePreview(files []FileInfo, anime model.LocalAnime, req RenameR
 		newName = strings.ReplaceAll(newName, "{Year}", year)
 
 		subGroup := ep.SubGroup
-		if subGroup == "" {
-			// Optional: handle empty subgroup details if needed
-		}
+
 		newName = strings.ReplaceAll(newName, "{SubGroup}", subGroup)
 
 		// Pad Ep to 2 digits if needed
