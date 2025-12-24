@@ -28,7 +28,7 @@ func TestParseTitle(t *testing.T) {
 	}
 
 	for _, c := range cases {
-		ep := parseTitle(c.Title)
+		ep := ParseTitle(c.Title)
 		if ep.SubGroup != c.ExpectedGrp {
 			t.Errorf("Group mismatch for %s: expected %s, got %s", c.Title, c.ExpectedGrp, ep.SubGroup)
 		}
