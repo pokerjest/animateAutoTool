@@ -1,14 +1,19 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
 	"html/template"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/pokerjest/animateAutoTool/internal/service"
 )
 
 func InitRoutes(r *gin.Engine) {
+	// Perform startup cleanup
+	service.NewLocalAnimeService().CleanupGarbage()
+
 	// 注册模板函数
 	r.SetFuncMap(template.FuncMap{
 		"div": func(a, b float64) float64 {
@@ -17,6 +22,10 @@ func InitRoutes(r *gin.Engine) {
 		"toGB": func(size int64) string {
 			gb := float64(size) / 1024 / 1024 / 1024
 			return fmt.Sprintf("%.2f GB", gb)
+		},
+		"json": func(v interface{}) template.JS {
+			a, _ := json.Marshal(v)
+			return template.JS(a)
 		},
 	})
 
@@ -53,6 +62,7 @@ func InitRoutes(r *gin.Engine) {
 		apiGroup.GET("/search/subgroups", GetSubgroupsHandler)
 		apiGroup.GET("/preview", PreviewRSSHandler)
 		apiGroup.GET("/mikan/dashboard", GetMikanDashboardHandler)
+		apiGroup.POST("/subscriptions/refresh", RefreshSubscriptionsHandler)
 
 		// Settings
 		apiGroup.POST("/settings", UpdateSettingsHandler) // Keep for backward compat if needed, or remove?
@@ -71,5 +81,8 @@ func InitRoutes(r *gin.Engine) {
 		apiGroup.GET("/bangumi/callback", BangumiCallbackHandler)
 		apiGroup.GET("/bangumi/profile", BangumiProfileHandler)
 		apiGroup.POST("/bangumi/logout", BangumiLogoutHandler)
+		apiGroup.GET("/bangumi/subject/:id", GetBangumiSubjectHandler)
+		apiGroup.POST("/bangumi/subject/:id/collection", UpdateBangumiCollectionHandler)
+		apiGroup.POST("/bangumi/subject/:id/progress", UpdateBangumiProgressHandler)
 	}
 }

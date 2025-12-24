@@ -1,6 +1,86 @@
 {{ if not .SkipLayout }}{{ template "header.html" . }}{{ end }}
 
-<div class="space-y-6">
+<!-- Wrap in Alpine data for modal and toast -->
+<div x-data="{
+    showModal: false,
+    editingAnime: null,
+    rating: 0,
+    comment: '',
+    tags: '',
+    updating: false,
+    toast: { show: false, message: '', type: 'success' },
+    
+    showToast(msg, type = 'success') {
+        this.toast.message = msg;
+        this.toast.type = type;
+        this.toast.show = true;
+        setTimeout(() => { this.toast.show = false }, 3000);
+    },
+
+    openModal(anime) {
+        this.editingAnime = anime;
+        this.rating = anime.rate || 0;
+        this.comment = anime.comment || '';
+        this.tags = (anime.tags || []).join(' ');
+        this.showModal = true;
+    },
+    
+    saveChanges() {
+        if (!this.editingAnime) return;
+        this.updating = true;
+        
+        const payload = {
+            status: this.editingAnime.type, // Keep current status
+            rating: parseInt(this.rating),
+            comment: this.comment,
+            tags: this.tags.split(' ').filter(t => t.trim() !== '')
+        };
+        
+        fetch('/api/bangumi/subject/' + this.editingAnime.subject_id + '/collection', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload)
+        })
+        .then(r => r.json())
+        .then(d => {
+            if(d.error) {
+                this.showToast('❌ ' + d.error, 'error');
+            } else {
+                // Optimistic UI Update (Partial)
+                this.editingAnime.rate = payload.rating;
+                this.editingAnime.comment = payload.comment;
+                this.editingAnime.tags = payload.tags;
+                this.showModal = false;
+                this.showToast('✅ ' + d.message, 'success');
+                // Reload page to reflect changes fully (lazy way)
+                 setTimeout(() => window.location.reload(), 1000);
+            }
+        })
+        .catch(err => {
+             this.showToast('❌ 网络请求失败', 'error');
+        })
+        .finally(() => this.updating = false);
+    }
+}" class="space-y-8 relative">
+
+    <!-- Toast Notification -->
+    <div x-show="toast.show" x-transition:enter="transition ease-out duration-300"
+        x-transition:enter-start="opacity-0 transform translate-y-2"
+        x-transition:enter-end="opacity-100 transform translate-y-0"
+        x-transition:leave="transition ease-in duration-200"
+        x-transition:leave-start="opacity-100 transform translate-y-0"
+        x-transition:leave-end="opacity-0 transform translate-y-2"
+        class="fixed top-24 right-8 z-[60] px-6 py-4 rounded-2xl shadow-2xl flex items-center gap-3 min-w-[300px]"
+        :class="toast.type === 'error' ? 'bg-red-50 text-red-600 border border-red-100' : 'bg-white text-gray-800 border border-gray-100'">
+
+        <div class="text-2xl" x-text="toast.type === 'error' ? '⚠️' : '🎉'"></div>
+        <div>
+            <div class="font-bold text-sm" x-text="toast.type === 'error' ? '操作失败' : '操作成功'"></div>
+            <div class="text-xs opacity-80 mt-0.5" x-text="toast.message"></div>
+        </div>
+    </div>
+
+    <!-- Top Bar -->
     <div class="flex justify-between items-center">
         <h2 class="text-2xl font-bold text-gray-700">仪表盘</h2>
         <button id="sync-btn"
@@ -12,6 +92,7 @@
         </button>
     </div>
 
+    <!-- Status Cards -->
     <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
         <!-- Status Card 1 -->
         <div class="bg-white/50 p-6 rounded-xl border border-white/60">
@@ -34,7 +115,6 @@
                         <span class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span> 正常
                     </span>
                 </div>
-
                 <!-- QB Status -->
                 <div class="flex items-center justify-between text-sm">
                     <span class="text-gray-600">qBittorrent</span>
@@ -48,7 +128,6 @@
                     </span>
                     {{ end }}
                 </div>
-
                 <!-- Bangumi Status -->
                 <div class="flex items-center justify-between text-sm">
                     <span class="text-gray-600">Bangumi</span>
@@ -61,6 +140,180 @@
                         <span class="w-2 h-2 rounded-full bg-gray-300"></span> 未登录
                     </span>
                     {{ end }}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bangumi Sections Template -->
+    {{ define "anime_grid" }}
+    <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
+        {{ range . }}
+        <div @click="openModal({{ . | json }})"
+            class="group bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden hover:shadow-md transition-all hover:scale-[1.02] cursor-pointer relative">
+            <div class="aspect-[2/3] relative overflow-hidden bg-gray-100">
+                <!-- Badge -->
+                <div class="absolute top-2 right-2 z-10">
+                    {{ if eq .Type 3 }}<span
+                        class="bg-pink-500/90 text-white text-[10px] px-1.5 py-0.5 rounded shadow-sm backdrop-blur-sm">在看</span>{{
+                    end }}
+                    {{ if eq .Type 2 }}<span
+                        class="bg-green-500/90 text-white text-[10px] px-1.5 py-0.5 rounded shadow-sm backdrop-blur-sm">已看</span>{{
+                    end }}
+                </div>
+                <!-- Cover -->
+                {{ if .Subject.Images.Common }}
+                <img src="{{ .Subject.Images.Common }}" loading="lazy"
+                    class="w-full h-full object-cover group-hover:opacity-90 transition-opacity">
+                {{ else }}
+                <div class="w-full h-full flex items-center justify-center text-gray-300 text-2xl">?</div>
+                {{ end }}
+                <!-- Info Overlay -->
+                <div class="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/80 to-transparent p-2 pt-8">
+                    <div class="text-white text-xs font-bold truncate">{{ if .Subject.NameCN }}{{ .Subject.NameCN }}{{
+                        else }}{{ .Subject.Name }}{{ end }}</div>
+                    <div class="text-white/80 text-[10px] truncate mt-0.5">
+                        {{ if eq .Type 2 }}
+                        <span class="{{ if gt .Rate 0 }}text-yellow-400{{ else }}text-gray-400{{ end }}">★ {{ if gt
+                            .Rate 0 }}{{ .Rate }}{{ else }}-{{ end }}</span>
+                        {{ else }}
+                        {{ .EpStatus }} / {{ if .Subject.Eps }}{{ .Subject.Eps }}{{ else }}?{{ end }} 集
+                        {{ end }}
+                    </div>
+                </div>
+            </div>
+        </div>
+        {{ end }}
+    </div>
+    {{ end }}
+
+    <!-- 1. Watching List -->
+    {{ if .WatchingList }}
+    <div>
+        <h3 class="text-lg font-bold text-gray-700 mb-4 flex items-center gap-2">
+            <span class="text-pink-500">📺</span> 在看
+            <span class="text-xs font-normal text-gray-500 bg-gray-100 px-2 py-1 rounded-full">{{ len .WatchingList
+                }}</span>
+        </h3>
+        {{ template "anime_grid" .WatchingList }}
+    </div>
+    {{ end }}
+
+    <!-- 2. Completed List -->
+    {{ if .CompletedList }}
+    <div>
+        <h3 class="text-lg font-bold text-gray-700 mb-4 flex items-center gap-2">
+            <span class="text-green-500">✅</span> 已看
+            <span class="text-xs font-normal text-gray-500 bg-gray-100 px-2 py-1 rounded-full">{{ len .CompletedList
+                }}</span>
+        </h3>
+        {{ template "anime_grid" .CompletedList }}
+    </div>
+    {{ end }}
+
+    {{ if and (not .WatchingList) (not .CompletedList) .BangumiLogin }}
+    <div class="text-center py-8 text-gray-400 bg-white/30 rounded-xl border border-dashed border-gray-300">
+        <p>暂无相关动画数据</p>
+    </div>
+    {{ end }}
+
+    <!-- Edit Modal -->
+    <div x-show="showModal" style="display: none;" class="fixed inset-0 z-50 overflow-y-auto"
+        aria-labelledby="modal-title" role="dialog" aria-modal="true">
+        <div class="flex items-center justify-center min-h-screen px-4 pb-20 text-center sm:block sm:p-0">
+            <!-- Background overlay -->
+            <div x-show="showModal" x-transition:enter="ease-out duration-300" x-transition:enter-start="opacity-0"
+                x-transition:enter-end="opacity-100" x-transition:leave="ease-in duration-200"
+                x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0"
+                class="fixed inset-0 bg-gray-900/60 backdrop-blur-sm transition-opacity" @click="showModal = false"
+                aria-hidden="true"></div>
+
+            <!-- This element is to trick the browser into centering the modal contents. -->
+            <span class="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
+
+            <!-- Modal panel -->
+            <div x-show="showModal" x-transition:enter="ease-out duration-300"
+                x-transition:enter-start="opacity-0 translate-y-4 sm:translate-y-0 sm:scale-95"
+                x-transition:enter-end="opacity-100 translate-y-0 sm:scale-100"
+                x-transition:leave="ease-in duration-200"
+                x-transition:leave-start="opacity-100 translate-y-0 sm:scale-100"
+                x-transition:leave-end="opacity-0 translate-y-4 sm:translate-y-0 sm:scale-95"
+                class="inline-block align-middle bg-white/95 backdrop-blur-md rounded-2xl text-left overflow-hidden shadow-2xl transform transition-all sm:my-8 sm:max-w-lg w-full border border-white/50">
+
+                <!-- Modal Header with Image Background effect -->
+                <div class="relative h-24 bg-gray-100 overflow-hidden">
+                    <div class="absolute inset-0 bg-gradient-to-b from-transparent to-white/90 z-10"></div>
+                    <!-- Use Grid image if available, else common -->
+                    <img :src="editingAnime?.subject?.images?.grid || editingAnime?.subject?.images?.common"
+                        class="w-full h-full object-cover opacity-50 blur-sm">
+
+                    <div class="absolute bottom-4 left-6 z-20">
+                        <h3 class="text-xl font-bold text-gray-800 drop-shadow-sm" id="modal-title">
+                            <span x-text="editingAnime?.subject?.name_cn || editingAnime?.subject?.name"></span>
+                        </h3>
+                    </div>
+                </div>
+
+                <div class="px-6 pt-6 pb-2">
+                    <!-- Rating -->
+                    <div class="mb-6">
+                        <label class="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">评分
+                            Rating</label>
+                        <div class="flex items-center gap-1">
+                            <template x-for="i in 10">
+                                <button type="button" @click="rating = i"
+                                    class="text-2xl transition transform hover:scale-110 focus:outline-none"
+                                    :class="i <= rating ? 'text-yellow-400 drop-shadow-md' : 'text-gray-200 hover:text-gray-300'">★</button>
+                            </template>
+                            <span x-text="rating > 0 ? rating : '-'"
+                                class="ml-3 text-2xl font-bold text-gray-700 w-8 text-center bg-gray-100 rounded-lg"></span>
+                        </div>
+                    </div>
+
+                    <!-- Comment -->
+                    <div class="mb-6">
+                        <label class="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">吐槽
+                            Comment</label>
+                        <textarea x-model="comment" rows="3"
+                            class="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all resize-none shadow-inner"
+                            placeholder="写点什么..."></textarea>
+                    </div>
+
+                    <!-- Tags -->
+                    <div class="mb-4">
+                        <label class="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">标签
+                            Tags</label>
+                        <input type="text" x-model="tags"
+                            class="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all shadow-inner"
+                            placeholder="空格分隔，如：TV 搞笑 治愈">
+                    </div>
+                </div>
+
+                <div class="bg-gray-50/50 px-6 py-4 flex flex-row-reverse gap-3 border-t border-gray-100">
+                    <button type="button" @click="saveChanges()" :disabled="updating"
+                        class="w-full sm:w-auto inline-flex justify-center items-center rounded-xl px-6 py-2.5 bg-primary text-white font-bold hover:bg-accent focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary transition-all shadow-lg shadow-primary/30 disabled:opacity-50 disabled:shadow-none">
+                        <span x-show="!updating">保存修改</span>
+                        <span x-show="updating" class="flex items-center gap-2">
+                            <svg class="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none"
+                                viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor"
+                                    stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor"
+                                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z">
+                                </path>
+                            </svg>
+                            保存中
+                        </span>
+                    </button>
+                    <button type="button" @click="showModal = false"
+                        class="mt-3 sm:mt-0 w-full sm:w-auto inline-flex justify-center rounded-xl border border-gray-200 px-6 py-2.5 bg-white text-gray-600 font-medium hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-200 transition-all">
+                        取消
+                    </button>
+                    <a :href="'https://bgm.tv/subject/' + editingAnime?.subject_id" target="_blank"
+                        class="mt-3 sm:mt-0 w-full sm:w-auto inline-flex justify-center items-center gap-1 rounded-xl border border-transparent px-4 py-2 text-gray-400 hover:text-primary transition-colors text-sm">
+                        <span>Bangumi</span>
+                        <span class="text-xs">↗</span>
+                    </a>
                 </div>
             </div>
         </div>

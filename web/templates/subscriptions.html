@@ -58,7 +58,11 @@
     isPreviewingBatch: false,
     isSubmittingBatch: false,
     deleteId: 0,
+    deleteId: 0,
     toast: { show: false, message: '', type: 'success' },
+    showDetailsModal: false,
+    detailsData: null,
+    loadingDetails: false,
     showSearchModal: false,
     addForm: { title: '', rss: '', image: '', subtitle_group: '', season: '' },
     subgroups: [],
@@ -92,7 +96,7 @@
     },
     selectSubgroup(subgroup) {
         const anime = this.selectedAnime;
-        this.addForm.title = `[${subgroup.Name}] ${anime.title}`;
+        this.addForm.title = anime.title; // Use clean title
         let rss = 'https://mikanani.me/RSS/Bangumi?bangumiId=' + anime.mikanId;
         if (subgroup.ID) {
             rss += '&subgroupid=' + subgroup.ID;
@@ -196,7 +200,7 @@
     addToBatch(subgroup) {
         const anime = this.selectedAnime;
         const rssUrl = 'https://mikanani.me/RSS/Bangumi?bangumiId=' + anime.mikanId + (subgroup.ID ? '&subgroupid=' + subgroup.ID : '');
-        const title = `[${subgroup.Name}] ${anime.title}`;
+        const title = anime.title; // Use clean title
         const line = `${title} | ${rssUrl}`;
         
         if (this.batchInput.trim()) {
@@ -255,8 +259,29 @@
 " @delete-subscription.window="
     deleteId = $event.detail.id;
     showDeleteModal = true;
+" @show-anime-details.window="
+    if (!$event.detail.bangumiId || $event.detail.bangumiId <= 0) {
+        showToast('⚠️ 该番剧未关联 Bangumi ID', 'error');
+        return;
+    }
+    loadingDetails = true;
+    showDetailsModal = true;
+    detailsData = null;
+    fetch('/api/bangumi/subject/' + $event.detail.bangumiId)
+        .then(res => res.json())
+        .then(data => {
+            detailsData = data;
+        })
+        .catch(err => {
+            showToast('❌ 获取详情失败', 'error');
+            showDetailsModal = false;
+        })
+        .finally(() => {
+            loadingDetails = false;
+        });
 ">
     <div class="flex justify-between items-center">
+
         <h2 class="text-2xl font-bold text-gray-700">订阅管理</h2>
         <div class="flex gap-2">
             <button @click="openDashboard()"
@@ -272,6 +297,12 @@
                 <span>📦</span> 批量添加
                 <span x-show="batchCount > 0" x-text="batchCount"
                     class="absolute -top-2 -right-2 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full shadow-sm animate-bounce"></span>
+            </button>
+            <button hx-post="/api/subscriptions/refresh" hx-swap="none" hx-indicator="#refresh-indicator"
+                @htmx:after-request="if(event.detail.successful) { showToast(JSON.parse(event.detail.xhr.response).message); setTimeout(() => window.location.reload(), 1500); }"
+                class="bg-emerald-500 text-white px-4 py-2 rounded-lg hover:bg-emerald-600 transition shadow-md flex items-center gap-2 disabled:opacity-50">
+                <span id="refresh-indicator" class="htmx-indicator animate-spin">⌛</span>
+                <span>🔄</span> 刷新信息
             </button>
             <button
                 @click="showAddModal = true; addForm = {title:'', rss:''}; document.getElementById('add-preview-results').innerHTML = ''"
@@ -294,82 +325,87 @@
 
     <!-- Add Subscription Modal -->
     <div x-show="showAddModal" style="display: none;"
-        class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
+        class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/60 backdrop-blur-sm"
         x-transition:enter="transition ease-out duration-300" x-transition:enter-start="opacity-0"
         x-transition:enter-end="opacity-100" x-transition:leave="transition ease-in duration-200"
         x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0">
 
-        <div class="bg-white rounded-2xl shadow-xl w-full max-w-lg p-6 relative" @click.away="showAddModal = false">
-            <h3 class="text-xl font-bold mb-4 text-gray-800">新增 RSS 订阅</h3>
+        <div class="bg-white/95 backdrop-blur-md rounded-2xl shadow-2xl w-full max-w-lg p-8 relative border border-white/50"
+            @click.away="showAddModal = false">
+            <h3 class="text-2xl font-bold mb-6 text-gray-800 flex items-center gap-2">
+                <span class="bg-primary/10 text-primary p-2 rounded-lg">➕</span> 新增 RSS 订阅
+            </h3>
 
             <form hx-post="/api/subscriptions" hx-swap="none"
                 @htmx:after-request="if(event.detail.successful && event.detail.elt.tagName === 'FORM') { showAddModal = false; window.location.reload() }">
-                <div class="space-y-4">
+                <div class="space-y-5">
                     <input type="hidden" name="Image" x-model="addForm.image">
                     <input type="hidden" name="SubtitleGroup" x-model="addForm.subtitle_group">
                     <input type="hidden" name="Season" x-model="addForm.season">
                     <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-1">番剧标题</label>
+                        <label class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">番剧标题</label>
                         <input type="text" name="Title" required x-model="addForm.title"
-                            class="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-primary focus:border-transparent outline-none"
+                            class="w-full px-4 py-3 rounded-xl bg-gray-50 border border-gray-200 focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none transition-all shadow-inner"
                             placeholder="例如：Frieren">
                     </div>
 
                     <div>
-                        <div class="flex justify-between items-center mb-1">
-                            <label class="block text-sm font-medium text-gray-700">RSS 链接</label>
+                        <div class="flex justify-between items-center mb-2">
+                            <label class="block text-xs font-bold text-gray-500 uppercase tracking-wider">RSS 链接</label>
                             <div class="flex items-center gap-2">
                                 <button type="button" hx-get="/api/preview" hx-target="#add-preview-results"
                                     hx-include="#add-rss-url" hx-indicator="#preview-loading" hx-disabled-elt="this"
                                     hx-swap="innerHTML" @htmx:before-request="$el.innerText = '正在解析...'"
                                     @htmx:after-request="$el.innerText = '预览内容'"
-                                    class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-gray-100 text-gray-500 hover:bg-primary hover:text-white transition-all disabled:opacity-50">
+                                    class="text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-lg bg-gray-100 text-gray-500 hover:bg-primary hover:text-white transition-all disabled:opacity-50">
                                     预览内容
                                 </button>
                                 <button type="button"
                                     @click="document.getElementById('add-preview-results').innerHTML = ''"
-                                    class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-gray-50 text-gray-300 hover:text-red-400 transition-all">
+                                    class="text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-lg bg-gray-50 text-gray-300 hover:text-red-400 transition-all">
                                     清除
                                 </button>
                             </div>
                         </div>
                         <div class="relative">
                             <input type="url" id="add-rss-url" name="RSSUrl" required x-model="addForm.rss"
-                                class="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-primary focus:border-transparent outline-none pr-10"
+                                class="w-full px-4 py-3 rounded-xl bg-gray-50 border border-gray-200 focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none pr-10 transition-all shadow-inner"
                                 placeholder="Mikan RSS URL">
                             <div id="preview-loading"
                                 class="htmx-indicator absolute inset-y-0 right-3 flex items-center">
                                 <div
-                                    class="animate-spin h-4 w-4 border-2 border-primary border-t-transparent rounded-full">
+                                    class="animate-spin h-5 w-5 border-2 border-primary border-t-transparent rounded-full">
                                 </div>
                             </div>
                         </div>
-                        <p class="text-xs text-gray-400 mt-1">从蜜柑计划复制 RSS 链接粘贴至此</p>
+                        <p class="text-xs text-gray-400 mt-2 ml-1">💡 从蜜柑计划复制 RSS 链接粘贴至此</p>
 
                         <!-- Preview Results Placeholder -->
-                        <div id="add-preview-results"></div>
+                        <div id="add-preview-results" class="mt-4 rounded-xl overflow-hidden"></div>
                     </div>
 
                     <div class="grid grid-cols-2 gap-4">
                         <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">过滤规则</label>
+                            <label
+                                class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">过滤规则</label>
                             <input type="text" name="FilterRule"
-                                class="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-primary focus:border-transparent outline-none">
+                                class="w-full px-4 py-3 rounded-xl bg-gray-50 border border-gray-200 focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none transition-all shadow-inner">
                         </div>
                         <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">排除规则</label>
+                            <label
+                                class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">排除规则</label>
                             <input type="text" name="ExcludeRule"
-                                class="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-primary focus:border-transparent outline-none">
+                                class="w-full px-4 py-3 rounded-xl bg-gray-50 border border-gray-200 focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none transition-all shadow-inner">
                         </div>
                     </div>
                 </div>
 
-                <div class="flex justify-end gap-3 mt-6">
+                <div class="flex justify-end gap-3 mt-8 pt-6 border-t border-gray-100">
                     <button type="button"
                         @click="showAddModal = false; document.getElementById('add-preview-results').innerHTML = ''"
-                        class="px-4 py-2 rounded-lg text-gray-600 hover:bg-gray-100">取消</button>
+                        class="px-6 py-2.5 rounded-xl border border-gray-200 text-gray-600 font-medium hover:bg-gray-50 transition-all">取消</button>
                     <button type="submit" id="add-sub-btn" hx-indicator="#add-sub-btn"
-                        class="px-6 py-2 rounded-lg bg-primary text-white hover:bg-accent shadow-lg shadow-pink-200 transition disabled:opacity-70 disabled:cursor-not-allowed flex items-center gap-2">
+                        class="px-6 py-2.5 rounded-xl bg-primary text-white font-bold hover:bg-accent shadow-lg shadow-pink-200 transition-all active:scale-95 disabled:opacity-70 disabled:cursor-not-allowed flex items-center gap-2">
                         <span class="htmx-indicator hidden animate-spin">⌛</span>
                         <span>确定添加</span>
                     </button>
@@ -380,64 +416,72 @@
 
     <!-- Batch Subscription Modal -->
     <div x-show="showBatchAddModal" style="display: none;"
-        class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
+        class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/60 backdrop-blur-sm"
         x-transition:enter="transition ease-out duration-300" x-transition:enter-start="opacity-0"
         x-transition:enter-end="opacity-100" x-transition:leave="transition ease-in duration-200"
         x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0">
 
-        <div class="bg-white rounded-2xl shadow-xl w-full max-w-2xl p-6 relative"
+        <div class="bg-white/95 backdrop-blur-md rounded-2xl shadow-2xl w-full max-w-2xl p-8 relative border border-white/50"
             @click.away="showBatchAddModal = false">
-            <h3 class="text-xl font-bold mb-4 text-gray-800">📦 批量添加订阅</h3>
+            <h3 class="text-2xl font-bold mb-6 text-gray-800 flex items-center gap-2">
+                <span class="bg-indigo-50 text-indigo-500 p-2 rounded-lg">📦</span> 批量添加订阅
+            </h3>
 
             <div class="mb-4">
-                <p class="text-sm text-gray-500 mb-2">每行填写一个订阅，格式如下：</p>
-                <div class="bg-gray-100/50 p-3 rounded-xl border border-gray-100 font-mono text-xs text-indigo-600">
-                    <div>番剧名称 | RSS 链接</div>
-                    <div class="mt-1 opacity-50">例如：葬送的芙莉莲 | https://mikanani.me/RSS/Bangumi?bangumiId=3141</div>
+                <p class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">每行填写一个订阅，格式如下：</p>
+                <div
+                    class="bg-indigo-50/50 p-4 rounded-xl border border-indigo-100 font-mono text-xs text-indigo-700 flex flex-col gap-1">
+                    <div class="flex items-center gap-2 before:content-['•'] before:text-indigo-400">番剧名称 | RSS 链接</div>
+                    <div class="opacity-60 pl-4">例如：葬送的芙莉莲 | https://mikanani.me/RSS/Bangumi?bangumiId=3141</div>
                 </div>
             </div>
 
             <textarea x-model="batchInput"
-                class="w-full h-48 px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-400 outline-none font-mono text-sm resize-none mb-4"
+                class="w-full h-48 px-4 py-3 rounded-xl bg-gray-50 border border-gray-200 focus:ring-2 focus:ring-indigo-400/50 focus:border-indigo-400 outline-none font-mono text-sm resize-none mb-4 custom-scrollbar shadow-inner"
                 placeholder="葬送的芙莉莲 | https://mikanani.me/RSS/Bangumi?bangumiId=3141&#10;迷宫饭 | https://mikanani.me/RSS/Bangumi?bangumiId=3154"></textarea>
 
             <!-- Preview Section -->
             <div x-show="batchPreviewData || isPreviewingBatch"
-                class="mb-4 max-h-64 overflow-y-auto rounded-xl border border-gray-100 bg-gray-50/50">
+                class="mb-6 max-h-64 overflow-y-auto rounded-xl border border-gray-100 bg-gray-50/80 custom-scrollbar">
                 <template x-if="isPreviewingBatch">
-                    <div class="p-8 text-center text-gray-400 flex flex-col items-center gap-2">
-                        <div class="animate-spin h-6 w-6 border-2 border-indigo-500 border-t-transparent rounded-full">
+                    <div class="p-8 text-center text-gray-400 flex flex-col items-center gap-3">
+                        <div class="animate-spin h-8 w-8 border-4 border-indigo-500 border-t-transparent rounded-full">
                         </div>
-                        <span class="text-xs">解析资源中...</span>
+                        <span class="text-sm font-medium">全力解析中...</span>
                     </div>
                 </template>
 
                 <template x-if="batchPreviewData">
                     <div class="divide-y divide-gray-100">
                         <template x-for="(item, index) in batchPreviewData" :key="index">
-                            <div x-data="{ expanded: false }" class="bg-white">
+                            <div x-data="{ expanded: false }" class="bg-white hover:bg-gray-50/80 transition-colors">
                                 <button @click="expanded = !expanded"
-                                    class="w-full px-4 py-3 flex items-center justify-between hover:bg-gray-50 transition">
+                                    class="w-full px-5 py-3 flex items-center justify-between group">
                                     <div class="flex items-center gap-3 overflow-hidden">
-                                        <span class="font-bold text-gray-700 text-sm truncate"
+                                        <span
+                                            class="font-bold text-gray-700 text-sm truncate group-hover:text-indigo-600 transition-colors"
                                             x-text="item.title"></span>
-                                        <span class="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-500"
-                                            x-text="item.error ? '⚠️ 错误' : (item.episodes?.length || 0) + ' 集'"></span>
+                                        <span class="text-[10px] font-bold px-1.5 py-0.5 rounded shadow-sm"
+                                            :class="item.error ? 'bg-red-100 text-red-500' : 'bg-green-100 text-green-600'"
+                                            x-text="item.error ? 'ERROR' : (item.episodes?.length || 0) + ' Eps'"></span>
                                     </div>
-                                    <span class="text-gray-400 text-xs transform transition-transform duration-200"
+                                    <span
+                                        class="text-gray-400 text-xs transform transition-transform duration-200 bg-gray-100 w-5 h-5 flex items-center justify-center rounded-full group-hover:bg-indigo-100 group-hover:text-indigo-500"
                                         :class="expanded ? 'rotate-180' : ''">▼</span>
                                 </button>
 
-                                <div x-show="expanded" x-collapse class="px-4 pb-3 bg-gray-50/50 text-xs">
+                                <div x-show="expanded" x-collapse
+                                    class="px-5 pb-4 bg-gray-50/50 text-xs border-t border-gray-100/50">
                                     <template x-if="item.error">
-                                        <div class="text-red-500 py-2" x-text="item.error"></div>
+                                        <div class="text-red-500 py-1 font-medium bg-red-50 px-2 rounded mt-2"
+                                            x-text="'❌ ' + item.error"></div>
                                     </template>
                                     <template x-if="!item.error && item.episodes">
-                                        <ul class="space-y-1.5 pt-2">
+                                        <ul class="space-y-2 pt-2">
                                             <template x-for="ep in item.episodes">
-                                                <li class="flex items-start gap-2">
-                                                    <span class="text-indigo-500 shrink-0">📄</span>
-                                                    <span class="text-gray-600 break-all" x-text="ep.title"></span>
+                                                <li class="flex items-start gap-2.5 text-gray-600">
+                                                    <span class="text-indigo-400 shrink-0 mt-0.5">📄</span>
+                                                    <span class="break-all leading-tight" x-text="ep.title"></span>
                                                 </li>
                                             </template>
                                         </ul>
@@ -449,20 +493,20 @@
                 </template>
             </div>
 
-            <div class="mt-6 flex justify-between items-center">
+            <div class="flex justify-between items-center pt-6 border-t border-gray-100">
                 <div class="flex gap-4 items-center">
                     <button @click="batchInput = ''; batchPreviewData = null"
-                        class="text-xs text-red-300 hover:text-red-500 hover:underline transition">清空列表</button>
+                        class="text-xs font-bold text-gray-400 hover:text-red-500 hover:underline transition">清空列表</button>
                     <button @click="previewBatch()" :disabled="!batchInput.trim() || isPreviewingBatch"
-                        class="text-xs font-bold text-indigo-500 hover:text-indigo-600 flex items-center gap-1 disabled:opacity-50 transition">
+                        class="text-xs font-bold text-indigo-500 hover:text-indigo-600 flex items-center gap-1 disabled:opacity-50 transition bg-indigo-50 px-3 py-1.5 rounded-lg hover:bg-indigo-100">
                         <span>👀</span> 预览内容
                     </button>
                 </div>
                 <div class="flex gap-3">
                     <button @click="showBatchAddModal = false"
-                        class="px-4 py-2 rounded-lg text-gray-500 hover:bg-gray-100 transition font-medium">取消</button>
+                        class="px-5 py-2.5 rounded-xl border border-gray-200 text-gray-600 font-medium hover:bg-gray-50 transition-all">取消</button>
                     <button @click="submitBatch()" :disabled="isSubmittingBatch"
-                        class="bg-indigo-500 text-white px-6 py-2 rounded-lg hover:bg-indigo-600 transition shadow-lg flex items-center gap-2 disabled:opacity-50">
+                        class="px-6 py-2.5 rounded-xl bg-indigo-500 text-white font-bold hover:bg-indigo-600 shadow-lg shadow-indigo-200 transition-all active:scale-95 disabled:opacity-50 flex items-center gap-2">
                         <span x-show="isSubmittingBatch" class="animate-spin text-sm">⌛</span>
                         <span x-text="isSubmittingBatch ? '正在处理...' : '确认批量添加' "></span>
                     </button>
@@ -708,51 +752,57 @@
 
     <!-- Edit Subscription Modal -->
     <div x-show="showEditModal" style="display: none;"
-        class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
+        class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/60 backdrop-blur-sm"
         x-transition:enter="transition ease-out duration-300" x-transition:enter-start="opacity-0"
         x-transition:enter-end="opacity-100" x-transition:leave="transition ease-in duration-200"
         x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0">
 
-        <div class="bg-white rounded-2xl shadow-xl w-full max-w-lg p-6 relative" @click.away="showEditModal = false">
-            <h3 class="text-xl font-bold mb-4 text-gray-800">编辑订阅</h3>
+        <div class="bg-white/95 backdrop-blur-md rounded-2xl shadow-2xl w-full max-w-lg p-8 relative border border-white/50"
+            @click.away="showEditModal = false">
+            <h3 class="text-2xl font-bold mb-6 text-gray-800 flex items-center gap-2">
+                <span class="bg-primary/10 text-primary p-2 rounded-lg">✏️</span> 编辑订阅
+            </h3>
 
             <!-- Dynamic attributes using x-bind and Alpine data -->
             <form :hx-put="'/api/subscriptions/' + editForm.id" :hx-target="'#sub-card-' + editForm.id"
                 hx-swap="outerHTML" @htmx:after-request="if(event.detail.successful) { showEditModal = false; }"
                 x-effect="htmx.process($el)"> <!-- Crucial: Reprocess HTMX attributes when bound data changes -->
 
-                <div class="space-y-4">
+                <div class="space-y-5">
                     <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-1">番剧标题</label>
+                        <label class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">番剧标题</label>
                         <input type="text" name="Title" x-model="editForm.title" required
-                            class="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-primary focus:border-transparent outline-none">
+                            class="w-full px-4 py-3 rounded-xl bg-gray-50 border border-gray-200 focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none transition-all shadow-inner">
                     </div>
 
                     <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-1">RSS 链接</label>
+                        <label class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">RSS
+                            链接</label>
                         <input type="url" name="RSSUrl" x-model="editForm.rss" required
-                            class="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-primary focus:border-transparent outline-none">
+                            class="w-full px-4 py-3 rounded-xl bg-gray-50 border border-gray-200 focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none transition-all shadow-inner">
                     </div>
 
                     <div class="grid grid-cols-2 gap-4">
                         <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">过滤规则</label>
+                            <label
+                                class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">过滤规则</label>
                             <input type="text" name="FilterRule" x-model="editForm.filter"
-                                class="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-primary focus:border-transparent outline-none">
+                                class="w-full px-4 py-3 rounded-xl bg-gray-50 border border-gray-200 focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none transition-all shadow-inner">
                         </div>
                         <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">排除规则</label>
+                            <label
+                                class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">排除规则</label>
                             <input type="text" name="ExcludeRule" x-model="editForm.exclude"
-                                class="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-primary focus:border-transparent outline-none">
+                                class="w-full px-4 py-3 rounded-xl bg-gray-50 border border-gray-200 focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none transition-all shadow-inner">
                         </div>
                     </div>
                 </div>
 
-                <div class="flex justify-end gap-3 mt-6">
+                <div class="flex justify-end gap-3 mt-8 pt-6 border-t border-gray-100">
                     <button type="button" @click="showEditModal = false"
-                        class="px-4 py-2 rounded-lg text-gray-600 hover:bg-gray-100">取消</button>
+                        class="px-6 py-2.5 rounded-xl border border-gray-200 text-gray-600 font-medium hover:bg-gray-50 transition-all">取消</button>
                     <button type="submit" id="edit-sub-btn" hx-indicator="#edit-sub-btn"
-                        class="px-6 py-2 rounded-lg bg-primary text-white hover:bg-accent shadow-lg shadow-pink-200 transition disabled:opacity-70 disabled:cursor-not-allowed flex items-center gap-2">
+                        class="px-6 py-2.5 rounded-xl bg-primary text-white font-bold hover:bg-accent shadow-lg shadow-pink-200 transition-all active:scale-95 disabled:opacity-70 disabled:cursor-not-allowed flex items-center gap-2">
                         <span class="htmx-indicator hidden animate-spin">⌛</span>
                         <span>保存修改</span>
                     </button>
@@ -797,6 +847,72 @@
         :class="toast.type === 'success' ? 'bg-green-500' : 'bg-red-500'" style="display: none;">
         <span x-text="toast.type === 'success' ? '✅' : '❌'"></span>
         <span x-text="toast.message"></span>
+    </div>
+
+    <!-- Anime Details Modal -->
+    <div x-show="showDetailsModal" style="display: none;"
+        class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
+        x-transition:enter="transition ease-out duration-300" x-transition:enter-start="opacity-0"
+        x-transition:enter-end="opacity-100" x-transition:leave="transition ease-in duration-200"
+        x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0">
+
+        <div class="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[80vh] overflow-y-auto relative flex flex-col"
+            @click.away="showDetailsModal = false">
+
+            <!-- Loading State -->
+            <div x-show="loadingDetails" class="p-12 flex flex-col items-center justify-center text-gray-400">
+                <div class="animate-spin h-10 w-10 border-4 border-indigo-500 border-t-transparent rounded-full mb-4">
+                </div>
+                <p>正在从 Bangumi 加载数据...</p>
+            </div>
+
+            <!-- Content -->
+            <div x-show="!loadingDetails && detailsData" class="flex flex-col md:flex-row">
+                <!-- Cover Image -->
+                <div class="w-full md:w-1/3 bg-gray-100 relative">
+                    <img :src="detailsData?.images?.large" class="w-full h-full object-cover">
+                    <div class="absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/80 to-transparent">
+                        <div class="flex items-center gap-1 text-white text-xs">
+                            <span class="text-yellow-400 text-base">★</span>
+                            <span class="font-bold text-lg" x-text="detailsData?.rating?.score || 'N/A'"></span>
+                            <span class="opacity-70" x-text="'(' + (detailsData?.rating?.total || 0) + '人评分)'"></span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Info -->
+                <div class="p-6 flex-1 flex flex-col">
+                    <button @click="showDetailsModal = false"
+                        class="absolute top-4 right-4 text-gray-400 hover:text-gray-600">✕</button>
+
+                    <h3 class="text-2xl font-bold text-gray-800 leading-tight"
+                        x-text="detailsData?.name_cn || detailsData?.name"></h3>
+                    <p class="text-sm text-gray-500 mb-4" x-show="detailsData?.name_cn" x-text="detailsData?.name"></p>
+
+                    <div class="flex flex-wrap gap-2 mb-4">
+                        <span class="px-2 py-1 bg-indigo-50 text-indigo-600 text-xs rounded-md border border-indigo-100"
+                            x-show="detailsData?.eps" x-text="detailsData?.eps + ' 话'"></span>
+                        <template x-for="tag in (detailsData?.tags || []).slice(0, 5)">
+                            <span class="px-2 py-1 bg-gray-100 text-gray-600 text-xs rounded-md"
+                                x-text="tag.name"></span>
+                        </template>
+                    </div>
+
+                    <div class="flex-1 overflow-y-auto max-h-60 mb-4 pr-2">
+                        <p class="text-sm text-gray-600 leading-relaxed whitespace-pre-wrap"
+                            x-text="detailsData?.summary || '暂无简介'"></p>
+                    </div>
+
+                    <div class="mt-auto pt-4 border-t border-gray-100 flex justify-end">
+                        <a :href="'https://bgm.tv/subject/' + detailsData?.id" target="_blank"
+                            class="text-indigo-500 hover:text-indigo-600 text-sm font-bold flex items-center gap-1">
+                            <span>访问 Bangumi 详情页</span>
+                            <span>↗</span>
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 </div>
 

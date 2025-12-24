@@ -4,11 +4,14 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
+	"regexp"
 	"strconv"
 	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/pokerjest/animateAutoTool/internal/bangumi"
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/downloader"
 	"github.com/pokerjest/animateAutoTool/internal/model"
@@ -24,6 +27,8 @@ type DashboardData struct {
 	QBConnected    bool
 	QBVersion      string
 	BangumiLogin   bool
+	WatchingList   []bangumi.UserCollectionItem
+	CompletedList  []bangumi.UserCollectionItem
 }
 
 type SubscriptionsData struct {
@@ -81,11 +86,41 @@ func DashboardHandler(c *gin.Context) {
 		}
 	}
 
-	// Check Bangumi Status
+	// Check Bangumi Status & Fetch Data
+	// Check Bangumi Status & Fetch Data
 	var bangumiLogin bool
+	var watchingList []bangumi.UserCollectionItem
+	var completedList []bangumi.UserCollectionItem
 	var tokenConfig model.GlobalConfig
 	if err := db.DB.Where("key = ?", model.ConfigKeyBangumiAccessToken).First(&tokenConfig).Error; err == nil && tokenConfig.Value != "" {
 		bangumiLogin = true
+
+		// Fetch Collection
+		// Note: Ideally we should cache this or do it async to not block dashboard load
+		// But for now, let's do it synchronously with a short timeout context or just rely on Resty timeout
+		client := bangumi.NewClient("", "", "")
+		user, err := client.GetCurrentUser(tokenConfig.Value)
+		if err == nil {
+			// Use 'me' or username. Let's use user.Username
+
+			// 1. Fetch Watching (Type 3)
+			watching, err1 := client.GetUserCollection(tokenConfig.Value, user.Username, 3, 12, 0)
+			if err1 != nil {
+				log.Printf("Error fetching watching collection: %v", err1)
+			} else {
+				watchingList = watching
+			}
+
+			// 2. Fetch Completed (Type 2) - Limit 12 (Recent)
+			completed, err2 := client.GetUserCollection(tokenConfig.Value, user.Username, 2, 12, 0)
+			if err2 != nil {
+				log.Printf("Error fetching completed collection: %v", err2)
+			} else {
+				completedList = completed
+			}
+		} else {
+			log.Printf("Error fetching user profile: %v", err)
+		}
 	}
 
 	data := DashboardData{
@@ -95,6 +130,8 @@ func DashboardHandler(c *gin.Context) {
 		QBConnected:    qbConnected,
 		QBVersion:      qbVersion,
 		BangumiLogin:   bangumiLogin,
+		WatchingList:   watchingList,
+		CompletedList:  completedList,
 	}
 
 	c.HTML(http.StatusOK, "index.html", data)
@@ -147,6 +184,26 @@ func CreateSubscriptionHandler(c *gin.Context) {
 }
 
 func createSubscriptionInternal(sub *model.Subscription) error {
+	// Try to extract BangumiID from RSS URL
+	if sub.RSSUrl != "" {
+		if u, err := url.Parse(sub.RSSUrl); err == nil {
+			q := u.Query()
+			if bidStr := q.Get("bangumiId"); bidStr != "" {
+				if bid, err := strconv.Atoi(bidStr); err == nil {
+					sub.BangumiID = bid
+				}
+			}
+		}
+	}
+
+	// Fallback: Search by title if no ID found
+	if sub.BangumiID == 0 && sub.Title != "" {
+		bgmClient := bangumi.NewClient("", "", "")
+		if bid, err := bgmClient.SearchSubject(sub.Title); err == nil && bid > 0 {
+			sub.BangumiID = bid
+		}
+	}
+
 	sub.IsActive = true
 
 	// Check if already exists (including soft-deleted)
@@ -375,22 +432,41 @@ func UpdateSubscriptionHandler(c *gin.Context) {
 		return
 	}
 
-	if err := c.ShouldBind(&sub); err != nil {
+	var input struct {
+		Title       string `form:"Title" binding:"required"`
+		RSSUrl      string `form:"RSSUrl" binding:"required"`
+		FilterRule  string `form:"FilterRule"`
+		ExcludeRule string `form:"ExcludeRule"`
+	}
+
+	if err := c.ShouldBind(&input); err != nil {
 		c.String(http.StatusBadRequest, "Invalid Data")
 		return
 	}
 
-	// Update specific fields avoids overwriting others if not present in form
-	// But `ShouldBind` maps form to struct.
-	// We should be careful about zero values if form is partial.
-	// Here the form contains all editable fields.
+	// Check if Title changed, reset BangumiID if so
+	if sub.Title != input.Title {
+		sub.Title = input.Title
+		// Re-clean title just in case
+		// Reset ID and try to find again immediately
+		sub.BangumiID = 0
+		bgmClient := bangumi.NewClient("", "", "")
+		if bid, err := bgmClient.SearchSubject(sub.Title); err == nil && bid > 0 {
+			sub.BangumiID = bid
+		}
+	}
+
+	sub.RSSUrl = input.RSSUrl
+	sub.FilterRule = input.FilterRule
+	sub.ExcludeRule = input.ExcludeRule
 
 	if err := db.DB.Save(&sub).Error; err != nil {
 		c.String(http.StatusInternalServerError, "Error saving: "+err.Error())
 		return
 	}
 
-	time.Sleep(1 * time.Second) // Smooth transition
+	// Sleep for smooth UI feel
+	time.Sleep(500 * time.Millisecond)
 
 	c.HTML(http.StatusOK, "subscription_card.html", sub)
 }
@@ -725,4 +801,82 @@ func GetMikanDashboardHandler(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, dashboard)
+}
+
+func RefreshSubscriptionsHandler(c *gin.Context) {
+	var subs []model.Subscription
+	if err := db.DB.Find(&subs).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch subscriptions"})
+		return
+	}
+
+	updatedCount := 0
+	bgmClient := bangumi.NewClient("", "", "") // Anonymous client
+
+	// Compile regex for cleaning title: remove leading [...]
+	re := regexp.MustCompile(`^\[.*?\]\s*`)
+
+	for _, sub := range subs {
+		// Only try to update if BangumiID is missing
+		if sub.BangumiID == 0 {
+			queryTitle := sub.Title
+			cleaned := false
+
+			// Try cleaning title if it looks like [Subgroup] Title
+			if re.MatchString(queryTitle) {
+				cleanTitle := re.ReplaceAllString(queryTitle, "")
+				if cleanTitle != "" {
+					queryTitle = cleanTitle
+					cleaned = true
+				}
+			}
+
+			// Search by title (cleaned or original)
+			log.Printf("DEBUG: Refresh - Searching Bangumi for: '%s'", queryTitle)
+			bid, err := bgmClient.SearchSubject(queryTitle)
+			if err == nil && bid > 0 {
+				log.Printf("DEBUG: Refresh - Found ID: %d", bid)
+				sub.BangumiID = bid
+				// If we successfully matched with a cleaned title, update the title in DB too
+				if cleaned {
+					sub.Title = queryTitle
+				}
+				if err := db.DB.Save(&sub).Error; err == nil {
+					updatedCount++
+				}
+			}
+			// Be nice to the API
+			time.Sleep(500 * time.Millisecond)
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": fmt.Sprintf("刷新完成，更新了 %d 个订阅的元数据", updatedCount),
+		"updated": updatedCount,
+		"total":   len(subs),
+	})
+}
+
+func GetBangumiSubjectHandler(c *gin.Context) {
+	idStr := c.Param("id")
+	if idStr == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "id is required"})
+		return
+	}
+
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id format"})
+		return
+	}
+
+	// Just use anonymous client for public data
+	client := bangumi.NewClient("", "", "")
+	subject, err := client.GetSubject(id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to fetch subject: %v", err)})
+		return
+	}
+
+	c.JSON(http.StatusOK, subject)
 }

@@ -20,8 +20,8 @@
         <!-- Content Section -->
         <div class="flex-1 min-w-0 flex flex-col">
             <div class="flex justify-between items-start gap-2">
-                <h3 class="font-bold text-base text-gray-800 line-clamp-2 leading-snug mb-2 hover:text-primary transition-colors cursor-default"
-                    title="{{ .Title }}">
+                <h3 class="font-bold text-base text-gray-800 line-clamp-2 leading-snug mb-2 hover:text-primary transition-colors cursor-pointer hover:underline"
+                    title="点击查看详情" @click.stop="$dispatch('show-anime-details', { bangumiId: {{ .BangumiID }} })">
                     {{ .Title }}
                 </h3>
             </div>
@@ -40,6 +40,13 @@
                     class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-rose-50 text-rose-600 border border-rose-100 font-medium whitespace-nowrap">
                     {{ .Season }}
                 </span>
+                {{ end }}
+                {{ if gt .BangumiID 0 }}
+                <a href="https://bgm.tv/subject/{{ .BangumiID }}" target="_blank"
+                    class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-pink-50 text-pink-600 border border-pink-100 font-medium whitespace-nowrap hover:bg-pink-100 transition-colors"
+                    title="Bangumi ID: {{ .BangumiID }}" @click.stop>
+                    🌸 {{ .BangumiID }}
+                </a>
                 {{ end }}
             </div>
 
@@ -108,14 +115,18 @@
                     rss: $el.dataset.rss, 
                     filter: $el.dataset.filter, 
                     exclude: $el.dataset.exclude 
-                })" class="p-1.5 text-gray-400 hover:text-amber-500 hover:bg-amber-50 rounded-md transition-colors"
+                })"
+                class="p-1.5 text-gray-400 hover:text-amber-500 hover:bg-amber-50 rounded-md transition-colors mr-1"
                 title="编辑">
                 <span class="text-sm">✏️</span>
             </button>
 
+            <span class="text-gray-200">|</span>
+
             <!-- Delete -->
             <button data-id="{{.ID}}" @click.stop="$dispatch('delete-subscription', { id: $el.dataset.id })"
-                class="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-md transition-colors" title="删除">
+                class="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-md transition-colors ml-1"
+                title="删除">
                 <span class="text-sm">🗑️</span>
             </button>
         </div>

@@ -27,3 +27,28 @@ type UserProfile struct {
 	Sign      string `json:"sign"`
 	UserGroup int    `json:"user_group"`
 }
+
+type Subject struct {
+	ID      int    `json:"id"`
+	Type    int    `json:"type"`
+	Name    string `json:"name"`
+	NameCN  string `json:"name_cn"`
+	Summary string `json:"summary"`
+	Images  struct {
+		Large  string `json:"large"`
+		Common string `json:"common"`
+		Medium string `json:"medium"`
+		Small  string `json:"small"`
+		Grid   string `json:"grid"`
+	} `json:"images"`
+	Rating struct {
+		Total    int            `json:"total"`
+		CountMap map[string]int `json:"count"`
+		Score    float64        `json:"score"`
+	} `json:"rating"`
+	Tags []struct {
+		Name  string `json:"name"`
+		Count int    `json:"count"`
+	} `json:"tags"`
+	Eps int `json:"eps"`
+}

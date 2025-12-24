@@ -8,6 +8,7 @@ import (
 type Subscription struct {
 	gorm.Model
 	MikanID         string `json:"mikan_id"`                                 // 蜜柑计划的 RSS ID 或 Group ID
+	BangumiID       int    `json:"bangumi_id"`                               // Bangumi 番剧 ID
 	Title           string `json:"title" form:"Title"`                       // 番剧名称
 	RSSUrl          string `json:"rss_url" form:"RSSUrl" gorm:"uniqueIndex"` // 具体的 RSS 链接
 	Image           string `json:"image" form:"Image"`                       // 番剧封面图片
@@ -64,7 +65,9 @@ type LocalAnimeDirectory struct {
 type LocalAnime struct {
 	gorm.Model
 	DirectoryID uint   `json:"directory_id" gorm:"index"` // 所属根目录ID
+	BangumiID   int    `json:"bangumi_id"`                // Bangumi 番剧 ID
 	Title       string `json:"title"`                     // 剧集标题 (通常是文件夹名)
+	Image       string `json:"image"`                     // 封面图片链接
 	Path        string `json:"path"`                      // 系列绝对路径
 	FileCount   int    `json:"file_count"`                // 视频文件数量 (mkv, mp4, etc.)
 	TotalSize   int64  `json:"total_size"`                // 总大小 (bytes)
