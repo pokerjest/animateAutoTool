@@ -186,12 +186,6 @@ func (s *LocalAnimeService) ScanDirectory(dirID uint, rootPath string) error {
 					}
 				}
 				// log.Printf("DEBUG: Matched Bangumi ID %d for %s", bid, queryTitle)
-			} else {
-				// log.Printf("DEBUG: No Bangumi ID found for %s (Query: %s)", anime.Title, queryTitle)
-			}
-			// Be courteous to API
-			if anime.BangumiID > 0 {
-				// time.Sleep(200 * time.Millisecond) // If scanning many, maybe throttle?
 			}
 
 			if err := db.DB.Create(&anime).Error; err != nil {
