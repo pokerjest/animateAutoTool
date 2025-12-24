@@ -472,7 +472,7 @@ func UpdateSettingsHandler(c *gin.Context) {
 			if ver, err := client.GetVersion(); err == nil {
 				qbStatusHtml = fmt.Sprintf(`<div id="qb-status" hx-swap-oob="innerHTML"><div class="text-emerald-600 bg-emerald-50 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 border border-emerald-200">✅ QB 已连接 (版本: %s)</div></div>`, ver)
 			} else {
-				qbStatusHtml = fmt.Sprintf(`<div id="qb-status" hx-swap-oob="innerHTML"><div class="text-amber-600 bg-amber-50 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 border border-amber-200">⚠️ QB 登录成功但版本未知</div></div>`)
+				qbStatusHtml = `<div id="qb-status" hx-swap-oob="innerHTML"><div class="text-amber-600 bg-amber-50 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 border border-amber-200">⚠️ QB 登录成功但版本未知</div></div>`
 			}
 		}
 	} else {

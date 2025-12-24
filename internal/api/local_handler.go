@@ -52,7 +52,11 @@ func AddLocalDirectoryHandler(c *gin.Context) {
 	}
 
 	// Trigger immediate scan
-	go svc.ScanAll()
+	go func() {
+		if err := svc.ScanAll(); err != nil {
+			fmt.Printf("Error scanning all directories: %v\n", err)
+		}
+	}()
 
 	time.Sleep(500 * time.Millisecond) // Wait a bit for UI
 	c.Header("HX-Redirect", "/local-anime")
@@ -80,7 +84,11 @@ func DeleteLocalDirectoryHandler(c *gin.Context) {
 // ScanLocalDirectoryHandler 触发重新扫描
 func ScanLocalDirectoryHandler(c *gin.Context) {
 	svc := service.NewLocalAnimeService()
-	go svc.ScanAll()
+	go func() {
+		if err := svc.ScanAll(); err != nil {
+			fmt.Printf("Error scanning all directories: %v\n", err)
+		}
+	}()
 
 	c.String(http.StatusOK, "扫描已在后台启动")
 }

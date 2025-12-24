@@ -112,7 +112,7 @@ func (s *LocalAnimeService) countVideos(path string) (int, int64) {
 	count := 0
 	var size int64 = 0
 
-	filepath.WalkDir(path, func(p string, d os.DirEntry, err error) error {
+	_ = filepath.WalkDir(path, func(p string, d os.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}
