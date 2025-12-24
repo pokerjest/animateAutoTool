@@ -306,15 +306,6 @@ func scrapeSubjectHTML(htmlContent string, id int) *Subject {
 		s.NameCN = s.Name
 	}
 
-	// 5. Air Date
-	// <li><span class="tip">放送开始: </span>2024-01-01</li>
-	reDate := regexp.MustCompile(`<li><span class="tip">放送开始: </span>(.*?)(</li>|<)`)
-	if match := reDate.FindStringSubmatch(htmlContent); len(match) > 1 {
-		// Just store it, we don't have a field for date in Subject but LocalAnime uses it?
-		// Wait, Subject struct doesn't have AirDate. It has Tags, Eps.
-		// It's fine to skip if struct doesn't have it.
-	}
-
 	return s
 }
 
