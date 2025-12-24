@@ -74,7 +74,7 @@ func (p *MikanParser) Parse(url string) ([]Episode, error) {
 		// 部分客户端(qBit)支持直接把 .torrent URL 传进去下载。
 
 		// 这里简单解析一下 Title
-		ep := parseTitle(item.Title)
+		ep := ParseTitle(item.Title)
 		ep.TorrentURL = item.Enclosure.URL
 
 		// 处理时间 RFC1123Z ?
@@ -91,7 +91,7 @@ func (p *MikanParser) Parse(url string) ([]Episode, error) {
 // 简单的正则解析器 (初步实现，后续需增强)
 // 示例标题: [Moozzi2] Fate/stay night [Unlimited Blade Works] - 25 (BD 1920x1080 x264 Flac) TV-rip
 // [LoliHouse] 葬送的芙莉莲 / Sousou no Frieren - 28 [WebRip 1080p HEVC-10bit AAC][简繁内封字幕]
-func parseTitle(title string) Episode {
+func ParseTitle(title string) Episode {
 	var ep Episode
 	ep.Title = title
 

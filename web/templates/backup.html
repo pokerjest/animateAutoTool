@@ -1,0 +1,94 @@
+{{ if not .SkipLayout }}{{ template "header.html" . }}{{ end }}
+
+<div class="space-y-6">
+    <h2 class="text-2xl font-bold text-gray-700">数据备份与还原</h2>
+
+    <div class="space-y-6 text-gray-800">
+        <!-- Backup Section -->
+        <div class="bg-white/60 p-6 rounded-xl border border-white/70 shadow-sm relative overflow-hidden group">
+            <div class="relative z-10">
+                <h3 class="text-lg font-semibold mb-2 flex items-center gap-2">
+                    <span>📦</span> 备份数据
+                </h3>
+                <div class="mb-4 text-sm text-gray-600 space-y-1 bg-white/50 p-3 rounded-lg border border-gray-100">
+                    <div class="flex justify-between"><span>订阅总数:</span> <span class="font-bold">{{
+                            .Stats.SubscriptionCount }}</span></div>
+                    <div class="flex justify-between"><span>历史记录:</span> <span class="font-bold">{{
+                            .Stats.DownloadLogCount }}</span></div>
+                    <!-- Local Anime not backed up anymore, but this view shows Current DB stats. Keep it? -->
+                    <!-- Wait, if we export filtered, this stat might be misleading if user thinks it IS backed up. -->
+                    <!-- But this card shows "Current DB Stats". Export button creates backup. -->
+                    <div class="flex justify-between text-gray-400"><span>本地番剧:</span> <span class="font-bold">{{
+                            .Stats.LocalAnimeCount }} (仅本地)</span></div>
+                    <div class="flex justify-between"><span>数据库大小:</span> <span class="font-bold">{{ .Stats.DatabaseSize
+                            }}</span></div>
+                    <div class="flex justify-between"><span>最后修改:</span> <span class="font-mono text-xs">{{
+                            .Stats.LastModified }}</span></div>
+
+                    {{ if .Stats.SubscriptionTitles }}
+                    <div class="mt-2 pt-2 border-t border-gray-200">
+                        <div class="text-xs text-gray-500 mb-1">包含的订阅:</div>
+                        <div class="max-h-[100px] overflow-y-auto space-y-1 pr-1 custom-scrollbar">
+                            {{ range .Stats.SubscriptionTitles }}
+                            <div class="text-xs bg-white px-2 py-1 rounded border border-gray-100 truncate">{{ . }}
+                            </div>
+                            {{ end }}
+                        </div>
+                    </div>
+                    {{ end }}
+                </div>
+                <p class="text-sm text-gray-600 mb-4">
+                    下载经过筛选的数据库文件 (仅包含订阅、日志和设置，不含本地番剧索引)。
+                </p>
+                <a href="/api/backup/export" target="_blank"
+                    class="inline-flex items-center gap-2 px-6 py-2 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition shadow-lg shadow-emerald-200">
+                    <span>⬇️</span> 下载备份
+                </a>
+            </div>
+            <div
+                class="absolute -right-10 -bottom-10 text-9xl text-emerald-100 opacity-50 group-hover:scale-110 transition duration-500 select-none">
+                💾
+            </div>
+        </div>
+
+        <!-- Restore Section -->
+        <div class="bg-white/60 p-6 rounded-xl border border-white/70 shadow-sm relative overflow-hidden group">
+            <div class="relative z-10">
+                <h3 class="text-lg font-semibold mb-2 flex items-center gap-2 text-red-600">
+                    <span>⚠️</span> 还原数据
+                </h3>
+                <p class="text-sm text-gray-600 mb-4">
+                    上传备份文件进行分析，预览数据后再确认还原。
+                </p>
+
+                <form hx-post="/api/backup/analyze" hx-encoding="multipart/form-data" hx-target="#restore-preview"
+                    hx-indicator="#analyze-btn" class="flex items-end gap-4 mb-4">
+                    <div class="flex-1">
+                        <label class="block text-sm font-medium text-gray-700 mb-1">选择备份文件 (.db)</label>
+                        <input type="file" name="backup_file" accept=".db" required
+                            class="w-full px-4 py-2 bg-white/50 rounded-lg border border-gray-300 focus:ring-2 focus:ring-red-500 focus:border-red-500 outline-none file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-red-50 file:text-red-700 hover:file:bg-red-100">
+                    </div>
+                </form>
+                <div class="mt-4">
+                    <button type="submit" id="analyze-btn"
+                        onclick="this.closest('div').previousElementSibling.requestSubmit()"
+                        class="inline-flex items-center gap-2 px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition shadow-lg shadow-blue-200 cursor-pointer">
+                        <span class="[.htmx-request_&]:hidden">🔍</span>
+                        <span class="hidden [.htmx-request_&]:inline animate-spin">⌛</span>
+                        分析文件
+                    </button>
+                </div>
+
+                <!-- Preview Container -->
+                <div id="restore-preview" class="mt-4"></div>
+            </div>
+            <div
+                class="absolute -right-6 -bottom-6 text-9xl text-red-100 opacity-50 group-hover:rotate-12 transition duration-500 select-none">
+                ♻️
+            </div>
+        </div>
+
+    </div>
+</div>
+
+{{ if not .SkipLayout }}{{ template "footer.html" . }}{{ end }}

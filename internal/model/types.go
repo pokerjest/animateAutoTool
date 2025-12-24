@@ -52,6 +52,10 @@ const (
 	ConfigKeyBangumiAppSecret    = "bangumi_app_secret"
 	ConfigKeyBangumiAccessToken  = "bangumi_access_token"
 	ConfigKeyBangumiRefreshToken = "bangumi_refresh_token"
+	ConfigKeyTMDBToken           = "tmdb_token"
+	ConfigKeyProxyURL            = "proxy_url"
+	ConfigKeyProxyBangumi        = "proxy_bangumi_enabled"
+	ConfigKeyProxyTMDB           = "proxy_tmdb_enabled"
 )
 
 // LocalAnimeDirectory 用户配置的本地番剧目录根路径
@@ -64,11 +68,12 @@ type LocalAnimeDirectory struct {
 // LocalAnime 扫描出的本地番剧系列
 type LocalAnime struct {
 	gorm.Model
-	DirectoryID uint   `json:"directory_id" gorm:"index"` // 所属根目录ID
-	BangumiID   int    `json:"bangumi_id"`                // Bangumi 番剧 ID
-	Title       string `json:"title"`                     // 剧集标题 (通常是文件夹名)
-	Image       string `json:"image"`                     // 封面图片链接
-	Path        string `json:"path"`                      // 系列绝对路径
-	FileCount   int    `json:"file_count"`                // 视频文件数量 (mkv, mp4, etc.)
-	TotalSize   int64  `json:"total_size"`                // 总大小 (bytes)
+	DirectoryID uint   `json:"directory_id" gorm:"index"`  // 所属根目录ID
+	BangumiID   int    `json:"bangumi_id"`                 // Bangumi 番剧 ID
+	Title       string `json:"title"`                      // 剧集标题 (通常是文件夹名)
+	Image       string `json:"image"`                      // 封面图片链接
+	Path        string `json:"path"`                       // 系列绝对路径
+	FileCount   int    `json:"file_count"`                 // 视频文件数量 (mkv, mp4, etc.)
+	TotalSize   int64  `json:"total_size"`                 // 总大小 (bytes)
+	AirDate     string `json:"air_date" gorm:"default:''"` // 放送日期 (用于获取年份)
 }

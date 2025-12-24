@@ -26,6 +26,12 @@ func NewClient(appID, appSecret, redirectURI string) *Client {
 	}
 }
 
+func (c *Client) SetProxy(proxyURL string) {
+	if proxyURL != "" {
+		c.client.SetProxy(proxyURL)
+	}
+}
+
 func (c *Client) GetAuthorizationURL() string {
 	// https://bgm.tv/oauth/authorize?client_id=[client_id]&response_type=code&redirect_uri=[redirect_uri]
 	u := fmt.Sprintf("https://bgm.tv/oauth/authorize?client_id=%s&response_type=code&redirect_uri=%s",

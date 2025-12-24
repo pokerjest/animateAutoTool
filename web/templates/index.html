@@ -141,6 +141,19 @@
                     </span>
                     {{ end }}
                 </div>
+                <!-- TMDB Status -->
+                <div class="flex items-center justify-between text-sm">
+                    <span class="text-gray-600">TMDB</span>
+                    {{ if .TMDBConnected }}
+                    <span class="text-blue-500 font-bold flex items-center gap-1">
+                        <span class="w-2 h-2 rounded-full bg-blue-500"></span> 已配置
+                    </span>
+                    {{ else }}
+                    <span class="text-gray-400 font-bold flex items-center gap-1">
+                        <span class="w-2 h-2 rounded-full bg-gray-300"></span> 未配置
+                    </span>
+                    {{ end }}
+                </div>
             </div>
         </div>
     </div>

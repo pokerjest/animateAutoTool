@@ -3,108 +3,184 @@
 <div class="space-y-6">
     <h2 class="text-2xl font-bold text-gray-700">系统设置</h2>
 
-    <!-- qBittorrent Settings -->
-    <!-- qBittorrent Settings -->
     <form hx-post="/api/settings" hx-target="#save-result" hx-swap="innerHTML" novalidate>
+        <div class="space-y-6">
+            <!-- qBittorrent Settings -->
+            <div class="bg-white/60 p-6 rounded-xl border border-white/70 shadow-sm">
+                <div class="mb-4">
+                    <h3 class="text-lg font-semibold text-gray-800 border-b border-gray-200 pb-2 mb-4">qBittorrent 设置
+                    </h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Web UI 地址</label>
+                            <input type="text" name="qb_url" value='{{ index .Config "qb_url" }}'
+                                class="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-primary focus:border-transparent outline-none"
+                                placeholder="http://localhost:8080 (请包含 http://)">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">下载保存目录</label>
+                            <input type="text" name="base_download_dir" value='{{ index .Config "base_download_dir" }}'
+                                class="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-primary focus:border-transparent outline-none"
+                                placeholder="/downloads/anime">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">用户名</label>
+                            <input type="text" name="qb_username" value='{{ index .Config "qb_username" }}'
+                                class="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-primary focus:border-transparent outline-none">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">密码</label>
+                            <div class="relative">
+                                <input type="password" id="qb_password_input" name="qb_password"
+                                    value='{{ index .Config "qb_password" }}'
+                                    class="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-primary focus:border-transparent outline-none pr-10">
+                                <button type="button" onclick="togglePassword()"
+                                    class="absolute inset-y-0 right-0 px-3 flex items-center text-gray-400 hover:text-gray-600 cursor-pointer focus:outline-none"
+                                    title="显示/隐藏密码">
+                                    <span id="pwd-toggle-icon">👁️</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
 
-        <!-- qBittorrent Settings -->
-        <div class="bg-white/60 p-6 rounded-xl border border-white/70 shadow-sm mb-6">
-            <div class="mb-4">
-                <h3 class="text-lg font-semibold text-gray-800 border-b border-gray-200 pb-2 mb-4">qBittorrent 设置</h3>
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-1">Web UI 地址</label>
-                        <input type="text" name="qb_url" value='{{ index .Config "qb_url" }}'
-                            class="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-primary focus:border-transparent outline-none"
-                            placeholder="http://localhost:8080 (请包含 http://)">
+                <!-- QB Connection Status -->
+                <div id="qb-status" class="min-h-[40px]" hx-get="/api/settings/qb-status" hx-trigger="load"
+                    hx-target="this" hx-swap="innerHTML">
+                    <!-- Default state empty or loading handled by OOB -->
+                    <div class="htmx-indicator flex items-center gap-2 text-gray-400">
+                        <span class="animate-spin">⌛</span>
+                        <span>检查连接状态...</span>
                     </div>
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-1">下载保存目录</label>
-                        <input type="text" name="base_download_dir" value='{{ index .Config "base_download_dir" }}'
-                            class="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-primary focus:border-transparent outline-none"
-                            placeholder="/downloads/anime">
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-1">用户名</label>
-                        <input type="text" name="qb_username" value='{{ index .Config "qb_username" }}'
-                            class="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-primary focus:border-transparent outline-none">
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-1">密码</label>
-                        <div class="relative">
-                            <input type="password" id="qb_password_input" name="qb_password"
-                                value='{{ index .Config "qb_password" }}'
-                                class="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-primary focus:border-transparent outline-none pr-10">
-                            <button type="button" onclick="togglePassword()"
-                                class="absolute inset-y-0 right-0 px-3 flex items-center text-gray-400 hover:text-gray-600 cursor-pointer focus:outline-none"
-                                title="显示/隐藏密码">
-                                <span id="pwd-toggle-icon">👁️</span>
-                            </button>
+                </div>
+            </div>
+
+            <!-- Network Proxy Settings -->
+            <div class="bg-white/60 p-6 rounded-xl border border-white/70 shadow-sm">
+                <div class="mb-4">
+                    <h3 class="text-lg font-semibold text-gray-800 border-b border-gray-200 pb-2 mb-4">网络代理设置</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div class="col-span-2 md:col-span-1">
+                            <label class="block text-sm font-medium text-gray-700 mb-1">HTTP 代理地址</label>
+                            <input type="text" name="proxy_url" value='{{ index .Config "proxy_url" }}'
+                                class="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-primary focus:border-transparent outline-none"
+                                placeholder="http://127.0.0.1:7890">
+                            <p class="text-xs text-gray-500 mt-1">
+                                为 Bangumi 和 TMDB 请求配置代理。留空则不使用代理。
+                            </p>
+                        </div>
+                        <div class="col-span-2 flex flex-col gap-3 justify-center">
+                            <label class="flex items-center gap-2 cursor-pointer">
+                                <input type="checkbox" name="proxy_bangumi_enabled" value="true"
+                                    class="w-4 h-4 text-primary border-gray-300 rounded focus:ring-primary" {{ if eq
+                                    (index .Config "proxy_bangumi_enabled" ) "true" }}checked{{ end }}>
+                                <span class="text-sm text-gray-700">Bangumi 使用代理</span>
+                            </label>
+                            <label class="flex items-center gap-2 cursor-pointer">
+                                <input type="checkbox" name="proxy_tmdb_enabled" value="true"
+                                    class="w-4 h-4 text-primary border-gray-300 rounded focus:ring-primary" {{ if eq
+                                    (index .Config "proxy_tmdb_enabled" ) "true" }}checked{{ end }}>
+                                <span class="text-sm text-gray-700">TMDB 使用代理</span>
+                            </label>
                         </div>
                     </div>
                 </div>
             </div>
 
-            <!-- QB Connection Status -->
-            <!-- QB Connection Status -->
-            <div id="qb-status" class="min-h-[40px]" hx-get="/api/settings/qb-status" hx-trigger="load" hx-target="this"
-                hx-swap="innerHTML">
-                <!-- Default state empty or loading handled by OOB -->
-                <div class="htmx-indicator flex items-center gap-2 text-gray-400">
-                    <span class="animate-spin">⌛</span>
-                    <span>检查连接状态...</span>
+            <!-- Bangumi Integration -->
+            <div class="bg-white/60 p-6 rounded-xl border border-white/70 shadow-sm">
+                <div class="mb-8">
+                    <div class="flex items-center gap-2 border-b border-gray-200 pb-2 mb-4">
+                        <h3 class="text-lg font-semibold text-gray-800">Bangumi 集成</h3>
+                    </div>
+
+                    <div class="space-y-6">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Personal Access Token</label>
+                            <div class="relative">
+                                <input type="password" id="bangumi_token_input" name="bangumi_access_token"
+                                    value='{{ index .Config "bangumi_access_token" }}'
+                                    class="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-primary focus:border-transparent outline-none pr-10"
+                                    placeholder="请在 Bangumi 开发者设置中生成 Access Token">
+                                <button type="button" onclick="toggleTokenVisibility()"
+                                    class="absolute inset-y-0 right-0 px-3 flex items-center text-gray-400 hover:text-gray-600 cursor-pointer focus:outline-none"
+                                    title="显示/隐藏 Token">
+                                    <span id="token-toggle-icon">👁️</span>
+                                </button>
+                            </div>
+                            <p class="text-xs text-gray-500 mt-1">
+                                请前往 <a href="https://bgm.tv/dev/app" target="_blank"
+                                    class="text-pink-500 hover:underline">Bangumi
+                                    开发者中心</a> 创建应用并生成 Access Token。
+                            </p>
+                        </div>
+
+                        <!-- Connection Status -->
+                        <div id="bangumi-status" hx-get="/api/bangumi/profile"
+                            hx-trigger="load, refresh-bangumi from:body" hx-target="this" hx-swap="innerHTML"
+                            class="min-h-[80px]">
+                            <!-- Default state if not connected (loading handled by htmx) -->
+                            <div class="htmx-indicator flex items-center gap-2 text-gray-500">
+                                <span class="animate-spin">⌛</span>
+                                <span>检查连接状态...</span>
+                            </div>
+                            <div class="text-sm text-gray-500 flex items-center gap-2">
+                                <span>🔴 未连接</span>
+                                <span class="text-xs text-gray-400">(请先输入 Access Token 并保存)</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TMDB Integration -->
+            <div class="bg-white/60 p-6 rounded-xl border border-white/70 shadow-sm">
+                <div class="mb-4">
+                    <div class="flex items-center gap-2 border-b border-gray-200 pb-2 mb-4">
+                        <h3 class="text-lg font-semibold text-gray-800">The Movie Database (TMDB)</h3>
+                    </div>
+
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">API Read Access Token (v4
+                                Auth)</label>
+                            <div class="relative">
+                                <input type="password" id="tmdb_token_input" name="tmdb_token"
+                                    value='{{ index .Config "tmdb_token" }}'
+                                    class="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-primary focus:border-transparent outline-none pr-10"
+                                    placeholder="eyJhbGciOiJIUzI1Ni...">
+                                <button type="button" onclick="toggleTMDBTokenVisibility()"
+                                    class="absolute inset-y-0 right-0 px-3 flex items-center text-gray-400 hover:text-gray-600 cursor-pointer focus:outline-none"
+                                    title="显示/隐藏 Token">
+                                    <span id="tmdb-token-toggle-icon">👁️</span>
+                                </button>
+                            </div>
+                            <p class="text-xs text-gray-500 mt-1">
+                                请前往 <a href="https://www.themoviedb.org/settings/api" target="_blank"
+                                    class="text-blue-500 hover:underline">TMDB API Settings</a> 生成 "API Read Access
+                                Token"。
+                            </p>
+                        </div>
+
+                        <!-- Connection Status -->
+                        <div id="tmdb-status" hx-get="/api/settings/tmdb-status" hx-trigger="load" hx-target="this"
+                            hx-swap="innerHTML" class="min-h-[40px]">
+                            <div class="htmx-indicator flex items-center gap-2 text-gray-500">
+                                <span class="animate-spin">⌛</span>
+                                <span>检查连接状态...</span>
+                            </div>
+                            <div class="text-sm text-gray-500 flex items-center gap-2">
+                                <span>🔴 未连接</span>
+                                <span class="text-xs text-gray-400">(请先输入 Token 并保存)</span>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
 
-        <!-- Bangumi Integration -->
-        <div class="bg-white/60 p-6 rounded-xl border border-white/70 shadow-sm mb-6">
-            <div class="mb-8">
-                <div class="flex items-center gap-2 border-b border-gray-200 pb-2 mb-4">
-                    <span class="text-xl">🌸</span>
-                    <h3 class="text-lg font-semibold text-gray-800">Bangumi 集成</h3>
-                </div>
-
-                <div class="space-y-6">
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-1">Personal Access Token</label>
-                        <div class="relative">
-                            <input type="password" id="bangumi_token_input" name="bangumi_access_token"
-                                value='{{ index .Config "bangumi_access_token" }}'
-                                class="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-primary focus:border-transparent outline-none pr-10"
-                                placeholder="请在 Bangumi 开发者设置中生成 Access Token">
-                            <button type="button" onclick="toggleTokenVisibility()"
-                                class="absolute inset-y-0 right-0 px-3 flex items-center text-gray-400 hover:text-gray-600 cursor-pointer focus:outline-none"
-                                title="显示/隐藏 Token">
-                                <span id="token-toggle-icon">👁️</span>
-                            </button>
-                        </div>
-                        <p class="text-xs text-gray-500 mt-1">
-                            请前往 <a href="https://bgm.tv/dev/app" target="_blank"
-                                class="text-pink-500 hover:underline">Bangumi 开发者中心</a> 创建应用并生成 Access Token。
-                        </p>
-                    </div>
-
-                    <!-- Connection Status -->
-                    <div id="bangumi-status" hx-get="/api/bangumi/profile" hx-trigger="load, refresh-bangumi from:body"
-                        hx-target="this" hx-swap="innerHTML" class="min-h-[80px]">
-                        <!-- Default state if not connected (loading handled by htmx) -->
-                        <div class="htmx-indicator flex items-center gap-2 text-gray-500">
-                            <span class="animate-spin">⌛</span>
-                            <span>检查连接状态...</span>
-                        </div>
-                        <div class="text-sm text-gray-500 flex items-center gap-2">
-                            <span>🔴 未连接</span>
-                            <span class="text-xs text-gray-400">(请先输入 Access Token 并保存)</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Sticky Footer for Save Button? Or just at bottom -->
-        <div
-            class="fixed bottom-0 left-0 lg:left-64 right-0 bg-white/80 backdrop-blur-md border-t border-gray-200 p-4 flex justify-between items-center z-10">
+        <!-- Save Actions -->
+        <div class="bg-white/60 p-6 rounded-xl border border-white/70 shadow-sm mt-6 flex justify-between items-center">
             <div id="save-result" class="text-sm transition-all duration-300"></div>
 
             <button type="submit" id="save-settings-btn"
@@ -115,8 +191,6 @@
                 <span class="hidden [.htmx-request_&]:inline">正在保存...</span>
             </button>
         </div>
-        <!-- Spacer for sticky footer -->
-        <div class="h-20"></div>
 
     </form>
 
@@ -136,6 +210,18 @@
         function toggleTokenVisibility() {
             const input = document.getElementById('bangumi_token_input');
             const icon = document.getElementById('token-toggle-icon');
+            if (input.type === 'password') {
+                input.type = 'text';
+                icon.innerText = '🙈';
+            } else {
+                input.type = 'password';
+                icon.innerText = '👁️';
+            }
+        }
+
+        function toggleTMDBTokenVisibility() {
+            const input = document.getElementById('tmdb_token_input');
+            const icon = document.getElementById('tmdb-token-toggle-icon');
             if (input.type === 'password') {
                 input.type = 'text';
                 icon.innerText = '🙈';

@@ -11,8 +11,10 @@ import (
 )
 
 var DB *gorm.DB
+var CurrentDBPath string
 
 func InitDB(storagePath string) {
+	CurrentDBPath = storagePath
 	var err error
 
 	// 确保存储目录存在
@@ -37,4 +39,12 @@ func InitDB(storagePath string) {
 	if err != nil {
 		log.Fatalf("failed to migrate database: %v", err)
 	}
+}
+
+func CloseDB() error {
+	sqlDB, err := DB.DB()
+	if err != nil {
+		return err
+	}
+	return sqlDB.Close()
 }

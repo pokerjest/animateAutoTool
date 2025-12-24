@@ -39,6 +39,7 @@ func InitRoutes(r *gin.Engine) {
 	r.GET("/subscriptions", SubscriptionsHandler)
 	r.GET("/settings", SettingsHandler)
 	r.GET("/local-anime", LocalAnimePageHandler)
+	r.GET("/backup", BackupPageHandler)
 
 	// API
 	apiGroup := r.Group("/api")
@@ -75,6 +76,15 @@ func InitRoutes(r *gin.Engine) {
 		apiGroup.POST("/local-directories", AddLocalDirectoryHandler)
 		apiGroup.DELETE("/local-directories/:id", DeleteLocalDirectoryHandler)
 		apiGroup.POST("/local-directories/scan", ScanLocalDirectoryHandler)
+		apiGroup.GET("/local-anime/:id/files", GetLocalAnimeFilesHandler) // Keep for debugging if needed
+		apiGroup.POST("/local-directories/:id/rename-preview", PreviewDirectoryRenameHandler)
+		apiGroup.POST("/local-directories/:id/rename", ApplyDirectoryRenameHandler)
+
+		// Backup
+		apiGroup.GET("/backup/export", ExportBackupHandler)
+		apiGroup.POST("/backup/import", ImportBackupHandler) // Keep for legacy or direct upload
+		apiGroup.POST("/backup/analyze", AnalyzeBackupHandler)
+		apiGroup.POST("/backup/execute", ExecuteRestoreHandler)
 
 		// Bangumi Integration
 		apiGroup.GET("/bangumi/login", BangumiLoginHandler)

@@ -8,6 +8,7 @@
     showDetailsModal: false,
     detailsData: null,
     currentFileCount: 0,
+    currentLocalId: 0, // Store Local DB ID
     inputProgress: 0,
     updatingCollection: false,
     updatingComplete: false,
@@ -45,6 +46,86 @@
         } catch (e) {
             this.showToast('❌ 网络错误', 'error');
         }
+    },
+    // Rename Logic
+    showRenameModal: false,
+    renameState: {
+        id: 0,
+        title: '',
+        pattern: '{Title} - S{Season}E{Ep}',
+        season: '01',
+        loading: false,
+        preview: null, // Array of {original, new, path}
+    },
+    async openRenameModal(id, title) {
+        this.renameState.id = id;
+        this.renameState.title = title;
+        this.renameState.season = '01'; // Reset default
+        this.renameState.preview = null;
+        this.showDetailsModal = false; // Close details
+        this.showRenameModal = true;
+        this.previewRename(); // Auto preview on open with default
+    },
+    async previewRename() {
+        if (!this.renameState.id) return;
+        this.renameState.loading = true;
+        try {
+            const resp = await fetch(`/api/local-directories/${this.renameState.id}/rename-preview`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    pattern: this.renameState.pattern,
+                    season: this.renameState.season
+                })
+            });
+            if (resp.ok) {
+                this.renameState.preview = await resp.json();
+            } else {
+                this.showToast('❌ 预览失败', 'error');
+            }
+        } catch (e) {
+            this.showToast('❌ 网络错误', 'error');
+        } finally {
+            this.renameState.loading = false;
+        }
+    },
+    async applyRename() {
+        if (!confirm('确定要重命名这些文件吗？此操作不可撤销。')) return;
+        this.renameState.loading = true;
+        try {
+            const resp = await fetch(`/api/local-directories/${this.renameState.id}/rename`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    pattern: this.renameState.pattern,
+                    season: this.renameState.season
+                })
+            });
+            const data = await resp.json();
+            if (resp.ok) {
+                this.showToast(`✅ ${data.message}`);
+                this.showRenameModal = false;
+                // Optional: Refresh details if needed, or just toast
+            } else {
+                this.showToast('❌ ' + (data.error || '重命名失败'), 'error');
+            }
+        } catch (e) {
+            this.showToast('❌ 网络错误', 'error');
+        } finally {
+            this.renameState.loading = false;
+        }
+    },
+    getLivePreview() {
+        let p = this.renameState.pattern || '{Title} - S{Season}E{Ep}';
+        const s = this.renameState.season || '01';
+        p = p.replace('{Title}', 'Example Anime');
+        p = p.replace('{Season}', s);
+        p = p.replace('{Ep}', '01');
+        p = p.replace('{SubGroup}', 'SubGroup');
+        p = p.replace('{Year}', '2024');
+        p = p.replace('{Ext}', 'mp4');
+        if (!p.endsWith('.mp4')) p += '.mp4';
+        return p;
     }
 }" @show-anime-details.window="
     $event.stopPropagation();
@@ -81,6 +162,56 @@
         </div>
     </div>
 
+    <!-- Naming Rules Configuration -->
+    <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+        <h3 class="text-lg font-bold text-gray-800 mb-3 flex items-center gap-2">
+            <span>📏</span> 命名规则配置
+        </h3>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div class="col-span-2">
+                <label class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">默认规则模板</label>
+                <div class="relative">
+                    <span
+                        class="absolute inset-y-0 left-0 pl-3 flex items-center text-gray-400 font-mono text-sm">Example:</span>
+                    <input type="text" x-model="renameState.pattern"
+                        class="w-full pl-20 pr-4 py-2 rounded-lg bg-gray-50 border border-gray-200 focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none font-mono text-sm transition-all shadow-inner"
+                        placeholder="{Title} - S{Season}E{Ep}">
+                </div>
+                <p class="text-[10px] text-gray-400 mt-1 ml-1">支持变量: <code
+                        class="bg-gray-100 px-1 rounded text-gray-600">{Title}</code>, <code
+                        class="bg-gray-100 px-1 rounded text-gray-600">{Season}</code>, <code
+                        class="bg-gray-100 px-1 rounded text-gray-600">{Ep}</code>, <code
+                        class="bg-gray-100 px-1 rounded text-gray-600">{SubGroup}</code>, <code
+                        class="bg-gray-100 px-1 rounded text-gray-600">{Year}</code>, <code
+                        class="bg-gray-100 px-1 rounded text-gray-600">{Ext}</code></p>
+            </div>
+            <div>
+                <label class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">默认季度 (Sxx)</label>
+                <input type="text" x-model="renameState.season"
+                    class="w-full px-4 py-2 rounded-lg bg-gray-50 border border-gray-200 focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none font-mono text-sm transition-all shadow-inner"
+                    placeholder="01">
+            </div>
+        </div>
+
+        <!-- Live Preview Box -->
+        <div class="mt-4 pt-4 border-t border-gray-50">
+            <label class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">效果预览</label>
+            <div
+                class="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-4 text-sm font-mono bg-gray-50 rounded-lg p-3 border border-gray-100">
+                <div class="flex items-center gap-2 text-gray-500">
+                    <span class="text-xs border border-gray-200 rounded px-1.5 py-0.5 bg-white">原文件名</span>
+                    <span>[SubGroup] Example Anime - 01 [1080p].mp4</span>
+                </div>
+                <div class="hidden sm:block text-gray-300">➜</div>
+                <div class="flex items-center gap-2 text-green-600 font-medium">
+                    <span
+                        class="text-xs border border-green-200 rounded px-1.5 py-0.5 bg-green-50 text-green-700">新文件名</span>
+                    <span x-text="getLivePreview()"></span>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Directories List -->
     <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
         <h3 class="text-lg font-bold text-gray-800 mb-3">已配置目录</h3>
@@ -92,10 +223,17 @@
                     <span class="text-xl">📁</span>
                     <span class="font-mono text-sm text-gray-600 tracking-tight">{{ .Path }}</span>
                 </div>
-                <button @click="deleteDirectory({{ .ID }})"
-                    class="text-gray-400 hover:text-red-500 p-2 rounded-full hover:bg-red-50 transition opacity-0 group-hover:opacity-100">
-                    🗑️
-                </button>
+                <div class="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button @click="openRenameModal({{ .ID }}, '{{ .Path }}')"
+                        class="text-gray-400 hover:text-indigo-600 p-2 rounded-full hover:bg-indigo-50 transition"
+                        title="整理/重命名">
+                        ✏️
+                    </button>
+                    <button @click="deleteDirectory({{ .ID }})"
+                        class="text-gray-400 hover:text-red-500 p-2 rounded-full hover:bg-red-50 transition">
+                        🗑️
+                    </button>
+                </div>
             </div>
             {{ else }}
             <p class="text-gray-400 text-sm italic">暂未配置任何本地目录</p>
@@ -112,7 +250,7 @@
                 class="bg-white rounded-xl shadow-sm border border-gray-100 hover:shadow-md transition-shadow overflow-hidden flex flex-col h-full group">
                 <!-- Card Header/Cover -->
                 <div class="relative h-48 bg-gray-100 overflow-hidden cursor-pointer"
-                    @click="$dispatch('show-anime-details', { bangumiId: {{ .BangumiID }}, fileCount: {{ .FileCount }} })">
+                    @click="$dispatch('show-anime-details', { bangumiId: {{ .BangumiID }}, fileCount: {{ .FileCount }}, localId: {{ .ID }} })">
                     {{ if .Image }}
                     <img src="{{ .Image }}" alt="{{ .Title }}"
                         class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105">
@@ -131,7 +269,7 @@
                     <!-- Title -->
                     <div class="flex justify-between items-start gap-2 mb-2">
                         <h3 class="font-bold text-gray-800 text-lg line-clamp-2 leading-tight cursor-pointer hover:text-indigo-600 transition-colors"
-                            @click="$dispatch('show-anime-details', { bangumiId: {{ .BangumiID }}, fileCount: {{ .FileCount }} })">
+                            @click="$dispatch('show-anime-details', { bangumiId: {{ .BangumiID }}, fileCount: {{ .FileCount }}, localId: {{ .ID }} })">
                             {{ .Title }}
                         </h3>
                     </div>
@@ -141,7 +279,7 @@
                         {{ if gt .BangumiID 0 }}
                         <span
                             class="px-2 py-0.5 rounded text-xs font-medium bg-pink-50 text-pink-600 flex items-center gap-1">
-                            🌸 Bangumi
+                            Bangumi
                         </span>
                         {{ else }}
                         <span
@@ -419,6 +557,16 @@
                             </div>
                         </div>
 
+                        <!-- 3. File Actions (Rename) -->
+                        <div class="pt-4 mt-4 border-t border-gray-100">
+                            <button @click="openRenameModal(currentLocalId, detailsData?.name)"
+                                class="w-full bg-gray-100 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-200 transition flex items-center justify-center gap-2 font-medium">
+                                <span>✏️</span> 文件整理 & 重命名
+                            </button>
+                        </div>
+
+
+
                         <a :href="'https://bgm.tv/subject/' + detailsData?.id" target="_blank"
                             class="block text-center text-xs text-indigo-400 hover:text-indigo-600 mt-2 transition-colors">
                             在 Bangumi 上查看详情 &rarr;
@@ -428,6 +576,99 @@
             </div>
         </div>
     </div>
+</div>
+
+<!-- Rename Modal -->
+<div x-show="showRenameModal" style="display: none;"
+    class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60 backdrop-blur-sm p-4"
+    x-transition.opacity>
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col"
+        @click.away="showRenameModal = false">
+        <!-- Header -->
+        <div class="p-4 border-b flex justify-between items-center bg-gray-50">
+            <h3 class="text-lg font-bold text-gray-800 flex items-center gap-2">
+                <span>✏️</span> 批量重命名 - <span x-text="renameState.title"
+                    class="text-primary truncate max-w-md block"></span>
+            </h3>
+            <button @click="showRenameModal = false" class="text-gray-400 hover:text-gray-600">✕</button>
+        </div>
+
+        <!-- Content -->
+        <div class="p-6 overflow-y-auto custom-scrollbar flex-1">
+            <!-- Rules -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                <div class="col-span-2">
+                    <label class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">命名规则模板</label>
+                    <input type="text" x-model="renameState.pattern" @input.debounce.500ms="previewRename()"
+                        class="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-primary focus:border-transparent outline-none font-mono text-sm"
+                        placeholder="{Title} - S{Season}E{Ep}">
+                    <p class="text-[10px] text-gray-400 mt-1">支持变量: {Title}, {Season}, {Ep}, {Ext}</p>
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">季度 (Sxx)</label>
+                    <input type="text" x-model="renameState.season" @input.debounce.500ms="previewRename()"
+                        class="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-primary focus:border-transparent outline-none font-mono text-sm"
+                        placeholder="01">
+                </div>
+            </div>
+
+            <!-- Preview Table -->
+            <div class="bg-gray-50 rounded-xl border border-gray-100 overflow-hidden">
+                <div
+                    class="p-3 bg-gray-100/50 border-b border-gray-200 text-xs font-bold text-gray-500 flex justify-between items-center">
+                    <span>预览结果</span>
+                    <span x-show="renameState.loading" class="flex items-center gap-1 text-primary">
+                        <span class="animate-spin">⏳</span> 生成预览中...
+                    </span>
+                </div>
+                <div class="max-h-[300px] overflow-y-auto">
+                    <table class="w-full text-sm text-left">
+                        <thead class="text-xs text-gray-500 bg-gray-50 sticky top-0">
+                            <tr>
+                                <th class="px-4 py-2 font-medium w-32">所属番剧</th>
+                                <th class="px-4 py-2 font-medium w-1/3">原文件名</th>
+                                <th class="px-4 py-2 font-medium w-1/3">新文件名</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-gray-100">
+                            <template x-for="(item, idx) in renameState.preview" :key="idx">
+                                <tr class="hover:bg-white transition-colors">
+                                    <td class="px-4 py-2 font-medium text-indigo-600 truncate max-w-[150px]"
+                                        :title="item.anime_name" x-text="item.anime_name"></td>
+                                    <td class="px-4 py-2 font-mono text-gray-600 truncate max-w-[200px]"
+                                        :title="item.original" x-text="item.original"></td>
+                                    <td class="px-4 py-2 font-mono truncate max-w-[200px]"
+                                        :class="item.original === item.new ? 'text-gray-400 italic' : 'text-green-600 font-medium'"
+                                        :title="item.new" x-text="item.new"></td>
+                                </tr>
+                            </template>
+                            <template x-if="!renameState.preview || renameState.preview.length === 0">
+                                <tr>
+                                    <td colspan="2" class="px-4 py-8 text-center text-gray-400 italic">
+                                        暂无预览，请检查规则或等待加载...
+                                    </td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="p-4 border-t bg-gray-50 flex justify-end gap-3">
+            <button @click="showRenameModal = false"
+                class="px-4 py-2 rounded-lg border border-gray-200 text-gray-600 hover:bg-white transition">取消</button>
+            <button @click="applyRename()" :disabled="renameState.loading || !renameState.preview"
+                class="px-6 py-2 rounded-lg bg-primary text-white font-bold hover:bg-accent transition shadow-lg shadow-pink-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2">
+                <span x-show="renameState.loading" class="animate-spin">⏳</span>
+                <span>确认重命名</span>
+            </button>
+        </div>
+    </div>
+</div>
+
+</div>
 </div>
 </div>
 

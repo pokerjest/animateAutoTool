@@ -53,6 +53,25 @@ func saveBangumiTokens(accessToken, refreshToken string) {
 	}
 }
 
+func applyProxyToBangumiClient(client *bangumi.Client) {
+	var config model.GlobalConfig
+	var enabledConfig model.GlobalConfig
+
+	// Check if proxy is set
+	if err := db.DB.Where("key = ?", model.ConfigKeyProxyURL).First(&config).Error; err != nil || config.Value == "" {
+		return
+	}
+
+	// Check if enabled for Bangumi (default to false if not set, or true? User says "checkbox", so explicit enable)
+	// But traditionally if not set, maybe we want it off.
+	// We check if "proxy_bangumi_enabled" == "true"
+	if err := db.DB.Where("key = ?", model.ConfigKeyProxyBangumi).First(&enabledConfig).Error; err != nil || enabledConfig.Value != "true" {
+		return
+	}
+
+	client.SetProxy(config.Value)
+}
+
 func BangumiLoginHandler(c *gin.Context) {
 	appID, appSecret := getBangumiConfig()
 	if appID == "" || appSecret == "" {
@@ -63,6 +82,7 @@ func BangumiLoginHandler(c *gin.Context) {
 	redirectURI := "http://localhost:8080/api/bangumi/callback"
 
 	client := bangumi.NewClient(appID, appSecret, redirectURI)
+	applyProxyToBangumiClient(client)
 	url := client.GetAuthorizationURL()
 
 	c.Redirect(http.StatusTemporaryRedirect, url)
@@ -104,12 +124,14 @@ func renderBangumiContent() string {
 	}
 
 	client := bangumi.NewClient("", "", "")
+	applyProxyToBangumiClient(client)
 	user, err := client.GetCurrentUser(accessToken)
 	if err != nil {
 		if refreshToken != "" {
 			appID, appSecret := getBangumiConfig()
 			if appID != "" && appSecret != "" {
 				client := bangumi.NewClient(appID, appSecret, "http://localhost:8080/api/bangumi/callback")
+				applyProxyToBangumiClient(client)
 				if tokenResp, errRefresh := client.RefreshToken(refreshToken); errRefresh == nil {
 					saveBangumiTokens(tokenResp.AccessToken, tokenResp.RefreshToken)
 					user, err = client.GetCurrentUser(tokenResp.AccessToken)

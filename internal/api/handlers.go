@@ -2,11 +2,13 @@ package api
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
 	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -27,6 +29,7 @@ type DashboardData struct {
 	QBConnected    bool
 	QBVersion      string
 	BangumiLogin   bool
+	TMDBConnected  bool
 	WatchingList   []bangumi.UserCollectionItem
 	CompletedList  []bangumi.UserCollectionItem
 }
@@ -123,6 +126,13 @@ func DashboardHandler(c *gin.Context) {
 		}
 	}
 
+	// Check TMDB Status (Simple check if configured)
+	var tmdbConnected bool
+	var tmdbConfig model.GlobalConfig
+	if err := db.DB.Where("key = ?", model.ConfigKeyTMDBToken).First(&tmdbConfig).Error; err == nil && tmdbConfig.Value != "" {
+		tmdbConnected = true
+	}
+
 	data := DashboardData{
 		SkipLayout:     skip,
 		ActiveSubs:     activeSubs,
@@ -130,6 +140,7 @@ func DashboardHandler(c *gin.Context) {
 		QBConnected:    qbConnected,
 		QBVersion:      qbVersion,
 		BangumiLogin:   bangumiLogin,
+		TMDBConnected:  tmdbConnected,
 		WatchingList:   watchingList,
 		CompletedList:  completedList,
 	}
@@ -510,6 +521,10 @@ func UpdateSettingsHandler(c *gin.Context) {
 		model.ConfigKeyQBPassword,
 		model.ConfigKeyBaseDir,
 		model.ConfigKeyBangumiAccessToken,
+		model.ConfigKeyTMDBToken,
+		model.ConfigKeyProxyURL,
+		model.ConfigKeyProxyBangumi,
+		model.ConfigKeyProxyTMDB,
 	}
 
 	for _, key := range keys {
@@ -556,8 +571,10 @@ func UpdateSettingsHandler(c *gin.Context) {
 	}
 
 	// 4. Trigger Bangumi Refresh OOB
-	// We no longer trigger via event, but return the OOB swap directly for robustness
 	bangumiStatusOOB := RenderBangumiStatusOOB()
+
+	// 5. Trigger TMDB Refresh OOB
+	tmdbStatusOOB := RenderTMDBStatusOOB()
 
 	c.Header("Content-Type", "text/html")
 	// Main response for #save-result + OOB blocks
@@ -565,7 +582,8 @@ func UpdateSettingsHandler(c *gin.Context) {
 		<div class="text-emerald-600 font-bold flex items-center gap-2 animate-pulse">✅ 所有配置已保存</div>
 		%s
 		%s
-	`, qbStatusHtml, bangumiStatusOOB))
+		%s
+	`, qbStatusHtml, bangumiStatusOOB, tmdbStatusOOB))
 }
 
 // QBSaveAndTestHandler saves QB settings and then tests connection
@@ -879,4 +897,69 @@ func GetBangumiSubjectHandler(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, subject)
+}
+func GetTMDBStatusHandler(c *gin.Context) {
+	c.Header("Content-Type", "text/html")
+	c.String(http.StatusOK, RenderTMDBStatusOOBNoSwap())
+}
+
+// RenderTMDBStatusOOB returns the OOB swap HTML for TMDB status
+func RenderTMDBStatusOOB() string {
+	content := RenderTMDBStatusOOBNoSwap()
+	// Wrap with OOB swap attribute
+	return strings.Replace(content, `id="tmdb-status"`, `id="tmdb-status" hx-swap-oob="innerHTML"`, 1)
+}
+
+// RenderTMDBStatusOOBNoSwap returns the inner HTML for TMDB status (for direct GET)
+func RenderTMDBStatusOOBNoSwap() string {
+	var config model.GlobalConfig
+	if err := db.DB.Where("key = ?", model.ConfigKeyTMDBToken).First(&config).Error; err != nil || config.Value == "" {
+		return `<div id="tmdb-status"><div class="text-sm text-gray-500 flex items-center gap-2"><span>🔴 未连接</span><span class="text-xs text-gray-400">(请先输入 Token 并保存)</span></div></div>`
+	}
+
+	token := config.Value
+	req, _ := http.NewRequest("GET", "https://api.themoviedb.org/3/account", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "application/json")
+
+	// Check Proxy
+	var proxyConfig model.GlobalConfig
+	var proxyEnabled model.GlobalConfig
+	var transport *http.Transport
+
+	db.DB.Where("key = ?", model.ConfigKeyProxyTMDB).First(&proxyEnabled)
+
+	if proxyEnabled.Value == "true" {
+		if err := db.DB.Where("key = ?", model.ConfigKeyProxyURL).First(&proxyConfig).Error; err == nil && proxyConfig.Value != "" {
+			if proxyUrl, err := url.Parse(proxyConfig.Value); err == nil {
+				transport = &http.Transport{Proxy: http.ProxyURL(proxyUrl)}
+			}
+		}
+	}
+
+	client := &http.Client{
+		Timeout:   10 * time.Second, // Increase timeout for proxy
+		Transport: transport,
+	}
+	resp, err := client.Do(req)
+
+	if err != nil {
+		log.Printf("TMDB Request Error: %v", err)
+		return fmt.Sprintf(`<div id="tmdb-status"><div class="text-red-600 bg-red-50 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 border border-red-200">❌ 连接失败: %v</div></div>`, err)
+	}
+	defer resp.Body.Close()
+
+	log.Printf("TMDB Response Status: %d", resp.StatusCode)
+	if resp.StatusCode != 200 {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		log.Printf("TMDB Response Body: %s", string(bodyBytes))
+	}
+
+	if resp.StatusCode == 200 {
+		return `<div id="tmdb-status"><div class="text-emerald-600 bg-emerald-50 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 border border-emerald-200">✅ 已连接 TMDB</div></div>`
+	} else if resp.StatusCode == 401 {
+		return `<div id="tmdb-status"><div class="text-red-600 bg-red-50 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 border border-red-200">❌ 认证失败 (Token 无效)</div></div>`
+	}
+
+	return fmt.Sprintf(`<div id="tmdb-status"><div class="text-amber-600 bg-amber-50 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 border border-amber-200">⚠️ 连接异常 (HTTP %d)</div></div>`, resp.StatusCode)
 }

@@ -1,0 +1,50 @@
+{{ define "backup_analyze.html" }}
+<div class="bg-red-50 rounded-lg p-4 border border-red-100 animate-fade-in-up">
+    <h4 class="font-semibold text-red-800 mb-3 flex items-center gap-2">
+        <span>📋</span> 备份文件分析结果
+    </h4>
+    <div class="grid grid-cols-2 gap-4 text-sm mb-4">
+        <div class="bg-white p-2 rounded border border-red-100">
+            <div class="text-gray-500 text-xs">订阅数</div>
+            <div class="font-bold text-gray-800">{{ .Stats.SubscriptionCount }}</div>
+        </div>
+        <div class="bg-white p-2 rounded border border-red-100">
+            <div class="text-gray-500 text-xs">历史记录</div>
+            <div class="font-bold text-gray-800">{{ .Stats.DownloadLogCount }}</div>
+        </div>
+        <div class="bg-white p-2 rounded border border-red-100">
+            <div class="text-gray-500 text-xs">本地番剧</div>
+            <div class="font-bold text-gray-800">{{ .Stats.LocalAnimeCount }}</div>
+        </div>
+        <div class="bg-white p-2 rounded border border-red-100">
+            <div class="text-gray-500 text-xs">文件大小</div>
+            <div class="font-bold text-gray-800">{{ .Stats.DatabaseSize }}</div>
+        </div>
+    </div>
+
+    {{ if .Stats.SubscriptionTitles }}
+    <div class="mb-4">
+        <div class="text-xs text-red-500 mb-1 font-semibold">将还原以下订阅:</div>
+        <div
+            class="max-h-[100px] overflow-y-auto space-y-1 pr-1 custom-scrollbar bg-white/50 p-2 rounded border border-red-100">
+            {{ range .Stats.SubscriptionTitles }}
+            <div class="text-xs text-gray-700 truncate">• {{ . }}</div>
+            {{ end }}
+        </div>
+    </div>
+    {{ end }}
+
+    <div class="text-xs text-red-600 mb-4 bg-white/50 p-2 rounded">
+        ⚠️ 确认后，当前系统的所有数据将被上述文件内容覆盖，且无法撤销。
+    </div>
+
+    <form hx-post="/api/backup/execute" hx-indicator="#confirm-btn">
+        <input type="hidden" name="temp_file" value="{{ .TempFile }}">
+        <button type="submit" id="confirm-btn"
+            class="w-full py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition shadow flex items-center justify-center gap-2 font-semibold">
+            <span class="[.htmx-request_&]:hidden">🚀 确认覆盖并还原</span>
+            <span class="hidden [.htmx-request_&]:inline animate-spin">⌛ 还原中...</span>
+        </button>
+    </form>
+</div>
+{{ end }}
