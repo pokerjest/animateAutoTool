@@ -25,3 +25,7 @@ status: prepare
 # 方便查看日志
 log:
 	tail -f server.log
+
+# 打包多平台发布版
+package:
+	./scripts/package.sh $(v)

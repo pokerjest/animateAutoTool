@@ -5,8 +5,8 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/glebarez/sqlite"
 	"github.com/pokerjest/animateAutoTool/internal/model"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
 
