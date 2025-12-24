@@ -210,8 +210,8 @@ func createSubscriptionInternal(sub *model.Subscription) error {
 	// Fallback: Search by title if no ID found
 	if sub.BangumiID == 0 && sub.Title != "" {
 		bgmClient := bangumi.NewClient("", "", "")
-		if bid, err := bgmClient.SearchSubject(sub.Title); err == nil && bid > 0 {
-			sub.BangumiID = bid
+		if res, err := bgmClient.SearchSubject(sub.Title); err == nil && res != nil {
+			sub.BangumiID = res.ID
 		}
 	}
 
@@ -462,8 +462,8 @@ func UpdateSubscriptionHandler(c *gin.Context) {
 		// Reset ID and try to find again immediately
 		sub.BangumiID = 0
 		bgmClient := bangumi.NewClient("", "", "")
-		if bid, err := bgmClient.SearchSubject(sub.Title); err == nil && bid > 0 {
-			sub.BangumiID = bid
+		if res, err := bgmClient.SearchSubject(sub.Title); err == nil && res != nil {
+			sub.BangumiID = res.ID
 		}
 	}
 
@@ -478,6 +478,42 @@ func UpdateSubscriptionHandler(c *gin.Context) {
 
 	// Sleep for smooth UI feel
 	time.Sleep(500 * time.Millisecond)
+
+	c.HTML(http.StatusOK, "subscription_card.html", sub)
+}
+
+func RefreshSubscriptionMetadataHandler(c *gin.Context) {
+	id := c.Param("id")
+	var sub model.Subscription
+	if err := db.DB.First(&sub, id).Error; err != nil {
+		c.String(http.StatusNotFound, "Not Found")
+		return
+	}
+
+	// Re-search Bangumi
+	bgmClient := bangumi.NewClient("", "", "")
+	if res, err := bgmClient.SearchSubject(sub.Title); err == nil && res != nil {
+		sub.BangumiID = res.ID
+		if err := db.DB.Save(&sub).Error; err != nil {
+			c.String(http.StatusInternalServerError, "Failed to save: "+err.Error())
+			return
+		}
+	} else {
+		// Optional: clear ID if not found? Or keep old?
+		// For now, let's keep old if search fails, but maybe log it.
+		// If user explicitly asks to refresh, maybe they expect a fix.
+		// But if network fails, we shouldn't wipe it.
+		// Let's only update if we found a valid ID.
+		log.Printf("RefreshMetadata: No match found for %s", sub.Title)
+	}
+
+	// Sleep for smooth UI feel
+	time.Sleep(500 * time.Millisecond)
+
+	// Populate DownloadedCount for the card view
+	var count int64
+	db.DB.Model(&model.DownloadLog{}).Where("subscription_id = ?", sub.ID).Count(&count)
+	sub.DownloadedCount = count
 
 	c.HTML(http.StatusOK, "subscription_card.html", sub)
 }
@@ -851,10 +887,9 @@ func RefreshSubscriptionsHandler(c *gin.Context) {
 
 			// Search by title (cleaned or original)
 			log.Printf("DEBUG: Refresh - Searching Bangumi for: '%s'", queryTitle)
-			bid, err := bgmClient.SearchSubject(queryTitle)
-			if err == nil && bid > 0 {
-				log.Printf("DEBUG: Refresh - Found ID: %d", bid)
-				sub.BangumiID = bid
+			if res, err := bgmClient.SearchSubject(queryTitle); err == nil && res != nil {
+				log.Printf("DEBUG: Refresh - Found ID: %d", res.ID)
+				sub.BangumiID = res.ID
 				// If we successfully matched with a cleaned title, update the title in DB too
 				if cleaned {
 					sub.Title = queryTitle

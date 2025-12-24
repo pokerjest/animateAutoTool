@@ -21,7 +21,8 @@
         <div class="flex-1 min-w-0 flex flex-col">
             <div class="flex justify-between items-start gap-2">
                 <h3 class="font-bold text-base text-gray-800 line-clamp-2 leading-snug mb-2 hover:text-primary transition-colors cursor-pointer hover:underline"
-                    title="点击查看详情" @click.stop="$dispatch('show-anime-details', { bangumiId: {{ .BangumiID }} })">
+                    title="点击查看详情"
+                    @click.stop="$dispatch('show-anime-details', { bangumiId: {{ .BangumiID }}, title: '{{ .Title }}', image: '{{ .Image }}' })">
                     {{ .Title }}
                 </h3>
             </div>
@@ -119,6 +120,12 @@
                 class="p-1.5 text-gray-400 hover:text-amber-500 hover:bg-amber-50 rounded-md transition-colors mr-1"
                 title="编辑">
                 <span class="text-sm">✏️</span>
+            </button>
+            <button hx-post="/api/subscriptions/{{ .ID }}/refresh-metadata" hx-swap="outerHTML"
+                hx-target="#sub-card-{{.ID}}"
+                class="p-1.5 text-gray-400 hover:text-purple-500 hover:bg-purple-50 rounded-md transition-colors mr-1"
+                title="刷新元数据">
+                <span class="text-sm">🔄</span>
             </button>
 
             <span class="text-gray-200">|</span>

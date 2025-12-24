@@ -2,16 +2,20 @@ package api
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/pokerjest/animateAutoTool/internal/bangumi"
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/parser"
+	"github.com/pokerjest/animateAutoTool/internal/service"
 )
 
 // FileInfo 简化的文件信息结构
@@ -58,6 +62,89 @@ func GetLocalAnimeFilesHandler(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, files)
+}
+
+func RefreshLocalAnimeMetadataHandler(c *gin.Context) {
+	id := c.Param("id")
+	var anime model.LocalAnime
+	if err := db.DB.First(&anime, id).Error; err != nil {
+		c.String(http.StatusNotFound, "Not Found")
+		return
+	}
+
+	// Use our cleaning logic
+	// Replicating CleanTitle logic here to avoid circular dependencies or exporting issues if service/api are separate (though they are same repo structure, maybe different packages?)
+	// `api` imports `service`. `service` imports `api`? No.
+	// Ideally `CleanTitle` should be in `service` and exported, or `parser`.
+	// Let's assume I didn't export `CleanTitle` in previous step (it was lowercase? No, I made it PascalCase `CleanTitle`).
+	// But `RefreshLocalAnimeMetadataHandler` is in `package api`. `ScanDirectory` is in `package service`.
+	// `service.CleanTitle`?
+	// I defined `CleanTitle` in `internal/service/local_anime.go` as `func CleanTitle(...)`.
+	// So I can call `service.CleanTitle`.
+
+	cleanTitle := service.CleanTitle(anime.Title)
+	bgmClient := bangumi.NewClient("", "", "")
+
+	// Try search with original OR cleaned title? Cleaned is better.
+	// But if anime.Title is ALREADY the cleaned Official Title (from previous scan), `CleanTitle` shouldn't hurt it (no brackets).
+
+	log.Printf("DEBUG: Refresh Metadata for '%s' (Clean: '%s')", anime.Title, cleanTitle)
+
+	var searchResult *bangumi.SearchResult
+	var err error
+	if searchResult, err = bgmClient.SearchSubject(cleanTitle); err == nil && searchResult != nil {
+		anime.BangumiID = searchResult.ID
+		log.Printf("DEBUG: Found Bangumi ID: %d for '%s'", anime.BangumiID, cleanTitle)
+
+		// Use search result images first
+		if searchResult.Images.Large != "" {
+			anime.Image = searchResult.Images.Large
+		} else if searchResult.Images.Common != "" {
+			anime.Image = searchResult.Images.Common
+		}
+
+		// Update Title if available
+		if searchResult.NameCN != "" {
+			anime.Title = searchResult.NameCN
+		} else if searchResult.Name != "" {
+			anime.Title = searchResult.Name
+		}
+
+		// Try Fetch details to get better info if possible (V0 API), but fallback to search result is safe
+		if subject, err := bgmClient.GetSubject(searchResult.ID); err == nil {
+			log.Printf("DEBUG: Fetched Subject: %+v", subject)
+
+			// Update Title and Image from V0 if successful (might be cleaner)
+			if subject.NameCN != "" {
+				anime.Title = subject.NameCN
+			} else if subject.Name != "" {
+				anime.Title = subject.Name
+			}
+
+			if subject.Images.Large != "" {
+				anime.Image = subject.Images.Large
+			} else if subject.Images.Common != "" {
+				anime.Image = subject.Images.Common
+			}
+		} else {
+			log.Printf("ERROR: GetSubject failed: %v. Using SearchResult image.", err)
+		}
+
+		log.Printf("DEBUG: Final Anime Image: %s", anime.Image)
+
+		if err := db.DB.Save(&anime).Error; err != nil {
+			c.String(http.StatusInternalServerError, "Failed to save: "+err.Error())
+			return
+		}
+	} else {
+		// Log mismatch
+		log.Printf("RefreshLocalMeta: No match found for %s (Error: %v)", cleanTitle, err)
+	}
+
+	// Sleep for smooth UI feel
+	time.Sleep(500 * time.Millisecond)
+
+	c.HTML(http.StatusOK, "local_anime_card.html", anime)
 }
 
 // PreviewDirectoryRenameHandler 预览目录下所有番剧的重命名

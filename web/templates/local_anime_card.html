@@ -1,0 +1,71 @@
+{{ define "local_anime_card.html" }}
+<div id="local-card-{{.ID}}"
+    class="bg-white rounded-xl shadow-sm border border-gray-100 hover:shadow-md transition-shadow overflow-hidden flex flex-col h-full group">
+    <!-- Card Header/Cover -->
+    <div class="relative h-48 bg-gray-100 overflow-hidden cursor-pointer"
+        @click="$dispatch('show-anime-details', { bangumiId: {{ .BangumiID }}, fileCount: {{ .FileCount }}, localId: {{ .ID }}, title: '{{ .Title }}', image: '{{ .Image }}' })">
+        {{ if .Image }}
+        <img src="{{ .Image }}" alt="{{ .Title }}"
+            class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105">
+        {{ else }}
+        <div class="w-full h-full flex items-center justify-center text-4xl opacity-10">📺</div>
+        {{ end }}
+
+        <!-- Overlay Gradient -->
+        <div
+            class="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+        </div>
+    </div>
+
+    <!-- Card Body -->
+    <div class="p-4 flex flex-col flex-grow">
+        <!-- Title -->
+        <div class="flex justify-between items-start gap-2 mb-2">
+            <h3 class="font-bold text-gray-800 text-lg line-clamp-2 leading-tight cursor-pointer hover:text-indigo-600 transition-colors"
+                @click="$dispatch('show-anime-details', { bangumiId: {{ .BangumiID }}, fileCount: {{ .FileCount }}, localId: {{ .ID }}, title: '{{ .Title }}', image: '{{ .Image }}' })">
+                {{ .Title }}
+            </h3>
+        </div>
+
+        <!-- Tags/Info -->
+        <div class="flex flex-wrap gap-2 mb-4 items-center">
+            {{ if gt .BangumiID 0 }}
+            <a href="https://bgm.tv/subject/{{ .BangumiID }}" target="_blank" @click.stop
+                class="px-2 py-0.5 rounded text-xs font-medium bg-pink-50 text-pink-600 flex items-center gap-1 hover:bg-pink-100 transition-colors"
+                title="Bangumi ID: {{ .BangumiID }}">
+                Bangumi
+            </a>
+            {{ else }}
+            <span class="px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-500 flex items-center gap-1">
+                ⚪ 未关联
+            </span>
+            {{ end }}
+
+            <!-- Refresh Button -->
+            <button hx-post="/api/local-directories/{{ .ID }}/refresh-metadata" hx-swap="outerHTML"
+                hx-target="#local-card-{{.ID}}"
+                class="p-1 text-gray-400 hover:text-purple-500 hover:bg-purple-50 rounded transition-colors"
+                title="刷新元数据" @click.stop>
+                <span class="text-xs">🔄</span>
+            </button>
+        </div>
+
+        <!-- Stats -->
+        <div class="mt-auto pt-3 border-t border-gray-50 flex justify-between items-center text-sm text-gray-500">
+            <div class="flex items-center gap-1.5" title="文件数量">
+                <span>📄</span>
+                <span class="font-medium">{{ .FileCount }}</span>
+            </div>
+            <div class="flex items-center gap-1.5" title="总大小">
+                <span>💾</span>
+                <span class="font-medium">{{ .TotalSize | toGB }}</span>
+            </div>
+        </div>
+
+        <!-- Path (Tooltip or small text) -->
+        <div class="mt-2 text-xs text-gray-400 truncate font-mono" title="{{ .Path }}">
+            {{ .Path }}
+        </div>
+    </div>
+</div>
+{{ end }}

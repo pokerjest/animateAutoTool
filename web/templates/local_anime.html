@@ -130,19 +130,32 @@
 }" @show-anime-details.window="
     $event.stopPropagation();
     showDetailsModal = true;
-    detailsData = null;
+    // Set fallback data immediately
+    detailsData = {
+        id: $event.detail.bangumiId,
+        name: $event.detail.title,
+        name_cn: $event.detail.title,
+        images: { large: $event.detail.image },
+        summary: '正在加载详细信息...',
+        tags: []
+    };
     currentFileCount = $event.detail.fileCount || 0;
-    loadingDetails = true;
+    currentLocalId = $event.detail.localId || 0;
+    loadingDetails = false; // Show fallback immediately
+
     fetch('/api/bangumi/subject/' + $event.detail.bangumiId)
-        .then(res => res.json())
+        .then(res => {
+            if (!res.ok) throw new Error('API Error');
+            return res.json();
+        })
         .then(data => {
+            if (data.error) throw new Error(data.error);
             detailsData = data;
-            loadingDetails = false;
         })
         .catch(err => {
             console.error(err);
-            loadingDetails = false;
-            showToast('获取详情失败', 'error');
+            // Keep fallback data
+            showToast('获取详情失败，仅显示本地信息', 'error');
         })
 ">
     <!-- Header Section -->
@@ -246,68 +259,7 @@
         <h3 class="text-lg font-bold text-gray-800 mb-4">扫描到的番剧 ({{ len .AnimeList }})</h3>
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
             {{ range .AnimeList }}
-            <div
-                class="bg-white rounded-xl shadow-sm border border-gray-100 hover:shadow-md transition-shadow overflow-hidden flex flex-col h-full group">
-                <!-- Card Header/Cover -->
-                <div class="relative h-48 bg-gray-100 overflow-hidden cursor-pointer"
-                    @click="$dispatch('show-anime-details', { bangumiId: {{ .BangumiID }}, fileCount: {{ .FileCount }}, localId: {{ .ID }} })">
-                    {{ if .Image }}
-                    <img src="{{ .Image }}" alt="{{ .Title }}"
-                        class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105">
-                    {{ else }}
-                    <div class="w-full h-full flex items-center justify-center text-4xl opacity-10">📺</div>
-                    {{ end }}
-
-                    <!-- Overlay Gradient -->
-                    <div
-                        class="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-                    </div>
-                </div>
-
-                <!-- Card Body -->
-                <div class="p-4 flex flex-col flex-grow">
-                    <!-- Title -->
-                    <div class="flex justify-between items-start gap-2 mb-2">
-                        <h3 class="font-bold text-gray-800 text-lg line-clamp-2 leading-tight cursor-pointer hover:text-indigo-600 transition-colors"
-                            @click="$dispatch('show-anime-details', { bangumiId: {{ .BangumiID }}, fileCount: {{ .FileCount }}, localId: {{ .ID }} })">
-                            {{ .Title }}
-                        </h3>
-                    </div>
-
-                    <!-- Tags/Info -->
-                    <div class="flex flex-wrap gap-2 mb-4">
-                        {{ if gt .BangumiID 0 }}
-                        <span
-                            class="px-2 py-0.5 rounded text-xs font-medium bg-pink-50 text-pink-600 flex items-center gap-1">
-                            Bangumi
-                        </span>
-                        {{ else }}
-                        <span
-                            class="px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-500 flex items-center gap-1">
-                            ⚪ 未关联
-                        </span>
-                        {{ end }}
-                    </div>
-
-                    <!-- Stats -->
-                    <div
-                        class="mt-auto pt-3 border-t border-gray-50 flex justify-between items-center text-sm text-gray-500">
-                        <div class="flex items-center gap-1.5" title="文件数量">
-                            <span>📄</span>
-                            <span class="font-medium">{{ .FileCount }}</span>
-                        </div>
-                        <div class="flex items-center gap-1.5" title="总大小">
-                            <span>💾</span>
-                            <span class="font-medium">{{ .TotalSize | toGB }}</span>
-                        </div>
-                    </div>
-
-                    <!-- Path (Tooltip or small text) -->
-                    <div class="mt-2 text-xs text-gray-400 truncate font-mono" title="{{ .Path }}">
-                        {{ .Path }}
-                    </div>
-                </div>
-            </div>
+            {{ template "local_anime_card.html" . }}
             {{ else }}
             <div
                 class="col-span-full py-16 text-center text-gray-400 border-2 border-dashed border-gray-100 rounded-xl">

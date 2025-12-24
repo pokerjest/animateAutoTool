@@ -118,18 +118,15 @@ func (s *LocalAnimeService) ScanAll() error {
 func (s *LocalAnimeService) ScanDirectory(dirID uint, rootPath string) error {
 	log.Printf("DEBUG: ScanDirectory started for: %s (ID: %d)", rootPath, dirID)
 
-	// Wipe existing entries for this directory to prevent duplicates (Fresh Scan)
-	if err := db.DB.Unscoped().Where("directory_id = ?", dirID).Delete(&model.LocalAnime{}).Error; err != nil {
-		log.Printf("ERROR: Failed to wipe old entries: %v", err)
-		return err
-	}
-
 	entries, err := os.ReadDir(rootPath)
 	if err != nil {
 		log.Printf("ERROR: ReadDir failed: %v", err)
 		return err
 	}
 	log.Printf("DEBUG: Found %d entries in %s", len(entries), rootPath)
+
+	// Track found paths to handle deletions
+	foundPaths := make(map[string]bool)
 
 	for _, entry := range entries {
 		if !entry.IsDir() {
@@ -141,60 +138,115 @@ func (s *LocalAnimeService) ScanDirectory(dirID uint, rootPath string) error {
 		}
 
 		animePath := filepath.Join(rootPath, entry.Name())
+		foundPaths[animePath] = true
+
 		fileCount, totalSize := s.countVideos(animePath)
-		log.Printf("DEBUG: Checked %s - Files: %d, Size: %d", entry.Name(), fileCount, totalSize)
-
 		if fileCount > 0 {
-			// Create new
-			anime := model.LocalAnime{
-				DirectoryID: dirID,
-				Title:       entry.Name(),
-				Path:        animePath,
-				FileCount:   fileCount,
-				TotalSize:   totalSize,
-			}
-			// Try filling BangumiID
-			bgmClient := bangumi.NewClient("", "", "")
-
-			// Clean title logic
-			queryTitle := anime.Title
-			re := regexp.MustCompile(`^\[.*?\]\s*`)
-			if re.MatchString(queryTitle) {
-				cleanTitle := re.ReplaceAllString(queryTitle, "")
-				if cleanTitle != "" {
-					queryTitle = cleanTitle
-					log.Printf("DEBUG: Cleaned title for search: '%s' -> '%s'", anime.Title, queryTitle)
+			// Check if exists
+			var anime model.LocalAnime
+			if err := db.DB.Where("path = ?", animePath).First(&anime).Error; err == nil {
+				// Update stats
+				anime.FileCount = fileCount
+				anime.TotalSize = totalSize
+				// Only update DirectoryID if changed (unlikely here but safe)
+				anime.DirectoryID = dirID
+				db.DB.Save(&anime)
+			} else {
+				// Create new
+				anime = model.LocalAnime{
+					DirectoryID: dirID,
+					Title:       entry.Name(),
+					Path:        animePath,
+					FileCount:   fileCount,
+					TotalSize:   totalSize,
 				}
-			}
 
-			if bid, err := bgmClient.SearchSubject(queryTitle); err == nil && bid > 0 {
-				anime.BangumiID = bid
+				// Initial Metadata Fetch
+				s.enrichAnimeMetadata(&anime)
 
-				// Fetch details to get image and clean title
-				if subject, err := bgmClient.GetSubject(bid); err == nil {
-					// Update Title to official Bangumi name (NameCN preferred)
-					if subject.NameCN != "" {
-						anime.Title = subject.NameCN
-					} else if subject.Name != "" {
-						anime.Title = subject.Name
-					}
-
-					if subject.Images.Large != "" {
-						anime.Image = subject.Images.Large
-					} else if subject.Images.Common != "" {
-						anime.Image = subject.Images.Common
-					}
+				if err := db.DB.Create(&anime).Error; err != nil {
+					log.Printf("ERROR: Failed to create anime record: %v", err)
 				}
-				// log.Printf("DEBUG: Matched Bangumi ID %d for %s", bid, queryTitle)
-			}
-
-			if err := db.DB.Create(&anime).Error; err != nil {
-				log.Printf("ERROR: Failed to create anime record: %v", err)
 			}
 		}
 	}
 
+	// Remove stale entries for this directory
+	// We need to fetch all existing for this dir first?
+	// Or just delete where directory_id = ? AND path NOT IN ?
+	// Careful with large IN clauses, but usually local anime count is manageable (<1000 per dir)
+	if len(foundPaths) > 0 {
+		var paths []string
+		for p := range foundPaths {
+			paths = append(paths, p)
+		}
+		db.DB.Where("directory_id = ? AND path NOT IN ?", dirID, paths).Delete(&model.LocalAnime{})
+	} else {
+		// No valid folders found, wipe all for this dir
+		db.DB.Where("directory_id = ?", dirID).Delete(&model.LocalAnime{})
+	}
+
 	return nil
+}
+
+// enrichAnimeMetadata tries to find Bangumi ID and valid Title/Image
+func (s *LocalAnimeService) enrichAnimeMetadata(anime *model.LocalAnime) {
+	bgmClient := bangumi.NewClient("", "", "")
+
+	// Clean title logic
+	queryTitle := CleanTitle(anime.Title)
+	log.Printf("DEBUG: Cleaned title search: '%s' -> '%s'", anime.Title, queryTitle)
+
+	if res, err := bgmClient.SearchSubject(queryTitle); err == nil && res != nil {
+		anime.BangumiID = res.ID
+
+		// Default to search result info
+		if res.Images.Large != "" {
+			anime.Image = res.Images.Large
+		} else if res.Images.Common != "" {
+			anime.Image = res.Images.Common
+		}
+		if res.NameCN != "" {
+			anime.Title = res.NameCN
+		} else if res.Name != "" {
+			anime.Title = res.Name
+		}
+
+		// Try Fetch details
+		if subject, err := bgmClient.GetSubject(res.ID); err == nil {
+			if subject.NameCN != "" {
+				anime.Title = subject.NameCN
+			} else if subject.Name != "" {
+				anime.Title = subject.Name
+			}
+
+			if subject.Images.Large != "" {
+				anime.Image = subject.Images.Large
+			} else if subject.Images.Common != "" {
+				anime.Image = subject.Images.Common
+			}
+		}
+	}
+}
+
+// CleanTitle removes common tags like [Group] or [1080p] to get a search-friendly title
+func CleanTitle(raw string) string {
+	// 1. Remove leading [...]
+	// 2. Remove trailing [...] or (...)
+	// 3. Remove date patterns like (2024), [2024], 2024
+
+	// Simple heuristic: Take the "middle" part if wrapped in tags, or just the string
+	// [Group] Title [Res] -> Title
+
+	s := raw
+	// Remove leading [...]
+	s = regexp.MustCompile(`^\[.*?\]\s*`).ReplaceAllString(s, "")
+	// Remove trailing [...]
+	s = regexp.MustCompile(`\s*\[.*?\]$`).ReplaceAllString(s, "")
+	// Remove trailing (...)
+	s = regexp.MustCompile(`\s*\(.*?\)$`).ReplaceAllString(s, "")
+
+	return strings.TrimSpace(s)
 }
 
 func (s *LocalAnimeService) countVideos(path string) (int, int64) {

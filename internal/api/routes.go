@@ -57,6 +57,7 @@ func InitRoutes(r *gin.Engine) {
 		apiGroup.POST("/subscriptions/batch-preview", BatchPreviewHandler)
 		apiGroup.POST("/subscriptions/:id/toggle", ToggleSubscriptionHandler)
 		apiGroup.POST("/subscriptions/:id/run", RunSubscriptionHandler)
+		apiGroup.POST("/subscriptions/:id/refresh-metadata", RefreshSubscriptionMetadataHandler)
 		apiGroup.PUT("/subscriptions/:id", UpdateSubscriptionHandler)
 		apiGroup.DELETE("/subscriptions/:id", DeleteSubscriptionHandler)
 		apiGroup.GET("/search", SearchAnimeHandler)
@@ -79,6 +80,7 @@ func InitRoutes(r *gin.Engine) {
 		apiGroup.GET("/local-anime/:id/files", GetLocalAnimeFilesHandler) // Keep for debugging if needed
 		apiGroup.POST("/local-directories/:id/rename-preview", PreviewDirectoryRenameHandler)
 		apiGroup.POST("/local-directories/:id/rename", ApplyDirectoryRenameHandler)
+		apiGroup.POST("/local-directories/:id/refresh-metadata", RefreshLocalAnimeMetadataHandler)
 
 		// Backup
 		apiGroup.GET("/backup/export", ExportBackupHandler)

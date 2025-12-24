@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -124,13 +126,17 @@ func (c *Client) GetCurrentUser(accessToken string) (*UserProfile, error) {
 	return &user, nil
 }
 
-// SearchSubject searches for a subject by keyword and returns the ID of the first match
-func (c *Client) SearchSubject(keyword string) (int, error) {
-	// GET https://api.bgm.tv/search/subject/{keywords}?type=2&responseGroup=small
-	// type=2 means Anime.
-	// Using legacy API because v0 search is complex or limited? Checking docs...
-	// Actually https://api.bgm.tv/search/subject/ is legacy but works well.
+// SearchResult represents a search result item
+type SearchResult struct {
+	ID     int    `json:"id"`
+	Name   string `json:"name"`
+	NameCN string `json:"name_cn"`
+	Images Images `json:"images"`
+}
 
+// SearchSubject searches for a subject by keyword and returns the first match with details
+func (c *Client) SearchSubject(keyword string) (*SearchResult, error) {
+	// GET https://api.bgm.tv/search/subject/{keywords}?type=2&responseGroup=small
 	encodedKeyword := url.QueryEscape(keyword)
 	u := fmt.Sprintf("https://api.bgm.tv/search/subject/%s?type=2&responseGroup=small&max_results=1", encodedKeyword)
 
@@ -139,57 +145,110 @@ func (c *Client) SearchSubject(keyword string) (int, error) {
 		Get(u)
 
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	if resp.IsError() {
-		return 0, fmt.Errorf("search failed: %s", string(resp.Body()))
+		return nil, fmt.Errorf("search failed: %s", string(resp.Body()))
 	}
 
 	var result struct {
-		List []struct {
-			ID   int    `json:"id"`
-			Name string `json:"name"`
-		} `json:"list"`
+		List []SearchResult `json:"list"`
 	}
 
 	if err := json.Unmarshal(resp.Body(), &result); err != nil {
-		return 0, err
+		return nil, err
 	}
 
 	if len(result.List) > 0 {
-		return result.List[0].ID, nil
+		// Fix image urls
+		item := &result.List[0]
+		fixImage := func(url string) string {
+			if strings.HasPrefix(url, "//") {
+				return "https:" + url
+			}
+			return url
+		}
+		item.Images.Large = fixImage(item.Images.Large)
+		item.Images.Common = fixImage(item.Images.Common)
+		item.Images.Medium = fixImage(item.Images.Medium)
+		item.Images.Small = fixImage(item.Images.Small)
+		item.Images.Grid = fixImage(item.Images.Grid)
+		return item, nil
 	}
 
-	return 0, nil // Not found
+	return nil, nil // Not found
 }
 
 func (c *Client) GetSubject(id int) (*Subject, error) {
 	// GET https://api.bgm.tv/v0/subjects/{subject_id}
+	// Try V0 API first
 	u := fmt.Sprintf("https://api.bgm.tv/v0/subjects/%d", id)
 
 	resp, err := c.client.R().
 		SetHeader("User-Agent", "pokerjest/animateAutoTool/1.0 (https://github.com/pokerjest/animateAutoTool)").
 		Get(u)
 
-	if err != nil {
-		return nil, err
-	}
-	if resp.IsError() {
-		return nil, fmt.Errorf("get subject failed: %s", string(resp.Body()))
-	}
-
-	var subject Subject
-	if err := json.Unmarshal(resp.Body(), &subject); err != nil {
-		return nil, err
-	}
-
-	// Fix http images
+	// Helper for fixing images
 	fixImage := func(url string) string {
 		if strings.HasPrefix(url, "//") {
 			return "https:" + url
 		}
 		return url
 	}
+
+	var subject Subject
+	var success bool
+
+	// Check if V0 succeeded
+	if err == nil && !resp.IsError() {
+		if err := json.Unmarshal(resp.Body(), &subject); err == nil {
+			success = true
+		}
+	}
+
+	// Fallback to Legacy API if V0 failed
+	if !success {
+		// GET https://api.bgm.tv/subject/{subject_id}?responseGroup=medium
+		uLegacy := fmt.Sprintf("https://api.bgm.tv/subject/%d?responseGroup=medium", id)
+		resp, err = c.client.R().
+			SetHeader("User-Agent", "pokerjest/animateAutoTool/1.0 (https://github.com/pokerjest/animateAutoTool)").
+			Get(uLegacy)
+
+		legacyFailed := false
+		if err != nil || resp.IsError() {
+			legacyFailed = true
+		} else {
+			if err := json.Unmarshal(resp.Body(), &subject); err != nil {
+				legacyFailed = true
+			} else if subject.ID == 0 {
+				legacyFailed = true
+			}
+		}
+
+		// Final Fallback: HTML Scraping
+		if legacyFailed {
+			uWeb := fmt.Sprintf("https://bgm.tv/subject/%d", id)
+			// Mimic a real browser slightly more just in case
+			resp, err = c.client.R().
+				SetHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36").
+				Get(uWeb)
+
+			if err == nil && !resp.IsError() {
+				scraped := scrapeSubjectHTML(string(resp.Body()), id)
+				if scraped != nil {
+					subject = *scraped
+					success = true
+				}
+			}
+
+			if !success {
+				// If all methods failed, return error
+				return nil, fmt.Errorf("all fetch methods failed for subject %d", id)
+			}
+		}
+	}
+
+	// Fix http images
 	subject.Images.Large = fixImage(subject.Images.Large)
 	subject.Images.Common = fixImage(subject.Images.Common)
 	subject.Images.Medium = fixImage(subject.Images.Medium)
@@ -197,6 +256,66 @@ func (c *Client) GetSubject(id int) (*Subject, error) {
 	subject.Images.Grid = fixImage(subject.Images.Grid)
 
 	return &subject, nil
+}
+
+func scrapeSubjectHTML(htmlContent string, id int) *Subject {
+	s := &Subject{ID: id, Type: 2} // Default to Anime
+
+	// 1. Extract Summary
+	// <div id="subject_summary" class="subject_summary" property="v:summary">...</div>
+	reSummary := regexp.MustCompile(`<div id="subject_summary" class="subject_summary" property="v:summary">([\s\S]*?)</div>`)
+	if match := reSummary.FindStringSubmatch(htmlContent); len(match) > 1 {
+		s.Summary = strings.TrimSpace(match[1])
+		s.Summary = strings.ReplaceAll(s.Summary, "<br />", "\n")
+		s.Summary = strings.ReplaceAll(s.Summary, "<br>", "\n")
+	}
+
+	// 2. Extract Rating
+	// <span class="number" property="v:average">7.4</span>
+	reRating := regexp.MustCompile(`<span class="number" property="v:average">([\d.]+)</span>`)
+	if match := reRating.FindStringSubmatch(htmlContent); len(match) > 1 {
+		if val, err := strconv.ParseFloat(match[1], 64); err == nil {
+			s.Rating.Score = val
+		}
+	}
+
+	// 3. Extract Cover Image
+	// <a href="..." title="..." class="thickbox cover">
+	//   <img src="//lain.bgm.tv/pic/cover/c/..." ... />
+	// </a>
+	// Or sometimes just in infobox
+	reImg := regexp.MustCompile(`<img src="(//lain\.bgm\.tv/pic/cover/[a-z]/[^"]+)"`)
+	if match := reImg.FindStringSubmatch(htmlContent); len(match) > 1 {
+		base := match[1]
+		if strings.Contains(base, "/c/") {
+			s.Images.Common = "https:" + base
+			s.Images.Large = "https:" + strings.Replace(base, "/c/", "/l/", 1)
+			s.Images.Medium = "https:" + strings.Replace(base, "/c/", "/m/", 1)
+			s.Images.Small = "https:" + strings.Replace(base, "/c/", "/s/", 1)
+			s.Images.Grid = "https:" + strings.Replace(base, "/c/", "/g/", 1)
+		} else {
+			s.Images.Large = "https:" + base // Fallback
+		}
+	}
+
+	// 4. Extract Title (CN name usually in infobox or header)
+	// Matches <title>Title | Bangumi ...</title>
+	reTitle := regexp.MustCompile(`<title>(.*?) \| Bangumi`)
+	if match := reTitle.FindStringSubmatch(htmlContent); len(match) > 1 {
+		s.Name = strings.TrimSpace(match[1])
+		s.NameCN = s.Name
+	}
+
+	// 5. Air Date
+	// <li><span class="tip">放送开始: </span>2024-01-01</li>
+	reDate := regexp.MustCompile(`<li><span class="tip">放送开始: </span>(.*?)(</li>|<)`)
+	if match := reDate.FindStringSubmatch(htmlContent); len(match) > 1 {
+		// Just store it, we don't have a field for date in Subject but LocalAnime uses it?
+		// Wait, Subject struct doesn't have AirDate. It has Tags, Eps.
+		// It's fine to skip if struct doesn't have it.
+	}
+
+	return s
 }
 
 // CollectionUpdateOptions represents fields that can be updated

@@ -264,20 +264,31 @@
         showToast('⚠️ 该番剧未关联 Bangumi ID', 'error');
         return;
     }
-    loadingDetails = true;
     showDetailsModal = true;
-    detailsData = null;
+    
+    // Set fallback data immediately
+    detailsData = {
+        id: $event.detail.bangumiId,
+        name: $event.detail.title,
+        name_cn: $event.detail.title,
+        images: { large: $event.detail.image },
+        summary: '正在加载详细信息...',
+        tags: []
+    };
+    loadingDetails = false; // Show fallback data immediately
+
     fetch('/api/bangumi/subject/' + $event.detail.bangumiId)
-        .then(res => res.json())
+        .then(res => {
+            if (!res.ok) throw new Error('API Error');
+            return res.json();
+        })
         .then(data => {
+            if (data.error) throw new Error(data.error);
             detailsData = data;
         })
         .catch(err => {
-            showToast('❌ 获取详情失败', 'error');
-            showDetailsModal = false;
-        })
-        .finally(() => {
-            loadingDetails = false;
+            console.error(err);
+            showToast('❌ 获取详情失败，仅显示本地信息', 'error');
         });
 ">
     <div class="flex justify-between items-center">
