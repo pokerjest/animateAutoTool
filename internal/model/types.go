@@ -43,10 +43,14 @@ type GlobalConfig struct {
 }
 
 const (
-	ConfigKeyQBUrl      = "qb_url"
-	ConfigKeyQBUsername = "qb_username"
-	ConfigKeyQBPassword = "qb_password"
-	ConfigKeyBaseDir    = "base_download_dir"
+	ConfigKeyQBUrl               = "qb_url"
+	ConfigKeyQBUsername          = "qb_username"
+	ConfigKeyQBPassword          = "qb_password"
+	ConfigKeyBaseDir             = "base_download_dir"
+	ConfigKeyBangumiAppID        = "bangumi_app_id"
+	ConfigKeyBangumiAppSecret    = "bangumi_app_secret"
+	ConfigKeyBangumiAccessToken  = "bangumi_access_token"
+	ConfigKeyBangumiRefreshToken = "bangumi_refresh_token"
 )
 
 // LocalAnimeDirectory 用户配置的本地番剧目录根路径

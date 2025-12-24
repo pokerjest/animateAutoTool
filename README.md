@@ -124,11 +124,11 @@ make run    # 运行
 ./animate-server
 ```
 
-服务默认运行在 `http://localhost:8080`
+服务默认运行在 `http://localhost:8306`
 
 ### 3. Web 界面配置
 
-访问 `http://localhost:8080/settings` 配置：
+访问 `http://localhost:8306/settings` 配置：
 
 - **qBittorrent Web UI 地址**：如 `http://localhost:8080`
 - **用户名/密码**：qBittorrent 的 Web UI 凭据

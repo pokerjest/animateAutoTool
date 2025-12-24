@@ -124,7 +124,13 @@ func (q *QBittorrentClient) Ping() error {
 }
 
 func (q *QBittorrentClient) GetVersion() (string, error) {
-	resp, err := q.client.R().Get("/api/v2/app/version")
+	req := q.client.R()
+	// Manually attach cookies provided by Login
+	if len(q.cookies) > 0 {
+		req.SetCookies(q.cookies)
+	}
+
+	resp, err := req.Get("/api/v2/app/version")
 	if err != nil {
 		return "", err
 	}

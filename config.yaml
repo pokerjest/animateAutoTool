@@ -1,6 +1,6 @@
 # Server Configuration
 server:
-  port: 8080
+  port: 8306
   mode: debug # debug or release
 
 # Database Configuration

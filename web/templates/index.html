@@ -26,8 +26,42 @@
         <!-- Status Card 3 -->
         <div class="bg-white/50 p-6 rounded-xl border border-white/60">
             <div class="text-gray-500 text-sm">系统状态</div>
-            <div class="text-lg font-bold text-green-500 mt-2 flex items-center gap-2">
-                <span class="w-3 h-3 rounded-full bg-green-500 animate-pulse"></span> 运行中
+            <div class="space-y-4 pt-2">
+                <!-- Service Status -->
+                <div class="flex items-center justify-between text-sm">
+                    <span class="text-gray-600">服务运行</span>
+                    <span class="text-green-500 font-bold flex items-center gap-1">
+                        <span class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span> 正常
+                    </span>
+                </div>
+
+                <!-- QB Status -->
+                <div class="flex items-center justify-between text-sm">
+                    <span class="text-gray-600">qBittorrent</span>
+                    {{ if .QBConnected }}
+                    <span class="text-emerald-600 font-bold flex items-center gap-1" title="{{.QBVersion}}">
+                        <span class="w-2 h-2 rounded-full bg-emerald-500"></span> 已连接
+                    </span>
+                    {{ else }}
+                    <span class="text-red-500 font-bold flex items-center gap-1">
+                        <span class="w-2 h-2 rounded-full bg-red-500"></span> 未连接
+                    </span>
+                    {{ end }}
+                </div>
+
+                <!-- Bangumi Status -->
+                <div class="flex items-center justify-between text-sm">
+                    <span class="text-gray-600">Bangumi</span>
+                    {{ if .BangumiLogin }}
+                    <span class="text-pink-500 font-bold flex items-center gap-1">
+                        <span class="w-2 h-2 rounded-full bg-pink-500"></span> 已登录
+                    </span>
+                    {{ else }}
+                    <span class="text-gray-400 font-bold flex items-center gap-1">
+                        <span class="w-2 h-2 rounded-full bg-gray-300"></span> 未登录
+                    </span>
+                    {{ end }}
+                </div>
             </div>
         </div>
     </div>

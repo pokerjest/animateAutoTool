@@ -21,6 +21,9 @@ type DashboardData struct {
 	SkipLayout     bool
 	ActiveSubs     int64
 	TodayDownloads int64
+	QBConnected    bool
+	QBVersion      string
+	BangumiLogin   bool
 }
 
 type SubscriptionsData struct {
@@ -64,10 +67,34 @@ func DashboardHandler(c *gin.Context) {
 	var totalDownloads int64
 	db.DB.Model(&model.DownloadLog{}).Count(&totalDownloads)
 
+	// Check QB Status
+	qbUrl, qbUser, qbPass := fetchQBConfig()
+	var qbConnected bool
+	var qbVersion string
+	if qbUrl != "" {
+		qbt := downloader.NewQBittorrentClient(qbUrl)
+		if err := qbt.Login(qbUser, qbPass); err == nil {
+			if ver, err := qbt.GetVersion(); err == nil {
+				qbConnected = true
+				qbVersion = ver
+			}
+		}
+	}
+
+	// Check Bangumi Status
+	var bangumiLogin bool
+	var tokenConfig model.GlobalConfig
+	if err := db.DB.Where("key = ?", model.ConfigKeyBangumiAccessToken).First(&tokenConfig).Error; err == nil && tokenConfig.Value != "" {
+		bangumiLogin = true
+	}
+
 	data := DashboardData{
 		SkipLayout:     skip,
 		ActiveSubs:     activeSubs,
 		TodayDownloads: totalDownloads,
+		QBConnected:    qbConnected,
+		QBVersion:      qbVersion,
+		BangumiLogin:   bangumiLogin,
 	}
 
 	c.HTML(http.StatusOK, "index.html", data)
@@ -400,41 +427,163 @@ func SettingsHandler(c *gin.Context) {
 }
 
 func UpdateSettingsHandler(c *gin.Context) {
+	// 1. Save All Configs
 	keys := []string{
 		model.ConfigKeyQBUrl,
 		model.ConfigKeyQBUsername,
 		model.ConfigKeyQBPassword,
 		model.ConfigKeyBaseDir,
+		model.ConfigKeyBangumiAccessToken,
 	}
 
 	for _, key := range keys {
-		val := c.PostForm(key)
+		val, exists := c.GetPostForm(key)
+		if !exists {
+			continue
+		}
+
 		log.Printf("DEBUG: UpdateSettings - Key: %s, Val: '%s'", key, val)
 
-		// Manual Upsert to ensure it works
+		// Manual Upsert
 		var count int64
 		db.DB.Model(&model.GlobalConfig{}).Where("key = ?", key).Count(&count)
 
 		if count == 0 {
-			// Create
-			if err := db.DB.Create(&model.GlobalConfig{Key: key, Value: val}).Error; err != nil {
-				log.Printf("ERROR creating config %s: %v", key, err)
-			}
+			db.DB.Create(&model.GlobalConfig{Key: key, Value: val})
 		} else {
-			// Update
-			// Note: Use map to update to allow empty string updates?
-			// Update("value", val)
-			if err := db.DB.Model(&model.GlobalConfig{}).Where("key = ?", key).Update("value", val).Error; err != nil {
-				log.Printf("ERROR updating config %s: %v", key, err)
-			}
+			db.DB.Model(&model.GlobalConfig{}).Where("key = ?", key).Update("value", val)
 		}
 	}
 
-	// Add artificial delay for smooth UI transition
-	time.Sleep(1 * time.Second)
+	// 2. Add artificial delay for smooth UI transition
+	time.Sleep(500 * time.Millisecond)
+
+	// 3. Test QB Connection
+	url := c.PostForm("qb_url")
+	username := c.PostForm("qb_username")
+	password := c.PostForm("qb_password")
+
+	qbStatusHtml := ""
+	if url != "" {
+		client := downloader.NewQBittorrentClient(url)
+		if err := client.Login(username, password); err != nil {
+			qbStatusHtml = fmt.Sprintf(`<div id="qb-status" hx-swap-oob="innerHTML"><div class="text-red-600 bg-red-50 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 border border-red-200">❌ QB 连接失败: %v</div></div>`, err)
+		} else {
+			if ver, err := client.GetVersion(); err == nil {
+				qbStatusHtml = fmt.Sprintf(`<div id="qb-status" hx-swap-oob="innerHTML"><div class="text-emerald-600 bg-emerald-50 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 border border-emerald-200">✅ QB 已连接 (版本: %s)</div></div>`, ver)
+			} else {
+				qbStatusHtml = fmt.Sprintf(`<div id="qb-status" hx-swap-oob="innerHTML"><div class="text-amber-600 bg-amber-50 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 border border-amber-200">⚠️ QB 登录成功但版本未知</div></div>`)
+			}
+		}
+	} else {
+		qbStatusHtml = `<div id="qb-status" hx-swap-oob="innerHTML"><div class="text-sm text-gray-400 flex items-center gap-2"><span>⚪ 未配置 QB URL</span></div></div>`
+	}
+
+	// 4. Trigger Bangumi Refresh OOB
+	// We no longer trigger via event, but return the OOB swap directly for robustness
+	bangumiStatusOOB := RenderBangumiStatusOOB()
 
 	c.Header("Content-Type", "text/html")
-	c.String(http.StatusOK, `<div class="text-emerald-600 font-medium flex items-center gap-2 animate-fade-in-up">✅ 配置保存成功</div>`)
+	// Main response for #save-result + OOB blocks
+	c.String(http.StatusOK, fmt.Sprintf(`
+		<div class="text-emerald-600 font-bold flex items-center gap-2 animate-pulse">✅ 所有配置已保存</div>
+		%s
+		%s
+	`, qbStatusHtml, bangumiStatusOOB))
+}
+
+// QBSaveAndTestHandler saves QB settings and then tests connection
+func QBSaveAndTestHandler(c *gin.Context) {
+	// 1. Save Config
+	qbKeys := []string{
+		model.ConfigKeyQBUrl,
+		model.ConfigKeyQBUsername,
+		model.ConfigKeyQBPassword,
+		model.ConfigKeyBaseDir,
+	}
+	// Reusing logic from UpdateSettings, simplified
+	for _, key := range qbKeys {
+		val, exists := c.GetPostForm(key)
+		if !exists {
+			continue
+		}
+
+		var count int64
+		db.DB.Model(&model.GlobalConfig{}).Where("key = ?", key).Count(&count)
+		if count == 0 {
+			db.DB.Create(&model.GlobalConfig{Key: key, Value: val})
+		} else {
+			db.DB.Model(&model.GlobalConfig{}).Where("key = ?", key).Update("value", val)
+		}
+	}
+
+	// 2. Test Connection
+	url := c.PostForm("qb_url")
+	username := c.PostForm("qb_username")
+	password := c.PostForm("qb_password")
+
+	if url == "" {
+		c.String(http.StatusOK, `<div class="text-amber-500 font-medium flex items-center gap-2">⚠️ 保存成功，但 URL 为空，无法测试连接</div>`)
+		return
+	}
+
+	client := downloader.NewQBittorrentClient(url)
+	if err := client.Login(username, password); err != nil {
+		log.Printf("DEBUG: Login failed: %v", err)
+		c.String(http.StatusOK, `<div class="text-red-600 bg-red-50 px-3 py-1.5 rounded-lg text-sm font-medium flex items-center gap-2 border border-red-200 shadow-sm animate-pulse">💾 保存成功 | ❌ 连接失败: `+err.Error()+`</div>`)
+		return
+	}
+
+	version, err := client.GetVersion()
+	statusMsg := ""
+	if err != nil {
+		statusMsg = fmt.Sprintf("⚠️ 保存成功 | 登录成功但获取版本失败: %v", err)
+	} else {
+		statusMsg = fmt.Sprintf("✅ 保存成功 | 🔌 连接正常 (%s)", version)
+	}
+
+	c.String(http.StatusOK, fmt.Sprintf(`<div class="text-emerald-600 bg-emerald-50 px-3 py-1.5 rounded-lg text-sm font-medium flex items-center gap-2 border border-emerald-200 shadow-sm transition-all duration-300 transform scale-100">%s</div>`, statusMsg))
+}
+
+// BangumiSaveHandler saves Bangumi settings and returns success
+func BangumiSaveHandler(c *gin.Context) {
+	keys := []string{
+		model.ConfigKeyBangumiAppID,
+		model.ConfigKeyBangumiAppSecret,
+	}
+
+	for _, key := range keys {
+		val, exists := c.GetPostForm(key)
+		if !exists {
+			continue
+		}
+
+		var count int64
+		db.DB.Model(&model.GlobalConfig{}).Where("key = ?", key).Count(&count)
+		if count == 0 {
+			db.DB.Create(&model.GlobalConfig{Key: key, Value: val})
+		} else {
+			db.DB.Model(&model.GlobalConfig{}).Where("key = ?", key).Update("value", val)
+		}
+	}
+
+	// Trigger Profile Refresh on the client using HTMX OOB or by having the client listen to event.
+	// We'll return the success message AND a trigger header (if simple) or script?
+	// Easiest is to return success message, and rely on `BangumiProfileHandler` being re-triggered.
+	// Since we are returning HTML to a target div (#bangumi-save-result), we can't easily swap #bangumi-status unless we use OOB.
+	// Let's use OOB swap to refresh the profile status simultaneously.
+
+	// Construct success message
+	successHtml := `<div class="text-emerald-600 font-medium flex items-center gap-2 animate-fade-in-up">✅ 保存成功</div>`
+
+	// OOB Swap for status div: trigger a reload by swapping a script or replacement?
+	// HTMX doesn't have "Reload this other element" OOB easily without replacing it.
+	// However, if we replace #bangumi-status with itself but with `hx-trigger="load"`, it will reload.
+	// Or we can just include the updated profile content via OOB if we call the handler logic?
+	// Let's just return a script to trigger the reload of #bangumi-status.
+	triggerScript := `<div hx-swap-oob="true" id="bangumi-refresh-trigger" hx-get="/api/bangumi/profile" hx-target="#bangumi-status" hx-trigger="load" class="hidden"></div>`
+
+	c.String(http.StatusOK, successHtml+triggerScript)
 }
 
 func TestConnectionHandler(c *gin.Context) {
@@ -466,6 +615,39 @@ func TestConnectionHandler(c *gin.Context) {
 
 	log.Printf("DEBUG: Connection successful, version: %s", version)
 	c.String(http.StatusOK, `<div class="text-emerald-600 bg-emerald-50 px-3 py-1.5 rounded-lg text-sm font-medium flex items-center gap-2 border border-emerald-200 shadow-sm transition-all duration-300 transform scale-100">✅ 连接成功! (`+version+`)</div>`)
+}
+
+// GetQBStatusHandler tests connection using stored config
+func GetQBStatusHandler(c *gin.Context) {
+	var configs []model.GlobalConfig
+	// Fetch only QB related configs
+	db.DB.Where("key IN ?", []string{model.ConfigKeyQBUrl, model.ConfigKeyQBUsername, model.ConfigKeyQBPassword}).Find(&configs)
+
+	configMap := make(map[string]string)
+	for _, cfg := range configs {
+		configMap[cfg.Key] = cfg.Value
+	}
+
+	url := configMap[model.ConfigKeyQBUrl]
+	username := configMap[model.ConfigKeyQBUsername]
+	password := configMap[model.ConfigKeyQBPassword]
+
+	if url == "" {
+		c.String(http.StatusOK, `<div class="text-sm text-gray-400 flex items-center gap-2"><span>⚪ 未配置 QB URL</span></div>`)
+		return
+	}
+
+	client := downloader.NewQBittorrentClient(url)
+	if err := client.Login(username, password); err != nil {
+		c.String(http.StatusOK, fmt.Sprintf(`<div class="text-red-600 bg-red-50 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 border border-red-200">❌ QB 连接失败: %v</div>`, err))
+		return
+	}
+
+	if ver, err := client.GetVersion(); err == nil {
+		c.String(http.StatusOK, fmt.Sprintf(`<div class="text-emerald-600 bg-emerald-50 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 border border-emerald-200">✅ QB 已连接 (版本: %s)</div>`, ver))
+	} else {
+		c.String(http.StatusOK, `<div class="text-amber-600 bg-amber-50 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 border border-amber-200">⚠️ QB 登录成功但版本未知</div>`)
+	}
 }
 
 func SearchAnimeHandler(c *gin.Context) {
