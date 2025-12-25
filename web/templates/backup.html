@@ -87,6 +87,332 @@
             </div>
         </div>
 
+        <!-- Cloudflare R2 Section -->
+        <div class="bg-white/60 p-6 rounded-xl border border-white/70 shadow-sm relative overflow-hidden group">
+            <div class="relative z-10">
+                <h3 class="text-lg font-semibold mb-2 flex items-center gap-2 text-orange-600">
+                    <span>☁️</span> Cloudflare R2 云备份
+                </h3>
+
+                <div x-data="{ 
+                    config: { endpoint: '', access_key: '', secret_key: '', bucket: '' },
+                    backups: [],
+                    loading: true,
+                    init() {
+                        this.loadConfig();
+                        this.loadBackups();
+                    },
+                    loadConfig() {
+                        fetch('/api/backup/r2/config')
+                            .then(r => r.json())
+                            .then(data => {
+                                this.config = data;
+                            });
+                    },
+                    testMessage: '',
+                    testError: false,
+                    testConnection() {
+                        this.loading = true;
+                        this.testMessage = '测试中...';
+                        this.testError = false;
+                        
+                        fetch('/api/backup/r2/test', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(this.config)
+                        })
+                        .then(r => r.json())
+                        .then(data => {
+                            this.loading = false;
+                            if(data.error) {
+                                this.testError = true;
+                                this.testMessage = '连接失败: ' + data.error;
+                            } else {
+                                this.testError = false;
+                                this.testMessage = '连接成功: ' + data.message;
+                            }
+                            setTimeout(() => this.testMessage = '', 5000);
+                        })
+                        .catch(e => {
+                            this.loading = false;
+                            this.testError = true;
+                            this.testMessage = '请求错误: ' + e;
+                            setTimeout(() => this.testMessage = '', 5000);
+                        });
+                    },
+                    saveConfig() {
+                        this.testMessage = '保存中...';
+                        fetch('/api/backup/r2/config', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(this.config)
+                        })
+                        .then(r => r.json())
+                        .then(() => {
+                            this.testError = false;
+                            this.testMessage = '配置已保存';
+                            this.loadBackups();
+                            setTimeout(() => this.testMessage = '', 3000);
+                        })
+                        .catch(e => {
+                            this.testError = true;
+                            this.testMessage = '保存失败: ' + e;
+                            setTimeout(() => this.testMessage = '', 5000);
+                        });
+                    },
+                    uploadMessage: '',
+                    uploadError: false,
+                    upload() {
+                        // Removed confirm dialog as per user request
+                        
+                        this.loading = true;
+                        this.uploadMessage = '上传中...';
+                        this.uploadError = false;
+
+                        fetch('/api/backup/r2/upload', { method: 'POST' })
+                            .then(r => r.json())
+                            .then(data => {
+                                if(data.error) {
+                                    this.uploadError = true;
+                                    this.uploadMessage = '上传失败: ' + data.error;
+                                } else {
+                                    this.uploadError = false;
+                                    this.uploadMessage = '上传成功';
+                                    this.loadBackups();
+                                }
+                                setTimeout(() => this.uploadMessage = '', 5000);
+                            })
+                            .catch(e => {
+                                this.uploadError = true;
+                                this.uploadMessage = '上传错误: ' + e;
+                                setTimeout(() => this.uploadMessage = '', 5000);
+                            })
+                            .finally(() => this.loading = false);
+                    },
+                    loadBackups() {
+                        this.loading = true;
+                        fetch('/api/backup/r2/list')
+                            .then(r => r.json())
+                            .then(data => {
+                                if(data.error) console.error(data.error);
+                                else this.backups = data.backups || [];
+                            })
+                            .catch(console.error)
+                            .finally(() => this.loading = false);
+                    },
+                    showConfirm: false,
+                    confirmTitle: '',
+                    confirmMessage: '',
+                    confirmButtonText: '',
+                    confirmType: '', // 'restore' or 'delete'
+                    currentKey: '',
+                    modalLoading: false,
+
+                    confirmRestore(key) {
+                        this.currentKey = key;
+                        this.confirmType = 'restore';
+                        this.confirmTitle = '确认还原';
+                        this.confirmMessage = '确定要从 ' + key + ' 还原吗？当前数据库将被覆盖，此操作不可逆！';
+                        this.confirmButtonText = '确定还原';
+                        this.showConfirm = true;
+                    },
+                    confirmDelete(key) {
+                        this.currentKey = key;
+                        this.confirmType = 'delete';
+                        this.confirmTitle = '确认删除';
+                        this.confirmMessage = '确定要删除备份 ' + key + ' 吗？此操作不可逆！';
+                        this.confirmButtonText = '确认删除';
+                        this.showConfirm = true;
+                    },
+                    executeConfirmAction() {
+                        this.modalLoading = true;
+                        if (this.confirmType === 'restore') {
+                            this.doRestore();
+                        } else if (this.confirmType === 'delete') {
+                            this.doDelete();
+                        }
+                    },
+                    doDelete() {
+                        const formData = new FormData();
+                        formData.append('key', this.currentKey);
+                        fetch('/api/backup/r2/delete', { method: 'POST', body: formData })
+                            .then(r => r.json())
+                            .then(data => {
+                                if(data.error) {
+                                    // Show error in modal instead of alert
+                                    this.confirmMessage = '删除失败: ' + data.error;
+                                    this.confirmTitle = '错误';
+                                    // Keep modal open to show error, remove action button?
+                                    // Simplified: just close and maybe show toast? Or just update text.
+                                    // Let's just update text and let user close.
+                                } else {
+                                    this.showConfirm = false;
+                                    this.loadBackups();
+                                }
+                            })
+                            .catch(e => {
+                                this.confirmMessage = '删除错误: ' + e;
+                                this.confirmTitle = '错误';
+                            })
+                            .finally(() => this.modalLoading = false);
+                    },
+                    doRestore() {
+                        const formData = new FormData();
+                        formData.append('key', this.currentKey);
+                        
+                        fetch('/api/backup/r2/restore', { method: 'POST', body: formData })
+                            .then(r => r.json())
+                            .then(data => {
+                                if(data.error) {
+                                    this.confirmMessage = '还原失败: ' + data.error;
+                                    this.confirmTitle = '错误';
+                                } else {
+                                    // Use replace to reload to ensure database connection is reset
+                                    window.location.reload();
+                                }
+                            })
+                            .catch(e => {
+                                this.confirmMessage = '还原错误: ' + e;
+                                this.confirmTitle = '错误';
+                            })
+                            .finally(() => this.modalLoading = false);
+                    }
+                }" class="space-y-4">
+
+                    <!-- Config Form -->
+                    <div
+                        class="grid grid-cols-1 md:grid-cols-2 gap-4 bg-white/50 p-4 rounded-lg border border-gray-100">
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-500 mb-1">R2 Endpoint (端点地址)</label>
+                            <input type="text" x-model="config.endpoint"
+                                placeholder="https://<account>.r2.cloudflarestorage.com"
+                                class="w-full text-sm px-3 py-2 bg-white rounded border border-gray-200 focus:border-orange-500 outline-none">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-500 mb-1">Bucket Name (存储桶名称)</label>
+                            <input type="text" x-model="config.bucket" placeholder="animate-backup"
+                                class="w-full text-sm px-3 py-2 bg-white rounded border border-gray-200 focus:border-orange-500 outline-none">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-500 mb-1">Access Key ID</label>
+                            <input type="text" x-model="config.access_key"
+                                class="w-full text-sm px-3 py-2 bg-white rounded border border-gray-200 focus:border-orange-500 outline-none">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-500 mb-1">Secret Access Key</label>
+                            <input type="password" x-model="config.secret_key" placeholder="********"
+                                class="w-full text-sm px-3 py-2 bg-white rounded border border-gray-200 focus:border-orange-500 outline-none">
+                        </div>
+                        <div class="md:col-span-2 text-right space-x-2 flex items-center justify-end gap-2">
+                            <span x-show="testMessage" x-text="testMessage"
+                                :class="testError ? 'text-red-500' : 'text-green-500'"
+                                class="text-xs font-semibold transition-opacity duration-500"></span>
+                            <button @click="testConnection" :disabled="loading"
+                                :class="loading ? 'bg-blue-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-500'"
+                                class="text-xs text-white px-3 py-1.5 rounded transition flex items-center gap-1">
+                                <span x-show="loading && testMessage === '测试中...'"
+                                    class="animate-spin h-3 w-3 border-2 border-white rounded-full border-t-transparent"></span>
+                                <span x-text="loading && testMessage === '测试中...' ? '测试中...' : '测试连接'"></span>
+                            </button>
+                            <button @click="saveConfig"
+                                class="text-xs bg-gray-800 text-white px-3 py-1.5 rounded hover:bg-gray-700 transition">保存配置</button>
+                        </div>
+                    </div>
+
+                    <!-- Actions -->
+                    <div class="flex items-center justify-between border-b border-gray-200 pb-2">
+                        <h4 class="text-sm font-semibold text-gray-700">云端备份列表</h4>
+                        <div class="flex items-center gap-2">
+                            <span x-show="uploadMessage" x-text="uploadMessage"
+                                :class="uploadError ? 'text-red-500' : 'text-green-500'"
+                                class="text-xs font-semibold transition-opacity duration-500"></span>
+                            <button @click="upload" :disabled="loading"
+                                :class="loading ? 'bg-orange-400 cursor-not-allowed' : 'bg-orange-500 hover:bg-orange-600'"
+                                class="text-sm flex items-center gap-1 text-white px-4 py-1.5 rounded-lg transition shadow-lg shadow-orange-200">
+                                <span x-show="loading && uploadMessage === '上传中...'"
+                                    class="animate-spin h-3 w-3 border-2 border-white rounded-full border-t-transparent inline-block"></span>
+                                <span x-show="!(loading && uploadMessage === '上传中...')">☁️</span>
+                                立即上传
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Backup List -->
+                    <div
+                        class="bg-white/50 rounded-lg border border-gray-100 min-h-[100px] max-h-[300px] overflow-y-auto custom-scrollbar p-2">
+                        <template x-if="loading">
+                            <div class="flex items-center justify-center h-20 text-gray-400 text-sm">加载中...</div>
+                        </template>
+                        <template x-if="!loading && backups.length === 0">
+                            <div class="flex items-center justify-center h-20 text-gray-400 text-sm">暂无备份</div>
+                        </template>
+
+                        <div class="space-y-2">
+                            <template x-for="file in backups" :key="file.key">
+                                <div
+                                    class="flex items-center justify-between bg-white p-3 rounded border border-gray-100 hover:border-orange-200 transition">
+                                    <div class="flex items-center gap-3">
+                                        <div class="text-xl">📦</div>
+                                        <div>
+                                            <div class="text-sm font-medium text-gray-800"
+                                                x-text="file.key.replace('animate_backup_', '').replace('.db', '')">
+                                            </div>
+                                            <div class="text-xs text-gray-400 mt-0.5">
+                                                <span x-text="file.last_modified"></span> • <span
+                                                    x-text="(file.size / 1024 / 1024).toFixed(2) + ' MB'"></span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="flex items-center gap-2">
+                                        <button @click="confirmRestore(file.key)"
+                                            class="text-xs bg-blue-50 text-blue-600 px-3 py-1.5 rounded hover:bg-blue-100 transition border border-blue-200">
+                                            还原
+                                        </button>
+                                        <button @click="confirmDelete(file.key)"
+                                            class="text-xs bg-red-50 text-red-600 px-2 py-1.5 rounded hover:bg-red-100 transition border border-red-200"
+                                            title="删除">
+                                            🗑️
+                                        </button>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+
+                    <!-- Custom Confirm Modal -->
+                    <div x-show="showConfirm" style="display: none;"
+                        class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
+                        x-transition.opacity>
+                        <div class="bg-white rounded-lg shadow-xl max-w-sm w-full p-6 space-y-4"
+                            @click.outside="showConfirm = false">
+                            <h3 class="text-lg font-bold text-gray-800" x-text="confirmTitle"></h3>
+                            <p class="text-sm text-gray-600" x-text="confirmMessage"></p>
+
+                            <!-- Loading Spinner inside Modal -->
+                            <div x-show="modalLoading" class="flex justify-center py-2">
+                                <span
+                                    class="animate-spin h-6 w-6 border-2 border-orange-500 rounded-full border-t-transparent"></span>
+                            </div>
+
+                            <div x-show="!modalLoading" class="flex justify-end gap-3 pt-2">
+                                <button @click="showConfirm = false"
+                                    class="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded transition">取消</button>
+                                <button @click="executeConfirmAction"
+                                    :class="confirmType === 'delete' ? 'bg-red-500 hover:bg-red-600' : 'bg-blue-600 hover:bg-blue-700'"
+                                    class="px-4 py-2 text-sm text-white rounded transition shadow-md"
+                                    x-text="confirmButtonText"></button>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+            <div
+                class="absolute -right-8 -bottom-8 text-9xl text-orange-100 opacity-50 group-hover:scale-105 transition duration-500 select-none">
+                ☁️
+            </div>
+        </div>
+
     </div>
 </div>
 

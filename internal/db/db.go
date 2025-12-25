@@ -49,3 +49,10 @@ func CloseDB() error {
 	}
 	return sqlDB.Close()
 }
+
+// SaveGlobalConfig helper to upsert config
+func SaveGlobalConfig(key string, value string) error {
+	var conf model.GlobalConfig
+	err := DB.Where(model.GlobalConfig{Key: key}).Assign(model.GlobalConfig{Value: value}).FirstOrCreate(&conf).Error
+	return err
+}

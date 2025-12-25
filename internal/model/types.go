@@ -103,6 +103,12 @@ const (
 	ConfigKeyJellyfinUrl         = "jellyfin_url"
 	ConfigKeyJellyfinApiKey      = "jellyfin_api_key"
 	ConfigKeyProxyJellyfin       = "proxy_jellyfin_enabled"
+
+	// Cloudflare R2
+	ConfigKeyR2Endpoint  = "r2_endpoint"
+	ConfigKeyR2AccessKey = "r2_access_key"
+	ConfigKeyR2SecretKey = "r2_secret_key"
+	ConfigKeyR2Bucket    = "r2_bucket"
 )
 
 // LocalAnimeDirectory 用户配置的本地番剧目录根路径

@@ -102,6 +102,15 @@ func InitRoutes(r *gin.Engine) {
 		apiGroup.POST("/backup/analyze", AnalyzeBackupHandler)
 		apiGroup.POST("/backup/execute", ExecuteRestoreHandler)
 
+		// R2 Backup
+		apiGroup.GET("/backup/r2/config", GetR2ConfigHandler)
+		apiGroup.POST("/backup/r2/config", UpdateR2ConfigHandler)
+		apiGroup.POST("/backup/r2/upload", UploadToR2Handler)
+		apiGroup.GET("/backup/r2/list", ListR2BackupsHandler)
+		apiGroup.POST("/backup/r2/restore", RestoreFromR2Handler)
+		apiGroup.POST("/backup/r2/delete", DeleteR2BackupHandler)
+		apiGroup.POST("/backup/r2/test", TestR2ConnectionHandler)
+
 		// Bangumi Integration
 		apiGroup.GET("/bangumi/login", BangumiLoginHandler)
 		apiGroup.GET("/posters/:id", GetPosterHandler)
