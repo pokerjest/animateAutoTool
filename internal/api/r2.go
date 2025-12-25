@@ -14,9 +14,11 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/gin-gonic/gin"
+	"github.com/glebarez/sqlite"
 	_ "github.com/pokerjest/animateAutoTool/internal/config"
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/model"
+	"gorm.io/gorm"
 )
 
 type R2Config struct {
@@ -208,6 +210,19 @@ func RestoreFromR2Handler(c *gin.Context) {
 		return
 	}
 
+	// Read restore options from form
+	restoreConfigs := c.PostForm("restore_configs") == "true"
+	restoreMetadata := c.PostForm("restore_metadata") == "true"
+	restoreSubscriptions := c.PostForm("restore_subscriptions") == "true"
+	restoreLogs := c.PostForm("restore_logs") == "true"
+	restoreLocal := c.PostForm("restore_local") == "true"
+
+	// Validate at least one option selected
+	if !restoreConfigs && !restoreMetadata && !restoreSubscriptions && !restoreLogs && !restoreLocal {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Please select at least one table to restore"})
+		return
+	}
+
 	client, bucket, err := getR2Client(c.Request.Context())
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "R2 Config Error: " + err.Error()})
@@ -246,27 +261,63 @@ func RestoreFromR2Handler(c *gin.Context) {
 		return
 	}
 
-	// Perform Restore (Dangerous!)
-	if err := db.CloseDB(); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to close DB: " + err.Error()})
-		return
-	}
-
-	input, err := os.ReadFile(tempFile.Name())
+	// Open backup database
+	backupDB, err := gorm.Open(sqlite.Open(tempFile.Name()), &gorm.Config{})
 	if err != nil {
-		db.InitDB(db.CurrentDBPath)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read downloaded file"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid backup file: " + err.Error()})
 		return
 	}
+	defer func() {
+		sqlDB, _ := backupDB.DB()
+		sqlDB.Close()
+	}()
 
-	if err := os.WriteFile(db.CurrentDBPath, input, 0644); err != nil {
-		db.InitDB(db.CurrentDBPath)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to overwrite DB: " + err.Error()})
-		return
+	// Perform selective restore
+	if restoreConfigs {
+		db.DB.Exec("DELETE FROM global_configs")
+		var configs []model.GlobalConfig
+		if err := backupDB.Find(&configs).Error; err == nil && len(configs) > 0 {
+			db.DB.Create(&configs)
+		}
 	}
 
-	db.InitDB(db.CurrentDBPath)
-	db.InitDB(db.CurrentDBPath)
+	if restoreMetadata {
+		db.DB.Exec("DELETE FROM anime_metadata")
+		var metadata []model.AnimeMetadata
+		if err := backupDB.Find(&metadata).Error; err == nil && len(metadata) > 0 {
+			db.DB.Create(&metadata)
+		}
+	}
+
+	if restoreSubscriptions {
+		db.DB.Exec("DELETE FROM subscriptions")
+		var subs []model.Subscription
+		if err := backupDB.Find(&subs).Error; err == nil && len(subs) > 0 {
+			db.DB.Create(&subs)
+		}
+	}
+
+	if restoreLogs {
+		db.DB.Exec("DELETE FROM download_logs")
+		var logs []model.DownloadLog
+		if err := backupDB.Find(&logs).Error; err == nil && len(logs) > 0 {
+			db.DB.Create(&logs)
+		}
+	}
+
+	if restoreLocal {
+		db.DB.Exec("DELETE FROM local_anime_directories")
+		db.DB.Exec("DELETE FROM local_animes")
+		var dirs []model.LocalAnimeDirectory
+		if err := backupDB.Find(&dirs).Error; err == nil && len(dirs) > 0 {
+			db.DB.Create(&dirs)
+		}
+		var animes []model.LocalAnime
+		if err := backupDB.Find(&animes).Error; err == nil && len(animes) > 0 {
+			db.DB.Create(&animes)
+		}
+	}
+
 	c.JSON(http.StatusOK, gin.H{"status": "restored"})
 }
 
