@@ -51,7 +51,7 @@ Animate Auto Tool 是一个基于 Go 开发的自动化动漫下载工具，通�
 ### 核心功能
 - ✅ **智能重命名**：根据规则自动重命名下载文件，整洁库房。
 - ✅ **下载历史**：记录所有下载历史，避免重复下载。
-- ✅ **连接测试**：一键测试 qBittorrent 连接状态。
+- ✅ **连接测试**：一键测试 qBittorrent 连接状态；**R2 云备份读写验证**。
 - ✅ **实时状态**：仪表盘实时显示订阅和下载状态。
 
 ### Web 界面
@@ -122,11 +122,11 @@ CGO_ENABLED=0 go build -ldflags="-s -w" -o animate-server cmd/server/main.go
 ./animate-server
 ```
 
-服务默认运行在 `http://localhost:8306`
+服务默认运行在 `http://localhost:8087`
 
 ### 3. Web 界面配置
 
-访问 `http://localhost:8306/settings` 配置：
+访问 `http://localhost:8087/settings` 配置：
 
 - **qBittorrent Web UI 地址**：如 `http://localhost:8080`
 - **用户名/密码**：qBittorrent 的 Web UI 凭据

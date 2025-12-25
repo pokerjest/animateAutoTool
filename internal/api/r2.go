@@ -93,13 +93,25 @@ func UpdateR2ConfigHandler(c *gin.Context) {
 		return
 	}
 
-	db.SaveGlobalConfig(model.ConfigKeyR2Endpoint, req.Endpoint)
-	db.SaveGlobalConfig(model.ConfigKeyR2AccessKey, req.AccessKey)
-	db.SaveGlobalConfig(model.ConfigKeyR2Bucket, req.Bucket)
+	if err := db.SaveGlobalConfig(model.ConfigKeyR2Endpoint, req.Endpoint); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save endpoint: " + err.Error()})
+		return
+	}
+	if err := db.SaveGlobalConfig(model.ConfigKeyR2AccessKey, req.AccessKey); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save access key: " + err.Error()})
+		return
+	}
+	if err := db.SaveGlobalConfig(model.ConfigKeyR2Bucket, req.Bucket); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save bucket: " + err.Error()})
+		return
+	}
 
 	// Only update secret key if provided (not empty or masked)
 	if req.SecretKey != "" && !isMasked(req.SecretKey) {
-		db.SaveGlobalConfig(model.ConfigKeyR2SecretKey, req.SecretKey)
+		if err := db.SaveGlobalConfig(model.ConfigKeyR2SecretKey, req.SecretKey); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save secret key: " + err.Error()})
+			return
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
@@ -361,7 +373,9 @@ func debugLog(format string, v ...interface{}) {
 	if len(msg) == 0 || msg[len(msg)-1] != '\n' {
 		msg += "\n"
 	}
-	f.WriteString(time.Now().Format("2006/01/02 15:04:05") + " " + msg)
+	if _, err := f.WriteString(time.Now().Format("2006/01/02 15:04:05") + " " + msg); err != nil {
+		fmt.Println("Error writing to debug log:", err)
+	}
 }
 
 func TestR2ConnectionHandler(c *gin.Context) {
