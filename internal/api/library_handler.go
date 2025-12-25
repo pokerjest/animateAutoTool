@@ -1,8 +1,8 @@
 package api
 
 import (
-	"fmt"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pokerjest/animateAutoTool/internal/db"
@@ -97,8 +97,12 @@ func RefreshLibraryMetadataHandler(c *gin.Context) {
 // RefreshItemMetadataHandler refreshes a single anime metadata
 func RefreshItemMetadataHandler(c *gin.Context) {
 	idStr := c.Param("id")
-	var id uint
-	fmt.Sscanf(idStr, "%d", &id)
+	idUint64, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "无效的ID参数"})
+		return
+	}
+	id := uint(idUint64)
 
 	svc := service.NewLocalAnimeService()
 	if err := svc.RefreshSingleMetadata(id); err != nil {
