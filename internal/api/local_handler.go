@@ -26,7 +26,7 @@ func LocalAnimePageHandler(c *gin.Context) {
 	db.DB.Find(&dirs)
 
 	var animes []model.LocalAnime
-	db.DB.Find(&animes) // TODO: Pagination? For now fetch all
+	db.DB.Preload("Metadata").Find(&animes) // TODO: Pagination? For now fetch all
 
 	data := LocalAnimeData{
 		SkipLayout:  skip,

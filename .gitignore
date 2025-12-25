@@ -39,3 +39,8 @@ data/
 .DS_Store
 Thumbs.db
 dist/
+
+# Project Binaries
+animateAutoTool
+remote_server
+animate_server

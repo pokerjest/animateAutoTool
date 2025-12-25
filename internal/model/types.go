@@ -8,20 +8,62 @@ import (
 type Subscription struct {
 	gorm.Model
 	MikanID         string `json:"mikan_id"`                                 // 蜜柑计划的 RSS ID 或 Group ID
-	BangumiID       int    `json:"bangumi_id"`                               // Bangumi 番剧 ID
-	Title           string `json:"title" form:"Title"`                       // 番剧名称
+	Title           string `json:"title" form:"Title"`                       // 番剧名称 (RSS 原始标题)
 	RSSUrl          string `json:"rss_url" form:"RSSUrl" gorm:"uniqueIndex"` // 具体的 RSS 链接
-	Image           string `json:"image" form:"Image"`                       // 番剧封面图片
+	Image           string `json:"image" form:"Image"`                       // 番剧封面图片 (RSS 原始封面)
 	SubtitleGroup   string `json:"subtitle_group" form:"SubtitleGroup"`      // 字幕组名称
-	Season          string `json:"season" form:"Season"`                     // 季度 (如 "2024年10月")
-	FilterRule      string `json:"filter_rule" form:"FilterRule"`            // 过滤规则 (正则或关键词，以逗号分隔)
+	Season          string `json:"season" form:"season"`                     // 季度
+	FilterRule      string `json:"filter_rule" form:"FilterRule"`            // 过滤规则
 	ExcludeRule     string `json:"exclude_rule" form:"ExcludeRule"`          // 排除规则
-	SavePath        string `json:"save_path"`                                // 保存路径 (相对或绝对)
+	SavePath        string `json:"save_path"`                                // 保存路径
 	RenameEnabled   bool   `json:"rename_enabled"`                           // 是否启用重命名
-	Offset          int    `json:"offset"`                                   // 第几集开始偏移 (可选)
-	LastEp          int    `json:"last_ep"`                                  // 无论下到哪一集了
+	Offset          int    `json:"offset"`                                   // 偏移
+	LastEp          int    `json:"last_ep"`                                  // 最后集数
 	IsActive        bool   `json:"is_active"`                                // 激活状态
 	DownloadedCount int64  `json:"downloaded_count" gorm:"-"`                // 实际已下载的集数 (动态计算)
+
+	// Refactored Metadata
+	MetadataID *uint          `json:"metadata_id"`
+	Metadata   *AnimeMetadata `json:"metadata" gorm:"foreignKey:MetadataID"`
+}
+
+// AnimeMetadata 统一的番剧元数据表
+type AnimeMetadata struct {
+	gorm.Model
+	// Primary display info (Selected by user)
+	Title   string `json:"title"`
+	Image   string `json:"image"`
+	Summary string `json:"summary"`
+	AirDate string `json:"air_date"`
+
+	// Multi-language titles
+	TitleCN string `json:"title_cn"`
+	TitleEN string `json:"title_en"`
+	TitleJP string `json:"title_jp"`
+
+	// Sources IDs
+	BangumiID int `json:"bangumi_id" gorm:"index"`
+	TMDBID    int `json:"tmdb_id" gorm:"index"`
+	AniListID int `json:"anilist_id" gorm:"index"`
+
+	// Source Specific Data (Cache)
+	BangumiTitle    string  `json:"bangumi_title"`
+	BangumiImage    string  `json:"bangumi_image"`
+	BangumiSummary  string  `json:"bangumi_summary"`
+	BangumiRating   float64 `json:"bangumi_rating"`
+	BangumiImageRaw []byte  `json:"-" gorm:"type:blob"`
+
+	TMDBTitle    string  `json:"tmdb_title"`
+	TMDBImage    string  `json:"tmdb_image"`
+	TMDBSummary  string  `json:"tmdb_summary"`
+	TMDBRating   float64 `json:"tmdb_rating"`
+	TMDBImageRaw []byte  `json:"-" gorm:"type:blob"`
+
+	AniListTitle    string  `json:"anilist_title"`
+	AniListImage    string  `json:"anilist_image"`
+	AniListSummary  string  `json:"anilist_summary"`
+	AniListRating   float64 `json:"anilist_rating"`
+	AniListImageRaw []byte  `json:"-" gorm:"type:blob"`
 }
 
 // DownloadLog 记录下载历史，避免重复下载
@@ -56,6 +98,8 @@ const (
 	ConfigKeyProxyURL            = "proxy_url"
 	ConfigKeyProxyBangumi        = "proxy_bangumi_enabled"
 	ConfigKeyProxyTMDB           = "proxy_tmdb_enabled"
+	ConfigKeyAniListToken        = "anilist_token"
+	ConfigKeyProxyAniList        = "proxy_anilist_enabled"
 )
 
 // LocalAnimeDirectory 用户配置的本地番剧目录根路径
@@ -69,11 +113,18 @@ type LocalAnimeDirectory struct {
 type LocalAnime struct {
 	gorm.Model
 	DirectoryID uint   `json:"directory_id" gorm:"index"`  // 所属根目录ID
-	BangumiID   int    `json:"bangumi_id"`                 // Bangumi 番剧 ID
 	Title       string `json:"title"`                      // 剧集标题 (通常是文件夹名)
 	Image       string `json:"image"`                      // 封面图片链接
 	Path        string `json:"path"`                       // 系列绝对路径
 	FileCount   int    `json:"file_count"`                 // 视频文件数量 (mkv, mp4, etc.)
 	TotalSize   int64  `json:"total_size"`                 // 总大小 (bytes)
-	AirDate     string `json:"air_date" gorm:"default:''"` // 放送日期 (用于获取年份)
+	AirDate     string `json:"air_date" gorm:"default:''"` // 放送日期
+	Summary     string `json:"summary"`                    // 当前显示的简介 (Deprecated: moved to Metadata)
+
+	// Refactored Metadata
+	MetadataID *uint          `json:"metadata_id"`
+	Metadata   *AnimeMetadata `json:"metadata" gorm:"foreignKey:MetadataID"`
 }
+
+// Append AniList Config Key
+// Note: This is a hacky way to append if I don't use multi_replace carefully, so I will use multi_replace instead.

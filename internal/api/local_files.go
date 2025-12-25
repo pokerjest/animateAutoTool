@@ -2,7 +2,6 @@ package api
 
 import (
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -11,7 +10,6 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/pokerjest/animateAutoTool/internal/bangumi"
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/parser"
@@ -72,77 +70,69 @@ func RefreshLocalAnimeMetadataHandler(c *gin.Context) {
 		return
 	}
 
-	// Use our cleaning logic
-	// Replicating CleanTitle logic here to avoid circular dependencies or exporting issues if service/api are separate (though they are same repo structure, maybe different packages?)
-	// `api` imports `service`. `service` imports `api`? No.
-	// Ideally `CleanTitle` should be in `service` and exported, or `parser`.
-	// Let's assume I didn't export `CleanTitle` in previous step (it was lowercase? No, I made it PascalCase `CleanTitle`).
-	// But `RefreshLocalAnimeMetadataHandler` is in `package api`. `ScanDirectory` is in `package service`.
-	// `service.CleanTitle`?
-	// I defined `CleanTitle` in `internal/service/local_anime.go` as `func CleanTitle(...)`.
-	// So I can call `service.CleanTitle`.
+	// Use Service logic
+	svc := service.NewLocalAnimeService()
+	// Preload metadata to ensure we have it
+	db.DB.Preload("Metadata").First(&anime, id)
+	svc.EnrichAnimeMetadata(&anime)
 
-	cleanTitle := service.CleanTitle(anime.Title)
-	bgmClient := bangumi.NewClient("", "", "")
-
-	// Try search with original OR cleaned title? Cleaned is better.
-	// But if anime.Title is ALREADY the cleaned Official Title (from previous scan), `CleanTitle` shouldn't hurt it (no brackets).
-
-	log.Printf("DEBUG: Refresh Metadata for '%s' (Clean: '%s')", anime.Title, cleanTitle)
-
-	var searchResult *bangumi.SearchResult
-	var err error
-	if searchResult, err = bgmClient.SearchSubject(cleanTitle); err == nil && searchResult != nil {
-		anime.BangumiID = searchResult.ID
-		log.Printf("DEBUG: Found Bangumi ID: %d for '%s'", anime.BangumiID, cleanTitle)
-
-		// Use search result images first
-		if searchResult.Images.Large != "" {
-			anime.Image = searchResult.Images.Large
-		} else if searchResult.Images.Common != "" {
-			anime.Image = searchResult.Images.Common
-		}
-
-		// Update Title if available
-		if searchResult.NameCN != "" {
-			anime.Title = searchResult.NameCN
-		} else if searchResult.Name != "" {
-			anime.Title = searchResult.Name
-		}
-
-		// Try Fetch details to get better info if possible (V0 API), but fallback to search result is safe
-		if subject, err := bgmClient.GetSubject(searchResult.ID); err == nil {
-			log.Printf("DEBUG: Fetched Subject: %+v", subject)
-
-			// Update Title and Image from V0 if successful (might be cleaner)
-			if subject.NameCN != "" {
-				anime.Title = subject.NameCN
-			} else if subject.Name != "" {
-				anime.Title = subject.Name
-			}
-
-			if subject.Images.Large != "" {
-				anime.Image = subject.Images.Large
-			} else if subject.Images.Common != "" {
-				anime.Image = subject.Images.Common
-			}
-		} else {
-			log.Printf("ERROR: GetSubject failed: %v. Using SearchResult image.", err)
-		}
-
-		log.Printf("DEBUG: Final Anime Image: %s", anime.Image)
-
-		if err := db.DB.Save(&anime).Error; err != nil {
-			c.String(http.StatusInternalServerError, "Failed to save: "+err.Error())
-			return
-		}
-	} else {
-		// Log mismatch
-		log.Printf("RefreshLocalMeta: No match found for %s (Error: %v)", cleanTitle, err)
+	if err := db.DB.Save(&anime).Error; err != nil {
+		c.String(http.StatusInternalServerError, "Failed to save: "+err.Error())
+		return
 	}
 
 	// Sleep for smooth UI feel
 	time.Sleep(500 * time.Millisecond)
+
+	c.HTML(http.StatusOK, "local_anime_card.html", anime)
+}
+
+// SwitchLocalAnimeSourceHandler 切换数据源
+func SwitchLocalAnimeSourceHandler(c *gin.Context) {
+	id := c.Param("id")
+	source := c.Query("source")
+
+	var anime model.LocalAnime
+	if err := db.DB.Preload("Metadata").First(&anime, id).Error; err != nil {
+		c.String(http.StatusNotFound, "Not Found")
+		return
+	}
+
+	if anime.Metadata == nil {
+		c.String(http.StatusBadRequest, "No metadata associated")
+		return
+	}
+
+	m := anime.Metadata
+	switch source {
+	case "tmdb":
+		if m.TMDBID != 0 {
+			m.Title = m.TMDBTitle
+			m.Image = m.TMDBImage
+			m.Summary = m.TMDBSummary
+		}
+	case "bangumi":
+		if m.BangumiID != 0 {
+			m.Title = m.BangumiTitle
+			m.Image = m.BangumiImage
+			m.Summary = m.BangumiSummary
+		}
+	case "anilist":
+		if m.AniListID != 0 {
+			m.Title = m.AniListTitle
+			m.Image = m.AniListImage
+			m.Summary = m.AniListSummary
+		}
+	}
+
+	if err := db.DB.Save(m).Error; err != nil {
+		c.String(http.StatusInternalServerError, "Failed to save metadata")
+		return
+	}
+
+	// Trigger global sync (this will update 'anime' results too)
+	svc := service.NewLocalAnimeService()
+	svc.SyncMetadataToModels(m)
 
 	c.HTML(http.StatusOK, "local_anime_card.html", anime)
 }
@@ -296,10 +286,15 @@ func generateRenamePreview(files []FileInfo, anime model.LocalAnime, req RenameR
 		season = "01"
 	}
 
+	airDate := anime.AirDate
+	if anime.Metadata != nil && anime.Metadata.AirDate != "" {
+		airDate = anime.Metadata.AirDate
+	}
+
 	// Extract Year from AirDate (e.g., "2024-01-07")
 	year := ""
-	if len(anime.AirDate) >= 4 {
-		year = anime.AirDate[:4]
+	if len(airDate) >= 4 {
+		year = airDate[:4]
 	}
 
 	for _, f := range files {

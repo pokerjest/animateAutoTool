@@ -248,6 +248,110 @@
     },
     get batchCount() {
         return this.batchInput.split('\n').filter(l => l.trim()).length;
+    },
+    // Details Modal Logic (Ported)
+    modalRaw: null,
+    detailsData: null,
+    activeSource: 'bangumi',
+    inputProgress: 0,
+    updatingCollection: false,
+    updatingComplete: false,
+    updatingProgress: false,
+    currentSubId: 0,
+    
+    async openDetails(data) {
+        this.modalRaw = data;
+        this.showDetailsModal = true;
+        this.currentSubId = data.id || 0;
+        // Auto switching: Prefer Bangumi, but if Bangumi ID missing and TMDB present, use TMDB
+        if (data.tmdbId > 0 && (!data.bangumiId || data.bangumiId === 0)) {
+            this.switchSource('tmdb');
+        } else {
+            this.switchSource('bangumi');
+        }
+    },
+    async switchSource(source) {
+        this.activeSource = source;
+        this.loadingDetails = true;
+        
+        if (source === 'tmdb') {
+            this.detailsData = {
+                id: this.modalRaw.tmdbId,
+                name: this.modalRaw.tmdbTitle || this.modalRaw.title,
+                name_cn: '',
+                images: { large: this.modalRaw.tmdbImage },
+                summary: this.modalRaw.tmdbSummary || '暂无 TMDB 简介',
+                tags: [],
+                rating: { score: this.modalRaw.tmdbRating || 'N/A' },
+                air_date: ''
+            };
+            
+            if (!this.modalRaw.tmdbId) {
+                this.detailsData.summary = '未关联 TMDB，请尝试刷新元数据';
+                this.detailsData.name = '无 TMDB 数据';
+            }
+            this.loadingDetails = false;
+        } else if (source === 'anilist') {
+            this.detailsData = {
+                id: this.modalRaw.anilistId,
+                name: this.modalRaw.anilistTitle,
+                name_cn: '', 
+                images: { large: this.modalRaw.anilistImage },
+                summary: this.modalRaw.anilistSummary || '暂召 AniList 简介',
+                tags: [],
+                rating: { score: this.modalRaw.anilistRating || 'N/A' },
+                air_date: ''
+            };
+            if (!this.modalRaw.anilistId) {
+                this.detailsData.summary = '未关联 AniList';
+                this.detailsData.name = '无 AniList 数据';
+            }
+            this.loadingDetails = false;
+        } else {
+            // Bangumi Logic
+            this.detailsData = {
+                id: this.modalRaw.bangumiId,
+                name: this.modalRaw.bangumiTitle || this.modalRaw.title,
+                name_cn: '', 
+                images: { large: this.modalRaw.bangumiImage || this.modalRaw.image },
+                summary: this.modalRaw.bangumiSummary || '正在加载详细信息...',
+                tags: [],
+                rating: { score: this.modalRaw.bangumiRating || '...' },
+                air_date: ''
+            };
+
+            if (this.modalRaw.bangumiId && this.modalRaw.bangumiId > 0) {
+                try {
+                    const res = await fetch('/api/bangumi/subject/' + this.modalRaw.bangumiId);
+                    if (res.ok) {
+                        const d = await res.json();
+                        if (!d.error) this.detailsData = d;
+                    }
+                } catch(e) {
+                    console.error(e);
+                    // Keep cached data on error
+                }
+            } else {
+                 this.detailsData.summary = '未关联 Bangumi ID';
+            }
+            this.loadingDetails = false;
+        }
+    },
+    async applyCurrentSource() {
+        if (!confirm('确定将当前数据源应用为封面和标题吗？')) return;
+        try {
+            const res = await fetch(`/api/subscriptions/${this.currentSubId}/switch-source?source=${this.activeSource}`, { 
+                method: 'POST' 
+            });
+            if (res.ok) {
+                this.showToast('✅ 切换成功！页面即将刷新');
+                setTimeout(() => window.location.reload(), 1000);
+            } else {
+                this.showToast('❌ 切换失败', 'error');
+            }
+        } catch(e) {
+             this.showToast('❌ 切换失败', 'error');
+        }
     }
 }" @edit-subscription.window="
     editForm.id = $event.detail.id;
@@ -260,36 +364,8 @@
     deleteId = $event.detail.id;
     showDeleteModal = true;
 " @show-anime-details.window="
-    if (!$event.detail.bangumiId || $event.detail.bangumiId <= 0) {
-        showToast('⚠️ 该番剧未关联 Bangumi ID', 'error');
-        return;
-    }
-    showDetailsModal = true;
-    
-    // Set fallback data immediately
-    detailsData = {
-        id: $event.detail.bangumiId,
-        name: $event.detail.title,
-        name_cn: $event.detail.title,
-        images: { large: $event.detail.image },
-        summary: '正在加载详细信息...',
-        tags: []
-    };
-    loadingDetails = false; // Show fallback data immediately
-
-    fetch('/api/bangumi/subject/' + $event.detail.bangumiId)
-        .then(res => {
-            if (!res.ok) throw new Error('API Error');
-            return res.json();
-        })
-        .then(data => {
-            if (data.error) throw new Error(data.error);
-            detailsData = data;
-        })
-        .catch(err => {
-            console.error(err);
-            showToast('❌ 获取详情失败，仅显示本地信息', 'error');
-        });
+    $event.stopPropagation();
+    openDetails($event.detail);
 ">
     <div class="flex justify-between items-center">
 
@@ -333,6 +409,180 @@
         </div>
         {{ end }}
     </div>
+
+
+    <!-- Anime Details Modal (Premium Split View) -->
+    <div x-show="showDetailsModal" style="display: none;"
+        class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md"
+        x-transition:enter="transition ease-out duration-300" x-transition:enter-start="opacity-0 scale-95"
+        x-transition:enter-end="opacity-100 scale-100" x-transition:leave="transition ease-in duration-200"
+        x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95">
+
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col md:flex-row relative"
+            @click.away="showDetailsModal = false">
+
+            <!-- Close Button -->
+            <button @click="showDetailsModal = false"
+                class="absolute top-4 right-4 z-10 p-2 bg-black/50 hover:bg-black/70 text-white rounded-full transition backdrop-blur-sm">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12">
+                    </path>
+                </svg>
+            </button>
+
+            <!-- Left Column: Poster -->
+            <div
+                class="w-full md:w-80 bg-gray-50 p-6 flex flex-col gap-4 border-r border-gray-100 flex-shrink-0 overflow-y-auto md:overflow-visible text-gray-800">
+                <div class="relative w-full aspect-[2/3] rounded-xl shadow-lg overflow-hidden group bg-gray-200">
+                    <template x-if="detailsData?.images?.large">
+                        <img :src="detailsData?.images?.large"
+                            class="w-full h-full object-cover transition-opacity duration-300">
+                    </template>
+                    <template x-if="!detailsData?.images?.large">
+                        <div class="w-full h-full flex items-center justify-center text-gray-400 font-bold">NO COVER
+                        </div>
+                    </template>
+                </div>
+
+                <!-- Source Switcher -->
+                <div class="flex p-1 bg-gray-200/50 rounded-lg">
+                    <button @click="switchSource('bangumi')"
+                        :class="activeSource === 'bangumi' ? 'bg-white shadow text-pink-600 font-bold' : 'text-gray-500 hover:text-gray-700'"
+                        class="flex-1 py-1.5 text-xs rounded-md transition-all flex items-center justify-center gap-1">
+                        <span>🌸</span> BGM
+                    </button>
+                    <button @click="switchSource('tmdb')"
+                        :class="activeSource === 'tmdb' ? 'bg-white shadow text-blue-600 font-bold' : 'text-gray-500 hover:text-gray-700'"
+                        class="flex-1 py-1.5 text-xs rounded-md transition-all flex items-center justify-center gap-1">
+                        <span>🎬</span> TMDB
+                    </button>
+                    <button @click="switchSource('anilist')"
+                        :class="activeSource === 'anilist' ? 'bg-white shadow text-indigo-600 font-bold' : 'text-gray-500 hover:text-gray-700'"
+                        class="flex-1 py-1.5 text-xs rounded-md transition-all flex items-center justify-center gap-1">
+                        <span>🅰️</span> AL
+                    </button>
+                </div>
+
+                <!-- Apply Source -->
+                <div class="mt-auto"
+                    x-show="detailsData?.name !== modalRaw?.title || activeSource === (modalRaw.title === modalRaw.tmdbTitle ? 'bangumi' : 'tmdb')"
+                    x-transition>
+                    <button @click="applyCurrentSource()"
+                        class="w-full py-2.5 rounded-xl border border-gray-200 text-gray-600 hover:border-green-300 hover:bg-green-50 hover:text-green-700 font-bold text-sm transition flex items-center justify-center gap-2">
+                        <span>📌</span> 应用当前元数据
+                    </button>
+                </div>
+            </div>
+
+            <!-- Right Column: Info & Progress -->
+            <div class="flex-1 p-8 overflow-y-auto custom-scrollbar bg-white">
+                <!-- Loading -->
+                <div x-show="loadingDetails" class="flex flex-col items-center justify-center h-full space-y-4">
+                    <div class="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-600"></div>
+                    <span class="text-sm text-gray-400">正在加载数据...</span>
+                </div>
+
+                <div x-show="!loadingDetails && detailsData" class="space-y-6">
+                    <!-- Title -->
+                    <div>
+                        <h2 x-text="detailsData?.name"
+                            class="text-2xl sm:text-3xl font-black text-gray-800 leading-tight mb-2"></h2>
+                        <h3 x-text="detailsData?.name_cn" class="text-lg font-medium text-gray-500"></h3>
+                    </div>
+
+                    <!-- Meta -->
+                    <div class="flex flex-wrap items-center gap-4 text-sm font-medium">
+                        <div
+                            class="flex items-center gap-1 text-amber-500 bg-amber-50 px-2.5 py-1 rounded-full border border-amber-100">
+                            <span class="text-xs">★</span>
+                            <span x-text="detailsData?.rating?.score || 'N/A'"></span>
+                        </div>
+                        <span class="text-gray-400" x-text="detailsData?.air_date || 'Unknown Date'"></span>
+                        <div class="flex flex-wrap gap-2">
+                            <template x-for="tag in (detailsData?.tags || []).slice(0, 5)">
+                                <span x-text="tag.name"
+                                    class="text-xs text-indigo-500 bg-indigo-50 px-2 py-1 rounded-md"></span>
+                            </template>
+                        </div>
+                    </div>
+
+                    <!-- Summary -->
+                    <div
+                        class="prose prose-sm text-gray-600 leading-relaxed bg-gray-50/50 p-4 rounded-xl border border-gray-100 max-h-[30vh] overflow-y-auto custom-scrollbar">
+                        <p x-text="detailsData?.summary" class="whitespace-pre-line"></p>
+                    </div>
+
+                    <!-- User Actions -->
+                    <div class="border-t border-gray-100 pt-6">
+                        <h4
+                            class="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4 flex items-center justify-between">
+                            <span>Bangumi 同步</span>
+                            <span class="text-[10px] font-normal normal-case"
+                                x-text="modalRaw?.bangumiId ? ('ID: ' + modalRaw.bangumiId) : '未关联'"></span>
+                        </h4>
+
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <!-- Collection Buttons -->
+                            <div class="flex gap-2 p-1 bg-gray-100 rounded-xl">
+                                <button type="button" :disabled="updatingCollection"
+                                    @click="
+                                        updatingCollection = true;
+                                        fetch('/api/bangumi/subject/' + modalRaw.bangumiId + '/collection', { 
+                                            method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({status: 3}) 
+                                        }).then(r=>r.json()).then(d=>{showToast(d.message||'在看')}).finally(()=>updatingCollection=false)"
+                                    class="flex-1 py-2 rounded-lg text-sm font-bold transition-all hover:bg-white hover:shadow-sm text-pink-500 disabled:opacity-50 flex items-center justify-center gap-1">
+                                    <span x-show="updatingCollection" class="animate-spin text-xs">⏳</span>
+                                    <span>📺 在看</span>
+                                </button>
+                                <button type="button" :disabled="updatingComplete" @click="
+                                        updatingComplete = true;
+                                        fetch('/api/bangumi/subject/' + modalRaw.bangumiId + '/collection', { 
+                                            method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({status: 2}) 
+                                        })
+                                        .then(r=>r.json())
+                                        .then(() => fetch('/api/bangumi/subject/' + modalRaw.bangumiId + '/progress', { 
+                                                method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({episode_count: detailsData?.eps||24}) 
+                                        }))
+                                        .then(()=>showToast('已标记看过'))
+                                        .finally(()=>updatingComplete=false)"
+                                    class="flex-1 py-2 rounded-lg text-sm font-bold transition-all hover:bg-white hover:shadow-sm text-green-500 disabled:opacity-50 flex items-center justify-center gap-1">
+                                    <span x-show="updatingComplete" class="animate-spin text-xs">⏳</span>
+                                    <span>✅ 看过</span>
+                                </button>
+                            </div>
+
+                            <!-- Progress Input -->
+                            <div class="flex items-center gap-2 p-1 bg-gray-50 rounded-xl border border-gray-100 px-2">
+                                <input type="number" x-model="inputProgress" placeholder="0"
+                                    class="w-12 bg-transparent text-center font-bold text-gray-700 focus:outline-none border-b border-transparent focus:border-indigo-500 transition-colors">
+                                <span class="text-gray-300">/</span>
+                                <span class="text-gray-400 text-sm font-bold" x-text="detailsData?.eps || '?'"></span>
+
+                                <button
+                                    @click="
+                                    updatingProgress = true;
+                                    fetch('/api/bangumi/subject/' + modalRaw.bangumiId + '/progress', { 
+                                        method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({episode_count: parseInt(inputProgress)}) 
+                                    }).then(r=>r.json()).then(d=>showToast(d.message)).finally(()=>updatingProgress=false)"
+                                    class="ml-auto px-3 py-1.5 rounded-lg bg-gray-800 text-white text-xs font-bold hover:bg-gray-700 transition shadow-lg shadow-gray-200 flex items-center gap-1">
+                                    <span x-show="updatingProgress" class="animate-spin">⏳</span>
+                                    同步
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="mt-4 text-center">
+                            <a :href="'https://bgm.tv/subject/' + modalRaw?.bangumiId" target="_blank"
+                                class="inline-flex items-center gap-1 text-xs font-bold text-gray-300 hover:text-pink-400 transition-colors">
+                                🔗 前往 Bangumi 番剧主页
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
 
     <!-- Add Subscription Modal -->
     <div x-show="showAddModal" style="display: none;"
@@ -577,7 +827,8 @@
                         <svg class="w-6 h-6 transform group-hover:rotate-90 transition-transform duration-300"
                             fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                d="M6 18L18 6M6 6l12 12"></path>
+                                d="M6 18L18 6M6 6l12 12">
+                            </path>
                         </svg>
                     </button>
                 </div>
@@ -776,7 +1027,8 @@
             <!-- Dynamic attributes using x-bind and Alpine data -->
             <form :hx-put="'/api/subscriptions/' + editForm.id" :hx-target="'#sub-card-' + editForm.id"
                 hx-swap="outerHTML" @htmx:after-request="if(event.detail.successful) { showEditModal = false; }"
-                x-effect="htmx.process($el)"> <!-- Crucial: Reprocess HTMX attributes when bound data changes -->
+                x-effect="htmx.process($el)">
+                <!-- Crucial: Reprocess HTMX attributes when bound data changes -->
 
                 <div class="space-y-5">
                     <div>
@@ -859,71 +1111,7 @@
         <span x-text="toast.message"></span>
     </div>
 
-    <!-- Anime Details Modal -->
-    <div x-show="showDetailsModal" style="display: none;"
-        class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
-        x-transition:enter="transition ease-out duration-300" x-transition:enter-start="opacity-0"
-        x-transition:enter-end="opacity-100" x-transition:leave="transition ease-in duration-200"
-        x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0">
 
-        <div class="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[80vh] overflow-y-auto relative flex flex-col"
-            @click.away="showDetailsModal = false">
-
-            <!-- Loading State -->
-            <div x-show="loadingDetails" class="p-12 flex flex-col items-center justify-center text-gray-400">
-                <div class="animate-spin h-10 w-10 border-4 border-indigo-500 border-t-transparent rounded-full mb-4">
-                </div>
-                <p>正在从 Bangumi 加载数据...</p>
-            </div>
-
-            <!-- Content -->
-            <div x-show="!loadingDetails && detailsData" class="flex flex-col md:flex-row">
-                <!-- Cover Image -->
-                <div class="w-full md:w-1/3 bg-gray-100 relative">
-                    <img :src="detailsData?.images?.large" class="w-full h-full object-cover">
-                    <div class="absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/80 to-transparent">
-                        <div class="flex items-center gap-1 text-white text-xs">
-                            <span class="text-yellow-400 text-base">★</span>
-                            <span class="font-bold text-lg" x-text="detailsData?.rating?.score || 'N/A'"></span>
-                            <span class="opacity-70" x-text="'(' + (detailsData?.rating?.total || 0) + '人评分)'"></span>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Info -->
-                <div class="p-6 flex-1 flex flex-col">
-                    <button @click="showDetailsModal = false"
-                        class="absolute top-4 right-4 text-gray-400 hover:text-gray-600">✕</button>
-
-                    <h3 class="text-2xl font-bold text-gray-800 leading-tight"
-                        x-text="detailsData?.name_cn || detailsData?.name"></h3>
-                    <p class="text-sm text-gray-500 mb-4" x-show="detailsData?.name_cn" x-text="detailsData?.name"></p>
-
-                    <div class="flex flex-wrap gap-2 mb-4">
-                        <span class="px-2 py-1 bg-indigo-50 text-indigo-600 text-xs rounded-md border border-indigo-100"
-                            x-show="detailsData?.eps" x-text="detailsData?.eps + ' 话'"></span>
-                        <template x-for="tag in (detailsData?.tags || []).slice(0, 5)">
-                            <span class="px-2 py-1 bg-gray-100 text-gray-600 text-xs rounded-md"
-                                x-text="tag.name"></span>
-                        </template>
-                    </div>
-
-                    <div class="flex-1 overflow-y-auto max-h-60 mb-4 pr-2">
-                        <p class="text-sm text-gray-600 leading-relaxed whitespace-pre-wrap"
-                            x-text="detailsData?.summary || '暂无简介'"></p>
-                    </div>
-
-                    <div class="mt-auto pt-4 border-t border-gray-100 flex justify-end">
-                        <a :href="'https://bgm.tv/subject/' + detailsData?.id" target="_blank"
-                            class="text-indigo-500 hover:text-indigo-600 text-sm font-bold flex items-center gap-1">
-                            <span>访问 Bangumi 详情页</span>
-                            <span>↗</span>
-                        </a>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
 </div>
 
 {{ if not .SkipLayout }}{{ template "footer.html" . }}{{ end }}

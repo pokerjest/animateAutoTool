@@ -1,70 +1,183 @@
 {{ define "local_anime_card.html" }}
 <div id="local-card-{{.ID}}"
-    class="bg-white rounded-xl shadow-sm border border-gray-100 hover:shadow-md transition-shadow overflow-hidden flex flex-col h-full group">
-    <!-- Card Header/Cover -->
-    <div class="relative h-48 bg-gray-100 overflow-hidden cursor-pointer"
-        @click="$dispatch('show-anime-details', { bangumiId: {{ .BangumiID }}, fileCount: {{ .FileCount }}, localId: {{ .ID }}, title: '{{ .Title }}', image: '{{ .Image }}' })">
+    class="bg-white rounded-2xl shadow-sm border border-gray-100 hover:shadow-xl transition-all duration-300 overflow-hidden flex flex-col h-full group relative">
+
+    <!-- Card Header/Cover (Poster Aspect Ratio) -->
+    <div class="relative w-full aspect-[2/3] bg-gray-100 overflow-hidden cursor-pointer" @click="$dispatch('show-anime-details', { 
+            localId: {{ .ID }}, 
+            bangumiId: {{ if .Metadata }}{{ .Metadata.BangumiID }}{{ else }}0{{ end }}, 
+            tmdbId: {{ if .Metadata }}{{ .Metadata.TMDBID }}{{ else }}0{{ end }}, 
+            fileCount: {{ .FileCount }}, 
+            
+            title: `{{ .Title }}`, 
+            image: `{{ .Image }}`, 
+            summary: `{{ .Summary }}`,
+
+            bangumiTitle: `{{ if .Metadata }}{{ .Metadata.BangumiTitle }}{{ end }}`,
+            bangumiImage: `{{ if .Metadata }}{{ .Metadata.BangumiImage }}{{ end }}`,
+            bangumiSummary: `{{ if .Metadata }}{{ .Metadata.BangumiSummary }}{{ end }}`,
+            bangumiRating: {{ if .Metadata }}{{ .Metadata.BangumiRating }}{{ else }}0{{ end }},
+
+            tmdbTitle: `{{ if .Metadata }}{{ .Metadata.TMDBTitle }}{{ end }}`,
+            tmdbImage: `{{ if .Metadata }}{{ .Metadata.TMDBImage }}{{ end }}`,
+            tmdbSummary: `{{ if .Metadata }}{{ .Metadata.TMDBSummary }}{{ end }}`,
+            tmdbRating: {{ if .Metadata }}{{ .Metadata.TMDBRating }}{{ else }}0{{ end }},
+
+            anilistId: {{ if .Metadata }}{{ .Metadata.AniListID }}{{ else }}0{{ end }},
+            anilistTitle: `{{ if .Metadata }}{{ .Metadata.AniListTitle }}{{ end }}`,
+            anilistImage: `{{ if .Metadata }}{{ .Metadata.AniListImage }}{{ end }}`,
+            anilistSummary: `{{ if .Metadata }}{{ .Metadata.AniListSummary }}{{ end }}`,
+            anilistRating: {{ if .Metadata }}{{ .Metadata.AniListRating }}{{ else }}0{{ end }},
+
+            titleCN: `{{ if .Metadata }}{{ .Metadata.TitleCN }}{{ end }}`,
+            titleEN: `{{ if .Metadata }}{{ .Metadata.TitleEN }}{{ end }}`,
+            titleJP: `{{ if .Metadata }}{{ .Metadata.TitleJP }}{{ end }}`
+        })">
         {{ if .Image }}
-        <img src="{{ .Image }}" alt="{{ .Title }}"
-            class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105">
+        <img src="{{ .Image }}" alt="{{ .Title }}" loading="lazy"
+            class="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110">
         {{ else }}
-        <div class="w-full h-full flex items-center justify-center text-4xl opacity-10">📺</div>
+        <div class="w-full h-full flex flex-col items-center justify-center text-gray-300 bg-gray-50">
+            <span class="text-4xl mb-2">🎬</span>
+            <span class="text-xs font-mono">NO COVER</span>
+        </div>
         {{ end }}
 
-        <!-- Overlay Gradient -->
+        <!-- Overlay Gradient (Bottom) -->
         <div
-            class="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+            class="absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-black/80 via-black/40 to-transparent opacity-60 group-hover:opacity-80 transition-opacity pointer-events-none">
+        </div>
+
+        <!-- File Count Badge (Top Right) -->
+        <div
+            class="absolute top-2 right-2 bg-black/60 backdrop-blur-sm text-white text-[10px] font-bold px-2 py-1 rounded-full border border-white/10 flex items-center gap-1 shadow-sm">
+            <span>💾</span>
+            <span>{{ .FileCount }}</span>
+        </div>
+
+        <!-- Size Badge (Top Left) -->
+        <div
+            class="absolute top-2 left-2 bg-black/60 backdrop-blur-sm text-white text-[10px] font-bold px-2 py-1 rounded-full border border-white/10 shadow-sm">
+            {{ .TotalSize | toGB }}
         </div>
     </div>
 
     <!-- Card Body -->
-    <div class="p-4 flex flex-col flex-grow">
+    <div class="p-3 flex flex-col flex-grow">
         <!-- Title -->
         <div class="flex justify-between items-start gap-2 mb-2">
-            <h3 class="font-bold text-gray-800 text-lg line-clamp-2 leading-tight cursor-pointer hover:text-indigo-600 transition-colors"
-                @click="$dispatch('show-anime-details', { bangumiId: {{ .BangumiID }}, fileCount: {{ .FileCount }}, localId: {{ .ID }}, title: '{{ .Title }}', image: '{{ .Image }}' })">
+            <h3 class="font-bold text-gray-800 text-sm leading-snug line-clamp-2 cursor-pointer hover:text-primary transition-colors h-10"
+                title="{{ .Title }}" @click="$dispatch('show-anime-details', { 
+                    localId: {{ .ID }}, 
+                    bangumiId: {{ if .Metadata }}{{ .Metadata.BangumiID }}{{ else }}0{{ end }}, 
+                    tmdbId: {{ if .Metadata }}{{ .Metadata.TMDBID }}{{ else }}0{{ end }}, 
+                    fileCount: {{ .FileCount }}, 
+                    
+                    title: `{{ .Title }}`, 
+                    image: `{{ .Image }}`, 
+                    summary: `{{ .Summary }}`,
+
+                    bangumiTitle: `{{ if .Metadata }}{{ .Metadata.BangumiTitle }}{{ end }}`,
+                    bangumiImage: `{{ if .Metadata }}{{ .Metadata.BangumiImage }}{{ end }}`,
+                    bangumiSummary: `{{ if .Metadata }}{{ .Metadata.BangumiSummary }}{{ end }}`,
+                    bangumiRating: {{ if .Metadata }}{{ .Metadata.BangumiRating }}{{ else }}0{{ end }},
+
+                    tmdbTitle: `{{ if .Metadata }}{{ .Metadata.TMDBTitle }}{{ end }}`,
+                    tmdbImage: `{{ if .Metadata }}{{ .Metadata.TMDBImage }}{{ end }}`,
+                    tmdbSummary: `{{ if .Metadata }}{{ .Metadata.TMDBSummary }}{{ end }}`,
+                    tmdbRating: {{ if .Metadata }}{{ .Metadata.TMDBRating }}{{ else }}0{{ end }},
+
+                    anilistId: {{ if .Metadata }}{{ .Metadata.AniListID }}{{ else }}0{{ end }},
+                    anilistTitle: `{{ if .Metadata }}{{ .Metadata.AniListTitle }}{{ end }}`,
+                    anilistImage: `{{ if .Metadata }}{{ .Metadata.AniListImage }}{{ end }}`,
+                    anilistSummary: `{{ if .Metadata }}{{ .Metadata.AniListSummary }}{{ end }}`,
+                    anilistRating: {{ if .Metadata }}{{ .Metadata.AniListRating }}{{ else }}0{{ end }},
+
+                    titleCN: `{{ if .Metadata }}{{ .Metadata.TitleCN }}{{ end }}`,
+                    titleEN: `{{ if .Metadata }}{{ .Metadata.TitleEN }}{{ end }}`,
+                    titleJP: `{{ if .Metadata }}{{ .Metadata.TitleJP }}{{ end }}`
+                })">
                 {{ .Title }}
             </h3>
         </div>
 
-        <!-- Tags/Info -->
-        <div class="flex flex-wrap gap-2 mb-4 items-center">
-            {{ if gt .BangumiID 0 }}
-            <a href="https://bgm.tv/subject/{{ .BangumiID }}" target="_blank" @click.stop
-                class="px-2 py-0.5 rounded text-xs font-medium bg-pink-50 text-pink-600 flex items-center gap-1 hover:bg-pink-100 transition-colors"
-                title="Bangumi ID: {{ .BangumiID }}">
-                Bangumi
-            </a>
-            {{ else }}
-            <span class="px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-500 flex items-center gap-1">
-                ⚪ 未关联
-            </span>
-            {{ end }}
+        <!-- Source Toggles and Actions -->
+        <div class="mt-auto flex items-center justify-between gap-2 pt-2 border-t border-gray-50">
+            <div class="flex items-center gap-1">
+                <!-- Bangumi Toggle -->
+                {{ if and .Metadata (gt .Metadata.BangumiID 0) }}
+                <button hx-post="/api/local-anime/{{.ID}}/switch-source?source=bangumi" hx-swap="outerHTML"
+                    hx-target="#local-card-{{.ID}}" @click.stop
+                    class="h-6 px-2 rounded flex items-center justify-center text-[10px] font-bold transition-all border
+                    {{ if eq .Title .Metadata.BangumiTitle }}bg-pink-50 text-pink-600 border-pink-200 shadow-sm{{ else }}bg-white text-gray-400 border-gray-200 hover:border-pink-300 hover:text-pink-500{{ end }}"
+                    title="切换到 Bangumi">
+                    BGM
+                </button>
+                {{ end }}
 
-            <!-- Refresh Button -->
-            <button hx-post="/api/local-directories/{{ .ID }}/refresh-metadata" hx-swap="outerHTML"
-                hx-target="#local-card-{{.ID}}"
-                class="p-1 text-gray-400 hover:text-purple-500 hover:bg-purple-50 rounded transition-colors"
-                title="刷新元数据" @click.stop>
-                <span class="text-xs">🔄</span>
-            </button>
-        </div>
+                <!-- TMDB Toggle -->
+                {{ if and .Metadata (gt .Metadata.TMDBID 0) }}
+                <button hx-post="/api/local-anime/{{.ID}}/switch-source?source=tmdb" hx-swap="outerHTML"
+                    hx-target="#local-card-{{.ID}}" @click.stop
+                    class="h-6 px-2 rounded flex items-center justify-center text-[10px] font-bold transition-all border
+                    {{ if eq .Title .Metadata.TMDBTitle }}bg-blue-50 text-blue-600 border-blue-200 shadow-sm{{ else }}bg-white text-gray-400 border-gray-200 hover:border-blue-300 hover:text-blue-500{{ end }}"
+                    title="切换到 TMDB">
+                    TMDB
+                </button>
+                {{ end }}
 
-        <!-- Stats -->
-        <div class="mt-auto pt-3 border-t border-gray-50 flex justify-between items-center text-sm text-gray-500">
-            <div class="flex items-center gap-1.5" title="文件数量">
-                <span>📄</span>
-                <span class="font-medium">{{ .FileCount }}</span>
+                <!-- AniList Toggle -->
+                {{ if and .Metadata (gt .Metadata.AniListID 0) }}
+                <button hx-post="/api/local-anime/{{.ID}}/switch-source?source=anilist" hx-swap="outerHTML"
+                    hx-target="#local-card-{{.ID}}" @click.stop
+                    class="h-6 px-2 rounded flex items-center justify-center text-[10px] font-bold transition-all border
+                    {{ if eq .Title .Metadata.AniListTitle }}bg-indigo-50 text-indigo-600 border-indigo-200 shadow-sm{{ else }}bg-white text-gray-400 border-gray-200 hover:border-indigo-300 hover:text-indigo-500{{ end }}"
+                    title="切换到 AniList">
+                    AL
+                </button>
+                {{ end }}
+
+                <!-- Unlinked -->
+                {{ if or (not .Metadata) (and (eq .Metadata.BangumiID 0) (eq .Metadata.TMDBID 0) (eq .Metadata.AniListID
+                0)) }}
+                <span
+                    class="h-6 px-2 rounded flex items-center justify-center text-[10px] bg-gray-50 text-gray-400 border border-gray-100 cursor-help"
+                    title="未关联元数据">
+                    N/A
+                </span>
+                {{ end }}
             </div>
-            <div class="flex items-center gap-1.5" title="总大小">
-                <span>💾</span>
-                <span class="font-medium">{{ .TotalSize | toGB }}</span>
-            </div>
-        </div>
 
-        <!-- Path (Tooltip or small text) -->
-        <div class="mt-2 text-xs text-gray-400 truncate font-mono" title="{{ .Path }}">
-            {{ .Path }}
+            <div class="flex items-center gap-1">
+                <!-- Folder Info Tooltip -->
+                <div class="group/path relative">
+                    <div
+                        class="w-6 h-6 flex items-center justify-center text-gray-300 hover:text-gray-500 cursor-help transition-colors rounded hover:bg-gray-100">
+                        📁
+                    </div>
+                    <div
+                        class="absolute bottom-full right-0 mb-2 hidden group-hover/path:block w-max max-w-[200px] z-20">
+                        <div class="bg-gray-800 text-white text-xs rounded px-2 py-1 break-all shadow-lg">
+                            <div class="font-mono opacity-75 mb-0.5 text-[10px] uppercase">Path</div>
+                            {{ .Path }}
+                        </div>
+                        <!-- Arrow -->
+                        <div class="w-2 h-2 bg-gray-800 rotate-45 absolute -bottom-1 right-2"></div>
+                    </div>
+                </div>
+
+                <!-- Refresh Button -->
+                <button hx-post="/api/local-directories/{{ .ID }}/refresh-metadata" hx-swap="outerHTML"
+                    hx-target="#local-card-{{.ID}}"
+                    class="w-6 h-6 flex items-center justify-center text-gray-400 hover:text-primary hover:bg-primary/10 rounded transition-colors"
+                    title="刷新元数据" @click.stop>
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15">
+                        </path>
+                    </svg>
+                </button>
+            </div>
         </div>
     </div>
 </div>

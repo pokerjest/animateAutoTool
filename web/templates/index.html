@@ -144,15 +144,22 @@
                 <!-- TMDB Status -->
                 <div class="flex items-center justify-between text-sm">
                     <span class="text-gray-600">TMDB</span>
-                    {{ if .TMDBConnected }}
-                    <span class="text-blue-500 font-bold flex items-center gap-1">
-                        <span class="w-2 h-2 rounded-full bg-blue-500"></span> 已配置
-                    </span>
-                    {{ else }}
-                    <span class="text-gray-400 font-bold flex items-center gap-1">
-                        <span class="w-2 h-2 rounded-full bg-gray-300"></span> 未配置
-                    </span>
-                    {{ end }}
+                    <div id="tmdb-status" hx-get="/api/settings/tmdb-status?style=dashboard" hx-trigger="load"
+                        hx-swap="outerHTML">
+                        <span class="text-gray-400 font-bold flex items-center gap-1">
+                            <span class="w-2 h-2 rounded-full bg-gray-300 animate-pulse"></span> 检查中...
+                        </span>
+                    </div>
+                </div>
+                <!-- AniList Status -->
+                <div class="flex items-center justify-between text-sm">
+                    <span class="text-gray-600">AniList</span>
+                    <div id="anilist-status" hx-get="/api/settings/anilist-status?style=dashboard" hx-trigger="load"
+                        hx-swap="outerHTML">
+                        <span class="text-gray-400 font-bold flex items-center gap-1">
+                            <span class="w-2 h-2 rounded-full bg-gray-300 animate-pulse"></span> 检查中...
+                        </span>
+                    </div>
                 </div>
             </div>
         </div>

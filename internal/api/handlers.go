@@ -2,15 +2,16 @@ package api
 
 import (
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"net/url"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"bytes"
+	"encoding/json"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pokerjest/animateAutoTool/internal/bangumi"
@@ -153,7 +154,7 @@ func DashboardHandler(c *gin.Context) {
 func SubscriptionsHandler(c *gin.Context) {
 	skip := isHTMX(c)
 	var subs []model.Subscription
-	if err := db.DB.Find(&subs).Error; err != nil {
+	if err := db.DB.Preload("Metadata").Find(&subs).Error; err != nil {
 		log.Printf("Error fetching subscriptions: %v", err)
 	}
 
@@ -201,19 +202,18 @@ func createSubscriptionInternal(sub *model.Subscription) error {
 			q := u.Query()
 			if bidStr := q.Get("bangumiId"); bidStr != "" {
 				if bid, err := strconv.Atoi(bidStr); err == nil {
-					sub.BangumiID = bid
+					if sub.Metadata == nil {
+						sub.Metadata = &model.AnimeMetadata{}
+					}
+					sub.Metadata.BangumiID = bid
 				}
 			}
 		}
 	}
 
-	// Fallback: Search by title if no ID found
-	if sub.BangumiID == 0 && sub.Title != "" {
-		bgmClient := bangumi.NewClient("", "", "")
-		if res, err := bgmClient.SearchSubject(sub.Title); err == nil && res != nil {
-			sub.BangumiID = res.ID
-		}
-	}
+	// Enrich Metadata (Bangumi & TMDB)
+	svc := service.NewLocalAnimeService()
+	svc.EnrichSubscriptionMetadata(sub)
 
 	sub.IsActive = true
 
@@ -455,15 +455,17 @@ func UpdateSubscriptionHandler(c *gin.Context) {
 		return
 	}
 
-	// Check if Title changed, reset BangumiID if so
+	// Check if Title changed, reset metadata ID search if so
 	if sub.Title != input.Title {
 		sub.Title = input.Title
 		// Re-clean title just in case
 		// Reset ID and try to find again immediately
-		sub.BangumiID = 0
-		bgmClient := bangumi.NewClient("", "", "")
-		if res, err := bgmClient.SearchSubject(sub.Title); err == nil && res != nil {
-			sub.BangumiID = res.ID
+		if sub.Metadata != nil {
+			sub.Metadata.BangumiID = 0
+			bgmClient := bangumi.NewClient("", "", "")
+			if res, err := bgmClient.SearchSubject(sub.Title); err == nil && res != nil {
+				sub.Metadata.BangumiID = res.ID
+			}
 		}
 	}
 
@@ -490,21 +492,13 @@ func RefreshSubscriptionMetadataHandler(c *gin.Context) {
 		return
 	}
 
-	// Re-search Bangumi
-	bgmClient := bangumi.NewClient("", "", "")
-	if res, err := bgmClient.SearchSubject(sub.Title); err == nil && res != nil {
-		sub.BangumiID = res.ID
-		if err := db.DB.Save(&sub).Error; err != nil {
-			c.String(http.StatusInternalServerError, "Failed to save: "+err.Error())
-			return
-		}
-	} else {
-		// Optional: clear ID if not found? Or keep old?
-		// For now, let's keep old if search fails, but maybe log it.
-		// If user explicitly asks to refresh, maybe they expect a fix.
-		// But if network fails, we shouldn't wipe it.
-		// Let's only update if we found a valid ID.
-		log.Printf("RefreshMetadata: No match found for %s", sub.Title)
+	// Enrich Metadata using shared service
+	svc := service.NewLocalAnimeService()
+	svc.EnrichSubscriptionMetadata(&sub)
+
+	if err := db.DB.Save(&sub).Error; err != nil {
+		c.String(http.StatusInternalServerError, "Failed to save: "+err.Error())
+		return
 	}
 
 	// Sleep for smooth UI feel
@@ -514,6 +508,56 @@ func RefreshSubscriptionMetadataHandler(c *gin.Context) {
 	var count int64
 	db.DB.Model(&model.DownloadLog{}).Where("subscription_id = ?", sub.ID).Count(&count)
 	sub.DownloadedCount = count
+
+	c.HTML(http.StatusOK, "subscription_card.html", sub)
+}
+
+// SwitchSubscriptionSourceHandler 切换订阅的数据源并全局同步
+func SwitchSubscriptionSourceHandler(c *gin.Context) {
+	id := c.Param("id")
+	source := c.Query("source")
+
+	var sub model.Subscription
+	if err := db.DB.Preload("Metadata").First(&sub, id).Error; err != nil {
+		c.String(http.StatusNotFound, "Not Found")
+		return
+	}
+
+	if sub.Metadata == nil {
+		c.String(http.StatusBadRequest, "No metadata associated")
+		return
+	}
+
+	m := sub.Metadata
+	switch source {
+	case "tmdb":
+		if m.TMDBID != 0 {
+			m.Title = m.TMDBTitle
+			m.Image = m.TMDBImage
+			m.Summary = m.TMDBSummary
+		}
+	case "bangumi":
+		if m.BangumiID != 0 {
+			m.Title = m.BangumiTitle
+			m.Image = m.BangumiImage
+			m.Summary = m.BangumiSummary
+		}
+	case "anilist":
+		if m.AniListID != 0 {
+			m.Title = m.AniListTitle
+			m.Image = m.AniListImage
+			m.Summary = m.AniListSummary
+		}
+	}
+
+	if err := db.DB.Save(m).Error; err != nil {
+		c.String(http.StatusInternalServerError, "Failed to save metadata")
+		return
+	}
+
+	// Trigger global sync (updates the subscription itself + any local folders)
+	svc := service.NewLocalAnimeService()
+	svc.SyncMetadataToModels(m)
 
 	c.HTML(http.StatusOK, "subscription_card.html", sub)
 }
@@ -556,11 +600,14 @@ func UpdateSettingsHandler(c *gin.Context) {
 		model.ConfigKeyQBUsername,
 		model.ConfigKeyQBPassword,
 		model.ConfigKeyBaseDir,
-		model.ConfigKeyBangumiAccessToken,
+		model.ConfigKeyBangumiRefreshToken,
 		model.ConfigKeyTMDBToken,
+		model.ConfigKeyAniListToken,
 		model.ConfigKeyProxyURL,
 		model.ConfigKeyProxyBangumi,
+		model.ConfigKeyProxyBangumi,
 		model.ConfigKeyProxyTMDB,
+		model.ConfigKeyProxyAniList,
 	}
 
 	for _, key := range keys {
@@ -612,6 +659,9 @@ func UpdateSettingsHandler(c *gin.Context) {
 	// 5. Trigger TMDB Refresh OOB
 	tmdbStatusOOB := RenderTMDBStatusOOB()
 
+	// 6. Trigger AniList Refresh OOB
+	anilistStatusOOB := RenderAniListStatusOOB()
+
 	c.Header("Content-Type", "text/html")
 	// Main response for #save-result + OOB blocks
 	c.String(http.StatusOK, fmt.Sprintf(`
@@ -619,7 +669,8 @@ func UpdateSettingsHandler(c *gin.Context) {
 		%s
 		%s
 		%s
-	`, qbStatusHtml, bangumiStatusOOB, tmdbStatusOOB))
+		%s
+	`, qbStatusHtml, bangumiStatusOOB, tmdbStatusOOB, anilistStatusOOB))
 }
 
 // QBSaveAndTestHandler saves QB settings and then tests connection
@@ -859,48 +910,21 @@ func GetMikanDashboardHandler(c *gin.Context) {
 
 func RefreshSubscriptionsHandler(c *gin.Context) {
 	var subs []model.Subscription
-	if err := db.DB.Find(&subs).Error; err != nil {
+	if err := db.DB.Preload("Metadata").Find(&subs).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch subscriptions"})
 		return
 	}
 
 	updatedCount := 0
-	bgmClient := bangumi.NewClient("", "", "") // Anonymous client
+	svc := service.NewLocalAnimeService()
 
-	// Compile regex for cleaning title: remove leading [...]
-	re := regexp.MustCompile(`^\[.*?\]\s*`)
-
-	for _, sub := range subs {
-		// Only try to update if BangumiID is missing
-		if sub.BangumiID == 0 {
-			queryTitle := sub.Title
-			cleaned := false
-
-			// Try cleaning title if it looks like [Subgroup] Title
-			if re.MatchString(queryTitle) {
-				cleanTitle := re.ReplaceAllString(queryTitle, "")
-				if cleanTitle != "" {
-					queryTitle = cleanTitle
-					cleaned = true
-				}
-			}
-
-			// Search by title (cleaned or original)
-			log.Printf("DEBUG: Refresh - Searching Bangumi for: '%s'", queryTitle)
-			if res, err := bgmClient.SearchSubject(queryTitle); err == nil && res != nil {
-				log.Printf("DEBUG: Refresh - Found ID: %d", res.ID)
-				sub.BangumiID = res.ID
-				// If we successfully matched with a cleaned title, update the title in DB too
-				if cleaned {
-					sub.Title = queryTitle
-				}
-				if err := db.DB.Save(&sub).Error; err == nil {
-					updatedCount++
-				}
-			}
-			// Be nice to the API
-			time.Sleep(500 * time.Millisecond)
+	for i := range subs {
+		svc.EnrichSubscriptionMetadata(&subs[i])
+		if err := db.DB.Save(&subs[i]).Error; err == nil {
+			updatedCount++
 		}
+		// Be nice to the API
+		time.Sleep(200 * time.Millisecond)
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -930,30 +954,66 @@ func GetBangumiSubjectHandler(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to fetch subject: %v", err)})
 		return
 	}
-
 	c.JSON(http.StatusOK, subject)
 }
 func GetTMDBStatusHandler(c *gin.Context) {
+	style := c.Query("style")
 	c.Header("Content-Type", "text/html")
-	c.String(http.StatusOK, RenderTMDBStatusOOBNoSwap())
+	c.String(http.StatusOK, RenderTMDBStatus(style))
 }
 
-// RenderTMDBStatusOOB returns the OOB swap HTML for TMDB status
+// RenderTMDBStatusOOB returns the OOB swap HTML for TMDB status (Settings page)
 func RenderTMDBStatusOOB() string {
-	content := RenderTMDBStatusOOBNoSwap()
+	content := RenderTMDBStatus("")
 	// Wrap with OOB swap attribute
 	return strings.Replace(content, `id="tmdb-status"`, `id="tmdb-status" hx-swap-oob="innerHTML"`, 1)
 }
 
-// RenderTMDBStatusOOBNoSwap returns the inner HTML for TMDB status (for direct GET)
-func RenderTMDBStatusOOBNoSwap() string {
+// RenderTMDBStatus returns HTML based on style ("" or "dashboard")
+func RenderTMDBStatus(style string) string {
+	connected, errStr := CheckTMDBConnection()
+
+	// Dashboard Style
+	if style == "dashboard" {
+		if connected {
+			return `<span class="text-emerald-600 font-bold flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-emerald-500"></span> 已连接</span>`
+		}
+		errText := "未连接"
+		if strings.Contains(errStr, "Token") {
+			errText = "未连接 (Token无效)"
+		} else if errStr != "" {
+			errText = "连接失败"
+		}
+		return fmt.Sprintf(`<span class="text-red-500 font-bold flex items-center gap-1" title="%s"><span class="w-2 h-2 rounded-full bg-red-500"></span> %s</span>`, errStr, errText)
+	}
+
+	// Default Settings Page Style (The Pill)
+	if connected {
+		return `<div id="tmdb-status"><div class="text-emerald-600 bg-emerald-50 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 border border-emerald-200">✅ 已连接 TMDB</div></div>`
+	}
+
+	// Error cases
+	if errStr == "Token missing" {
+		return `<div id="tmdb-status"><div class="text-sm text-gray-500 flex items-center gap-2"><span>🔴 未连接</span><span class="text-xs text-gray-400">(请先输入 Token 并保存)</span></div></div>`
+	}
+	if strings.Contains(errStr, "Token Invalid") {
+		return `<div id="tmdb-status"><div class="text-red-600 bg-red-50 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 border border-red-200">❌ 认证失败 (Token 无效)</div></div>`
+	}
+
+	return fmt.Sprintf(`<div id="tmdb-status"><div class="text-red-600 bg-red-50 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 border border-red-200">❌ 连接失败: %s</div></div>`, errStr)
+}
+
+func CheckTMDBConnection() (bool, string) {
 	var config model.GlobalConfig
 	if err := db.DB.Where("key = ?", model.ConfigKeyTMDBToken).First(&config).Error; err != nil || config.Value == "" {
-		return `<div id="tmdb-status"><div class="text-sm text-gray-500 flex items-center gap-2"><span>🔴 未连接</span><span class="text-xs text-gray-400">(请先输入 Token 并保存)</span></div></div>`
+		return false, "Token missing"
 	}
 
 	token := config.Value
-	req, _ := http.NewRequest("GET", "https://api.themoviedb.org/3/account", nil)
+	req, err := http.NewRequest("GET", "https://api.themoviedb.org/3/configuration", nil)
+	if err != nil {
+		return false, fmt.Sprintf("Internal Error: %v", err)
+	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Accept", "application/json")
 
@@ -973,28 +1033,206 @@ func RenderTMDBStatusOOBNoSwap() string {
 	}
 
 	client := &http.Client{
-		Timeout:   10 * time.Second, // Increase timeout for proxy
-		Transport: transport,
+		Timeout: 10 * time.Second,
 	}
-	resp, err := client.Do(req)
+	if transport != nil {
+		client.Transport = transport
+	}
 
+	resp, err := client.Do(req)
 	if err != nil {
-		log.Printf("TMDB Request Error: %v", err)
-		return fmt.Sprintf(`<div id="tmdb-status"><div class="text-red-600 bg-red-50 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 border border-red-200">❌ 连接失败: %v</div></div>`, err)
+		return false, err.Error()
 	}
 	defer resp.Body.Close()
 
-	log.Printf("TMDB Response Status: %d", resp.StatusCode)
-	if resp.StatusCode != 200 {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		log.Printf("TMDB Response Body: %s", string(bodyBytes))
-	}
-
 	if resp.StatusCode == 200 {
-		return `<div id="tmdb-status"><div class="text-emerald-600 bg-emerald-50 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 border border-emerald-200">✅ 已连接 TMDB</div></div>`
-	} else if resp.StatusCode == 401 {
-		return `<div id="tmdb-status"><div class="text-red-600 bg-red-50 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 border border-red-200">❌ 认证失败 (Token 无效)</div></div>`
+		return true, ""
+	}
+	if resp.StatusCode == 401 {
+		return false, "Token Invalid"
+	}
+	return false, fmt.Sprintf("HTTP %d", resp.StatusCode)
+}
+
+// Logic for AniList Status
+func GetAniListStatusHandler(c *gin.Context) {
+	style := c.Query("style")
+	c.Header("Content-Type", "text/html")
+	c.String(http.StatusOK, RenderAniListStatus(style))
+}
+
+func RenderAniListStatusOOB() string {
+	content := RenderAniListStatus("")
+	return strings.Replace(content, `id="anilist-status"`, `id="anilist-status" hx-swap-oob="innerHTML"`, 1)
+}
+
+func RenderAniListStatus(style string) string {
+	connected, username, errStr := CheckAniListConnection()
+
+	// Dashboard Style
+	if style == "dashboard" {
+		if connected {
+			return `<span class="text-emerald-600 font-bold flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-emerald-500"></span> 已连接</span>`
+		}
+		errText := "未连接"
+		if strings.Contains(errStr, "Token") {
+			errText = "未连接 (Token无效)"
+		} else if errStr != "" {
+			errText = "连接失败"
+		}
+		return fmt.Sprintf(`<span class="text-red-500 font-bold flex items-center gap-1" title="%s"><span class="w-2 h-2 rounded-full bg-red-500"></span> %s</span>`, errStr, errText)
 	}
 
-	return fmt.Sprintf(`<div id="tmdb-status"><div class="text-amber-600 bg-amber-50 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 border border-amber-200">⚠️ 连接异常 (HTTP %d)</div></div>`, resp.StatusCode)
+	if connected {
+		return fmt.Sprintf(`<div id="anilist-status"><div class="text-emerald-600 bg-emerald-50 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 border border-emerald-200">✅ 已连接 AniList (%s)</div></div>`, username)
+	}
+
+	if errStr == "Token missing" {
+		return `<div id="anilist-status"><div class="text-sm text-gray-500 flex items-center gap-2"><span>🔴 未连接</span><span class="text-xs text-gray-400">(请先输入 Token 并保存)</span></div></div>`
+	}
+	if strings.Contains(errStr, "Token Invalid") || strings.Contains(errStr, "401") || strings.Contains(errStr, "400") {
+		return fmt.Sprintf(`<div id="anilist-status"><div class="text-red-600 bg-red-50 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 border border-red-200">❌ 认证失败 (%s)</div></div>`, errStr)
+	}
+
+	return fmt.Sprintf(`<div id="anilist-status"><div class="text-red-600 bg-red-50 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 border border-red-200">❌ 连接失败: %s</div></div>`, errStr)
+}
+
+type AniListViewerQuery struct {
+	Viewer struct {
+		Name string `json:"name"`
+		Id   int    `json:"id"`
+	} `json:"Viewer"`
+}
+
+type AniListResponse struct {
+	Data   AniListViewerQuery `json:"data"`
+	Errors []struct {
+		Message string `json:"message"`
+	} `json:"errors"`
+}
+
+func CheckAniListConnection() (bool, string, string) {
+	var config model.GlobalConfig
+	if err := db.DB.Where("key = ?", model.ConfigKeyAniListToken).First(&config).Error; err != nil || config.Value == "" {
+		return false, "", "Token missing"
+	}
+
+	token := strings.TrimSpace(config.Value)
+	// Remove "Bearer " prefix if present (case-insensitive)
+	lowerToken := strings.ToLower(token)
+	if strings.HasPrefix(lowerToken, "bearer ") {
+		token = strings.TrimSpace(token[7:])
+	}
+
+	if token == "" {
+		return false, "", "Token missing"
+	}
+
+	query := `{"query": "{ Viewer { name id } }"}`
+
+	req, err := http.NewRequest("POST", "https://graphql.anilist.co", bytes.NewBufferString(query))
+	if err != nil {
+		return false, "", fmt.Sprintf("Internal Error: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+
+	// Check Proxy
+	var proxyConfig model.GlobalConfig
+	var proxyEnabled model.GlobalConfig
+	var transport *http.Transport
+
+	db.DB.Where("key = ?", model.ConfigKeyProxyAniList).First(&proxyEnabled)
+
+	if proxyEnabled.Value == "true" {
+		if err := db.DB.Where("key = ?", model.ConfigKeyProxyURL).First(&proxyConfig).Error; err == nil && proxyConfig.Value != "" {
+			if proxyUrl, err := url.Parse(proxyConfig.Value); err == nil {
+				transport = &http.Transport{Proxy: http.ProxyURL(proxyUrl)}
+			}
+		}
+	}
+
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+	}
+	if transport != nil {
+		client.Transport = transport
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return false, "", err.Error()
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return false, "", fmt.Sprintf("HTTP %d", resp.StatusCode)
+	}
+
+	var result AniListResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return false, "", "Decode Error"
+	}
+
+	if len(result.Errors) > 0 {
+		return false, "", result.Errors[0].Message
+	}
+
+	return true, result.Data.Viewer.Name, ""
+}
+
+// GetPosterHandler handles image requests from the database
+func GetPosterHandler(c *gin.Context) {
+	id := c.Param("id")
+	source := c.Query("source") // source can be 'active', 'bangumi', 'tmdb', 'anilist'
+
+	var m model.AnimeMetadata
+	if err := db.DB.First(&m, id).Error; err != nil {
+		c.Status(http.StatusNotFound)
+		return
+	}
+
+	var data []byte
+	switch source {
+	case "bangumi":
+		data = m.BangumiImageRaw
+	case "tmdb":
+		data = m.TMDBImageRaw
+	case "anilist":
+		data = m.AniListImageRaw
+	default:
+		// Default to current active source or first available
+		if m.Title == m.BangumiTitle && len(m.BangumiImageRaw) > 0 {
+			data = m.BangumiImageRaw
+		} else if m.Title == m.TMDBTitle && len(m.TMDBImageRaw) > 0 {
+			data = m.TMDBImageRaw
+		} else if m.Title == m.AniListTitle && len(m.AniListImageRaw) > 0 {
+			data = m.AniListImageRaw
+		} else {
+			// fallback to whatever is not empty
+			if len(m.BangumiImageRaw) > 0 {
+				data = m.BangumiImageRaw
+			} else if len(m.TMDBImageRaw) > 0 {
+				data = m.TMDBImageRaw
+			} else if len(m.AniListImageRaw) > 0 {
+				data = m.AniListImageRaw
+			}
+		}
+	}
+
+	if len(data) == 0 {
+		c.Status(http.StatusNotFound)
+		return
+	}
+
+	// Basic content type detection (or we could store it in DB too)
+	contentType := "image/jpeg"
+	if len(data) > 4 && string(data[1:4]) == "PNG" {
+		contentType = "image/png"
+	} else if len(data) > 3 && string(data[:3]) == "GIF" {
+		contentType = "image/gif"
+	}
+
+	c.Data(http.StatusOK, contentType, data)
 }

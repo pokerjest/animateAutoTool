@@ -306,6 +306,10 @@ func scrapeSubjectHTML(htmlContent string, id int) *Subject {
 		s.NameCN = s.Name
 	}
 
+	if s.Name == "" {
+		return nil
+	}
+
 	return s
 }
 

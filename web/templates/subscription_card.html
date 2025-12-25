@@ -21,8 +21,35 @@
         <div class="flex-1 min-w-0 flex flex-col">
             <div class="flex justify-between items-start gap-2">
                 <h3 class="font-bold text-base text-gray-800 line-clamp-2 leading-snug mb-2 hover:text-primary transition-colors cursor-pointer hover:underline"
-                    title="点击查看详情"
-                    @click.stop="$dispatch('show-anime-details', { bangumiId: {{ .BangumiID }}, title: '{{ .Title }}', image: '{{ .Image }}' })">
+                    title="点击查看详情" @click.stop="$dispatch('show-anime-details', { 
+                        subId: {{ .ID }},
+                        bangumiId: {{ if .Metadata }}{{ .Metadata.BangumiID }}{{ else }}0{{ end }}, 
+                        title: '{{ .Title }}', 
+                        image: '{{ .Image }}',
+                        tmdbId: {{ if .Metadata }}{{ .Metadata.TMDBID }}{{ else }}0{{ end }},
+                        tmdbTitle: '{{ if .Metadata }}{{ .Metadata.TMDBTitle }}{{ end }}',
+                        tmdbImage: '{{ if .Metadata }}{{ .Metadata.TMDBImage }}{{ end }}',
+                        tmdbSummary: `{{ if .Metadata }}{{ .Metadata.TMDBSummary }}{{ end }}`,
+                        bangumiTitle: '{{ if .Metadata }}{{ .Metadata.BangumiTitle }}{{ end }}',
+                        bangumiImage: '{{ if .Metadata }}{{ .Metadata.BangumiImage }}{{ end }}',
+                        bangumiSummary: `{{ if .Metadata }}{{ .Metadata.BangumiSummary }}{{ end }}`,
+                        bangumiRating: {{ if .Metadata }}{{ .Metadata.BangumiRating }}{{ else }}0{{ end }},
+                        
+                        tmdbTitle: '{{ if .Metadata }}{{ .Metadata.TMDBTitle }}{{ end }}',
+                        tmdbImage: '{{ if .Metadata }}{{ .Metadata.TMDBImage }}{{ end }}',
+                        tmdbSummary: `{{ if .Metadata }}{{ .Metadata.TMDBSummary }}{{ end }}`,
+                        tmdbRating: {{ if .Metadata }}{{ .Metadata.TMDBRating }}{{ else }}0{{ end }},
+                        
+                        anilistId: {{ if .Metadata }}{{ .Metadata.AniListID }}{{ else }}0{{ end }},
+                        anilistTitle: `{{ if .Metadata }}{{ .Metadata.AniListTitle }}{{ end }}`,
+                        anilistImage: `{{ if .Metadata }}{{ .Metadata.AniListImage }}{{ end }}`,
+                        anilistSummary: `{{ if .Metadata }}{{ .Metadata.AniListSummary }}{{ end }}`,
+                        anilistRating: {{ if .Metadata }}{{ .Metadata.AniListRating }}{{ else }}0{{ end }},
+
+                        titleCN: `{{ if .Metadata }}{{ .Metadata.TitleCN }}{{ end }}`,
+                        titleEN: `{{ if .Metadata }}{{ .Metadata.TitleEN }}{{ end }}`,
+                        titleJP: `{{ if .Metadata }}{{ .Metadata.TitleJP }}{{ end }}`
+                    })">
                     {{ .Title }}
                 </h3>
             </div>
@@ -42,11 +69,11 @@
                     {{ .Season }}
                 </span>
                 {{ end }}
-                {{ if gt .BangumiID 0 }}
-                <a href="https://bgm.tv/subject/{{ .BangumiID }}" target="_blank"
+                {{ if and .Metadata (gt .Metadata.BangumiID 0) }}
+                <a href="https://bgm.tv/subject/{{ .Metadata.BangumiID }}" target="_blank"
                     class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-pink-50 text-pink-600 border border-pink-100 font-medium whitespace-nowrap hover:bg-pink-100 transition-colors"
-                    title="Bangumi ID: {{ .BangumiID }}" @click.stop>
-                    {{ .BangumiID }}
+                    title="Bangumi ID: {{ .Metadata.BangumiID }}" @click.stop>
+                    BGM: {{ .Metadata.BangumiID }}
                 </a>
                 {{ end }}
             </div>

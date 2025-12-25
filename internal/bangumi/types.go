@@ -52,5 +52,6 @@ type Subject struct {
 		Name  string `json:"name"`
 		Count int    `json:"count"`
 	} `json:"tags"`
-	Eps int `json:"eps"`
+	Date string `json:"date"`
+	Eps  int    `json:"eps"`
 }

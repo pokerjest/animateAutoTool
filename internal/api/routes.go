@@ -12,7 +12,9 @@ import (
 
 func InitRoutes(r *gin.Engine) {
 	// Perform startup cleanup
-	service.NewLocalAnimeService().CleanupGarbage()
+	svc := service.NewLocalAnimeService()
+	svc.CleanupGarbage()
+	svc.StartMetadataMigration() // Start background image caching
 
 	// 注册模板函数
 	r.SetFuncMap(template.FuncMap{
@@ -60,6 +62,7 @@ func InitRoutes(r *gin.Engine) {
 		apiGroup.POST("/subscriptions/:id/refresh-metadata", RefreshSubscriptionMetadataHandler)
 		apiGroup.PUT("/subscriptions/:id", UpdateSubscriptionHandler)
 		apiGroup.DELETE("/subscriptions/:id", DeleteSubscriptionHandler)
+		apiGroup.POST("/subscriptions/:id/switch-source", SwitchSubscriptionSourceHandler)
 		apiGroup.GET("/search", SearchAnimeHandler)
 		apiGroup.GET("/search/subgroups", GetSubgroupsHandler)
 		apiGroup.GET("/preview", PreviewRSSHandler)
@@ -71,6 +74,8 @@ func InitRoutes(r *gin.Engine) {
 		apiGroup.POST("/settings/qb-save-test", QBSaveAndTestHandler)
 		apiGroup.POST("/settings/bangumi-save", BangumiSaveHandler)
 		apiGroup.GET("/settings/qb-status", GetQBStatusHandler)
+		apiGroup.GET("/settings/tmdb-status", GetTMDBStatusHandler)
+		apiGroup.GET("/settings/anilist-status", GetAniListStatusHandler)
 		apiGroup.POST("/settings/test-connection", TestConnectionHandler)
 
 		// Local Anime
@@ -81,6 +86,7 @@ func InitRoutes(r *gin.Engine) {
 		apiGroup.POST("/local-directories/:id/rename-preview", PreviewDirectoryRenameHandler)
 		apiGroup.POST("/local-directories/:id/rename", ApplyDirectoryRenameHandler)
 		apiGroup.POST("/local-directories/:id/refresh-metadata", RefreshLocalAnimeMetadataHandler)
+		apiGroup.POST("/local-anime/:id/switch-source", SwitchLocalAnimeSourceHandler)
 
 		// Backup
 		apiGroup.GET("/backup/export", ExportBackupHandler)
@@ -90,6 +96,7 @@ func InitRoutes(r *gin.Engine) {
 
 		// Bangumi Integration
 		apiGroup.GET("/bangumi/login", BangumiLoginHandler)
+		apiGroup.GET("/posters/:id", GetPosterHandler)
 		apiGroup.GET("/bangumi/callback", BangumiCallbackHandler)
 		apiGroup.GET("/bangumi/profile", BangumiProfileHandler)
 		apiGroup.POST("/bangumi/logout", BangumiLogoutHandler)

@@ -7,8 +7,10 @@
     loadingDetails: false,
     showDetailsModal: false,
     detailsData: null,
+    modalRaw: null,        // New: Raw event data
+    activeSource: 'bangumi', // New: 'bangumi' or 'tmdb'
     currentFileCount: 0,
-    currentLocalId: 0, // Store Local DB ID
+    currentLocalId: 0,
     inputProgress: 0,
     updatingCollection: false,
     updatingComplete: false,
@@ -20,6 +22,117 @@
         this.toast.show = true;
         setTimeout(() => { this.toast.show = false }, 3000);
     },
+    // New: Unified Open Logic
+    async openDetails(data) {
+        this.modalRaw = data;
+        this.showDetailsModal = true;
+        this.currentLocalId = data.localId || 0;
+        this.currentFileCount = data.fileCount || 0;
+
+        // Auto-select source based on active title vs cached titles
+        // Default to Bangumi if matched, else if TMDB matched use TMDB, else default to 'bangumi' (first choice)
+        // Or simply: check if title matches tmdbTitle strictly?
+        // Let's default to Bangumi unless active Title is clearly TMDB's
+        if (data.tmdbId > 0 && data.title === data.tmdbTitle && data.title !== data.bangumiTitle) {
+             this.switchSource('tmdb');
+        } else {
+             this.switchSource('bangumi');
+        }
+    },
+    async switchSource(source) {
+        this.activeSource = source;
+        if (source === 'tmdb') {
+            this.loadingDetails = false;
+            // Use Cached TMDB Data
+            // Map to Bangumi-like structure for the template
+            this.detailsData = {
+                id: this.modalRaw.tmdbId,
+                name: this.modalRaw.tmdbTitle,
+                name_cn: '', 
+                images: { large: this.modalRaw.tmdbImage },
+                summary: this.modalRaw.tmdbSummary || '暂无 TMDB 简介',
+                tags: [],
+                rating: { score: this.modalRaw.tmdbRating || 'N/A' },
+                air_date: ''
+            };
+            if (!this.modalRaw.tmdbId) {
+                this.detailsData.summary = '未关联 TMDB';
+                this.detailsData.name = '无 TMDB 数据';
+            }
+        } else if (source === 'anilist') {
+            this.loadingDetails = false;
+            this.detailsData = {
+                id: this.modalRaw.anilistId,
+                name: this.modalRaw.anilistTitle,
+                name_cn: '', 
+                images: { large: this.modalRaw.anilistImage },
+                summary: this.modalRaw.anilistSummary || '暂无 AniList 简介',
+                tags: [],
+                rating: { score: this.modalRaw.anilistRating || 'N/A' },
+                air_date: ''
+            };
+            if (!this.modalRaw.anilistId) {
+                this.detailsData.summary = '未关联 AniList';
+                this.detailsData.name = '无 AniList 数据';
+            }
+        } else {
+            // Bangumi Logic
+            // First set fallback from cache
+            this.detailsData = {
+                id: this.modalRaw.bangumiId,
+                name: this.modalRaw.bangumiTitle || this.modalRaw.title,
+                name_cn: '', 
+                images: { large: this.modalRaw.bangumiImage || this.modalRaw.image },
+                summary: this.modalRaw.bangumiSummary || '正在加载详细信息...',
+                tags: [],
+                rating: { score: this.modalRaw.bangumiRating || '...' },
+                air_date: ''
+            };
+
+            if (!this.modalRaw.bangumiId) {
+                this.loadingDetails = false;
+                this.detailsData.summary = '未关联 Bangumi';
+                this.detailsData.name = '无 Bangumi 数据';
+                return;
+            }
+
+            this.loadingDetails = true;
+            fetch('/api/bangumi/subject/' + this.modalRaw.bangumiId)
+                .then(res => {
+                    if (!res.ok) throw new Error('API Error');
+                    return res.json();
+                })
+                .then(data => {
+                    if (data.error) throw new Error(data.error);
+                    // Merge, keep ID/images if valid
+                    this.detailsData = data;
+                })
+                .catch(err => {
+                    console.error(err);
+                    this.showToast('获取 Bangumi 详情失败，仅显示本地信息', 'error');
+                })
+                .finally(() => {
+                    this.loadingDetails = false;
+                });
+        }
+    },
+    async applyCurrentSource() {
+        if (!confirm('确定将当前数据源应用为封面和标题吗？')) return;
+        try {
+            const res = await fetch(`/api/local-anime/${this.currentLocalId}/switch-source?source=${this.activeSource}`, { 
+                method: 'POST' 
+            });
+            if (res.ok) {
+                this.showToast('✅ 切换成功！页面即将刷新');
+                setTimeout(() => window.location.reload(), 1000);
+            } else {
+                this.showToast('❌ 切换失败', 'error');
+            }
+        } catch(e) {
+             this.showToast('❌ 切换失败', 'error');
+        }
+    },
+
     async deleteDirectory(id) {
         if (!confirm('确定要移除该目录吗？')) return;
         try {
@@ -129,34 +242,7 @@
     }
 }" @show-anime-details.window="
     $event.stopPropagation();
-    showDetailsModal = true;
-    // Set fallback data immediately
-    detailsData = {
-        id: $event.detail.bangumiId,
-        name: $event.detail.title,
-        name_cn: $event.detail.title,
-        images: { large: $event.detail.image },
-        summary: '正在加载详细信息...',
-        tags: []
-    };
-    currentFileCount = $event.detail.fileCount || 0;
-    currentLocalId = $event.detail.localId || 0;
-    loadingDetails = false; // Show fallback immediately
-
-    fetch('/api/bangumi/subject/' + $event.detail.bangumiId)
-        .then(res => {
-            if (!res.ok) throw new Error('API Error');
-            return res.json();
-        })
-        .then(data => {
-            if (data.error) throw new Error(data.error);
-            detailsData = data;
-        })
-        .catch(err => {
-            console.error(err);
-            // Keep fallback data
-            showToast('获取详情失败，仅显示本地信息', 'error');
-        })
+    openDetails($event.detail);
 ">
     <!-- Header Section -->
     <div class="flex justify-between items-center">
@@ -321,208 +407,218 @@
         <span x-text="toast.message"></span>
     </div>
 
-    <!-- Anime Details Modal -->
+    <!-- Anime Details Modal (Redesigned) -->
     <div x-show="showDetailsModal" style="display: none;"
-        class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60 backdrop-blur-sm p-4"
-        x-transition.opacity>
-        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col"
-            @click.away="showDetailsModal = false">
-            <!-- Header -->
-            <div class="p-4 border-b flex justify-between items-center bg-gray-50">
-                <h3 class="text-lg font-bold text-gray-800">番剧详情</h3>
-                <button @click="showDetailsModal = false" class="text-gray-400 hover:text-gray-600">
-                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12">
-                        </path>
-                    </svg>
-                </button>
-            </div>
+        class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md"
+        x-transition:enter="transition ease-out duration-300" x-transition:enter-start="opacity-0 scale-95"
+        x-transition:enter-end="opacity-100 scale-100" x-transition:leave="transition ease-in duration-200"
+        x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95">
 
-            <!-- Content -->
-            <div class="p-6 overflow-y-auto custom-scrollbar">
-                <div x-show="loadingDetails" class="flex flex-col items-center justify-center py-12">
-                    <div class="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-600 mb-4"></div>
-                    <span class="text-gray-500">正在从 Bangumi 获取信息...</span>
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col md:flex-row relative"
+            @click.away="showDetailsModal = false">
+
+            <!-- Close Button (Absolute) -->
+            <button @click="showDetailsModal = false"
+                class="absolute top-4 right-4 z-10 p-2 bg-black/50 hover:bg-black/70 text-white rounded-full transition backdrop-blur-sm">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12">
+                    </path>
+                </svg>
+            </button>
+
+            <!-- Left Column: Poster & Quick Stats -->
+            <div
+                class="w-full md:w-80 bg-gray-50 p-6 flex flex-col gap-4 border-r border-gray-100 flex-shrink-0 overflow-y-auto md:overflow-visible">
+                <!-- Poster -->
+                <div class="relative w-full aspect-[2/3] rounded-xl shadow-lg overflow-hidden group bg-gray-200">
+                    <template x-if="detailsData?.images?.large">
+                        <img :src="detailsData?.images?.large" class="w-full h-full object-cover">
+                    </template>
+                    <template x-if="!detailsData?.images?.large">
+                        <div class="w-full h-full flex items-center justify-center text-gray-400 font-bold">NO COVER
+                        </div>
+                    </template>
                 </div>
 
-                <div x-show="!loadingDetails && detailsData" class="flex flex-col md:flex-row gap-6">
-                    <!-- Cover -->
-                    <div class="w-full md:w-1/3 flex-shrink-0">
-                        <img :src="detailsData?.images?.large" alt="Cover"
-                            class="w-full rounded-lg shadow-md object-cover aspect-[2/3]">
+                <!-- Source Switcher (Segmented Control) -->
+                <div class="flex p-1 bg-gray-200/50 rounded-lg">
+                    <button @click="switchSource('bangumi')"
+                        :class="activeSource === 'bangumi' ? 'bg-white shadow text-pink-600 font-bold' : 'text-gray-500 hover:text-gray-700'"
+                        class="flex-1 py-1.5 text-xs rounded-md transition-all flex items-center justify-center gap-1">
+                        <span>🌸</span> Bangumi
+                    </button>
+                    <button @click="switchSource('tmdb')"
+                        :class="activeSource === 'tmdb' ? 'bg-white shadow text-blue-600 font-bold' : 'text-gray-500 hover:text-gray-700'"
+                        class="flex-1 py-1.5 text-xs rounded-md transition-all flex items-center justify-center gap-1">
+                        <span>🎬</span> TMDB
+                    </button>
+                    <button @click="switchSource('anilist')"
+                        :class="activeSource === 'anilist' ? 'bg-white shadow text-indigo-600 font-bold' : 'text-gray-500 hover:text-gray-700'"
+                        class="flex-1 py-1.5 text-xs rounded-md transition-all flex items-center justify-center gap-1">
+                        <span>🅰️</span> AniList
+                    </button>
+                </div>
+
+                <!-- File Management Actions -->
+                <div class="mt-auto space-y-2">
+                    <button @click="openRenameModal(currentLocalId, detailsData?.name)"
+                        class="w-full py-2.5 rounded-xl bg-indigo-50 text-indigo-600 hover:bg-indigo-100 font-bold text-sm transition flex items-center justify-center gap-2">
+                        <span>✏️</span> 文件管理
+                    </button>
+
+                    <!-- Apply Source -->
+                    <div x-show="detailsData?.name !== modalRaw?.title || activeSource === (modalRaw.title === modalRaw.tmdbTitle ? 'bangumi' : 'tmdb')"
+                        x-transition>
+                        <button @click="applyCurrentSource()"
+                            class="w-full py-2.5 rounded-xl border border-gray-200 text-gray-600 hover:border-green-300 hover:bg-green-50 hover:text-green-700 font-bold text-sm transition flex items-center justify-center gap-2">
+                            <span>📌</span> 应用当前元数据
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Column: Info & Progress -->
+            <div class="flex-1 p-8 overflow-y-auto custom-scrollbar bg-white">
+                <!-- Loading State -->
+                <div x-show="loadingDetails" class="flex flex-col items-center justify-center h-full space-y-4">
+                    <div class="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-600"></div>
+                    <span class="text-sm text-gray-400">正在加载数据...</span>
+                </div>
+
+                <div x-show="!loadingDetails && detailsData" class="space-y-6">
+                    <!-- Title Header -->
+                    <div class="space-y-2">
+                        <h2 x-text="detailsData?.name"
+                            class="text-2xl sm:text-3xl font-black text-gray-800 leading-tight"></h2>
+
+                        <div class="flex flex-wrap gap-x-4 gap-y-1 items-center">
+                            <template x-if="modalRaw?.titleCN">
+                                <div class="flex items-center gap-1.5">
+                                    <span
+                                        class="text-[10px] font-bold bg-pink-50 text-pink-500 px-1.5 py-0.5 rounded border border-pink-100">中文</span>
+                                    <span class="text-sm font-medium text-gray-500" x-text="modalRaw.titleCN"></span>
+                                </div>
+                            </template>
+                            <template x-if="modalRaw?.titleEN">
+                                <div class="flex items-center gap-1.5">
+                                    <span
+                                        class="text-[10px] font-bold bg-blue-50 text-blue-500 px-1.5 py-0.5 rounded border border-blue-100">EN</span>
+                                    <span class="text-sm font-medium text-gray-500" x-text="modalRaw.titleEN"></span>
+                                </div>
+                            </template>
+                            <template x-if="modalRaw?.titleJP">
+                                <div class="flex items-center gap-1.5">
+                                    <span
+                                        class="text-[10px] font-bold bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded border border-gray-200">JP</span>
+                                    <span class="text-sm font-medium text-gray-500" x-text="modalRaw.titleJP"></span>
+                                </div>
+                            </template>
+                        </div>
                     </div>
 
-                    <!-- Info -->
-                    <div class="flex-1 space-y-4">
-                        <div>
-                            <h2 x-text="detailsData?.name" class="text-2xl font-bold text-gray-900 leading-tight"></h2>
-                            <h3 x-text="detailsData?.name_cn" class="text-lg text-gray-600 mt-1"></h3>
+                    <!-- Meta Row -->
+                    <div class="flex flex-wrap items-center gap-4 text-sm font-medium">
+                        <!-- Score -->
+                        <div
+                            class="flex items-center gap-1 text-amber-500 bg-amber-50 px-2.5 py-1 rounded-full border border-amber-100">
+                            <span class="text-xs">★</span>
+                            <span x-text="detailsData?.rating?.score || 'N/A'"></span>
                         </div>
-
-                        <div class="flex items-center gap-4">
-                            <div
-                                class="flex items-center gap-1 bg-amber-50 px-2 py-1 rounded-md border border-amber-100">
-                                <span class="text-amber-500 text-lg">★</span>
-                                <span x-text="detailsData?.rating?.score" class="font-bold text-gray-800"></span>
-                            </div>
-                            <span class="text-sm text-gray-500" x-text="detailsData?.air_date"></span>
-                        </div>
-
+                        <!-- Date -->
+                        <span class="text-gray-400" x-text="detailsData?.air_date || 'Unknown Date'"></span>
                         <!-- Tags -->
                         <div class="flex flex-wrap gap-2">
                             <template x-for="tag in (detailsData?.tags || []).slice(0, 5)">
                                 <span x-text="tag.name"
-                                    class="text-xs px-2 py-1 bg-indigo-50 text-indigo-600 rounded-full"></span>
+                                    class="text-xs text-indigo-500 bg-indigo-50 px-2 py-1 rounded-md"></span>
                             </template>
                         </div>
+                    </div>
 
-                        <div class="prose prose-sm text-gray-600 max-h-40 overflow-y-auto pr-2">
-                            <p x-text="detailsData?.summary" class="whitespace-pre-line"></p>
-                        </div>
+                    <!-- Summary -->
+                    <div
+                        class="prose prose-sm text-gray-600 leading-relaxed bg-gray-50/50 p-4 rounded-xl border border-gray-100 max-h-[30vh] overflow-y-auto custom-scrollbar">
+                        <p x-text="detailsData?.summary" class="whitespace-pre-line"></p>
+                    </div>
 
-                        <!-- Actions Area -->
-                        <div class="pt-4 mt-auto border-t border-gray-100">
+                    <!-- User Actions (Collection & Progress) -->
+                    <div class="border-t border-gray-100 pt-6">
+                        <h4
+                            class="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4 flex items-center justify-between">
+                            <span>Bangumi 同步</span>
+                            <span class="text-[10px] font-normal normal-case"
+                                x-text="modalRaw?.bangumiId ? ('ID: ' + modalRaw.bangumiId) : '未关联'"></span>
+                        </h4>
 
-                            <!-- 1. Collection Status -->
-                            <div class="mb-4">
-                                <label
-                                    class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 block">收藏状态</label>
-                                <div class="flex gap-2">
-                                    <!-- Watching (Status 3) -->
-                                    <button type="button" :disabled="updatingCollection" @click="
-                                                updatingCollection = true;
-                                                fetch('/api/bangumi/subject/' + detailsData?.id + '/collection', { 
-                                                    method: 'POST',
-                                                    headers: {'Content-Type': 'application/json'},
-                                                    body: JSON.stringify({status: 3}) 
-                                                })
-                                                .then(r => r.json())
-                                                .then(d => {
-                                                    if(d.error) showToast(d.error, 'error');
-                                                    else showToast('✅ ' + (d.message || '已标记为在看'));
-                                                })
-                                                .catch(e => showToast('❌ 请求失败', 'error'))
-                                                .finally(() => updatingCollection = false)
-                                            "
-                                        class="flex-1 bg-pink-100 text-pink-600 px-3 py-2 rounded-lg hover:bg-pink-200 transition flex items-center justify-center gap-2 disabled:opacity-50 font-medium text-sm">
-                                        <span x-show="!updatingCollection">📺</span>
-                                        <span x-show="updatingCollection" class="animate-spin">⏳</span>
-                                        <span>在看</span>
+                        <template x-if="modalRaw?.bangumiId">
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <!-- Collection Buttons -->
+                                <div class="flex gap-2 p-1 bg-gray-100 rounded-xl">
+                                    <button type="button" :disabled="updatingCollection"
+                                        @click="
+                                            updatingCollection = true;
+                                            fetch('/api/bangumi/subject/' + modalRaw.bangumiId + '/collection', { 
+                                                method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({status: 3}) 
+                                            }).then(r=>r.json()).then(d=>{showToast(d.message||'在看')}).finally(()=>updatingCollection=false)"
+                                        class="flex-1 py-2 rounded-lg text-sm font-bold transition-all hover:bg-white hover:shadow-sm text-pink-500 disabled:opacity-50 flex items-center justify-center gap-1">
+                                        <span x-show="updatingCollection" class="animate-spin text-xs">⏳</span>
+                                        <span>📺 在看</span>
                                     </button>
-
-                                    <!-- Completed (Status 2) -->
                                     <button type="button" :disabled="updatingComplete" @click="
-                                                updatingComplete = true;
-                                                // 1. Update Collection Status to 2 (Collect)
-                                                fetch('/api/bangumi/subject/' + detailsData?.id + '/collection', { 
-                                                    method: 'POST',
-                                                    headers: {'Content-Type': 'application/json'},
-                                                    body: JSON.stringify({status: 2}) 
-                                                })
-                                                .then(r => r.json())
-                                                .then(d => {
-                                                    if(d.error) throw new Error(d.error);
-                                                    showToast('✅ 已标记为看过');
-                                                    
-                                                    // 2. Auto Update Progress to Max (if eps > 0)
-                                                    const totalEps = detailsData?.eps || 0;
-                                                    if (totalEps > 0) {
-                                                        return fetch('/api/bangumi/subject/' + detailsData?.id + '/progress', { 
-                                                            method: 'POST', 
-                                                            headers: {'Content-Type': 'application/json'},
-                                                            body: JSON.stringify({episode_count: totalEps}) 
-                                                        });
-                                                    }
-                                                })
-                                                .then(r => r ? r.json() : null)
-                                                .then(d => {
-                                                    if(d && d.error) showToast('⚠️ 状态更新成功但进度同步失败: ' + d.error, 'error');
-                                                    else if(d) showToast('✅ 已自动同步进度至 ' + (detailsData?.eps || 0) + ' 集');
-                                                })
-                                                .catch(e => showToast('❌ ' + e.message, 'error'))
-                                                .finally(() => updatingComplete = false)
-                                            "
-                                        class="flex-1 bg-green-100 text-green-600 px-3 py-2 rounded-lg hover:bg-green-200 transition flex items-center justify-center gap-2 disabled:opacity-50 font-medium text-sm">
-                                        <span x-show="!updatingComplete">✅</span>
-                                        <span x-show="updatingComplete" class="animate-spin">⏳</span>
-                                        <span>看过 (完成)</span>
+                                            updatingComplete = true;
+                                            fetch('/api/bangumi/subject/' + modalRaw.bangumiId + '/collection', { 
+                                                method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({status: 2}) 
+                                            })
+                                            .then(r=>r.json())
+                                            .then(() => fetch('/api/bangumi/subject/' + modalRaw.bangumiId + '/progress', { 
+                                                    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({episode_count: detailsData?.eps||24}) 
+                                            }))
+                                            .then(()=>showToast('已标记看过'))
+                                            .finally(()=>updatingComplete=false)"
+                                        class="flex-1 py-2 rounded-lg text-sm font-bold transition-all hover:bg-white hover:shadow-sm text-green-500 disabled:opacity-50 flex items-center justify-center gap-1">
+                                        <span x-show="updatingComplete" class="animate-spin text-xs">⏳</span>
+                                        <span>✅ 看过</span>
                                     </button>
                                 </div>
-                            </div>
 
-                            <!-- 2. Progress Control -->
-                            <div>
-                                <label
-                                    class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 block">观看进度</label>
-                                <div class="flex gap-2 items-center">
-                                    <!-- Input -->
-                                    <div class="relative w-24">
-                                        <input type="number" x-model="inputProgress" min="0"
-                                            class="w-full px-3 py-2 border rounded-lg text-center font-mono focus:ring-2 focus:ring-indigo-500 outline-none">
-                                    </div>
+                                <!-- Progress Input -->
+                                <div
+                                    class="flex items-center gap-2 p-1 bg-gray-50 rounded-xl border border-gray-100 px-2">
+                                    <input type="number" x-model="inputProgress" placeholder="0"
+                                        class="w-12 bg-transparent text-center font-bold text-gray-700 focus:outline-none border-b border-transparent focus:border-indigo-500 transition-colors">
+                                    <span class="text-gray-300">/</span>
+                                    <span class="text-gray-400 text-sm font-bold"
+                                        x-text="detailsData?.eps || '?'"></span>
 
-                                    <!-- Update Button -->
-                                    <button type="button" :disabled="updatingProgress" @click="
-                                                updatingProgress = true;
-                                                fetch('/api/bangumi/subject/' + detailsData?.id + '/progress', { 
-                                                    method: 'POST', 
-                                                    headers: {'Content-Type': 'application/json'},
-                                                    body: JSON.stringify({episode_count: parseInt(inputProgress)}) 
-                                                })
-                                                .then(r => r.json())
-                                                .then(d => {
-                                                    if(d.error) showToast(d.error, 'error');
-                                                    else showToast('✅ ' + d.message);
-                                                })
-                                                .catch(e => showToast('❌ 请求失败', 'error'))
-                                                .finally(() => updatingProgress = false)
-                                            "
-                                        class="flex-1 bg-indigo-500 text-white px-3 py-2 rounded-lg hover:bg-indigo-600 transition flex items-center justify-center gap-2 disabled:opacity-70 shadow-sm text-sm font-medium">
+                                    <button
+                                        @click="
+                                        updatingProgress = true;
+                                        fetch('/api/bangumi/subject/' + modalRaw.bangumiId + '/progress', { 
+                                            method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({episode_count: parseInt(inputProgress)}) 
+                                        }).then(r=>r.json()).then(d=>showToast(d.message)).finally(()=>updatingProgress=false)"
+                                        class="ml-auto px-3 py-1.5 rounded-lg bg-gray-800 text-white text-xs font-bold hover:bg-gray-700 transition shadow-lg shadow-gray-200 flex items-center gap-1">
                                         <span x-show="updatingProgress" class="animate-spin">⏳</span>
-                                        <span>同步</span>
-                                    </button>
-
-                                    <!-- Reset Button -->
-                                    <button type="button" @click="
-                                                if(!confirm('确定要重置观看进度为 0 吗？')) return;
-                                                inputProgress = 0;
-                                                updatingProgress = true;
-                                                fetch('/api/bangumi/subject/' + detailsData?.id + '/progress', { 
-                                                    method: 'POST', 
-                                                    headers: {'Content-Type': 'application/json'},
-                                                    body: JSON.stringify({episode_count: 0}) 
-                                                })
-                                                .then(r => r.json())
-                                                .then(d => {
-                                                    if(d.error) showToast(d.error, 'error');
-                                                    else showToast('🔄 已重置进度');
-                                                })
-                                                .catch(e => showToast('❌ 请求失败', 'error'))
-                                                .finally(() => updatingProgress = false)
-                                            "
-                                        class="px-3 py-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition"
-                                        title="重置进度">
-                                        <span class="text-lg">↺</span>
+                                        同步
                                     </button>
                                 </div>
-                                <p class="text-[10px] text-gray-400 mt-1 pl-1"> * 默认为本地文件数量，可手动修改并同步</p>
                             </div>
-                        </div>
+                        </template>
 
-                        <!-- 3. File Actions (Rename) -->
-                        <div class="pt-4 mt-4 border-t border-gray-100">
-                            <button @click="openRenameModal(currentLocalId, detailsData?.name)"
-                                class="w-full bg-gray-100 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-200 transition flex items-center justify-center gap-2 font-medium">
-                                <span>✏️</span> 文件整理 & 重命名
-                            </button>
-                        </div>
+                        <template x-if="!modalRaw?.bangumiId">
+                            <div class="bg-gray-50 p-4 rounded-xl text-center text-gray-400 text-sm">
+                                ⚠️ 此番剧未关联 Bangumi ID，无法同步进度。
+                            </div>
+                        </template>
 
-
-
-                        <a :href="'https://bgm.tv/subject/' + detailsData?.id" target="_blank"
-                            class="block text-center text-xs text-indigo-400 hover:text-indigo-600 mt-2 transition-colors">
-                            在 Bangumi 上查看详情 &rarr;
-                        </a>
+                        <!-- BGM Link -->
+                        <template x-if="modalRaw?.bangumiId">
+                            <div class="mt-4 text-center">
+                                <a :href="'https://bgm.tv/subject/' + modalRaw.bangumiId" target="_blank"
+                                    class="inline-flex items-center gap-1 text-xs font-bold text-gray-300 hover:text-pink-400 transition-colors">
+                                    🔗 前往 Bangumi 番剧主页
+                                </a>
+                            </div>
+                        </template>
                     </div>
                 </div>
             </div>
