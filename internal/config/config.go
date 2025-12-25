@@ -32,7 +32,7 @@ func LoadConfig(configPath string) error {
 	v := viper.New()
 
 	// 默认值
-	v.SetDefault("server.port", 8080)
+	v.SetDefault("server.port", 8087)
 	v.SetDefault("server.mode", "release")
 	v.SetDefault("database.path", "data/animate.db")
 	v.SetDefault("log.level", "info")
