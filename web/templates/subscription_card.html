@@ -1,141 +1,159 @@
 {{ define "subscription_card.html" }}
 <div id="sub-card-{{.ID}}"
-    class="bg-white rounded-xl shadow-sm border border-gray-100 hover:shadow-md transition-all duration-300 relative group overflow-hidden flex flex-col">
+    class="bg-white/60 backdrop-blur-md rounded-2xl shadow-sm border border-white/70 hover:shadow-xl transition-all duration-300 hover:-translate-y-1 relative group overflow-hidden flex flex-col">
 
-    <div class="p-4 flex gap-4">
+    <div class="p-5 flex gap-5">
         <!-- Image Section -->
-        {{ if .Image }}
-        <div class="w-20 h-28 shrink-0 rounded-lg overflow-hidden shadow-inner bg-gray-100 relative">
+        <div class="w-24 h-32 shrink-0 rounded-xl overflow-hidden shadow-lg bg-gray-100 relative group/poster cursor-pointer"
+            @click.stop="$dispatch('show-anime-details', { 
+                subId: {{ .ID }},
+                bangumiId: {{ if .Metadata }}{{ .Metadata.BangumiID }}{{ else }}0{{ end }}, 
+                title: '{{ .Title }}', 
+                image: '{{ .Image }}',
+                tmdbId: {{ if .Metadata }}{{ .Metadata.TMDBID }}{{ else }}0{{ end }},
+                tmdbTitle: '{{ if .Metadata }}{{ .Metadata.TMDBTitle }}{{ end }}',
+                tmdbImage: '{{ if .Metadata }}{{ .Metadata.TMDBImage }}{{ end }}',
+                tmdbSummary: `{{ if .Metadata }}{{ .Metadata.TMDBSummary }}{{ end }}`,
+                bangumiTitle: '{{ if .Metadata }}{{ .Metadata.BangumiTitle }}{{ end }}',
+                bangumiImage: '{{ if .Metadata }}{{ .Metadata.BangumiImage }}{{ end }}',
+                bangumiSummary: `{{ if .Metadata }}{{ .Metadata.BangumiSummary }}{{ end }}`,
+                bangumiRating: {{ if .Metadata }}{{ .Metadata.BangumiRating }}{{ else }}0{{ end }},
+                tmdbRating: {{ if .Metadata }}{{ .Metadata.TMDBRating }}{{ else }}0{{ end }},
+                anilistId: {{ if .Metadata }}{{ .Metadata.AniListID }}{{ else }}0{{ end }},
+                anilistTitle: `{{ if .Metadata }}{{ .Metadata.AniListTitle }}{{ end }}`,
+                anilistImage: `{{ if .Metadata }}{{ .Metadata.AniListImage }}{{ end }}`,
+                anilistSummary: `{{ if .Metadata }}{{ .Metadata.AniListSummary }}{{ end }}`,
+                anilistRating: {{ if .Metadata }}{{ .Metadata.AniListRating }}{{ else }}0{{ end }},
+                titleCN: `{{ if .Metadata }}{{ .Metadata.TitleCN }}{{ end }}`,
+                titleEN: `{{ if .Metadata }}{{ .Metadata.TitleEN }}{{ end }}`,
+                titleJP: `{{ if .Metadata }}{{ .Metadata.TitleJP }}{{ end }}`
+            })">
+            {{ if .Image }}
             <img src="{{ .Image }}"
-                class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
+                class="w-full h-full object-cover transition-transform duration-500 group-hover/poster:scale-110"
                 loading="lazy" alt="{{.Title}}">
+            {{ else }}
+            <div class="w-full h-full flex items-center justify-center text-gray-300 text-3xl bg-gray-50">📺</div>
+            {{ end }}
+            <!-- Detail Overlay -->
+            <div
+                class="absolute inset-0 bg-black/40 opacity-0 group-hover/poster:opacity-100 transition-opacity flex items-center justify-center">
+                <span
+                    class="text-white text-xs font-bold bg-black/40 px-2 py-1 rounded-lg backdrop-blur-sm border border-white/20">详情</span>
+            </div>
         </div>
-        {{ else }}
-        <div
-            class="w-20 h-28 shrink-0 rounded-lg overflow-hidden shadow-inner bg-gray-50 flex items-center justify-center text-gray-300 relative">
-            <span class="text-2xl">📺</span>
-        </div>
-        {{ end }}
 
         <!-- Content Section -->
         <div class="flex-1 min-w-0 flex flex-col">
-            <div class="flex justify-between items-start gap-2">
-                <h3 class="font-bold text-base text-gray-800 line-clamp-2 leading-snug mb-2 hover:text-primary transition-colors cursor-pointer hover:underline"
-                    title="点击查看详情" @click.stop="$dispatch('show-anime-details', { 
-                        subId: {{ .ID }},
-                        bangumiId: {{ if .Metadata }}{{ .Metadata.BangumiID }}{{ else }}0{{ end }}, 
-                        title: '{{ .Title }}', 
-                        image: '{{ .Image }}',
-                        tmdbId: {{ if .Metadata }}{{ .Metadata.TMDBID }}{{ else }}0{{ end }},
-                        tmdbTitle: '{{ if .Metadata }}{{ .Metadata.TMDBTitle }}{{ end }}',
-                        tmdbImage: '{{ if .Metadata }}{{ .Metadata.TMDBImage }}{{ end }}',
-                        tmdbSummary: `{{ if .Metadata }}{{ .Metadata.TMDBSummary }}{{ end }}`,
-                        bangumiTitle: '{{ if .Metadata }}{{ .Metadata.BangumiTitle }}{{ end }}',
-                        bangumiImage: '{{ if .Metadata }}{{ .Metadata.BangumiImage }}{{ end }}',
-                        bangumiSummary: `{{ if .Metadata }}{{ .Metadata.BangumiSummary }}{{ end }}`,
-                        bangumiRating: {{ if .Metadata }}{{ .Metadata.BangumiRating }}{{ else }}0{{ end }},
-                        
-                        tmdbTitle: '{{ if .Metadata }}{{ .Metadata.TMDBTitle }}{{ end }}',
-                        tmdbImage: '{{ if .Metadata }}{{ .Metadata.TMDBImage }}{{ end }}',
-                        tmdbSummary: `{{ if .Metadata }}{{ .Metadata.TMDBSummary }}{{ end }}`,
-                        tmdbRating: {{ if .Metadata }}{{ .Metadata.TMDBRating }}{{ else }}0{{ end }},
-                        
-                        anilistId: {{ if .Metadata }}{{ .Metadata.AniListID }}{{ else }}0{{ end }},
-                        anilistTitle: `{{ if .Metadata }}{{ .Metadata.AniListTitle }}{{ end }}`,
-                        anilistImage: `{{ if .Metadata }}{{ .Metadata.AniListImage }}{{ end }}`,
-                        anilistSummary: `{{ if .Metadata }}{{ .Metadata.AniListSummary }}{{ end }}`,
-                        anilistRating: {{ if .Metadata }}{{ .Metadata.AniListRating }}{{ else }}0{{ end }},
-
-                        titleCN: `{{ if .Metadata }}{{ .Metadata.TitleCN }}{{ end }}`,
-                        titleEN: `{{ if .Metadata }}{{ .Metadata.TitleEN }}{{ end }}`,
-                        titleJP: `{{ if .Metadata }}{{ .Metadata.TitleJP }}{{ end }}`
-                    })">
-                    {{ .Title }}
-                </h3>
-            </div>
+            <h3 class="font-black text-lg text-gray-800 line-clamp-2 leading-tight mb-2 hover:text-primary transition-colors cursor-pointer"
+                title="点击查看详情" @click.stop="$dispatch('show-anime-details', { 
+                    subId: {{ .ID }},
+                    bangumiId: {{ if .Metadata }}{{ .Metadata.BangumiID }}{{ else }}0{{ end }}, 
+                    title: '{{ .Title }}', 
+                    image: '{{ .Image }}',
+                    tmdbId: {{ if .Metadata }}{{ .Metadata.TMDBID }}{{ else }}0{{ end }},
+                    tmdbTitle: '{{ if .Metadata }}{{ .Metadata.TMDBTitle }}{{ end }}',
+                    tmdbImage: '{{ if .Metadata }}{{ .Metadata.TMDBImage }}{{ end }}',
+                    tmdbSummary: `{{ if .Metadata }}{{ .Metadata.TMDBSummary }}{{ end }}`,
+                    bangumiTitle: '{{ if .Metadata }}{{ .Metadata.BangumiTitle }}{{ end }}',
+                    bangumiImage: '{{ if .Metadata }}{{ .Metadata.BangumiImage }}{{ end }}',
+                    bangumiSummary: `{{ if .Metadata }}{{ .Metadata.BangumiSummary }}{{ end }}`,
+                    bangumiRating: {{ if .Metadata }}{{ .Metadata.BangumiRating }}{{ else }}0{{ end }},
+                    tmdbRating: {{ if .Metadata }}{{ .Metadata.TMDBRating }}{{ else }}0{{ end }},
+                    anilistId: {{ if .Metadata }}{{ .Metadata.AniListID }}{{ else }}0{{ end }},
+                    anilistTitle: `{{ if .Metadata }}{{ .Metadata.AniListTitle }}{{ end }}`,
+                    anilistImage: `{{ if .Metadata }}{{ .Metadata.AniListImage }}{{ end }}`,
+                    anilistSummary: `{{ if .Metadata }}{{ .Metadata.AniListSummary }}{{ end }}`,
+                    anilistRating: {{ if .Metadata }}{{ .Metadata.AniListRating }}{{ else }}0{{ end }},
+                    titleCN: `{{ if .Metadata }}{{ .Metadata.TitleCN }}{{ end }}`,
+                    titleEN: `{{ if .Metadata }}{{ .Metadata.TitleEN }}{{ end }}`,
+                    titleJP: `{{ if .Metadata }}{{ .Metadata.TitleJP }}{{ end }}`
+                })">
+                {{ .Title }}
+            </h3>
 
             <!-- Quick Metadata Tags -->
-            <div class="flex flex-wrap gap-1.5 mb-2">
+            <div class="flex flex-wrap gap-1.5 mb-3">
                 {{ if .SubtitleGroup }}
                 <span
-                    class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-indigo-50 text-indigo-600 border border-indigo-100 font-medium truncate max-w-[100px]"
+                    class="inline-flex items-center px-2 py-0.5 rounded-lg text-[10px] bg-indigo-50/80 text-indigo-600 border border-indigo-100 font-bold max-w-[120px] truncate"
                     title="{{ .SubtitleGroup }}">
                     {{ .SubtitleGroup }}
                 </span>
                 {{ end }}
                 {{ if .Season }}
                 <span
-                    class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-rose-50 text-rose-600 border border-rose-100 font-medium whitespace-nowrap">
+                    class="inline-flex items-center px-2 py-0.5 rounded-lg text-[10px] bg-rose-50/80 text-rose-600 border border-rose-100 font-bold">
                     {{ .Season }}
                 </span>
                 {{ end }}
-                {{ if and .Metadata (gt .Metadata.BangumiID 0) }}
-                <a href="https://bgm.tv/subject/{{ .Metadata.BangumiID }}" target="_blank"
-                    class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-pink-50 text-pink-600 border border-pink-100 font-medium whitespace-nowrap hover:bg-pink-100 transition-colors"
-                    title="Bangumi ID: {{ .Metadata.BangumiID }}" @click.stop>
-                    BGM: {{ .Metadata.BangumiID }}
-                </a>
-                {{ end }}
             </div>
 
-            <!-- Tech Details (Compact) -->
-            <div class="space-y-0.5 mb-2 hidden group-hover:block animate-fade-in">
-                {{ if .FilterRule }}
-                <div class="flex items-center gap-1 text-[10px] text-gray-500" title="包含规则: {{ .FilterRule }}">
-                    <span class="text-gray-400">🔍</span> <span
-                        class="bg-gray-50 px-1 rounded truncate max-w-[150px]">{{ .FilterRule }}</span>
-                </div>
-                {{ end }}
-                {{ if .ExcludeRule }}
-                <div class="flex items-center gap-1 text-[10px] text-gray-500" title="排除规则: {{ .ExcludeRule }}">
-                    <span class="text-gray-400">🚫</span> <span
-                        class="bg-gray-50 px-1 rounded truncate max-w-[150px]">{{ .ExcludeRule }}</span>
-                </div>
-                {{ end }}
-            </div>
-
-            <!-- Progress / Stats -->
-            <div class="mt-auto flex items-center justify-between">
-                <div class="flex items-center gap-2 text-xs text-gray-500 bg-gray-50 px-2 py-1 rounded-md"
+            <!-- Stats -->
+            <div class="mt-auto flex items-center gap-3">
+                <div class="flex items-center gap-1.5 text-xs text-gray-500 bg-gray-50/50 px-2.5 py-1 rounded-lg border border-gray-100"
                     title="RSS: {{.RSSUrl}}">
-                    <span>🎬</span>
-                    <span>已下载: <b class="text-gray-900">{{ .DownloadedCount }}</b> 集</span>
+                    <span class="opacity-70">🎬</span>
+                    <span class="font-medium">已下载: <b class="text-gray-900 font-black">{{ .DownloadedCount }}</b>
+                        集</span>
                 </div>
             </div>
         </div>
     </div>
 
+    <!-- Tech Details (Compact) -->
+    <div class="px-5 pb-3">
+        <div class="space-y-1.5 p-2.5 bg-gray-50/50 rounded-xl border border-gray-100/50">
+            {{ if .FilterRule }}
+            <div class="flex items-center gap-2 text-[10px] text-gray-500" title="包含规则: {{ .FilterRule }}">
+                <span class="w-4 h-4 flex items-center justify-center bg-white rounded shadow-sm text-[8px]">🔍</span>
+                <span class="font-mono truncate flex-1">{{ .FilterRule }}</span>
+            </div>
+            {{ end }}
+            {{ if .ExcludeRule }}
+            <div class="flex items-center gap-2 text-[10px] text-gray-500" title="排除规则: {{ .ExcludeRule }}">
+                <span class="w-4 h-4 flex items-center justify-center bg-white rounded shadow-sm text-[8px]">🚫</span>
+                <span class="font-mono truncate flex-1">{{ .ExcludeRule }}</span>
+            </div>
+            {{ end }}
+            {{ if and (not .FilterRule) (not .ExcludeRule) }}
+            <div class="text-[10px] text-gray-400 italic text-center py-1">无过滤规则</div>
+            {{ end }}
+        </div>
+    </div>
+
     <!-- Footer Actions -->
-    <div class="bg-gray-50/50 px-3 py-2 border-t border-gray-100 flex items-center justify-between mx-1">
-        <!-- Status / ID -->
-        <div class="flex items-center gap-2">
+    <div
+        class="mt-auto bg-gray-50/80 backdrop-blur-sm px-4 py-3 border-t border-gray-100 flex items-center justify-between">
+        <!-- Status -->
+        <div class="flex items-center">
             {{ if .IsActive }}
             <button id="toggle-{{.ID}}" hx-post="/api/subscriptions/{{ .ID }}/toggle" hx-swap="outerHTML"
                 hx-indicator="#toggle-{{.ID}}"
-                class="px-2 py-0.5 rounded-full text-[10px] font-bold text-green-600 bg-green-100 border border-green-200 hover:bg-green-200 transition flex items-center gap-1 cursor-pointer">
-                <span>🟢 运行中</span>
+                class="px-3 py-1 rounded-full text-[10px] font-black tracking-tight text-emerald-600 bg-emerald-50 border border-emerald-100 hover:bg-emerald-100 transition shadow-sm flex items-center gap-1.5 cursor-pointer">
+                <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                <span>运行中</span>
                 <span class="htmx-indicator hidden animate-spin">⌛</span>
             </button>
             {{ else }}
             <button id="toggle-{{.ID}}" hx-post="/api/subscriptions/{{ .ID }}/toggle" hx-swap="outerHTML"
                 hx-indicator="#toggle-{{.ID}}"
-                class="px-2 py-0.5 rounded-full text-[10px] font-bold text-gray-500 bg-gray-200 border border-gray-300 hover:bg-gray-300 transition flex items-center gap-1 cursor-pointer">
-                <span>⏸️ 已暂停</span>
+                class="px-3 py-1 rounded-full text-[10px] font-black tracking-tight text-gray-500 bg-gray-100 border border-gray-200 hover:bg-gray-200 transition shadow-sm flex items-center gap-1.5 cursor-pointer">
+                <span class="w-1.5 h-1.5 rounded-full bg-gray-400"></span>
+                <span>已暂停</span>
                 <span class="htmx-indicator hidden animate-spin">⌛</span>
             </button>
             {{ end }}
         </div>
 
-        <!-- Right: Actions -->
-        <div class="flex items-center gap-1">
-            <!-- Run -->
+        <!-- Actions -->
+        <div class="flex items-center gap-0.5">
             <button hx-post="/api/subscriptions/{{ .ID }}/run" hx-swap="none"
-                class="p-1.5 text-gray-400 hover:text-blue-500 hover:bg-blue-50 rounded-md transition-colors"
+                class="p-2 text-gray-400 hover:text-blue-600 hover:bg-white rounded-xl transition-all hover:shadow-sm"
                 title="立即运行">
                 <span class="text-sm">▶️</span>
             </button>
 
-            <!-- Edit -->
             <button data-id="{{.ID}}" data-title="{{.Title}}" data-rss="{{.RSSUrl}}" data-filter="{{.FilterRule}}"
                 data-exclude="{{.ExcludeRule}}" @click.stop="$dispatch('edit-subscription', { 
                     id: $el.dataset.id, 
@@ -144,23 +162,22 @@
                     filter: $el.dataset.filter, 
                     exclude: $el.dataset.exclude 
                 })"
-                class="p-1.5 text-gray-400 hover:text-amber-500 hover:bg-amber-50 rounded-md transition-colors mr-1"
+                class="p-2 text-gray-400 hover:text-amber-600 hover:bg-white rounded-xl transition-all hover:shadow-sm"
                 title="编辑">
                 <span class="text-sm">✏️</span>
             </button>
+
             <button hx-post="/api/subscriptions/{{ .ID }}/refresh-metadata" hx-swap="outerHTML"
                 hx-target="#sub-card-{{.ID}}"
-                class="p-1.5 text-gray-400 hover:text-purple-500 hover:bg-purple-50 rounded-md transition-colors mr-1"
+                class="p-2 text-gray-400 hover:text-purple-600 hover:bg-white rounded-xl transition-all hover:shadow-sm"
                 title="刷新元数据">
                 <span class="text-sm">🔄</span>
             </button>
 
-            <span class="text-gray-200">|</span>
+            <div class="w-px h-4 bg-gray-200 mx-1"></div>
 
-            <!-- Delete -->
             <button data-id="{{.ID}}" @click.stop="$dispatch('delete-subscription', { id: $el.dataset.id })"
-                class="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-md transition-colors ml-1"
-                title="删除">
+                class="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-all" title="删除">
                 <span class="text-sm">🗑️</span>
             </button>
         </div>

@@ -29,6 +29,10 @@ func InitRoutes(r *gin.Engine) {
 			a, _ := json.Marshal(v)
 			return template.JS(a)
 		},
+		"toJson": func(v interface{}) string {
+			a, _ := json.Marshal(v)
+			return string(a)
+		},
 	})
 
 	// 加载模板，注意路径问题，在此我们假设运行在项目根目录
@@ -40,6 +44,9 @@ func InitRoutes(r *gin.Engine) {
 	r.GET("/", DashboardHandler)
 	r.GET("/subscriptions", SubscriptionsHandler)
 	r.GET("/settings", SettingsHandler)
+	// Library
+	r.GET("/library", GetLibraryHandler)
+	r.POST("/library/refresh", RefreshLibraryMetadataHandler)
 	r.GET("/local-anime", LocalAnimePageHandler)
 	r.GET("/backup", BackupPageHandler)
 
@@ -76,6 +83,7 @@ func InitRoutes(r *gin.Engine) {
 		apiGroup.GET("/settings/qb-status", GetQBStatusHandler)
 		apiGroup.GET("/settings/tmdb-status", GetTMDBStatusHandler)
 		apiGroup.GET("/settings/anilist-status", GetAniListStatusHandler)
+		apiGroup.GET("/settings/jellyfin-status", GetJellyfinStatusHandler)
 		apiGroup.POST("/settings/test-connection", TestConnectionHandler)
 
 		// Local Anime

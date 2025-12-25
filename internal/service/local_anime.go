@@ -227,6 +227,38 @@ func (s *LocalAnimeService) EnrichAnimeMetadata(anime *model.LocalAnime) {
 	s.SyncMetadataToModels(anime.Metadata)
 }
 
+// RefreshAllMetadata updates all metadata records and returns the count of updated items
+func (s *LocalAnimeService) RefreshAllMetadata() int {
+	log.Println("Refresh: Starting global metadata refresh...")
+	var list []model.AnimeMetadata
+	if err := db.DB.Find(&list).Error; err != nil {
+		log.Printf("Refresh: Failed to fetch metadata list: %v", err)
+		return 0
+	}
+
+	updatedCount := 0
+	for _, m := range list {
+		// Create a copy to avoid pointer issues in loop (though standard for range is by value, m is a struct)
+		// We pass &m to EnrichMetadata.
+		// Re-fetch fresh copy to ensure no race or stale data
+		var freshM model.AnimeMetadata
+		if err := db.DB.First(&freshM, m.ID).Error; err == nil {
+			// Use the existing Title as fallback query if IDs are missing
+			queryTitle := freshM.Title
+			if freshM.TitleCN != "" {
+				queryTitle = freshM.TitleCN
+			}
+			s.EnrichMetadata(&freshM, queryTitle)
+			updatedCount++
+			log.Printf("Refresh: Updated metadata for '%s'", freshM.Title)
+		}
+		// Rate limit protection
+		time.Sleep(200 * time.Millisecond)
+	}
+	log.Printf("Refresh: Global metadata refresh completed. Updated %d items.", updatedCount)
+	return updatedCount
+}
+
 // EnrichMetadata is the CORE logic shared by LocalAnime and Subscription
 func (s *LocalAnimeService) EnrichMetadata(m *model.AnimeMetadata, queryTitle string) {
 	// 1. Prepare Clients
@@ -262,99 +294,136 @@ func (s *LocalAnimeService) EnrichMetadata(m *model.AnimeMetadata, queryTitle st
 		anilistClient = anilist.NewClient(anilistTokenConfig.Value, proxyURL)
 	}
 
-	anilistQuery := queryTitle // Default to cleaned title
-	log.Printf("DEBUG: EnrichMetadata: '%s'", queryTitle)
+	rawQueryTitle := queryTitle // Keep original for fallbacks
+	if queryTitle == "" {
+		queryTitle = m.Title // Fallback to existing title
+	}
+	log.Printf("DEBUG: EnrichMetadata for '%s' (ID: %d)", queryTitle, m.ID)
 
-	// 2. Fetch Bangumi Data
-	if res, err := bgmClient.SearchSubject(queryTitle); err == nil && res != nil {
-		m.BangumiID = res.ID
-		anilistQuery = res.Name // Use Original Name (usually JP) for AniList
-		// Default fields
-		if res.NameCN != "" {
-			m.BangumiTitle = res.NameCN
-		} else {
-			m.BangumiTitle = res.Name
-		}
+	// ==========================================
+	// 2. Fetch Bangumi Data (Priority: ID > Search)
+	// ==========================================
+	var bgmSubject *bangumi.Subject
+	var err error
 
-		// Detail retrieve
-		if detail, err := bgmClient.GetSubject(res.ID); err == nil && detail != nil {
-			m.BangumiImage = detail.Images.Large
-			m.BangumiSummary = detail.Summary
-			m.BangumiRating = detail.Rating.Score // Store rating
-			if m.AirDate == "" {
-				m.AirDate = detail.Date
-			}
-			if m.TitleJP == "" {
-				m.TitleJP = detail.Name
-			}
-			if m.TitleCN == "" {
-				m.TitleCN = detail.NameCN
-			}
-			// Cache Image
-			m.BangumiImageRaw = s.fetchAndCacheImage(m.BangumiImage)
+	if m.BangumiID != 0 {
+		// ID exists, fetch directly
+		bgmSubject, err = bgmClient.GetSubject(m.BangumiID)
+		if err != nil {
+			log.Printf("DEBUG: Bangumi ID %d fetch failed, will try search: %v", m.BangumiID, err)
+			// Don't resetting ID yet, network might be down.
+			// But if we want to repair broken IDs, we could. For now, keep it.
 		}
 	}
 
-	// 3. Fetch TMDB Data
-	if tmdbClient != nil {
-		tmdbSearchQuery := queryTitle
-		if m.TitleCN != "" {
-			tmdbSearchQuery = m.TitleCN
+	if bgmSubject == nil && queryTitle != "" {
+		// No ID or fetch failed, try search
+		if res, err := bgmClient.SearchSubject(queryTitle); err == nil && res != nil {
+			m.BangumiID = res.ID // Set ID for future
+			// Fetch full details
+			bgmSubject, _ = bgmClient.GetSubject(res.ID)
 		}
-		log.Printf("DEBUG: Searching TMDB for '%s'", tmdbSearchQuery)
-		show, err := tmdbClient.SearchTV(tmdbSearchQuery)
-		if err == nil && show != nil {
-			log.Printf("DEBUG: TMDB Search success: %s (ID: %d)", show.Name, show.ID)
-			m.TMDBID = show.ID
-			m.TMDBTitle = show.Name
-			m.TMDBImage = show.PosterPath
-			m.TMDBSummary = show.Overview
-			m.TMDBRating = show.VoteAverage // Store rating
+	}
+
+	if bgmSubject != nil {
+		m.BangumiID = bgmSubject.ID
+		m.BangumiImage = bgmSubject.Images.Large
+		m.BangumiSummary = bgmSubject.Summary
+		m.BangumiRating = bgmSubject.Rating.Score
+		if m.AirDate == "" {
+			m.AirDate = bgmSubject.Date
+		}
+		if m.TitleJP == "" {
+			m.TitleJP = bgmSubject.Name
+		}
+		if m.TitleCN == "" {
+			m.TitleCN = bgmSubject.NameCN
+		}
+		// Default fields priority
+		if bgmSubject.NameCN != "" {
+			m.BangumiTitle = bgmSubject.NameCN
+		} else {
+			m.BangumiTitle = bgmSubject.Name
+		}
+		// Cache Image
+		m.BangumiImageRaw = s.fetchAndCacheImage(m.BangumiImage)
+	}
+
+	// ==========================================
+	// 3. Fetch TMDB Data (Priority: ID > Search)
+	// ==========================================
+	if tmdbClient != nil {
+		var tmdbShow *tmdb.TVShow
+
+		if m.TMDBID != 0 {
+			tmdbShow, err = tmdbClient.GetTVDetails(m.TMDBID)
+			if err != nil {
+				log.Printf("DEBUG: TMDB ID %d fetch failed: %v", m.TMDBID, err)
+			}
+		}
+
+		if tmdbShow == nil && queryTitle != "" {
+			tmdbSearchQuery := queryTitle
+			if m.TitleCN != "" {
+				tmdbSearchQuery = m.TitleCN
+			}
+			tmdbShow, _ = tmdbClient.SearchTV(tmdbSearchQuery)
+		}
+
+		if tmdbShow != nil {
+			m.TMDBID = tmdbShow.ID
+			m.TMDBTitle = tmdbShow.Name
+			m.TMDBImage = tmdbShow.PosterPath
+			m.TMDBSummary = tmdbShow.Overview
+			m.TMDBRating = tmdbShow.VoteAverage
 			if m.AirDate == "" {
-				m.AirDate = show.FirstAirDate
+				m.AirDate = tmdbShow.FirstAirDate
 			}
 			if m.TitleCN == "" {
-				m.TitleCN = show.Name
+				m.TitleCN = tmdbShow.Name
 			}
 			if m.TitleJP == "" {
-				m.TitleJP = show.OriginalName
-			}
-
-			// If summary is empty in search result, try detail
-			if m.TMDBSummary == "" {
-				if details, err := tmdbClient.GetTVDetails(show.ID); err == nil && details != nil {
-					m.TMDBSummary = details.Overview
-				}
+				m.TitleJP = tmdbShow.OriginalName
 			}
 			// Cache Image
 			m.TMDBImageRaw = s.fetchAndCacheImage(m.TMDBImage)
 		}
 	}
 
-	// 4. Fetch AniList Data
+	// ==========================================
+	// 4. Fetch AniList Data (Priority: ID > Search)
+	// ==========================================
 	if anilistClient != nil {
-		// Try JP first if available
-		if m.TitleJP != "" {
-			anilistQuery = m.TitleJP
+		var alMedia *anilist.Media
+
+		if m.AniListID != 0 {
+			alMedia, err = anilistClient.GetAnimeDetails(m.AniListID)
+			if err != nil {
+				log.Printf("DEBUG: AniList ID %d fetch failed: %v", m.AniListID, err)
+			}
 		}
-		log.Printf("DEBUG: Searching AniList for '%s' (Original Query: '%s')", anilistQuery, queryTitle)
-		media, err := anilistClient.SearchAnime(anilistQuery)
-		if err == nil && media != nil {
-			log.Printf("DEBUG: AniList Search success: %s (ID: %d)", media.Title.Native, media.ID)
-			m.AniListID = media.ID
-			m.AniListTitle = media.Title.Romaji
-			m.AniListImage = media.CoverImage.ExtraLarge
-			// Clean HTML from AniList Description
-			desc := media.Description
-			re := regexp.MustCompile("<[^>]*>")
-			m.AniListSummary = re.ReplaceAllString(desc, "")
-			m.AniListRating = float64(media.AverageScore) / 10.0 // Normalize to 0-10 if needed, AniList is 0-100
+
+		if alMedia == nil && queryTitle != "" {
+			alQuery := queryTitle
+			// Try JP first if available from other sources
+			if m.TitleJP != "" {
+				alQuery = m.TitleJP
+			}
+			alMedia, _ = anilistClient.SearchAnime(alQuery)
+		}
+
+		if alMedia != nil {
+			m.AniListID = alMedia.ID
+			m.AniListTitle = alMedia.Title.Romaji
+			m.AniListImage = alMedia.CoverImage.ExtraLarge
+			m.AniListSummary = alMedia.Description
+			m.AniListRating = float64(alMedia.AverageScore) / 10.0
 
 			if m.TitleEN == "" {
-				m.TitleEN = media.Title.English
+				m.TitleEN = alMedia.Title.English
 			}
 			if m.TitleJP == "" {
-				m.TitleJP = media.Title.Native
+				m.TitleJP = alMedia.Title.Native
 			}
 			// Cache Image
 			m.AniListImageRaw = s.fetchAndCacheImage(m.AniListImage)
@@ -362,10 +431,14 @@ func (s *LocalAnimeService) EnrichMetadata(m *model.AnimeMetadata, queryTitle st
 	}
 
 	// 5. Save the enriched metadata
-	// CONSOLIDATION: Before creating new, check if we found an ID that already exists in DB
+	// CONSOLIDATION logic (only for new records, existing ID logic handled above)
+	// Since we simplified, we just save/create.
+	// But wait, if m.ID==0, we should still check if another record exists with these external IDs to avoid dups?
+	// The original code had complex deduping. Let's keep a simplified safely check.
 	if m.ID == 0 {
 		var existing model.AnimeMetadata
 		found := false
+		// ... (Same dedup logic as before roughly)
 		if m.BangumiID != 0 {
 			if err := db.DB.Where("bangumi_id = ?", m.BangumiID).First(&existing).Error; err == nil {
 				found = true
@@ -383,8 +456,7 @@ func (s *LocalAnimeService) EnrichMetadata(m *model.AnimeMetadata, queryTitle st
 		}
 
 		if found {
-			// Found existing metadata for this anime!
-			// Copy IDs found to the existing record
+			// Found existing! Merge new IDs into it.
 			if m.BangumiID != 0 {
 				existing.BangumiID = m.BangumiID
 			}
@@ -394,7 +466,7 @@ func (s *LocalAnimeService) EnrichMetadata(m *model.AnimeMetadata, queryTitle st
 			if m.AniListID != 0 {
 				existing.AniListID = m.AniListID
 			}
-			*m = existing
+			*m = existing // Point to existing ID
 		} else {
 			db.DB.Create(m)
 		}
@@ -402,7 +474,7 @@ func (s *LocalAnimeService) EnrichMetadata(m *model.AnimeMetadata, queryTitle st
 		db.DB.Save(m)
 	}
 
-	// 6. Set Active Fields (Default priority: Bangumi > TMDB > AniList)
+	// 6. Set Active Fields (Bangumi > TMDB > AniList)
 	if m.BangumiID != 0 {
 		m.Title = m.BangumiTitle
 		m.Image = m.BangumiImage
@@ -420,19 +492,18 @@ func (s *LocalAnimeService) EnrichMetadata(m *model.AnimeMetadata, queryTitle st
 		m.Summary = m.AniListSummary
 	}
 
-	// Update active image to point to internal API
+	// Ensure Image Points to Local API
 	if m.ID != 0 {
 		m.Image = fmt.Sprintf("/api/posters/%d", m.ID)
 	}
-
-	// Final Fallback for Title
+	// Fallback Title
 	if m.Title == "" {
-		m.Title = queryTitle
+		m.Title = rawQueryTitle
 	}
 
 	db.DB.Save(m)
 
-	// Trigger sync to all linked records
+	// Trigger sync to linked records
 	s.SyncMetadataToModels(m)
 }
 

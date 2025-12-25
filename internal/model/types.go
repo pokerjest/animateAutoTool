@@ -100,6 +100,9 @@ const (
 	ConfigKeyProxyTMDB           = "proxy_tmdb_enabled"
 	ConfigKeyAniListToken        = "anilist_token"
 	ConfigKeyProxyAniList        = "proxy_anilist_enabled"
+	ConfigKeyJellyfinUrl         = "jellyfin_url"
+	ConfigKeyJellyfinApiKey      = "jellyfin_api_key"
+	ConfigKeyProxyJellyfin       = "proxy_jellyfin_enabled"
 )
 
 // LocalAnimeDirectory 用户配置的本地番剧目录根路径

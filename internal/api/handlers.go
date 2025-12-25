@@ -24,15 +24,16 @@ import (
 )
 
 type DashboardData struct {
-	SkipLayout     bool
-	ActiveSubs     int64
-	TodayDownloads int64
-	QBConnected    bool
-	QBVersion      string
-	BangumiLogin   bool
-	TMDBConnected  bool
-	WatchingList   []bangumi.UserCollectionItem
-	CompletedList  []bangumi.UserCollectionItem
+	SkipLayout        bool
+	ActiveSubs        int64
+	TodayDownloads    int64
+	QBConnected       bool
+	QBVersion         string
+	BangumiLogin      bool
+	TMDBConnected     bool
+	JellyfinConnected bool
+	WatchingList      []bangumi.UserCollectionItem
+	CompletedList     []bangumi.UserCollectionItem
 }
 
 type SubscriptionsData struct {
@@ -134,16 +135,24 @@ func DashboardHandler(c *gin.Context) {
 		tmdbConnected = true
 	}
 
+	// Check Jellyfin Status (Simple check if configured)
+	var jellyfinConnected bool
+	var jellyfinConfig model.GlobalConfig
+	if err := db.DB.Where("key = ?", model.ConfigKeyJellyfinUrl).First(&jellyfinConfig).Error; err == nil && jellyfinConfig.Value != "" {
+		jellyfinConnected = true
+	}
+
 	data := DashboardData{
-		SkipLayout:     skip,
-		ActiveSubs:     activeSubs,
-		TodayDownloads: totalDownloads,
-		QBConnected:    qbConnected,
-		QBVersion:      qbVersion,
-		BangumiLogin:   bangumiLogin,
-		TMDBConnected:  tmdbConnected,
-		WatchingList:   watchingList,
-		CompletedList:  completedList,
+		SkipLayout:        skip,
+		ActiveSubs:        activeSubs,
+		TodayDownloads:    totalDownloads,
+		QBConnected:       qbConnected,
+		QBVersion:         qbVersion,
+		BangumiLogin:      bangumiLogin,
+		TMDBConnected:     tmdbConnected,
+		JellyfinConnected: jellyfinConnected,
+		WatchingList:      watchingList,
+		CompletedList:     completedList,
 	}
 
 	c.HTML(http.StatusOK, "index.html", data)
@@ -605,9 +614,11 @@ func UpdateSettingsHandler(c *gin.Context) {
 		model.ConfigKeyAniListToken,
 		model.ConfigKeyProxyURL,
 		model.ConfigKeyProxyBangumi,
-		model.ConfigKeyProxyBangumi,
 		model.ConfigKeyProxyTMDB,
 		model.ConfigKeyProxyAniList,
+		model.ConfigKeyJellyfinUrl,
+		model.ConfigKeyJellyfinApiKey,
+		model.ConfigKeyProxyJellyfin,
 	}
 
 	for _, key := range keys {
@@ -626,6 +637,19 @@ func UpdateSettingsHandler(c *gin.Context) {
 			db.DB.Create(&model.GlobalConfig{Key: key, Value: val})
 		} else {
 			db.DB.Model(&model.GlobalConfig{}).Where("key = ?", key).Update("value", val)
+		}
+	}
+
+	// 1.5 Handle Checkboxes (Unchecked ones won't be in form)
+	checkboxes := []string{
+		model.ConfigKeyProxyBangumi,
+		model.ConfigKeyProxyTMDB,
+		model.ConfigKeyProxyAniList,
+		model.ConfigKeyProxyJellyfin,
+	}
+	for _, key := range checkboxes {
+		if _, exists := c.GetPostForm(key); !exists {
+			db.DB.Model(&model.GlobalConfig{}).Where("key = ?", key).Update("value", "false")
 		}
 	}
 
@@ -662,6 +686,9 @@ func UpdateSettingsHandler(c *gin.Context) {
 	// 6. Trigger AniList Refresh OOB
 	anilistStatusOOB := RenderAniListStatusOOB()
 
+	// 7. Trigger Jellyfin Refresh OOB
+	jellyfinStatusOOB := RenderJellyfinStatusOOB()
+
 	c.Header("Content-Type", "text/html")
 	// Main response for #save-result + OOB blocks
 	c.String(http.StatusOK, fmt.Sprintf(`
@@ -670,7 +697,8 @@ func UpdateSettingsHandler(c *gin.Context) {
 		%s
 		%s
 		%s
-	`, qbStatusHtml, bangumiStatusOOB, tmdbStatusOOB, anilistStatusOOB))
+		%s
+	`, qbStatusHtml, bangumiStatusOOB, tmdbStatusOOB, anilistStatusOOB, jellyfinStatusOOB))
 }
 
 // QBSaveAndTestHandler saves QB settings and then tests connection
@@ -1180,6 +1208,104 @@ func CheckAniListConnection() (bool, string, string) {
 	}
 
 	return true, result.Data.Viewer.Name, ""
+}
+
+// Logic for Jellyfin Status
+func GetJellyfinStatusHandler(c *gin.Context) {
+	style := c.Query("style")
+	c.Header("Content-Type", "text/html")
+	c.String(http.StatusOK, RenderJellyfinStatus(style))
+}
+
+func RenderJellyfinStatusOOB() string {
+	content := RenderJellyfinStatus("")
+	return strings.Replace(content, `id="jellyfin-status"`, `id="jellyfin-status" hx-swap-oob="innerHTML"`, 1)
+}
+
+func RenderJellyfinStatus(style string) string {
+	connected, errStr := CheckJellyfinConnection()
+
+	// Dashboard Style
+	if style == "dashboard" {
+		if connected {
+			return `<span class="text-emerald-600 font-bold flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-emerald-500"></span> 已连接</span>`
+		}
+		errText := "未连接"
+		if errStr != "" {
+			errText = "连接失败"
+		}
+		return fmt.Sprintf(`<span class="text-red-500 font-bold flex items-center gap-1" title="%s"><span class="w-2 h-2 rounded-full bg-red-500"></span> %s</span>`, errStr, errText)
+	}
+
+	if connected {
+		return `<div id="jellyfin-status"><div class="text-emerald-600 bg-emerald-50 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 border border-emerald-200">✅ 已连接 Jellyfin</div></div>`
+	}
+
+	if errStr == "Config missing" {
+		return `<div id="jellyfin-status"><div class="text-sm text-gray-500 flex items-center gap-2"><span>🔴 未连接</span><span class="text-xs text-gray-400">(请先输入 URL 和 API Key 并保存)</span></div></div>`
+	}
+
+	return fmt.Sprintf(`<div id="jellyfin-status"><div class="text-red-600 bg-red-50 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 border border-red-200">❌ 连接失败: %s</div></div>`, errStr)
+}
+
+func CheckJellyfinConnection() (bool, string) {
+	var urlCfg, keyCfg, proxyEnabled model.GlobalConfig
+	db.DB.Where("key = ?", model.ConfigKeyJellyfinUrl).First(&urlCfg)
+	db.DB.Where("key = ?", model.ConfigKeyJellyfinApiKey).First(&keyCfg)
+	db.DB.Where("key = ?", model.ConfigKeyProxyJellyfin).First(&proxyEnabled)
+
+	if urlCfg.Value == "" || keyCfg.Value == "" {
+		log.Printf("DEBUG: Jellyfin connection check failed: Config missing (URL: %s, Key: %s)", urlCfg.Value, keyCfg.Value)
+		return false, "Config missing"
+	}
+
+	serverUrl := strings.TrimRight(urlCfg.Value, "/")
+	// Jellyfin common info endpoint
+	apiUrl := fmt.Sprintf("%s/System/Info", serverUrl)
+
+	log.Printf("DEBUG: Testing Jellyfin connection to: %s", apiUrl)
+
+	req, err := http.NewRequest("GET", apiUrl, nil)
+	if err != nil {
+		return false, fmt.Sprintf("Internal Error: %v", err)
+	}
+
+	req.Header.Set("X-Emby-Token", keyCfg.Value)
+	req.Header.Set("Accept", "application/json")
+
+	var transport *http.Transport
+	if proxyEnabled.Value == "true" {
+		var proxyUrlCfg model.GlobalConfig
+		if err := db.DB.Where("key = ?", model.ConfigKeyProxyURL).First(&proxyUrlCfg).Error; err == nil && proxyUrlCfg.Value != "" {
+			if pUrl, err := url.Parse(proxyUrlCfg.Value); err == nil {
+				transport = &http.Transport{Proxy: http.ProxyURL(pUrl)}
+			}
+		}
+	}
+
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+	}
+	if transport != nil {
+		client.Transport = transport
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("DEBUG: Jellyfin connection error: %v", err)
+		return false, err.Error()
+	}
+	defer resp.Body.Close()
+
+	log.Printf("DEBUG: Jellyfin connection response: %d", resp.StatusCode)
+
+	if resp.StatusCode == 200 {
+		return true, ""
+	}
+	if resp.StatusCode == 401 {
+		return false, "API Key Invalid"
+	}
+	return false, fmt.Sprintf("HTTP %d", resp.StatusCode)
 }
 
 // GetPosterHandler handles image requests from the database

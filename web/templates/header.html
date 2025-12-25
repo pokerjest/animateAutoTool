@@ -63,6 +63,11 @@
             transform: scale(0.95);
             transition: all 0.5s ease-out;
         }
+
+        /* Alpine.js Cloak */
+        [x-cloak] {
+            display: none !important;
+        }
     </style>
 </head>
 
@@ -84,9 +89,12 @@
                     hx-push-url="true">
                     📺 订阅管理
                 </a>
+                <a href="/library" class="nav-link" hx-get="/library" hx-target="#main-content" hx-push-url="true">
+                    📚 番剧图鉴
+                </a>
                 <a href="/local-anime" class="nav-link" hx-get="/local-anime" hx-target="#main-content"
                     hx-push-url="true">
-                    📁 番剧目录
+                    📁 本地番剧
                 </a>
                 <a href="/settings" class="nav-link" hx-get="/settings" hx-target="#main-content" hx-push-url="true">
                     ⚙️ 系统设置
