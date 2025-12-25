@@ -73,29 +73,43 @@ func GetLibraryHandler(c *gin.Context) {
 
 // RefreshLibraryMetadataHandler triggers a background global refresh
 func RefreshLibraryMetadataHandler(c *gin.Context) {
+	force := c.Query("force") == "true"
 	svc := service.NewLocalAnimeService()
-	count := svc.RefreshAllMetadata()
+	if service.GlobalRefreshStatus.IsRunning {
+		c.JSON(http.StatusOK, gin.H{"message": "已经在刷新中", "status": "running"})
+		return
+	}
 
-	// Return a JSON trigger header with the success message
-	msg := fmt.Sprintf("后台刷新完成，共更新 %d 条元数据", count)
+	// Run in background
+	go svc.RefreshAllMetadata(force)
 
-	// Create the header JSON. Since the value is simple, we can construct it manually or use a struct?
-	// Manually is fine for simple strings. Note: JSON strings must be quoted.
-	// We'll use a simple approach: Trigger a "showToast" event with the message as detail
-	// Or pass it as { "showToast": "message" }
+	msg := "已开始后台增量刷新元数据"
+	if force {
+		msg = "已开始后台全量强制刷新所有元数据"
+	}
 
-	// Since we need to put a string variable inside JSON, let's use Sprintf properly
-	// Using custom event name "library-refresh-done" might be cleaner, but "showToast" is what we used in planning.
-	// frontend: @htmx:after-request check for header?
-	// actually standard way: HX-Trigger: {"showMessage": "text"}
-
-	// Let's use `encoding/json` to be safe
-	// URI Encode the message content ONLY to ensure JSON is valid ASCII
-	// Front-end will decodeURIComponent
-	// Use JSON body for maximum compatibility and robustness
-	// This bypasses header exposure issues and event dispatching complexity
 	c.JSON(http.StatusOK, gin.H{
 		"message": msg,
-		"count":   count,
+		"status":  "started",
 	})
+}
+
+// RefreshItemMetadataHandler refreshes a single anime metadata
+func RefreshItemMetadataHandler(c *gin.Context) {
+	idStr := c.Param("id")
+	var id uint
+	fmt.Sscanf(idStr, "%d", &id)
+
+	svc := service.NewLocalAnimeService()
+	if err := svc.RefreshSingleMetadata(id); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "刷新失败: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "刷新成功", "status": "ok"})
+}
+
+// GetRefreshStatusHandler returns the current global refresh status
+func GetRefreshStatusHandler(c *gin.Context) {
+	c.JSON(http.StatusOK, service.GlobalRefreshStatus)
 }

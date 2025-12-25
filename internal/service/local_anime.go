@@ -20,6 +20,16 @@ import (
 	"gorm.io/gorm"
 )
 
+type RefreshStatus struct {
+	Total        int    `json:"total"`
+	Current      int    `json:"current"`
+	CurrentTitle string `json:"current_title"`
+	IsRunning    bool   `json:"is_running"`
+	LastResult   string `json:"last_result"`
+}
+
+var GlobalRefreshStatus = RefreshStatus{}
+
 type LocalAnimeService struct{}
 
 func NewLocalAnimeService() *LocalAnimeService {
@@ -227,19 +237,54 @@ func (s *LocalAnimeService) EnrichAnimeMetadata(anime *model.LocalAnime) {
 	s.SyncMetadataToModels(anime.Metadata)
 }
 
-// RefreshAllMetadata updates all metadata records and returns the count of updated items
-func (s *LocalAnimeService) RefreshAllMetadata() int {
-	log.Println("Refresh: Starting global metadata refresh...")
-	var list []model.AnimeMetadata
-	if err := db.DB.Find(&list).Error; err != nil {
+// RefreshAllMetadata updates metadata records. If force is false, it skips already scraped items.
+func (s *LocalAnimeService) RefreshAllMetadata(force bool) int {
+	log.Printf("Refresh: Starting %s metadata refresh...", func() string {
+		if force {
+			return "FULL FORCE"
+		}
+		return "incremental"
+	}())
+	var allList []model.AnimeMetadata
+	if err := db.DB.Find(&allList).Error; err != nil {
 		log.Printf("Refresh: Failed to fetch metadata list: %v", err)
 		return 0
 	}
 
+	// Filter for items that are not scraped yet if not forced
+	var list []model.AnimeMetadata
+	if force {
+		list = allList
+	} else {
+		for _, m := range allList {
+			// If it has a summary and at least one source ID, we consider it "scraped"
+			if m.Summary != "" && (m.BangumiID != 0 || m.TMDBID != 0 || m.AniListID != 0) {
+				continue
+			}
+			list = append(list, m)
+		}
+	}
+
+	total := len(list)
+	GlobalRefreshStatus.Total = total
+	GlobalRefreshStatus.Current = 0
+	GlobalRefreshStatus.IsRunning = true
+	GlobalRefreshStatus.LastResult = ""
+
+	if total == 0 {
+		GlobalRefreshStatus.IsRunning = false
+		GlobalRefreshStatus.LastResult = "全库元数据已是最新状态，无需刷新"
+		return 0
+	}
+
 	updatedCount := 0
-	for _, m := range list {
-		// Create a copy to avoid pointer issues in loop (though standard for range is by value, m is a struct)
-		// We pass &m to EnrichMetadata.
+	for i, m := range list {
+		GlobalRefreshStatus.Current = i + 1
+		GlobalRefreshStatus.CurrentTitle = m.Title
+		if m.TitleCN != "" {
+			GlobalRefreshStatus.CurrentTitle = m.TitleCN
+		}
+
 		// Re-fetch fresh copy to ensure no race or stale data
 		var freshM model.AnimeMetadata
 		if err := db.DB.First(&freshM, m.ID).Error; err == nil {
@@ -250,13 +295,32 @@ func (s *LocalAnimeService) RefreshAllMetadata() int {
 			}
 			s.EnrichMetadata(&freshM, queryTitle)
 			updatedCount++
-			log.Printf("Refresh: Updated metadata for '%s'", freshM.Title)
+			log.Printf("Refresh: Updated metadata for '%s' (%d/%d)", freshM.Title, i+1, total)
 		}
 		// Rate limit protection
 		time.Sleep(200 * time.Millisecond)
 	}
-	log.Printf("Refresh: Global metadata refresh completed. Updated %d items.", updatedCount)
+	GlobalRefreshStatus.IsRunning = false
+	GlobalRefreshStatus.CurrentTitle = ""
+	GlobalRefreshStatus.LastResult = fmt.Sprintf("后台刷新完成，共更新 %d 条元数据", updatedCount)
+	log.Printf("Refresh: Metadata refresh completed. Updated %d items.", updatedCount)
 	return updatedCount
+}
+
+// RefreshSingleMetadata forces a refresh of a single metadata record
+func (s *LocalAnimeService) RefreshSingleMetadata(id uint) error {
+	var m model.AnimeMetadata
+	if err := db.DB.First(&m, id).Error; err != nil {
+		return err
+	}
+
+	queryTitle := m.Title
+	if m.TitleCN != "" {
+		queryTitle = m.TitleCN
+	}
+
+	s.EnrichMetadata(&m, queryTitle)
+	return nil
 }
 
 // EnrichMetadata is the CORE logic shared by LocalAnime and Subscription

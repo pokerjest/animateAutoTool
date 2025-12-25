@@ -111,5 +111,7 @@ func InitRoutes(r *gin.Engine) {
 		apiGroup.GET("/bangumi/subject/:id", GetBangumiSubjectHandler)
 		apiGroup.POST("/bangumi/subject/:id/collection", UpdateBangumiCollectionHandler)
 		apiGroup.POST("/bangumi/subject/:id/progress", UpdateBangumiProgressHandler)
+		apiGroup.GET("/library/refresh/status", GetRefreshStatusHandler)
+		apiGroup.POST("/library/metadata/:id/refresh", RefreshItemMetadataHandler)
 	}
 }
