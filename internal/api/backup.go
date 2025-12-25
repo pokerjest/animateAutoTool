@@ -132,28 +132,103 @@ func ExecuteRestoreHandler(c *gin.Context) {
 		return
 	}
 
-	// DANGEROUS ZONE: Close DB and Swap
-	if err := db.CloseDB(); err != nil {
-		c.String(http.StatusInternalServerError, "Failed to close database: "+err.Error())
+	// Read restore options from form
+	restoreConfigs := c.PostForm("restore_configs") == "on"
+	restoreMetadata := c.PostForm("restore_metadata") == "on"
+	restoreSubscriptions := c.PostForm("restore_subscriptions") == "on"
+	restoreLogs := c.PostForm("restore_logs") == "on"
+	restoreLocal := c.PostForm("restore_local") == "on"
+
+	// Validate at least one option selected
+	if !restoreConfigs && !restoreMetadata && !restoreSubscriptions && !restoreLogs && !restoreLocal {
+		c.String(http.StatusBadRequest, "Please select at least one table to restore")
 		return
 	}
 
-	// Overwrite
-	input, err := os.ReadFile(tempPath)
+	// Open backup database
+	backupDB, err := gorm.Open(sqlite.Open(tempPath), &gorm.Config{})
 	if err != nil {
-		db.InitDB(db.CurrentDBPath)
-		c.String(http.StatusInternalServerError, "Failed to read restore file")
+		c.String(http.StatusBadRequest, "Invalid backup file: "+err.Error())
 		return
 	}
+	defer func() {
+		sqlDB, _ := backupDB.DB()
+		sqlDB.Close()
+	}()
 
-	if err := os.WriteFile(db.CurrentDBPath, input, 0644); err != nil {
-		db.InitDB(db.CurrentDBPath)
-		c.String(http.StatusInternalServerError, "Failed to write database file: "+err.Error())
-		return
+	// Perform selective restore
+	if restoreConfigs {
+		// Clear current configs
+		if err := db.DB.Exec("DELETE FROM global_configs").Error; err != nil {
+			c.String(http.StatusInternalServerError, "Failed to clear configs: "+err.Error())
+			return
+		}
+		// Copy from backup
+		var configs []model.GlobalConfig
+		if err := backupDB.Find(&configs).Error; err == nil && len(configs) > 0 {
+			db.DB.Create(&configs)
+		}
 	}
 
-	// Re-open DB
-	db.InitDB(db.CurrentDBPath)
+	if restoreMetadata {
+		// Clear current metadata
+		if err := db.DB.Exec("DELETE FROM anime_metadata").Error; err != nil {
+			c.String(http.StatusInternalServerError, "Failed to clear metadata: "+err.Error())
+			return
+		}
+		// Copy from backup
+		var metadata []model.AnimeMetadata
+		if err := backupDB.Find(&metadata).Error; err == nil && len(metadata) > 0 {
+			db.DB.Create(&metadata)
+		}
+	}
+
+	if restoreSubscriptions {
+		// Clear current subscriptions
+		if err := db.DB.Exec("DELETE FROM subscriptions").Error; err != nil {
+			c.String(http.StatusInternalServerError, "Failed to clear subscriptions: "+err.Error())
+			return
+		}
+		// Copy from backup
+		var subs []model.Subscription
+		if err := backupDB.Find(&subs).Error; err == nil && len(subs) > 0 {
+			db.DB.Create(&subs)
+		}
+	}
+
+	if restoreLogs {
+		// Clear current logs
+		if err := db.DB.Exec("DELETE FROM download_logs").Error; err != nil {
+			c.String(http.StatusInternalServerError, "Failed to clear logs: "+err.Error())
+			return
+		}
+		// Copy from backup
+		var logs []model.DownloadLog
+		if err := backupDB.Find(&logs).Error; err == nil && len(logs) > 0 {
+			db.DB.Create(&logs)
+		}
+	}
+
+	if restoreLocal {
+		// Clear current local anime data
+		if err := db.DB.Exec("DELETE FROM local_anime_directories").Error; err != nil {
+			c.String(http.StatusInternalServerError, "Failed to clear local directories: "+err.Error())
+			return
+		}
+		if err := db.DB.Exec("DELETE FROM local_animes").Error; err != nil {
+			c.String(http.StatusInternalServerError, "Failed to clear local animes: "+err.Error())
+			return
+		}
+		// Copy from backup
+		var dirs []model.LocalAnimeDirectory
+		if err := backupDB.Find(&dirs).Error; err == nil && len(dirs) > 0 {
+			db.DB.Create(&dirs)
+		}
+		var animes []model.LocalAnime
+		if err := backupDB.Find(&animes).Error; err == nil && len(animes) > 0 {
+			db.DB.Create(&animes)
+		}
+	}
 
 	c.Header("HX-Redirect", "/backup")
 	c.String(http.StatusOK, "Restore successful")
@@ -178,11 +253,14 @@ func ExportBackupHandler(c *gin.Context) {
 		return
 	}
 
-	// 2. Migrate Select Tables (No LocalAnime)
+	// 2. Migrate All Tables
 	err = exportDB.AutoMigrate(
 		&model.Subscription{},
 		&model.DownloadLog{},
 		&model.GlobalConfig{},
+		&model.LocalAnimeDirectory{},
+		&model.LocalAnime{},
+		&model.AnimeMetadata{},
 	)
 	if err != nil {
 		c.String(http.StatusInternalServerError, "Failed to migrate export DB: "+err.Error())
@@ -206,6 +284,24 @@ func ExportBackupHandler(c *gin.Context) {
 	var configs []model.GlobalConfig
 	if err := db.DB.Find(&configs).Error; err == nil && len(configs) > 0 {
 		exportDB.Create(&configs)
+	}
+
+	// Local Anime Directories
+	var dirs []model.LocalAnimeDirectory
+	if err := db.DB.Find(&dirs).Error; err == nil && len(dirs) > 0 {
+		exportDB.Create(&dirs)
+	}
+
+	// Local Animes
+	var animes []model.LocalAnime
+	if err := db.DB.Find(&animes).Error; err == nil && len(animes) > 0 {
+		exportDB.Create(&animes)
+	}
+
+	// Anime Metadata (includes poster image BLOBs)
+	var metadata []model.AnimeMetadata
+	if err := db.DB.Find(&metadata).Error; err == nil && len(metadata) > 0 {
+		exportDB.Create(&metadata)
 	}
 
 	// Close Export DB
