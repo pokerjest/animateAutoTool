@@ -128,6 +128,10 @@ func (s *LocalAnimeService) ScanAll() error {
 			// 继续扫描下一个，不中断
 		}
 	}
+
+	// Phase 2: Background Enrich
+	go s.EnrichMissingMetadata()
+
 	return nil
 }
 
@@ -155,10 +159,12 @@ func (s *LocalAnimeService) ScanDirectory(dirID uint, rootPath string) error {
 		}
 
 		animePath := filepath.Join(rootPath, entry.Name())
-		foundPaths[animePath] = true
 
 		fileCount, totalSize := s.countVideos(animePath)
 		if fileCount > 0 {
+			// Only mark as found if valid videos exist
+			foundPaths[animePath] = true
+
 			// Check if exists
 			var anime model.LocalAnime
 			if err := db.DB.Where("path = ?", animePath).First(&anime).Error; err == nil {
@@ -169,9 +175,10 @@ func (s *LocalAnimeService) ScanDirectory(dirID uint, rootPath string) error {
 				anime.DirectoryID = dirID
 
 				// Retry Metadata if missing (Auto-Repair)
-				if anime.MetadataID == nil || *anime.MetadataID == 0 || anime.Summary == "" {
-					s.EnrichAnimeMetadata(&anime)
-				}
+				// DEPRECATED: Do not enrich synchronously during scan.
+				// if anime.MetadataID == nil || *anime.MetadataID == 0 || anime.Summary == "" {
+				// 	s.EnrichAnimeMetadata(&anime)
+				// }
 
 				db.DB.Save(&anime)
 			} else {
@@ -185,7 +192,8 @@ func (s *LocalAnimeService) ScanDirectory(dirID uint, rootPath string) error {
 				}
 
 				// Initial Metadata Fetch
-				s.EnrichAnimeMetadata(&anime)
+				// DEPRECATED: Do not enrich synchronously during scan.
+				// s.EnrichAnimeMetadata(&anime)
 
 				if err := db.DB.Create(&anime).Error; err != nil {
 					log.Printf("ERROR: Failed to create anime record: %v", err)
@@ -210,6 +218,48 @@ func (s *LocalAnimeService) ScanDirectory(dirID uint, rootPath string) error {
 	}
 
 	return nil
+}
+
+// EnrichMissingMetadata finds local anime without metadata and enriches them
+func (s *LocalAnimeService) EnrichMissingMetadata() {
+	log.Println("Enrich: Starting background enrichment for missing metadata...")
+	var list []model.LocalAnime
+	// Find items with missing metadata OR missing summary (indicates incomplete fetch)
+	// We join with Metadata to be precise, or just check fields on LocalAnime if valid.
+	// LocalAnime has Summary copied from Metadata.
+	// But check MetadataID is safer.
+	db.DB.Preload("Metadata").Where("metadata_id IS NULL OR metadata_id = 0").Find(&list)
+
+	// Also check items where valid Metadata exists but Summary is empty (incomplete scrape)
+	var incomplete []model.LocalAnime
+	db.DB.Preload("Metadata").Where("metadata_id > 0 AND summary = ''").Find(&incomplete)
+	list = append(list, incomplete...)
+
+	if len(list) == 0 {
+		log.Println("Enrich: No items need enrichment.")
+		return
+	}
+
+	log.Printf("Enrich: Found %d items needing metadata.", len(list))
+
+	count := 0
+	for _, anime := range list {
+		// Re-check existence to avoid race
+		var fresh model.LocalAnime
+		if err := db.DB.First(&fresh, anime.ID).Error; err != nil {
+			continue
+		}
+
+		s.EnrichAnimeMetadata(&fresh) // This now handles proxy correctly too
+		if err := db.DB.Save(&fresh).Error; err == nil {
+			count++
+			// Sync back to db immediately handled by EnrichAnimeMetadata's SyncMetadataToModels
+		}
+
+		// Rate limit
+		time.Sleep(500 * time.Millisecond)
+	}
+	log.Printf("Enrich: Completed. Enriched %d items.", count)
 }
 
 // EnrichAnimeMetadata tries to find Bangumi ID and valid Title/Image from BOTH sources
@@ -327,6 +377,14 @@ func (s *LocalAnimeService) RefreshSingleMetadata(id uint) error {
 func (s *LocalAnimeService) EnrichMetadata(m *model.AnimeMetadata, queryTitle string) {
 	// 1. Prepare Clients
 	bgmClient := bangumi.NewClient("", "", "")
+	// Apply Proxy to Bangumi
+	var bgmProxyConfig model.GlobalConfig
+	if err := db.DB.Where("key = ?", model.ConfigKeyProxyBangumi).First(&bgmProxyConfig).Error; err == nil && bgmProxyConfig.Value == "true" {
+		var p model.GlobalConfig
+		if err := db.DB.Where("key = ?", model.ConfigKeyProxyURL).First(&p).Error; err == nil && p.Value != "" {
+			bgmClient.SetProxy(p.Value)
+		}
+	}
 
 	// TMDB Client
 	var tmdbTokenConfig model.GlobalConfig

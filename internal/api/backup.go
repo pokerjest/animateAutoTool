@@ -172,45 +172,13 @@ func ExportBackupHandler(c *gin.Context) {
 	tempFile.Close() // Close file handle, let gorm open it
 	defer os.Remove(tempPath)
 
-	exportDB, err := gorm.Open(sqlite.Open(tempPath), &gorm.Config{})
-	if err != nil {
-		c.String(http.StatusInternalServerError, "Failed to open export DB: "+err.Error())
+	// 2. Generate Backup
+	if err := createBackupFile(tempPath); err != nil {
+		c.String(http.StatusInternalServerError, "Failed to create backup: "+err.Error())
 		return
 	}
 
-	// 2. Migrate Select Tables (No LocalAnime)
-	err = exportDB.AutoMigrate(
-		&model.Subscription{},
-		&model.DownloadLog{},
-		&model.GlobalConfig{},
-	)
-	if err != nil {
-		c.String(http.StatusInternalServerError, "Failed to migrate export DB: "+err.Error())
-		return
-	}
-
-	// 3. Copy Data
-	// Subscriptions
-	var subs []model.Subscription
-	if err := db.DB.Find(&subs).Error; err == nil && len(subs) > 0 {
-		exportDB.Create(&subs)
-	}
-
-	// Logs
-	var logs []model.DownloadLog
-	if err := db.DB.Find(&logs).Error; err == nil && len(logs) > 0 {
-		exportDB.Create(&logs)
-	}
-
-	// Configs
-	var configs []model.GlobalConfig
-	if err := db.DB.Find(&configs).Error; err == nil && len(configs) > 0 {
-		exportDB.Create(&configs)
-	}
-
-	// Close Export DB
-	sqlDB, _ := exportDB.DB()
-	sqlDB.Close()
+	// 3. Stream File
 
 	// 4. Stream File
 	timestamp := time.Now().Format("20060102_150405")
@@ -274,7 +242,91 @@ func ImportBackupHandler(c *gin.Context) {
 
 	// Re-open DB
 	db.InitDB(db.CurrentDBPath)
-
+	db.InitDB(db.CurrentDBPath)
 	c.Header("HX-Redirect", "/backup") // Refresh page
 	c.String(http.StatusOK, "Restore successful")
+}
+
+// createBackupFile generates a standard backup database at destPath
+func createBackupFile(destPath string) error {
+	debugLog("DEBUG: Creating backup at %s using Source DB: %s", destPath, db.CurrentDBPath)
+
+	exportDB, err := gorm.Open(sqlite.Open(destPath), &gorm.Config{})
+	if err != nil {
+		debugLog("DEBUG: Failed to open export DB: %v", err)
+		return err
+	}
+
+	// Migrate All Tables
+	if err := exportDB.AutoMigrate(
+		&model.Subscription{},
+		&model.DownloadLog{},
+		&model.GlobalConfig{},
+		&model.LocalAnimeDirectory{},
+		&model.LocalAnime{},
+		&model.AnimeMetadata{},
+	); err != nil {
+		debugLog("DEBUG: AutoMigrate failed: %v", err)
+		return err
+	}
+
+	// Copy Data
+	// Subscriptions
+	var subs []model.Subscription
+	if err := db.DB.Find(&subs).Error; err == nil && len(subs) > 0 {
+		result := exportDB.Create(&subs)
+		debugLog("DEBUG: Exported %d Subscriptions (Error: %v)", result.RowsAffected, result.Error)
+	} else {
+		debugLog("DEBUG: No Subscriptions found or error: %v", err)
+	}
+
+	// Logs
+	var logs []model.DownloadLog
+	if err := db.DB.Find(&logs).Error; err == nil && len(logs) > 0 {
+		result := exportDB.Create(&logs)
+		debugLog("DEBUG: Exported %d DownloadLogs (Error: %v)", result.RowsAffected, result.Error)
+	} else {
+		debugLog("DEBUG: No DownloadLogs found or error: %v", err)
+	}
+
+	// Configs
+	var configs []model.GlobalConfig
+	if err := db.DB.Find(&configs).Error; err == nil && len(configs) > 0 {
+		result := exportDB.Create(&configs)
+		debugLog("DEBUG: Exported %d GlobalConfigs (Error: %v)", result.RowsAffected, result.Error)
+	} else {
+		debugLog("DEBUG: No GlobalConfigs found or error: %v", err)
+	}
+
+	// LocalAnimeDirectory
+	var dirs []model.LocalAnimeDirectory
+	if err := db.DB.Find(&dirs).Error; err == nil && len(dirs) > 0 {
+		result := exportDB.Create(&dirs)
+		debugLog("DEBUG: Exported %d LocalAnimeDirectories (Error: %v)", result.RowsAffected, result.Error)
+	}
+
+	// LocalAnime
+	var localAnimes []model.LocalAnime
+	if err := db.DB.Find(&localAnimes).Error; err == nil && len(localAnimes) > 0 {
+		result := exportDB.Create(&localAnimes)
+		debugLog("DEBUG: Exported %d LocalAnimes (Error: %v)", result.RowsAffected, result.Error)
+	}
+
+	// AnimeMetadata
+	var metadatas []model.AnimeMetadata
+	if err := db.DB.Find(&metadatas).Error; err == nil && len(metadatas) > 0 {
+		result := exportDB.Create(&metadatas)
+		debugLog("DEBUG: Exported %d AnimeMetadatas (Error: %v)", result.RowsAffected, result.Error)
+	}
+
+	sqlDB, _ := exportDB.DB()
+	sqlDB.Close()
+
+	// Verify file size
+	fi, err := os.Stat(destPath)
+	if err == nil {
+		debugLog("DEBUG: Final Backup Size: %d bytes", fi.Size())
+	}
+
+	return nil
 }

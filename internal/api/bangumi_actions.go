@@ -40,9 +40,11 @@ func UpdateBangumiCollectionHandler(c *gin.Context) {
 		req.Status = 3
 	}
 
-	// Init Client (credentials not needed for this call if token is valid, but struct requires them)
-	// Fetch app ID/Secret from DB just in case, though token is what matters
+	// Init Client
 	client := bangumi.NewClient("", "", "")
+
+	// Apply Proxy
+	applyProxyToBangumiClient(client)
 
 	opts := bangumi.CollectionUpdateOptions{
 		Status:  req.Status,
@@ -87,6 +89,7 @@ func UpdateBangumiProgressHandler(c *gin.Context) {
 	}
 
 	client := bangumi.NewClient("", "", "")
+	applyProxyToBangumiClient(client)
 
 	if err := client.UpdateWatchedEpisodes(accessToken, id, req.EpisodeCount); err != nil {
 		log.Printf("ERROR: UpdateWatchedEpisodes failed for ID %d: %v", id, err)

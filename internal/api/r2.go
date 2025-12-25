@@ -14,11 +14,9 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/gin-gonic/gin"
-	"github.com/glebarez/sqlite"
 	_ "github.com/pokerjest/animateAutoTool/internal/config"
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/model"
-	"gorm.io/gorm"
 )
 
 type R2Config struct {
@@ -121,8 +119,8 @@ func UploadToR2Handler(c *gin.Context) {
 	tempFile.Close()
 	defer os.Remove(tempPath)
 
-	if err := createFilteredBackup(tempPath); err != nil {
-		debugLog("DEBUG: createFilteredBackup error: %v", err)
+	if err := createBackupFile(tempPath); err != nil {
+		debugLog("DEBUG: createBackupFile error: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create backup: " + err.Error()})
 		return
 	}
@@ -160,36 +158,6 @@ func UploadToR2Handler(c *gin.Context) {
 
 	debugLog("DEBUG: Upload successful")
 	c.JSON(http.StatusOK, gin.H{"status": "uploaded", "key": key})
-}
-
-// createFilteredBackup duplicates logic from ExportBackupHandler but writes to a specific path
-func createFilteredBackup(destPath string) error {
-	exportDB, err := gorm.Open(sqlite.Open(destPath), &gorm.Config{})
-	if err != nil {
-		return err
-	}
-
-	if err := exportDB.AutoMigrate(&model.Subscription{}, &model.DownloadLog{}, &model.GlobalConfig{}); err != nil {
-		return err
-	}
-
-	// Copy Data
-	var subs []model.Subscription
-	if err := db.DB.Find(&subs).Error; err == nil && len(subs) > 0 {
-		exportDB.Create(&subs)
-	}
-	var logs []model.DownloadLog
-	if err := db.DB.Find(&logs).Error; err == nil && len(logs) > 0 {
-		exportDB.Create(&logs)
-	}
-	var configs []model.GlobalConfig
-	if err := db.DB.Find(&configs).Error; err == nil && len(configs) > 0 {
-		exportDB.Create(&configs)
-	}
-
-	sqlDB, _ := exportDB.DB()
-	sqlDB.Close()
-	return nil
 }
 
 type R2BackupFile struct {
