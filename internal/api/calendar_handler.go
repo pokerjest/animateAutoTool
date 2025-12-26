@@ -42,8 +42,12 @@ func (s *Server) GetCalendarHandler(c *gin.Context) {
 		today = 7
 	}
 
+	// Check for HTMX request
+	isHTMX := c.GetHeader("HX-Request") == "true"
+
 	c.HTML(http.StatusOK, "calendar.html", gin.H{
-		"Calendar": calendar,
-		"Today":    today,
+		"Calendar":   calendar,
+		"Today":      today,
+		"SkipLayout": isHTMX,
 	})
 }
