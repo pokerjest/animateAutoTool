@@ -3,8 +3,12 @@ name: Go CI/CD
 on:
   push:
     branches: [ "main" ]
+    paths-ignore:
+      - '**.md'
   pull_request:
     branches: [ "main" ]
+    paths-ignore:
+      - '**.md'
   workflow_dispatch:
 
 jobs:
@@ -18,7 +22,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
+          go-version: '1.24.3'
           cache: true
 
       - name: Download dependencies
@@ -51,7 +55,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
+          go-version: '1.24.3'
           cache: true
 
       - name: Build server binary

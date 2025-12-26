@@ -35,14 +35,18 @@ Animate Auto Tool 是一个基于 Go 开发的自动化动漫下载工具，通�
 ### 🌸 元数据深度集成 (持续增强!)
 - **多源聚合**：可选 Bangumi, TMDB 或 AniList 作为首选元数据来源。
 - **离线缓存**：所有海报和简介均以 BLOB 形式存储于 SQLite 中，**无网环境也能正常浏览**。
+- **强制刷新**：单体/全局强制刷新元数据，确保信息实时同步。
 - **双向同步**：自动同步 Bangumi 的"在看"和"看过"列表。
-- **进度管理**：本地播放进度可一键同步至 Bangumi。
-- **Mikan 聚合**：内置 Mikan Dashboard，查看每日更新并快速订阅。
+- **连接验证**：Bangumi 连接状态实时检测与修复。
 
 ### 📦 批量订阅
 - **文本批量导入**：支持 `标题 | RSS链接` 格式的批量导入。
 - **UI 交互添加**：在搜索或 Dashboard 中将番剧加入"批量列表"。
 - **分组预览**：提交前可预览每个订阅包含的剧集详情，防止加错。
+
+### 🛡️ 数据安全与备份
+- **Cloudflare R2 备份**：支持将元数据、配置和订阅备份至 R2 对象存储。
+- **选择性恢复**：从备份中按需恢复特定数据（如仅配置、仅订阅），灵活安全。
 
 ### 📂 本地番剧管理
 - **目录扫描**：配置本地根目录，自动扫描识别番剧系列。
@@ -122,11 +126,11 @@ CGO_ENABLED=0 go build -ldflags="-s -w" -o animate-server cmd/server/main.go
 ./animate-server
 ```
 
-服务默认运行在 `http://localhost:8087`
+服务默认运行在 `http://localhost:8306`
 
 ### 3. Web 界面配置
 
-访问 `http://localhost:8087/settings` 配置：
+访问 `http://localhost:8306/settings` 配置：
 
 - **qBittorrent Web UI 地址**：如 `http://localhost:8080`
 - **用户名/密码**：qBittorrent 的 Web UI 凭据
