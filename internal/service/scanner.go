@@ -201,8 +201,6 @@ func (s *ScannerService) aggregator(results <-chan ScanResult) {
 			DoUpdates: clause.AssignmentColumns([]string{"file_size", "season_num", "episode_num", "title", "container"}),
 		}).Create(&batch).Error; err != nil {
 			log.Printf("Scanner: Batch insert failed: %v", err)
-		} else {
-			// log.Printf("Scanner: Saved batch of %d episodes", len(batch))
 		}
 		batch = make([]model.LocalEpisode, 0, s.BatchSize)
 	}
