@@ -1,99 +1,181 @@
 {{ define "calendar.html" }}
 {{ if not .SkipLayout }}{{ template "header.html" . }}{{ end }}
 
-<div class="container mx-auto" x-data="{ currentTab: {{.Today}} }">
+<div class="container mx-auto" x-data="{ 
+    currentTab: {{.Today}},
+    modalOpen: false,
+    selectedAnime: null,
+    
+    openSubscribeModal(anime) {
+        this.selectedAnime = anime;
+        this.modalOpen = true;
+    }
+}">
     <!-- Header -->
-    <div class="flex justify-between items-center mb-8">
+    <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
         <div>
-            <h1 class="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-primary to-accent">
+            <h1 class="text-4xl font-black bg-clip-text text-transparent bg-gradient-to-r from-primary to-accent">
                 追番日历
             </h1>
-            <p class="text-gray-500 mt-2">查看本周更新的全部番剧</p>
+            <p class="text-gray-500 mt-2 font-medium">查看本周更新的全部番剧</p>
+        </div>
+
+        <!-- Weekday Tabs (Desktop/Tablet) -->
+        <div class="hidden md:flex bg-white/50 backdrop-blur-sm p-1.5 rounded-2xl border border-white/60 shadow-sm">
+            {{ range .Calendar }}
+            <button @click="currentTab = {{.Weekday.ID}}"
+                :class="currentTab === {{.Weekday.ID}} ? 'bg-white text-primary shadow-md font-bold' : 'text-gray-500 hover:text-gray-700 hover:bg-white/50'"
+                class="px-4 py-2 rounded-xl transition-all duration-300 text-sm">
+                {{ .Weekday.CN }}
+            </button>
+            {{ end }}
         </div>
     </div>
 
     <!-- Error Message -->
     {{ if .Error }}
-    <div class="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-6 rounded shadow-sm" role="alert">
-        <p class="font-bold">Error</p>
-        <p>{{ .Error }}</p>
+    <div class="bg-red-50 border border-red-200 text-red-600 p-6 rounded-2xl shadow-sm flex items-center gap-4"
+        role="alert">
+        <div class="text-3xl">⚠️</div>
+        <div>
+            <p class="font-bold text-lg">无法获取日历数据</p>
+            <p class="opacity-80">{{ .Error }}</p>
+        </div>
     </div>
     {{ else }}
 
-    <!-- Weekday Tabs (Mobile/Tablet) -->
-    <div class="lg:hidden mb-6 flex overflow-x-auto gap-2 pb-2 scrollbar-hide">
+    <!-- Weekday Tabs (Mobile) -->
+    <div class="md:hidden mb-6 flex overflow-x-auto gap-2 pb-2 scrollbar-hide -mx-4 px-4">
         {{ range .Calendar }}
         <button @click="currentTab = {{.Weekday.ID}}"
-            :class="{'bg-primary text-white shadow-lg scale-105': currentTab === {{.Weekday.ID}}, 'bg-white text-gray-600 hover:bg-gray-50': currentTab !== {{.Weekday.ID}}}"
-            class="px-4 py-2 rounded-full whitespace-nowrap transition-all duration-200 font-medium text-sm flex-shrink-0 border border-gray-100">
+            :class="currentTab === {{.Weekday.ID}} ? 'bg-primary text-white shadow-lg scale-105' : 'bg-white text-gray-600 border border-gray-100'"
+            class="px-5 py-2.5 rounded-full whitespace-nowrap transition-all duration-200 font-bold text-sm flex-shrink-0">
             {{ .Weekday.CN }}
         </button>
         {{ end }}
     </div>
 
     <!-- Calendar Grid -->
-    <div class="grid grid-cols-1 lg:grid-cols-7 gap-6">
+    <div class="min-h-[500px]">
         {{ range .Calendar }}
-        <!-- Day Column -->
-        <div class="flex flex-col gap-4" :class="{'hidden lg:flex': currentTab !== {{.Weekday.ID}} }">
+        <div x-show="currentTab === {{.Weekday.ID}}" x-transition:enter="transition ease-out duration-300"
+            x-transition:enter-start="opacity-0 translate-y-4" x-transition:enter-end="opacity-100 translate-y-0"
+            class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6">
 
-            <!-- Day Header -->
-            <div class="sticky top-0 z-10 py-3 glass-panel text-center border-b-2"
-                :class="currentTab === {{.Weekday.ID}} ? 'border-primary text-primary' : 'border-transparent text-gray-500'">
-                <h3 class="font-bold text-lg">{{ .Weekday.CN }}</h3>
-            </div>
+            {{ range .Items }}
+            <!-- Anime Card -->
+            {{ $isSubscribed := index $.SubMap .ID }}
+            <div class="group relative bg-white rounded-2xl shadow-sm hover:shadow-xl transition-all duration-300 hover:-translate-y-1 overflow-hidden border border-gray-100"
+                @click="{{ if $isSubscribed }}window.location.href='/subscriptions'{{ else }}openSubscribeModal({name: '{{if .NameCN}}{{.NameCN}}{{else}}{{.Name}}{{end}}', id: {{.ID}} }){{ end }}">
 
-            <!-- Anime Cards -->
-            <div class="flex flex-col gap-3">
-                {{ range .Items }}
+                <!-- Rate Badge -->
+                {{ if .Rating.Score }}
                 <div
-                    class="group relative bg-white/50 hover:bg-white rounded-xl overflow-hidden transition-all duration-300 hover:shadow-lg border border-white/20 hover:border-primary/20">
-                    <div class="flex p-2 gap-3 h-24">
-                        <!-- Cover -->
-                        <div
-                            class="w-16 h-full shrink-0 rounded-lg overflow-hidden relative shadow-sm group-hover:shadow-md transition-all">
-                            <img src="{{ .Images.Grid }}" alt="{{ .NameCN }}"
-                                class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
-                                loading="lazy" onerror="this.src='/static/img/placeholder.png'">
-                        </div>
-
-                        <!-- Info -->
-                        <div class="flex-1 flex flex-col justify-between min-w-0 py-1">
-                            <div class="space-y-1">
-                                <h4 class="font-bold text-sm text-gray-800 line-clamp-2 leading-tight group-hover:text-primary transition-colors"
-                                    title="{{ .NameCN }}">
-                                    {{ if .NameCN }}{{ .NameCN }}{{ else }}{{ .Name }}{{ end }}
-                                </h4>
-                                {{ if .Rating.Score }}
-                                <div class="flex items-center gap-1">
-                                    <span class="text-yellow-400 text-xs">★</span>
-                                    <span class="text-xs text-gray-500 font-medium">{{ .Rating.Score }}</span>
-                                </div>
-                                {{ end }}
-                            </div>
-
-                            <!-- Search/Add Button -->
-                            <div
-                                class="flex justify-end opacity-0 group-hover:opacity-100 transition-opacity duration-200 translate-y-2 group-hover:translate-y-0">
-                                <a href="/subscriptions?q={{ if .NameCN }}{{ .NameCN }}{{ else }}{{ .Name }}{{ end }}"
-                                    class="p-1.5 bg-primary/10 text-primary rounded-lg hover:bg-primary hover:text-white transition-colors"
-                                    title="去搜索订阅">
-                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none"
-                                        viewBox="0 0 24 24" stroke="currentColor">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                            d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                                    </svg>
-                                </a>
-                            </div>
-                        </div>
-                    </div>
+                    class="absolute top-2 left-2 z-20 bg-black/60 backdrop-blur-md text-white text-[10px] font-bold px-2 py-0.5 rounded-md flex items-center gap-1">
+                    <span class="text-yellow-400">★</span> {{ .Rating.Score }}
                 </div>
                 {{ end }}
+
+                <!-- Subscribed Badge -->
+                {{ if $isSubscribed }}
+                <div
+                    class="absolute top-2 right-2 z-20 bg-emerald-500 text-white text-[10px] font-bold px-2 py-1 rounded-lg shadow-lg flex items-center gap-1">
+                    ✓ 已订阅
+                </div>
+                {{ end }}
+
+                <!-- Cover -->
+                <div class="aspect-[2/3] relative overflow-hidden bg-gray-100">
+                    <img src="{{ .Images.Common }}" alt="{{ if .NameCN }}{{ .NameCN }}{{ else }}{{ .Name }}{{ end }}"
+                        class="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
+                        loading="lazy" onerror="this.src='/static/img/placeholder.png'">
+
+                    <!-- Overlay -->
+                    <div
+                        class="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-end p-4">
+                        {{ if not $isSubscribed }}
+                        <button
+                            class="w-full bg-primary text-white py-2 rounded-xl font-bold text-sm shadow-lg transform translate-y-2 group-hover:translate-y-0 transition-transform duration-300">
+                            + 快速订阅
+                        </button>
+                        {{ end }}
+                    </div>
+                </div>
+
+                <!-- Info -->
+                <div class="p-3">
+                    <h3 class="font-bold text-gray-800 text-sm line-clamp-2 leading-tight group-hover:text-primary transition-colors min-h-[2.5em]"
+                        title="{{ if .NameCN }}{{ .NameCN }}{{ else }}{{ .Name }}{{ end }}">
+                        {{ if .NameCN }}{{ .NameCN }}{{ else }}{{ .Name }}{{ end }}
+                    </h3>
+                    <div class="flex justify-between items-center mt-2">
+                        {{ if .Collection.Doing }}
+                        <span class="text-[10px] text-gray-400 bg-gray-50 px-1.5 py-0.5 rounded">{{ .Collection.Doing }}
+                            人在看</span>
+                        {{ end }}
+                        {{ if .AirDate }}
+                        <span class="text-[10px] font-mono text-gray-400">{{ .AirDate }}</span>
+                        {{ end }}
+                    </div>
+                </div>
             </div>
+            {{ end }}
         </div>
         {{ end }}
     </div>
 
+    <!-- Quick Subscribe Modal -->
+    <div x-show="modalOpen" style="display: none;" class="fixed inset-0 z-50 overflow-y-auto" role="dialog"
+        aria-modal="true">
+        <div class="flex items-center justify-center min-h-screen px-4 pb-20 text-center sm:block sm:p-0">
+            <div x-show="modalOpen" x-transition:enter="ease-out duration-300" x-transition:enter-start="opacity-0"
+                x-transition:enter-end="opacity-100" x-transition:leave="ease-in duration-200"
+                x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0"
+                class="fixed inset-0 bg-gray-900/60 backdrop-blur-sm transition-opacity" @click="modalOpen = false"
+                aria-hidden="true"></div>
+            <span class="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
+
+            <div x-show="modalOpen" x-transition:enter="ease-out duration-300"
+                x-transition:enter-start="opacity-0 translate-y-4 sm:translate-y-0 sm:scale-95"
+                x-transition:enter-end="opacity-100 translate-y-0 sm:scale-100"
+                x-transition:leave="ease-in duration-200"
+                x-transition:leave-start="opacity-100 translate-y-0 sm:scale-100"
+                x-transition:leave-end="opacity-0 translate-y-4 sm:translate-y-0 sm:scale-95"
+                class="inline-block align-middle bg-white rounded-2xl text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:max-w-md w-full border border-gray-100">
+                <div class="p-6">
+                    <h3 class="text-xl font-bold text-gray-800 mb-4">添加订阅</h3>
+                    <form hx-post="/api/subscriptions" hx-swap="none"
+                        @htmx:after-request="modalOpen = false; window.location.reload()">
+                        <div class="space-y-4">
+                            <div>
+                                <label class="block text-sm font-bold text-gray-700 mb-1">番剧名称</label>
+                                <input type="text" name="Title" :value="selectedAnime?.name"
+                                    class="w-full rounded-xl border-gray-200 bg-gray-50 focus:border-primary focus:ring-primary">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-bold text-gray-700 mb-1">RSS 链接 (Mikan)</label>
+                                <div class="flex gap-2">
+                                    <input type="text" name="RSSUrl" placeholder="粘贴 RSS 链接..."
+                                        class="w-full rounded-xl border-gray-200 bg-gray-50 focus:border-primary focus:ring-primary">
+                                    <a :href="'https://mikanani.me/Home/Search?searchstr=' + encodeURIComponent(selectedAnime?.name)"
+                                        target="_blank"
+                                        class="shrink-0 px-3 py-2 bg-pink-500 text-white rounded-xl hover:bg-pink-600 flex items-center justify-center font-bold text-sm">
+                                        🔍 搜RSS
+                                    </a>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="mt-8 flex justify-end gap-3">
+                            <button type="button" @click="modalOpen = false"
+                                class="px-5 py-2.5 rounded-xl border border-gray-200 font-bold text-gray-600 hover:bg-gray-50 transition-colors">取消</button>
+                            <button type="submit"
+                                class="px-5 py-2.5 rounded-xl bg-primary text-white font-bold hover:bg-accent transition-all shadow-lg shadow-primary/30">确认订阅</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
     {{ end }}
 </div>
 

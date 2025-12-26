@@ -7,6 +7,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/pokerjest/animateAutoTool/internal/bangumi"
+	"github.com/pokerjest/animateAutoTool/internal/db"
+	"github.com/pokerjest/animateAutoTool/internal/model"
 )
 
 // GetCalendarHandler renders the anime calendar
@@ -35,9 +37,23 @@ func GetCalendarHandler(c *gin.Context) {
 	// Check for HTMX request
 	isHTMX := c.GetHeader("HX-Request") == "true"
 
+	// Fetch active subscriptions to check status
+	// Map: BangumiID -> SubscriptionID (if subscribed)
+	subMap := make(map[int]uint)
+	var subs []model.Subscription
+	// Preload Metadata to get BangumiID
+	if err := db.DB.Preload("Metadata").Where("is_active = ?", true).Find(&subs).Error; err == nil {
+		for _, sub := range subs {
+			if sub.Metadata != nil && sub.Metadata.BangumiID != 0 {
+				subMap[sub.Metadata.BangumiID] = sub.ID
+			}
+		}
+	}
+
 	c.HTML(http.StatusOK, "calendar.html", gin.H{
 		"Calendar":   calendar,
 		"Today":      today,
 		"SkipLayout": isHTMX,
+		"SubMap":     subMap,
 	})
 }
