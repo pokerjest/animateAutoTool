@@ -35,6 +35,7 @@ func InitDB(storagePath string) {
 		&model.GlobalConfig{},
 		&model.LocalAnimeDirectory{},
 		&model.LocalAnime{},
+		&model.LocalEpisode{},
 		&model.AnimeMetadata{},
 	)
 	if err != nil {

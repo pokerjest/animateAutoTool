@@ -11,6 +11,7 @@ import (
 	"github.com/glebarez/sqlite"
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/model"
+	"github.com/pokerjest/animateAutoTool/internal/service"
 	"gorm.io/gorm"
 )
 
@@ -131,107 +132,54 @@ func ExecuteRestoreHandler(c *gin.Context) {
 		c.String(http.StatusBadRequest, "Restore file expired or not found")
 		return
 	}
+	// Also ensure it's a valid SQLite file before passing to service
+	if !isValidSQLite(tempPath) {
+		c.String(http.StatusBadRequest, "Invalid Database File")
+		return
+	}
 
 	// Read restore options from form
-	restoreConfigs := c.PostForm("restore_configs") == "on"
-	restoreMetadata := c.PostForm("restore_metadata") == "on"
-	restoreSubscriptions := c.PostForm("restore_subscriptions") == "on"
-	restoreLogs := c.PostForm("restore_logs") == "on"
-	restoreLocal := c.PostForm("restore_local") == "on"
+	options := service.RestoreOptions{
+		Configs:       c.PostForm("restore_configs") == "on",
+		Metadata:      c.PostForm("restore_metadata") == "on",
+		Subscriptions: c.PostForm("restore_subscriptions") == "on",
+		Logs:          c.PostForm("restore_logs") == "on",
+		Local:         c.PostForm("restore_local") == "on",
+	}
 
 	// Validate at least one option selected
-	if !restoreConfigs && !restoreMetadata && !restoreSubscriptions && !restoreLogs && !restoreLocal {
+	if !options.Configs && !options.Metadata && !options.Subscriptions && !options.Logs && !options.Local {
 		c.String(http.StatusBadRequest, "Please select at least one table to restore")
 		return
 	}
 
-	// Open backup database
-	backupDB, err := gorm.Open(sqlite.Open(tempPath), &gorm.Config{})
-	if err != nil {
-		c.String(http.StatusBadRequest, "Invalid backup file: "+err.Error())
+	// EXECUTE PARALLEL RESTORE
+	svc := service.NewRestoreService()
+	if err := svc.PerformRestore(tempPath, options); err != nil {
+		c.String(http.StatusInternalServerError, fmt.Sprintf("Restore Failed: %v", err))
 		return
 	}
-	defer func() {
-		sqlDB, _ := backupDB.DB()
-		sqlDB.Close()
-	}()
 
-	// Perform selective restore
-	if restoreConfigs {
-		// Clear current configs
-		if err := db.DB.Exec("DELETE FROM global_configs").Error; err != nil {
-			c.String(http.StatusInternalServerError, "Failed to clear configs: "+err.Error())
-			return
-		}
-		// Copy from backup
-		var configs []model.GlobalConfig
-		if err := backupDB.Find(&configs).Error; err == nil && len(configs) > 0 {
-			db.DB.Create(&configs)
-		}
-	}
-
-	if restoreMetadata {
-		// Clear current metadata
-		if err := db.DB.Exec("DELETE FROM anime_metadata").Error; err != nil {
-			c.String(http.StatusInternalServerError, "Failed to clear metadata: "+err.Error())
-			return
-		}
-		// Copy from backup
-		var metadata []model.AnimeMetadata
-		if err := backupDB.Find(&metadata).Error; err == nil && len(metadata) > 0 {
-			db.DB.Create(&metadata)
-		}
-	}
-
-	if restoreSubscriptions {
-		// Clear current subscriptions
-		if err := db.DB.Exec("DELETE FROM subscriptions").Error; err != nil {
-			c.String(http.StatusInternalServerError, "Failed to clear subscriptions: "+err.Error())
-			return
-		}
-		// Copy from backup
-		var subs []model.Subscription
-		if err := backupDB.Find(&subs).Error; err == nil && len(subs) > 0 {
-			db.DB.Create(&subs)
-		}
-	}
-
-	if restoreLogs {
-		// Clear current logs
-		if err := db.DB.Exec("DELETE FROM download_logs").Error; err != nil {
-			c.String(http.StatusInternalServerError, "Failed to clear logs: "+err.Error())
-			return
-		}
-		// Copy from backup
-		var logs []model.DownloadLog
-		if err := backupDB.Find(&logs).Error; err == nil && len(logs) > 0 {
-			db.DB.Create(&logs)
-		}
-	}
-
-	if restoreLocal {
-		// Clear current local anime data
-		if err := db.DB.Exec("DELETE FROM local_anime_directories").Error; err != nil {
-			c.String(http.StatusInternalServerError, "Failed to clear local directories: "+err.Error())
-			return
-		}
-		if err := db.DB.Exec("DELETE FROM local_animes").Error; err != nil {
-			c.String(http.StatusInternalServerError, "Failed to clear local animes: "+err.Error())
-			return
-		}
-		// Copy from backup
-		var dirs []model.LocalAnimeDirectory
-		if err := backupDB.Find(&dirs).Error; err == nil && len(dirs) > 0 {
-			db.DB.Create(&dirs)
-		}
-		var animes []model.LocalAnime
-		if err := backupDB.Find(&animes).Error; err == nil && len(animes) > 0 {
-			db.DB.Create(&animes)
-		}
-	}
-
+	// Success response: Send HTMX trigger or redirect
 	c.Header("HX-Redirect", "/backup")
-	c.String(http.StatusOK, "Restore successful")
+	c.String(http.StatusOK, "Restore completed successfully!")
+}
+
+// Helper duplicated from r2.go if needed, or better export it.
+// To avoid duplication, let's keep it here or export in utils.
+// For now, implementing locally if r2.go one is private.
+func isValidSQLite(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+
+	header := make([]byte, 16)
+	if _, err := f.Read(header); err != nil {
+		return false
+	}
+	return string(header) == "SQLite format 3\000"
 }
 
 func ExportBackupHandler(c *gin.Context) {
@@ -330,67 +278,47 @@ func createBackupFile(destPath string) error {
 		return err
 	}
 
-	// Migrate All Tables
+	// 1. Migrate All Tables (Including LocalEpisode)
 	if err := exportDB.AutoMigrate(
 		&model.Subscription{},
 		&model.DownloadLog{},
 		&model.GlobalConfig{},
 		&model.LocalAnimeDirectory{},
 		&model.LocalAnime{},
+		&model.LocalEpisode{}, // Added
 		&model.AnimeMetadata{},
 	); err != nil {
 		debugLog("DEBUG: AutoMigrate failed: %v", err)
 		return err
 	}
 
-	// Copy Data
-	// Subscriptions
-	var subs []model.Subscription
-	if err := db.DB.Find(&subs).Error; err == nil && len(subs) > 0 {
-		result := exportDB.Create(&subs)
-		debugLog("DEBUG: Exported %d Subscriptions (Error: %v)", result.RowsAffected, result.Error)
-	} else {
-		debugLog("DEBUG: No Subscriptions found or error: %v", err)
+	// Helper to batch export
+	batchExport := func(model interface{}, name string) {
+		var count int64
+		db.DB.Model(model).Count(&count)
+		if count == 0 {
+			debugLog("DEBUG: No %s found.", name)
+			return
+		}
+
+		debugLog("DEBUG: Exporting %d %s...", count, name)
+
+		// Use a large batch size for SQLite inserts
+		db.DB.Model(model).FindInBatches(model, 1000, func(tx *gorm.DB, batch int) error {
+			return exportDB.Create(tx.Statement.Dest).Error
+		})
 	}
 
-	// Logs
-	var logs []model.DownloadLog
-	if err := db.DB.Find(&logs).Error; err == nil && len(logs) > 0 {
-		result := exportDB.Create(&logs)
-		debugLog("DEBUG: Exported %d DownloadLogs (Error: %v)", result.RowsAffected, result.Error)
-	} else {
-		debugLog("DEBUG: No DownloadLogs found or error: %v", err)
-	}
+	// 2. Export Data (Batch Processing)
+	batchExport(&[]model.Subscription{}, "Subscriptions")
+	batchExport(&[]model.DownloadLog{}, "DownloadLogs")
+	batchExport(&[]model.GlobalConfig{}, "GlobalConfigs")
+	batchExport(&[]model.LocalAnimeDirectory{}, "LocalAnimeDirectories")
 
-	// Configs
-	var configs []model.GlobalConfig
-	if err := db.DB.Find(&configs).Error; err == nil && len(configs) > 0 {
-		result := exportDB.Create(&configs)
-		debugLog("DEBUG: Exported %d GlobalConfigs (Error: %v)", result.RowsAffected, result.Error)
-	} else {
-		debugLog("DEBUG: No GlobalConfigs found or error: %v", err)
-	}
-
-	// LocalAnimeDirectory
-	var dirs []model.LocalAnimeDirectory
-	if err := db.DB.Find(&dirs).Error; err == nil && len(dirs) > 0 {
-		result := exportDB.Create(&dirs)
-		debugLog("DEBUG: Exported %d LocalAnimeDirectories (Error: %v)", result.RowsAffected, result.Error)
-	}
-
-	// LocalAnime
-	var localAnimes []model.LocalAnime
-	if err := db.DB.Find(&localAnimes).Error; err == nil && len(localAnimes) > 0 {
-		result := exportDB.Create(&localAnimes)
-		debugLog("DEBUG: Exported %d LocalAnimes (Error: %v)", result.RowsAffected, result.Error)
-	}
-
-	// AnimeMetadata
-	var metadatas []model.AnimeMetadata
-	if err := db.DB.Find(&metadatas).Error; err == nil && len(metadatas) > 0 {
-		result := exportDB.Create(&metadatas)
-		debugLog("DEBUG: Exported %d AnimeMetadatas (Error: %v)", result.RowsAffected, result.Error)
-	}
+	// Complex data types
+	batchExport(&[]model.AnimeMetadata{}, "AnimeMetadatas")
+	batchExport(&[]model.LocalAnime{}, "LocalAnimes")
+	batchExport(&[]model.LocalEpisode{}, "LocalEpisodes") // Added
 
 	sqlDB, _ := exportDB.DB()
 	sqlDB.Close()

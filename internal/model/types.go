@@ -133,6 +133,26 @@ type LocalAnime struct {
 	// Refactored Metadata
 	MetadataID *uint          `json:"metadata_id"`
 	Metadata   *AnimeMetadata `json:"metadata" gorm:"foreignKey:MetadataID"`
+
+	Episodes []LocalEpisode `json:"episodes" gorm:"foreignKey:LocalAnimeID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE;"`
+}
+
+// LocalEpisode 代表本地的一个视频文件（单集）
+type LocalEpisode struct {
+	gorm.Model
+	LocalAnimeID uint   `json:"local_anime_id" gorm:"index"` // 关联的番剧系列
+	Title        string `json:"title"`                       // 单集标题 (e.g. "Episode 1")
+	EpisodeNum   int    `json:"episode_num"`                 // 核心集号 (绝对集数)
+	SeasonNum    int    `json:"season_num"`                  // 季度号 (默认 1)
+	Path         string `json:"path" gorm:"uniqueIndex"`     // 绝对路径
+	Container    string `json:"container"`                   // 容器格式 (mkv, mp4)
+	FileSize     int64  `json:"file_size"`                   // 文件大小
+
+	// Offline Metadata / Raw Parsed Data
+	ParsedTitle  string `json:"parsed_title"`  // 从文件名解析出的原始系列标题
+	ParsedSeason string `json:"parsed_season"` // 解析出的季度字符串
+	Resolution   string `json:"resolution"`    // 解析出的分辨率
+	SubGroup     string `json:"sub_group"`     // 解析出的字幕组
 }
 
 // Append AniList Config Key

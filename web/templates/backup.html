@@ -94,202 +94,7 @@
                     <span>☁️</span> Cloudflare R2 云备份
                 </h3>
 
-                <div x-data="{ 
-                    config: { endpoint: '', access_key: '', secret_key: '', bucket: '' },
-                    backups: [],
-                    loading: true,
-                    init() {
-                        this.loadConfig();
-                        this.loadBackups();
-                    },
-                    loadConfig() {
-                        fetch('/api/backup/r2/config')
-                            .then(r => r.json())
-                            .then(data => {
-                                this.config = data;
-                            });
-                    },
-                    testMessage: '',
-                    testError: false,
-                    testConnection() {
-                        this.loading = true;
-                        this.testMessage = '测试中...';
-                        this.testError = false;
-                        
-                        fetch('/api/backup/r2/test', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify(this.config)
-                        })
-                        .then(r => r.json())
-                        .then(data => {
-                            this.loading = false;
-                            if(data.error) {
-                                this.testError = true;
-                                this.testMessage = '连接失败: ' + data.error;
-                            } else {
-                                this.testError = false;
-                                this.testMessage = '连接成功: ' + data.message;
-                            }
-                            setTimeout(() => this.testMessage = '', 5000);
-                        })
-                        .catch(e => {
-                            this.loading = false;
-                            this.testError = true;
-                            this.testMessage = '请求错误: ' + e;
-                            setTimeout(() => this.testMessage = '', 5000);
-                        });
-                    },
-                    saveConfig() {
-                        this.testMessage = '保存中...';
-                        fetch('/api/backup/r2/config', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify(this.config)
-                        })
-                        .then(r => r.json())
-                        .then(() => {
-                            this.testError = false;
-                            this.testMessage = '配置已保存';
-                            this.loadBackups();
-                            setTimeout(() => this.testMessage = '', 3000);
-                        })
-                        .catch(e => {
-                            this.testError = true;
-                            this.testMessage = '保存失败: ' + e;
-                            setTimeout(() => this.testMessage = '', 5000);
-                        });
-                    },
-                    uploadMessage: '',
-                    uploadError: false,
-                    upload() {
-                        // Removed confirm dialog as per user request
-                        
-                        this.loading = true;
-                        this.uploadMessage = '上传中...';
-                        this.uploadError = false;
-
-                        fetch('/api/backup/r2/upload', { method: 'POST' })
-                            .then(r => r.json())
-                            .then(data => {
-                                if(data.error) {
-                                    this.uploadError = true;
-                                    this.uploadMessage = '上传失败: ' + data.error;
-                                } else {
-                                    this.uploadError = false;
-                                    this.uploadMessage = '上传成功';
-                                    this.loadBackups();
-                                }
-                                setTimeout(() => this.uploadMessage = '', 5000);
-                            })
-                            .catch(e => {
-                                this.uploadError = true;
-                                this.uploadMessage = '上传错误: ' + e;
-                                setTimeout(() => this.uploadMessage = '', 5000);
-                            })
-                            .finally(() => this.loading = false);
-                    },
-                    loadBackups() {
-                        this.loading = true;
-                        fetch('/api/backup/r2/list')
-                            .then(r => r.json())
-                            .then(data => {
-                                if(data.error) console.error(data.error);
-                                else this.backups = data.backups || [];
-                            })
-                            .catch(console.error)
-                            .finally(() => this.loading = false);
-                    },
-                    showConfirm: false,
-                    confirmTitle: '',
-                    confirmMessage: '',
-                    confirmButtonText: '',
-                    confirmType: '', // 'restore' or 'delete'
-                    currentKey: '',
-                    modalLoading: false,
-
-                    confirmRestore(key) {
-                        this.currentKey = key;
-                        this.confirmType = 'restore';
-                        this.confirmTitle = '选择要还原的数据';
-                        this.confirmMessage = '从 ' + key.replace('animate_backup_', '').replace('.db', '') + ' 还原数据';
-                        this.confirmButtonText = '确认还原';
-                        this.showConfirm = true;
-                    },
-                    confirmDelete(key) {
-                        this.currentKey = key;
-                        this.confirmType = 'delete';
-                        this.confirmTitle = '确认删除';
-                        this.confirmMessage = '确定要删除备份 ' + key + ' 吗？此操作不可逆！';
-                        this.confirmButtonText = '确认删除';
-                        this.showConfirm = true;
-                    },
-                    executeConfirmAction() {
-                        this.modalLoading = true;
-                        if (this.confirmType === 'restore') {
-                            this.doRestore();
-                        } else if (this.confirmType === 'delete') {
-                            this.doDelete();
-                        }
-                    },
-                    doDelete() {
-                        const formData = new FormData();
-                        formData.append('key', this.currentKey);
-                        fetch('/api/backup/r2/delete', { method: 'POST', body: formData })
-                            .then(r => r.json())
-                            .then(data => {
-                                if(data.error) {
-                                    // Show error in modal instead of alert
-                                    this.confirmMessage = '删除失败: ' + data.error;
-                                    this.confirmTitle = '错误';
-                                    // Keep modal open to show error, remove action button?
-                                    // Simplified: just close and maybe show toast? Or just update text.
-                                    // Let's just update text and let user close.
-                                } else {
-                                    this.showConfirm = false;
-                                    this.loadBackups();
-                                }
-                            })
-                            .catch(e => {
-                                this.confirmMessage = '删除错误: ' + e;
-                                this.confirmTitle = '错误';
-                            })
-                            .finally(() => this.modalLoading = false);
-                    },
-                    doRestore() {
-                        const formData = new FormData();
-                        formData.append('key', this.currentKey);
-                        // Read checkbox states
-                        const restoreConfigs = document.getElementById('r2_restore_configs')?.checked || false;
-                        const restoreMetadata = document.getElementById('r2_restore_metadata')?.checked || false;
-                        const restoreSubscriptions = document.getElementById('r2_restore_subscriptions')?.checked || false;
-                        const restoreLogs = document.getElementById('r2_restore_logs')?.checked || false;
-                        const restoreLocal = document.getElementById('r2_restore_local')?.checked || false;
-                        
-                        formData.append('restore_configs', restoreConfigs);
-                        formData.append('restore_metadata', restoreMetadata);
-                        formData.append('restore_subscriptions', restoreSubscriptions);
-                        formData.append('restore_logs', restoreLogs);
-                        formData.append('restore_local', restoreLocal);
-                        
-                        fetch('/api/backup/r2/restore', { method: 'POST', body: formData })
-                            .then(r => r.json())
-                            .then(data => {
-                                if(data.error) {
-                                    this.confirmMessage = '还原失败: ' + data.error;
-                                    this.confirmTitle = '错误';
-                                } else {
-                                    // Use replace to reload to ensure database connection is reset
-                                    window.location.reload();
-                                }
-                            })
-                            .catch(e => {
-                                this.confirmMessage = '还原错误: ' + e;
-                                this.confirmTitle = '错误';
-                            })
-                            .finally(() => this.modalLoading = false);
-                    }
-                }" class="space-y-4">
+                <div x-data="r2Backup" class="space-y-4">
 
                     <!-- Config Form -->
                     <div
@@ -378,7 +183,7 @@
                                     <div class="flex items-center gap-2">
                                         <button @click="confirmRestore(file.key)"
                                             class="text-xs bg-blue-50 text-blue-600 px-3 py-1.5 rounded hover:bg-blue-100 transition border border-blue-200">
-                                            还原
+                                            预览 / 还原
                                         </button>
                                         <button @click="confirmDelete(file.key)"
                                             class="text-xs bg-red-50 text-red-600 px-2 py-1.5 rounded hover:bg-red-100 transition border border-red-200"
@@ -391,7 +196,7 @@
                         </div>
                     </div>
 
-                    <!-- Custom Confirm Modal -->
+                    <!-- Delete Confirm Modal (Simplified, only for Delete) -->
                     <div x-show="showConfirm" style="display: none;"
                         class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
                         x-transition.opacity>
@@ -399,39 +204,6 @@
                             @click.outside="showConfirm = false">
                             <h3 class="text-lg font-bold text-gray-800" x-text="confirmTitle"></h3>
                             <p class="text-sm text-gray-600" x-text="confirmMessage"></p>
-
-                            <!-- Restore Options Checkboxes (only for restore action) -->
-                            <div x-show="confirmType === 'restore'"
-                                class="bg-blue-50 p-3 rounded-lg border border-blue-200">
-                                <div class="text-xs font-semibold text-blue-700 mb-2">选择要还原的数据</div>
-                                <div class="space-y-1.5">
-                                    <label
-                                        class="flex items-center gap-2 text-xs text-gray-700 cursor-pointer hover:bg-white/50 p-1 rounded">
-                                        <input type="checkbox" id="r2_restore_configs" checked class="rounded">
-                                        <span class="font-medium">全局配置</span>
-                                    </label>
-                                    <label
-                                        class="flex items-center gap-2 text-xs text-gray-700 cursor-pointer hover:bg-white/50 p-1 rounded">
-                                        <input type="checkbox" id="r2_restore_metadata" checked class="rounded">
-                                        <span class="font-medium">元数据与海报</span>
-                                    </label>
-                                    <label
-                                        class="flex items-center gap-2 text-xs text-gray-700 cursor-pointer hover:bg-white/50 p-1 rounded">
-                                        <input type="checkbox" id="r2_restore_subscriptions" class="rounded">
-                                        <span>订阅配置</span>
-                                    </label>
-                                    <label
-                                        class="flex items-center gap-2 text-xs text-gray-700 cursor-pointer hover:bg-white/50 p-1 rounded">
-                                        <input type="checkbox" id="r2_restore_logs" class="rounded">
-                                        <span>下载日志</span>
-                                    </label>
-                                    <label
-                                        class="flex items-center gap-2 text-xs text-gray-700 cursor-pointer hover:bg-white/50 p-1 rounded">
-                                        <input type="checkbox" id="r2_restore_local" class="rounded">
-                                        <span>本地动漫数据</span>
-                                    </label>
-                                </div>
-                            </div>
 
                             <!-- Loading Spinner inside Modal -->
                             <div x-show="modalLoading" class="flex justify-center py-2">
@@ -443,8 +215,7 @@
                                 <button @click="showConfirm = false"
                                     class="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded transition">取消</button>
                                 <button @click="executeConfirmAction"
-                                    :class="confirmType === 'delete' ? 'bg-red-500 hover:bg-red-600' : 'bg-blue-600 hover:bg-blue-700'"
-                                    class="px-4 py-2 text-sm text-white rounded transition shadow-md"
+                                    class="bg-red-500 hover:bg-red-600 px-4 py-2 text-sm text-white rounded transition shadow-md"
                                     x-text="confirmButtonText"></button>
                             </div>
                         </div>
@@ -460,5 +231,258 @@
 
     </div>
 </div>
+
+<script>
+    document.addEventListener('alpine:init', () => {
+        Alpine.data('r2Backup', () => ({
+            config: { endpoint: '', access_key: '', secret_key: '', bucket: '' },
+            backups: [],
+            loading: true,
+
+            init() {
+                this.loadConfig();
+                this.loadBackups();
+            },
+
+            loadConfig() {
+                fetch('/api/backup/r2/config')
+                    .then(r => r.json())
+                    .then(data => {
+                        this.config = data;
+                    });
+            },
+
+            testMessage: '',
+            testError: false,
+            testConnection() {
+                this.loading = true;
+                this.testMessage = '测试中...';
+                this.testError = false;
+
+                fetch('/api/backup/r2/test', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(this.config)
+                })
+                    .then(r => r.json())
+                    .then(data => {
+                        this.loading = false;
+                        if (data.error) {
+                            this.testError = true;
+                            this.testMessage = '连接失败: ' + data.error;
+                        } else {
+                            this.testError = false;
+                            this.testMessage = '连接成功: ' + data.message;
+                        }
+                        setTimeout(() => this.testMessage = '', 5000);
+                    })
+                    .catch(e => {
+                        this.loading = false;
+                        this.testError = true;
+                        this.testMessage = '请求错误: ' + e;
+                        setTimeout(() => this.testMessage = '', 5000);
+                    });
+            },
+
+            saveConfig() {
+                this.testMessage = '保存中...';
+                fetch('/api/backup/r2/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(this.config)
+                })
+                    .then(r => r.json())
+                    .then(() => {
+                        this.testError = false;
+                        this.testMessage = '配置已保存';
+                        this.loadBackups();
+                        setTimeout(() => this.testMessage = '', 3000);
+                    })
+                    .catch(e => {
+                        this.testError = true;
+                        this.testMessage = '保存失败: ' + e;
+                        setTimeout(() => this.testMessage = '', 5000);
+                    });
+            },
+
+            uploadMessage: '',
+            uploadError: false,
+            upload() {
+                this.loading = true;
+                this.uploadMessage = '上传中...';
+                this.uploadError = false;
+
+                fetch('/api/backup/r2/upload', { method: 'POST' })
+                    .then(r => r.json())
+                    .then(data => {
+                        if (data.error) {
+                            this.uploadError = true;
+                            this.uploadMessage = '上传失败: ' + data.error;
+                        } else {
+                            this.uploadError = false;
+                            this.uploadMessage = '上传成功';
+                            this.loadBackups();
+                        }
+                        setTimeout(() => this.uploadMessage = '', 5000);
+                    })
+                    .catch(e => {
+                        this.uploadError = true;
+                        this.uploadMessage = '上传错误: ' + e;
+                        setTimeout(() => this.uploadMessage = '', 5000);
+                    })
+                    .finally(() => this.loading = false);
+            },
+
+            loadBackups() {
+                this.loading = true;
+                fetch('/api/backup/r2/list')
+                    .then(r => r.json())
+                    .then(data => {
+                        if (data.error) console.error(data.error);
+                        else this.backups = data.backups || [];
+                    })
+                    .catch(console.error)
+                    .finally(() => this.loading = false);
+            },
+
+            showConfirm: false,
+            confirmTitle: '',
+            confirmMessage: '',
+            confirmButtonText: '',
+            confirmType: '',
+            currentKey: '',
+            modalLoading: false,
+
+            confirmRestore(key) {
+                this.loading = true;
+
+                // Scroll to preview area
+                const previewEl = document.getElementById('restore-preview');
+                previewEl.scrollIntoView({ behavior: 'smooth' });
+
+                // Initial State
+                this.renderProgress(previewEl, key, 0, 'starting');
+
+                const formData = new FormData();
+                formData.append('key', key);
+
+                fetch('/api/backup/r2/stage', {
+                    method: 'POST',
+                    body: formData
+                })
+                    .then(r => r.json())
+                    .then(data => {
+                        if (data.error) throw new Error(data.error);
+                        if (!data.task_id) throw new Error("No Task ID returned");
+                        this.startPolling(data.task_id, key, previewEl);
+                    })
+                    .catch(e => {
+                        this.renderError(previewEl, e);
+                        this.loading = false;
+                    });
+            },
+
+            startPolling(taskId, key, previewEl) {
+                const interval = setInterval(() => {
+                    fetch('/api/backup/r2/progress/' + taskId)
+                        .then(r => r.json())
+                        .then(data => {
+                            if (data.status === 'completed') {
+                                clearInterval(interval);
+                                previewEl.innerHTML = data.result_html;
+                                if (window.htmx) htmx.process(previewEl);
+                                this.loading = false;
+                            } else if (data.status === 'error') {
+                                clearInterval(interval);
+                                throw new Error(data.error || 'Unknown error');
+                            } else {
+                                // Update Progress
+                                let percent = 0;
+                                if (data.total_bytes > 0) {
+                                    percent = (data.downloaded / data.total_bytes) * 100;
+                                }
+                                this.renderProgress(previewEl, key, percent, data.status);
+                            }
+                        })
+                        .catch(e => {
+                            clearInterval(interval);
+                            this.renderError(previewEl, "Progress check failed: " + e);
+                            this.loading = false;
+                        });
+                }, 1000);
+            },
+
+            renderProgress(el, key, percent, status) {
+                const statusText = status === 'analyzing' ? '正在分析数据...' : (status === 'starting' ? '正在启动任务...' : `已下载 ${percent.toFixed(1)}%`);
+
+                el.innerHTML = `
+                    <div class="bg-blue-50 border border-blue-200 rounded-lg p-6 text-center animate-fade-in-up">
+                        <div class="mb-3">
+                            <span class="inline-block animate-bounce text-3xl">☁️</span>
+                        </div>
+                        <h4 class="text-blue-800 font-bold text-lg mb-1">正在从云端下载备份...</h4>
+                        <p class="text-blue-600 text-sm mb-4">文件名: ${key}</p>
+                        
+                        <div class="w-full max-w-xs mx-auto bg-blue-200 rounded-full h-4 overflow-hidden relative">
+                            <div class="bg-blue-500 h-full rounded-full transition-all duration-500 ease-out" style="width: ${percent}%"></div>
+                        </div>
+                        <div class="mt-2 flex justify-between text-xs text-blue-500 max-w-xs mx-auto">
+                            <span>${statusText}</span>
+                            <span>${percent.toFixed(0)}%</span>
+                        </div>
+                    </div>
+                `;
+            },
+
+            renderError(el, error) {
+                el.innerHTML = `
+                    <div class="bg-red-50 border border-red-200 rounded-lg p-4 text-center">
+                        <div class="text-red-500 font-bold mb-1">下载/分析失败</div>
+                        <div class="text-sm text-red-600">${error}</div>
+                    </div>
+                `;
+            },
+
+            confirmDelete(key) {
+                this.currentKey = key;
+                this.confirmType = 'delete';
+                this.confirmTitle = '确认删除';
+                this.confirmMessage = '确定要删除备份 ' + key + ' 吗？此操作不可逆！';
+                this.confirmButtonText = '确认删除';
+                this.showConfirm = true;
+            },
+
+            executeConfirmAction() {
+                this.modalLoading = true;
+                if (this.confirmType === 'delete') {
+                    this.doDelete();
+                }
+            },
+
+            doDelete() {
+                const formData = new FormData();
+                formData.append('key', this.currentKey);
+                fetch('/api/backup/r2/delete', { method: 'POST', body: formData })
+                    .then(r => r.json())
+                    .then(data => {
+                        if (data.error) {
+                            this.confirmMessage = '删除失败: ' + data.error;
+                            this.confirmTitle = '错误';
+                        } else {
+                            this.showConfirm = false;
+                            this.loadBackups();
+                        }
+                    })
+                    .catch(e => {
+                        this.confirmMessage = '删除错误: ' + e;
+                        this.confirmTitle = '错误';
+                    })
+                    .finally(() => this.modalLoading = false);
+            }
+        }));
+    });
+</script>
+
+
 
 {{ if not .SkipLayout }}{{ template "footer.html" . }}{{ end }}

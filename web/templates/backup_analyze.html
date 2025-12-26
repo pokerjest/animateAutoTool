@@ -34,57 +34,63 @@
     </div>
     {{ end }}
 
-    <!-- 还原选项 -->
-    <div class="mb-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
-        <div class="text-xs font-semibold text-blue-700 mb-2">选择要还原的数据</div>
-        <div class="space-y-1.5">
-            <!-- 默认勾选 -->
-            <label class="flex items-center gap-2 text-xs text-gray-700 cursor-pointer hover:bg-white/50 p-1 rounded">
-                <input type="checkbox" name="restore_configs" checked class="rounded">
-                <span class="font-medium">全局配置</span>
-                <span class="text-gray-500">(qBittorrent、Bangumi等设置)</span>
-            </label>
-            <label class="flex items-center gap-2 text-xs text-gray-700 cursor-pointer hover:bg-white/50 p-1 rounded">
-                <input type="checkbox" name="restore_metadata" checked class="rounded">
-                <span class="font-medium">元数据与海报</span>
-                <span class="text-gray-500">(动漫信息和图片缓存)</span>
-            </label>
-
-            <!-- 默认不勾选 -->
-            <label class="flex items-center gap-2 text-xs text-gray-700 cursor-pointer hover:bg-white/50 p-1 rounded">
-                <input type="checkbox" name="restore_subscriptions" class="rounded">
-                <span>订阅配置</span>
-                <span class="text-gray-500">({{ .Stats.SubscriptionCount }} 个)</span>
-            </label>
-            <label class="flex items-center gap-2 text-xs text-gray-700 cursor-pointer hover:bg-white/50 p-1 rounded">
-                <input type="checkbox" name="restore_logs" class="rounded">
-                <span>下载日志</span>
-                <span class="text-gray-500">({{ .Stats.DownloadLogCount }} 条)</span>
-            </label>
-            <label class="flex items-center gap-2 text-xs text-gray-700 cursor-pointer hover:bg-white/50 p-1 rounded">
-                <input type="checkbox" name="restore_local" class="rounded">
-                <span>本地动漫数据</span>
-                <span class="text-gray-500">({{ .Stats.LocalAnimeCount }} 个)</span>
-            </label>
-        </div>
-    </div>
-
-    <div class="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4">
-        <div class="flex items-start gap-2">
-            <span class="text-lg">⚠️</span>
-            <div class="text-xs text-amber-700">
-                <div class="font-semibold mb-1">注意事项</div>
-                <ul class="list-disc list-inside space-y-0.5 text-amber-600">
-                    <li>已勾选的表将被备份文件中的数据<strong>完全替换</strong></li>
-                    <li>未勾选的表保持当前状态不变</li>
-                    <li>此操作不可逆，建议先备份当前数据</li>
-                </ul>
-            </div>
-        </div>
-    </div>
-
     <form hx-post="/api/backup/execute" hx-indicator="#confirm-btn">
         <input type="hidden" name="temp_file" value="{{ .TempFile }}">
+
+        <!-- 还原选项 -->
+        <div class="mb-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
+            <div class="text-xs font-semibold text-blue-700 mb-2">选择要还原的数据</div>
+            <div class="space-y-1.5">
+                <!-- 默认勾选 -->
+                <label
+                    class="flex items-center gap-2 text-xs text-gray-700 cursor-pointer hover:bg-white/50 p-1 rounded">
+                    <input type="checkbox" name="restore_configs" checked class="rounded">
+                    <span class="font-medium">全局配置</span>
+                    <span class="text-gray-500">(qBittorrent、Bangumi等设置)</span>
+                </label>
+                <label
+                    class="flex items-center gap-2 text-xs text-gray-700 cursor-pointer hover:bg-white/50 p-1 rounded">
+                    <input type="checkbox" name="restore_metadata" checked class="rounded">
+                    <span class="font-medium">元数据与海报</span>
+                    <span class="text-gray-500">(动漫信息和图片缓存)</span>
+                </label>
+
+                <!-- 默认不勾选 -->
+                <label
+                    class="flex items-center gap-2 text-xs text-gray-700 cursor-pointer hover:bg-white/50 p-1 rounded">
+                    <input type="checkbox" name="restore_subscriptions" class="rounded">
+                    <span>订阅配置</span>
+                    <span class="text-gray-500">({{ .Stats.SubscriptionCount }} 个)</span>
+                </label>
+                <label
+                    class="flex items-center gap-2 text-xs text-gray-700 cursor-pointer hover:bg-white/50 p-1 rounded">
+                    <input type="checkbox" name="restore_logs" class="rounded">
+                    <span>下载日志</span>
+                    <span class="text-gray-500">({{ .Stats.DownloadLogCount }} 条)</span>
+                </label>
+                <label
+                    class="flex items-center gap-2 text-xs text-gray-700 cursor-pointer hover:bg-white/50 p-1 rounded">
+                    <input type="checkbox" name="restore_local" class="rounded">
+                    <span>本地动漫数据</span>
+                    <span class="text-gray-500">({{ .Stats.LocalAnimeCount }} 个)</span>
+                </label>
+            </div>
+        </div>
+
+        <div class="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4">
+            <div class="flex items-start gap-2">
+                <span class="text-lg">⚠️</span>
+                <div class="text-xs text-amber-700">
+                    <div class="font-semibold mb-1">注意事项</div>
+                    <ul class="list-disc list-inside space-y-0.5 text-amber-600">
+                        <li>已勾选的表将被备份文件中的数据<strong>完全替换</strong></li>
+                        <li>未勾选的表保持当前状态不变</li>
+                        <li>此操作不可逆，建议先备份当前数据</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
         <button type="submit" id="confirm-btn"
             class="w-full py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition shadow flex items-center justify-center gap-2 font-semibold">
             <span class="[.htmx-request_&]:hidden">🚀 确认还原选中数据</span>

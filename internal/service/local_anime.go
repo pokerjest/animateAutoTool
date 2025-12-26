@@ -702,7 +702,7 @@ func (s *LocalAnimeService) countVideos(path string) (int, int64) {
 			}
 
 			ext := strings.ToLower(filepath.Ext(d.Name()))
-			if isVideoExt(ext) {
+			if IsVideoExt(ext) {
 				count++
 				info, _ := d.Info()
 				if info != nil {
@@ -721,7 +721,7 @@ func (s *LocalAnimeService) countVideos(path string) (int, int64) {
 	return count, size
 }
 
-func isVideoExt(ext string) bool {
+func IsVideoExt(ext string) bool {
 	switch ext {
 	// Added .!qB, .bc! for partial downloads
 	case ".mp4", ".mkv", ".avi", ".mov", ".flv", ".wmv", ".ts", ".rmvb", ".webm", ".m2ts", ".!qb", ".bc!":

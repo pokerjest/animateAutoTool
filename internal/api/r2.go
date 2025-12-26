@@ -1,13 +1,16 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"html/template"
 	"io"
 	"net/http"
 	"os"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -16,11 +19,57 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
+	"github.com/google/uuid"
 	_ "github.com/pokerjest/animateAutoTool/internal/config"
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"gorm.io/gorm"
 )
+
+// Progress Management
+type DownloadProgress struct {
+	TaskID     string `json:"task_id"`
+	TotalBytes int64  `json:"total_bytes"`
+	Downloaded int64  `json:"downloaded"`
+	Status     string `json:"status"` // "pending", "downloading", "analyzing", "completed", "error"
+	Error      string `json:"error,omitempty"`
+	ResultHTML string `json:"result_html,omitempty"`
+}
+
+var progressMap sync.Map
+
+// CountingReader tracks read progress
+type CountingReader struct {
+	Reader     io.Reader
+	Total      int64
+	Downloaded int64
+	TaskID     string
+}
+
+func (r *CountingReader) Read(p []byte) (int, error) {
+	n, err := r.Reader.Read(p)
+	if n > 0 {
+		r.Downloaded += int64(n)
+		// Update map periodically or on every read?
+		// For smooth UI, every read is fine if not too frequent lock contention.
+		// sync.Map is okay. To optimize, could update every N bytes.
+		// Let's just update directly for simplicity first.
+		if val, ok := progressMap.Load(r.TaskID); ok {
+			progress := val.(*DownloadProgress)
+			progress.Downloaded = r.Downloaded
+			// We store pointer, so modification is visible?
+			// sync.Map Store is safer for atomic replacement, but here we modify the struct field.
+			// Race condition possible if reading simultaneously.
+			// Better to use a mutex on the struct or replace the value in map.
+			// Let's replace in map to be safeish, or simple Mutex in struct.
+			// Simplified: Update the struct copy and Store back.
+			newProgress := *progress
+			newProgress.Downloaded = r.Downloaded
+			progressMap.Store(r.TaskID, &newProgress)
+		}
+	}
+	return n, err
+}
 
 type R2Config struct {
 	Endpoint  string `json:"endpoint"`
@@ -216,23 +265,20 @@ func ListR2BackupsHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"backups": backups})
 }
 
-func RestoreFromR2Handler(c *gin.Context) {
+func GetR2ProgressHandler(c *gin.Context) {
+	taskID := c.Param("taskId")
+	if val, ok := progressMap.Load(taskID); ok {
+		c.JSON(http.StatusOK, val.(*DownloadProgress))
+		return
+	}
+	c.JSON(http.StatusNotFound, gin.H{"error": "Task not found"})
+}
+
+// StageR2BackupHandler (Async Version)
+func StageR2BackupHandler(c *gin.Context) {
 	key := c.PostForm("key")
 	if key == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "No backup identifier provided"})
-		return
-	}
-
-	// Read restore options from form
-	restoreConfigs := c.PostForm("restore_configs") == "true"
-	restoreMetadata := c.PostForm("restore_metadata") == "true"
-	restoreSubscriptions := c.PostForm("restore_subscriptions") == "true"
-	restoreLogs := c.PostForm("restore_logs") == "true"
-	restoreLocal := c.PostForm("restore_local") == "true"
-
-	// Validate at least one option selected
-	if !restoreConfigs && !restoreMetadata && !restoreSubscriptions && !restoreLogs && !restoreLocal {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Please select at least one table to restore"})
 		return
 	}
 
@@ -242,96 +288,150 @@ func RestoreFromR2Handler(c *gin.Context) {
 		return
 	}
 
-	// Download to temp
-	tempFile, err := os.CreateTemp("", "restore_r2_*.db")
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create temp file"})
-		return
-	}
-	defer os.Remove(tempFile.Name())
+	// Create Task ID
+	taskID := uuid.New().String()
 
-	resp, err := client.GetObject(c.Request.Context(), &s3.GetObjectInput{
-		Bucket: aws.String(bucket),
-		Key:    aws.String(key),
-	})
-	if err != nil {
+	// Initialize Progress
+	progress := &DownloadProgress{
+		TaskID:     taskID,
+		Status:     "pending",
+		TotalBytes: 0,
+		Downloaded: 0,
+	}
+	progressMap.Store(taskID, progress)
+
+	// Launch Background Task
+	go func(tID, k, b string, cli *s3.Client) {
+		// Recovery
+		defer func() {
+			if r := recover(); r != nil {
+				updateProgress(tID, "error", fmt.Sprintf("Panic: %v", r), 0, 0, "")
+			}
+		}()
+
+		updateProgress(tID, "downloading", "", 0, 0, "")
+
+		// 1. Get Object Info (Head/Get)
+		// We use GetObject directly.
+		// Note: We need a specialized Context for background task, don't use c.Request.Context()
+		bgCtx := context.Background()
+
+		resp, err := cli.GetObject(bgCtx, &s3.GetObjectInput{
+			Bucket: aws.String(b),
+			Key:    aws.String(k),
+		})
+		if err != nil {
+			updateProgress(tID, "error", "Download init failed: "+err.Error(), 0, 0, "")
+			return
+		}
+		defer resp.Body.Close()
+
+		total := int64(0)
+		if resp.ContentLength != nil {
+			total = *resp.ContentLength
+		}
+		updateProgress(tID, "downloading", "", total, 0, "")
+
+		// 2. Create Temp File
+		tempFile, err := os.CreateTemp("", "restore_r2_stage_*.db")
+		if err != nil {
+			updateProgress(tID, "error", "Create temp file failed", total, 0, "")
+			return
+		}
+		// Note: No defer remove, kept for restore execution.
+
+		// 3. Download with Progress
+		reader := &CountingReader{
+			Reader: resp.Body,
+			Total:  total,
+			TaskID: tID,
+		}
+
+		if _, err := io.Copy(tempFile, reader); err != nil {
+			tempFile.Close()
+			os.Remove(tempFile.Name())
+			updateProgress(tID, "error", "Download stream failed: "+err.Error(), total, 0, "")
+			return
+		}
 		tempFile.Close()
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to download backup: " + err.Error()})
-		return
-	}
-	defer resp.Body.Close()
 
-	if _, err := io.Copy(tempFile, resp.Body); err != nil {
-		tempFile.Close()
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to write temp file"})
-		return
-	}
-	tempFile.Close()
+		// 4. Analyze
+		updateProgress(tID, "analyzing", "", total, total, "") // 100% downloaded
 
-	// Verify DB file valid (simple check)
-	if !isValidSQLite(tempFile.Name()) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Downloaded file is not a valid database"})
-		return
-	}
-
-	// Open backup database
-	backupDB, err := gorm.Open(sqlite.Open(tempFile.Name()), &gorm.Config{})
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid backup file: " + err.Error()})
-		return
-	}
-	defer func() {
-		sqlDB, _ := backupDB.DB()
+		tempDB, err := gorm.Open(sqlite.Open(tempFile.Name()), &gorm.Config{})
+		if err != nil {
+			os.Remove(tempFile.Name())
+			updateProgress(tID, "error", "Invalid Database File", total, total, "")
+			return
+		}
+		stats := getDBStats(tempDB, tempFile.Name())
+		sqlDB, _ := tempDB.DB()
 		sqlDB.Close()
-	}()
 
-	// Perform selective restore
-	if restoreConfigs {
-		db.DB.Exec("DELETE FROM global_configs")
-		var configs []model.GlobalConfig
-		if err := backupDB.Find(&configs).Error; err == nil && len(configs) > 0 {
-			db.DB.Create(&configs)
+		// 5. Render HTML
+		// Parse the template manually.
+		tmpl, err := template.ParseFiles("web/templates/backup_analyze.html")
+		if err != nil {
+			os.Remove(tempFile.Name())
+			updateProgress(tID, "error", "Template parse error: "+err.Error(), total, total, "")
+			return
+		}
+
+		var buf bytes.Buffer
+		err = tmpl.ExecuteTemplate(&buf, "backup_analyze.html", map[string]interface{}{
+			"Stats":    stats,
+			"TempFile": tempFile.Name(),
+		})
+		if err != nil {
+			os.Remove(tempFile.Name())
+			updateProgress(tID, "error", "Template execute error: "+err.Error(), total, total, "")
+			return
+		}
+
+		// 6. Complete
+		updateProgress(tID, "completed", "", total, total, buf.String())
+
+	}(taskID, key, bucket, client)
+
+	c.JSON(http.StatusOK, gin.H{"task_id": taskID, "status": "started"})
+}
+
+func updateProgress(taskID, status, errStr string, total, downloaded int64, html string) {
+	p := &DownloadProgress{
+		TaskID:     taskID,
+		Status:     status,
+		TotalBytes: total,
+		Downloaded: downloaded,
+		Error:      errStr,
+		ResultHTML: html,
+	}
+	// If existing, preserve Total/Downloaded if passed 0?
+	// Simplified: callers pass correct values.
+	// For error state, we might want to keep downloaded count?
+	// This helper overrides everything.
+	if val, ok := progressMap.Load(taskID); ok {
+		prev := val.(*DownloadProgress)
+		if total == 0 {
+			p.TotalBytes = prev.TotalBytes
+		}
+		if downloaded == 0 && status != "pending" { // keep prev downloaded if not reset
+			p.Downloaded = prev.Downloaded
 		}
 	}
 
-	if restoreMetadata {
-		db.DB.Exec("DELETE FROM anime_metadata")
-		var metadata []model.AnimeMetadata
-		if err := backupDB.Find(&metadata).Error; err == nil && len(metadata) > 0 {
-			db.DB.Create(&metadata)
-		}
-	}
+	progressMap.Store(taskID, p)
+}
 
-	if restoreSubscriptions {
-		db.DB.Exec("DELETE FROM subscriptions")
-		var subs []model.Subscription
-		if err := backupDB.Find(&subs).Error; err == nil && len(subs) > 0 {
-			db.DB.Create(&subs)
-		}
-	}
-
-	if restoreLogs {
-		db.DB.Exec("DELETE FROM download_logs")
-		var logs []model.DownloadLog
-		if err := backupDB.Find(&logs).Error; err == nil && len(logs) > 0 {
-			db.DB.Create(&logs)
-		}
-	}
-
-	if restoreLocal {
-		db.DB.Exec("DELETE FROM local_anime_directories")
-		db.DB.Exec("DELETE FROM local_animes")
-		var dirs []model.LocalAnimeDirectory
-		if err := backupDB.Find(&dirs).Error; err == nil && len(dirs) > 0 {
-			db.DB.Create(&dirs)
-		}
-		var animes []model.LocalAnime
-		if err := backupDB.Find(&animes).Error; err == nil && len(animes) > 0 {
-			db.DB.Create(&animes)
-		}
-	}
-
-	c.JSON(http.StatusOK, gin.H{"status": "restored"})
+// RestoreFromR2Handler - Deprecated?
+// Actually, with the new flow, the User:
+// 1. Clicks "R2 Restore" button -> StageR2BackupHandler -> Returns HTML Form with "Confirm" button.
+// 2. Click "Confirm" -> ExecuteRestoreHandler (Standard).
+// So we don't strictly need a separate RestoreFromR2Handler execution logic anymore.
+// BUT, to keep API clean, let's just make sure UI points to ExecuteRestoreHandler.
+// We can remove the old RestoreFromR2Handler or keep it as a legacy direct handler (if user skips preview).
+// Let's replace it with a redirect or error to force preview.
+func RestoreFromR2Handler(c *gin.Context) {
+	c.JSON(http.StatusBadRequest, gin.H{"error": "Please use the Preview/Stage flow."})
 }
 
 func DeleteR2BackupHandler(c *gin.Context) {
@@ -464,18 +564,4 @@ func TestR2ConnectionHandler(c *gin.Context) {
 
 	debugLog("DEBUG: Connection successful (Read/Write/Delete verified)")
 	c.JSON(http.StatusOK, gin.H{"status": "ok", "message": "Connection successful (Read/Write Verified)"})
-}
-
-func isValidSQLite(path string) bool {
-	f, err := os.Open(path)
-	if err != nil {
-		return false
-	}
-	defer f.Close()
-
-	header := make([]byte, 16)
-	if _, err := f.Read(header); err != nil {
-		return false
-	}
-	return string(header) == "SQLite format 3\000"
 }

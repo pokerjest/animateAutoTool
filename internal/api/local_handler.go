@@ -53,7 +53,8 @@ func AddLocalDirectoryHandler(c *gin.Context) {
 
 	// Trigger immediate scan
 	go func() {
-		if err := svc.ScanAll(); err != nil {
+		scanner := service.NewScannerService()
+		if err := scanner.ScanAll(); err != nil {
 			fmt.Printf("Error scanning all directories: %v\n", err)
 		}
 	}()
@@ -83,12 +84,18 @@ func DeleteLocalDirectoryHandler(c *gin.Context) {
 
 // ScanLocalDirectoryHandler 触发重新扫描
 func ScanLocalDirectoryHandler(c *gin.Context) {
-	svc := service.NewLocalAnimeService()
+	scanner := service.NewScannerService()
 	go func() {
-		if err := svc.ScanAll(); err != nil {
+		// Phase 1: Scanner
+		if err := scanner.ScanAll(); err != nil {
 			fmt.Printf("Error scanning all directories: %v\n", err)
+			return
 		}
+
+		// Phase 2: Agent
+		agent := service.NewAgentService()
+		agent.RunAgentForLibrary()
 	}()
 
-	c.String(http.StatusOK, "扫描已在后台启动")
+	c.String(http.StatusOK, "扫描(Phase1)与刮削(Phase2)已在后台启动")
 }
