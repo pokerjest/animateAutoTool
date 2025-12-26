@@ -5,26 +5,16 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/bangumi-pro/bangumi-api-go"
 	"github.com/gin-gonic/gin"
 )
 
 // GetCalendarHandler renders the anime calendar
-func (s *Server) GetCalendarHandler(c *gin.Context) {
-	// Attempt to get user access token if available, though Calendar is public API usually
-	// But Bangumi client structure uses access token for personal data.
-	// The GetCalendar method we added doesn't require token, it uses public API.
+func GetCalendarHandler(c *gin.Context) {
+	// Use Bangumi Client (Public API, no auth needed)
+	client := bangumi.NewClient("", "", "")
 
-	// Use our Bangumi client instance
-	// We need to access the bangumi client from Server struct or create a temporary one?
-	// The Server struct has BangumiClient field of type *bangumi.Client?
-	// Let's check api/server.go or where Server is defined.
-	// Assuming s.BangumiClient exists.
-
-	// Actually, looking at other handlers, how do we access bangumi client?
-	// We might need to check internal/api/routes.go or server struct definition.
-	// For now, I will assume s.BangumiClient is available.
-
-	calendar, err := s.BangumiClient.GetCalendar()
+	calendar, err := client.GetCalendar()
 	if err != nil {
 		log.Printf("Calendar: Failed to fetch calendar: %v", err)
 		c.HTML(http.StatusOK, "calendar.html", gin.H{
