@@ -48,6 +48,7 @@ func InitRoutes(r *gin.Engine) {
 	r.GET("/library", GetLibraryHandler)
 	r.POST("/library/refresh", RefreshLibraryMetadataHandler)
 	r.GET("/local-anime", LocalAnimePageHandler)
+	r.GET("/calendar", GetCalendarHandler)
 	r.GET("/backup", BackupPageHandler)
 
 	// API

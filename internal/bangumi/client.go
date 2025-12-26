@@ -461,3 +461,60 @@ func (c *Client) GetUserCollection(accessToken string, username string, collecti
 
 	return result.Data, nil
 }
+
+// CalendarItem represents a daily schedule item
+type CalendarItem struct {
+	Weekday struct {
+		CN string `json:"cn"`
+		EN string `json:"en"`
+		JA string `json:"ja"`
+		ID int    `json:"id"`
+	} `json:"weekday"`
+	Items []Subject `json:"items"`
+}
+
+// GetCalendar fetches the weekly anime calendar
+func (c *Client) GetCalendar() ([]CalendarItem, error) {
+	// GET https://api.bgm.tv/calendar
+	u := "https://api.bgm.tv/calendar"
+
+	resp, err := c.client.R().
+		SetHeader("User-Agent", "pokerjest/animateAutoTool/1.0 (https://github.com/pokerjest/animateAutoTool)").
+		Get(u)
+
+	if err != nil {
+		return nil, err
+	}
+	if resp.IsError() {
+		return nil, fmt.Errorf("fetch calendar failed: %s", string(resp.Body()))
+	}
+
+	var calendar []CalendarItem
+	if err := json.Unmarshal(resp.Body(), &calendar); err != nil {
+		return nil, err
+	}
+
+	// Fix images
+	for i := range calendar {
+		for j := range calendar[i].Items {
+			s := &calendar[i].Items[j]
+			if strings.HasPrefix(s.Images.Large, "//") {
+				s.Images.Large = "https:" + s.Images.Large
+			}
+			if strings.HasPrefix(s.Images.Common, "//") {
+				s.Images.Common = "https:" + s.Images.Common
+			}
+			if strings.HasPrefix(s.Images.Medium, "//") {
+				s.Images.Medium = "https:" + s.Images.Medium
+			}
+			if strings.HasPrefix(s.Images.Small, "//") {
+				s.Images.Small = "https:" + s.Images.Small
+			}
+			if strings.HasPrefix(s.Images.Grid, "//") {
+				s.Images.Grid = "https:" + s.Images.Grid
+			}
+		}
+	}
+
+	return calendar, nil
+}
