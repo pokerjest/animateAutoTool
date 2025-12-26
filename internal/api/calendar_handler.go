@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/bangumi-pro/bangumi-api-go"
 	"github.com/gin-gonic/gin"
+	"github.com/pokerjest/animateAutoTool/internal/bangumi"
 )
 
 // GetCalendarHandler renders the anime calendar
