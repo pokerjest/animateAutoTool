@@ -10,6 +10,7 @@ type Episode struct {
 	Season        string    `json:"season"`         // 季度 S01, S02...
 	Magnet        string    `json:"magnet"`         // 磁力链接
 	TorrentURL    string    `json:"torrent_url"`    // 种子文件链接
+	Size          string    `json:"size"`           // 文件大小 (格式化后)
 	PubDate       time.Time `json:"pub_date"`       // 发布时间
 	SubGroup      string    `json:"sub_group"`      // 字幕组
 	Resolution    string    `json:"resolution"`     // 分辨率 1080p, 4k...

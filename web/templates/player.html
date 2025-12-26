@@ -1,0 +1,147 @@
+{{ define "player.html" }}
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ if .IsPlayer }}播放: {{ .Name }}{{ else }}文件浏览{{ end }} - AnimateTool</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f8fafc;
+        }
+
+        .glass {
+            background: rgba(255, 255, 255, 0.9);
+            backdrop-filter: blur(10px);
+        }
+    </style>
+</head>
+
+<body class="text-gray-800 h-screen flex flex-col">
+
+    <!-- Header -->
+    <div class="glass border-b border-gray-200 sticky top-0 z-50">
+        <div class="container mx-auto px-4 h-16 flex items-center justify-between">
+            <div class="flex items-center gap-4">
+                <a href="/calendar"
+                    class="text-gray-500 hover:text-pink-500 transition flex items-center gap-1 font-medium">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd"
+                            d="M9.707 16.707a1 1 0 01-1.414 0l-6-6a1 1 0 010-1.414l6-6a1 1 0 011.414 1.414L5.414 9H17a1 1 0 110 2H5.414l4.293 4.293a1 1 0 010 1.414z"
+                            clip-rule="evenodd" />
+                    </svg>
+                    返回日历
+                </a>
+                <div class="h-4 w-px bg-gray-300"></div>
+
+                {{ if .Parent }}
+                <a href="/player?path={{ .Parent }}"
+                    class="text-gray-500 hover:text-gray-900 transition flex items-center gap-1 text-sm bg-gray-100 px-2 py-1 rounded-md">
+                    📁 上一级
+                </a>
+                {{ end }}
+
+                <h1 class="text-lg font-bold truncate max-w-xl text-gray-800">
+                    {{ if .IsPlayer }}
+                    正在播放: <span class="text-pink-600">{{ .Name }}</span>
+                    {{ else }}
+                    📂 {{ .Path }}
+                    {{ end }}
+                </h1>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="flex-1 overflow-auto p-6 container mx-auto">
+
+        {{ if .IsPlayer }}
+        <!-- Player View -->
+        <div class="max-w-5xl mx-auto bg-black rounded-2xl overflow-hidden shadow-2xl ring-1 ring-gray-900/10">
+            <video controls autoplay class="w-full aspect-video outline-none" id="main-player">
+                <source src="{{ .VideoUrl }}" type="video/mp4">
+                您的浏览器不支持 HTML5 视频。
+            </video>
+        </div>
+        <div class="max-w-5xl mx-auto mt-6 flex justify-between items-center text-sm text-gray-500">
+            <p>如果是 MKV 或特殊编码无法播放，请尝试使用外部播放器打开链接。</p>
+            <a href="{{ .VideoUrl }}" target="_blank" class="text-pink-500 hover:underline">下载 / 外部播放链接</a>
+        </div>
+
+        {{ else }}
+        <!-- File List View -->
+        {{ if .Error }}
+        <div class="p-8 text-center text-red-500 bg-red-50 rounded-xl border border-red-100">
+            <p class="font-bold">加载失败</p>
+            <p class="text-sm mt-1 opacity-75">{{ .Error }}</p>
+        </div>
+        {{ else }}
+
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+
+            {{ if not .Files }}
+            <div class="col-span-full py-20 text-center text-gray-400 flex flex-col items-center">
+                <div class="text-6xl mb-4">📭</div>
+                <p class="text-lg font-medium">此文件夹为空</p>
+                <p class="text-sm mt-2">任务可能正在下载中，请稍后刷新...</p>
+                <button onclick="location.reload()"
+                    class="mt-6 px-4 py-2 bg-white border border-gray-200 shadow-sm rounded-lg hover:bg-gray-50 text-sm font-medium transition">
+                    刷新页面
+                </button>
+            </div>
+            {{ end }}
+
+            {{ range .Files }}
+            <a href="/player?path={{ .Path }}"
+                class="group relative bg-white border border-gray-100 rounded-xl p-4 hover:border-pink-500 hover:shadow-lg hover:shadow-pink-500/5 transition flex items-start gap-4">
+
+                <div
+                    class="w-12 h-12 flex items-center justify-center rounded-lg bg-gray-50 text-2xl group-hover:scale-110 transition duration-300 shrink-0">
+                    {{ if eq .Type 1 }}
+                    📂
+                    {{ else if .IsVideo }}
+                    🎬
+                    {{ else }}
+                    📄
+                    {{ end }}
+                </div>
+
+                <div class="min-w-0 flex-1">
+                    <h3 class="font-medium text-gray-900 truncate group-hover:text-pink-600 transition">{{ .Name }}</h3>
+                    <div class="mt-1 flex items-center gap-2 text-xs text-gray-400 font-mono">
+                        {{ if ne .Type 1 }}
+                        <span class="bg-gray-100 px-1.5 py-0.5 rounded text-gray-500">{{ .Size }}</span>
+                        {{ end }}
+                        <span>{{ .Modified.Format "01-02 15:04" }}</span>
+                    </div>
+                </div>
+
+                {{ if .IsVideo }}
+                <div class="absolute right-4 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition">
+                    <div
+                        class="w-8 h-8 bg-pink-500 text-white rounded-full flex items-center justify-center shadow-lg transform scale-0 group-hover:scale-100 transition delay-75">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 ml-0.5" viewBox="0 0 20 20"
+                            fill="currentColor">
+                            <path fill-rule="evenodd"
+                                d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z"
+                                clip-rule="evenodd" />
+                        </svg>
+                    </div>
+                </div>
+                {{ end }}
+            </a>
+            {{ end }}
+        </div>
+        {{ end }}
+        {{ end }}
+
+    </div>
+
+</body>
+
+</html>
+{{ end }}

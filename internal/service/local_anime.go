@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 
 	"io"
 	"net/http"
@@ -316,43 +317,80 @@ func (s *LocalAnimeService) RefreshAllMetadata(force bool) int {
 	}
 
 	total := len(list)
+
+	// Use a lock for status updates
+	var statusMu sync.Mutex
+
+	statusMu.Lock()
 	GlobalRefreshStatus.Total = total
 	GlobalRefreshStatus.Current = 0
 	GlobalRefreshStatus.IsRunning = true
 	GlobalRefreshStatus.LastResult = ""
+	statusMu.Unlock()
 
 	if total == 0 {
+		statusMu.Lock()
 		GlobalRefreshStatus.IsRunning = false
 		GlobalRefreshStatus.LastResult = "全库元数据已是最新状态，无需刷新"
+		statusMu.Unlock()
 		return 0
 	}
 
 	updatedCount := 0
-	for i, m := range list {
-		GlobalRefreshStatus.Current = i + 1
-		GlobalRefreshStatus.CurrentTitle = m.Title
-		if m.TitleCN != "" {
-			GlobalRefreshStatus.CurrentTitle = m.TitleCN
-		}
+	var updateMu sync.Mutex
 
-		// Re-fetch fresh copy to ensure no race or stale data
-		var freshM model.AnimeMetadata
-		if err := db.DB.First(&freshM, m.ID).Error; err == nil {
-			// Use the existing Title as fallback query if IDs are missing
-			queryTitle := freshM.Title
-			if freshM.TitleCN != "" {
-				queryTitle = freshM.TitleCN
+	// Worker Pool Settings
+	maxWorkers := 5
+	guard := make(chan struct{}, maxWorkers)
+	var wg sync.WaitGroup
+
+	for i, m := range list {
+		guard <- struct{}{} // Block if filled
+		wg.Add(1)
+
+		go func(idx int, meta model.AnimeMetadata) {
+			defer wg.Done()
+			defer func() { <-guard }()
+
+			// Update Status (Non-blocking visual update)
+			statusMu.Lock()
+			GlobalRefreshStatus.Current = idx + 1
+			titleDisplay := meta.Title
+			if meta.TitleCN != "" {
+				titleDisplay = meta.TitleCN
 			}
-			s.EnrichMetadata(&freshM, queryTitle)
-			updatedCount++
-			log.Printf("Refresh: Updated metadata for '%s' (%d/%d)", freshM.Title, i+1, total)
-		}
-		// Rate limit protection
-		time.Sleep(200 * time.Millisecond)
+			GlobalRefreshStatus.CurrentTitle = titleDisplay
+			statusMu.Unlock()
+
+			// Re-fetch fresh copy to ensure no race or stale data
+			var freshM model.AnimeMetadata
+			if err := db.DB.First(&freshM, meta.ID).Error; err == nil {
+				// Use the existing Title as fallback query if IDs are missing
+				queryTitle := freshM.Title
+				if freshM.TitleCN != "" {
+					queryTitle = freshM.TitleCN
+				}
+				s.EnrichMetadata(&freshM, queryTitle)
+
+				updateMu.Lock()
+				updatedCount++
+				updateMu.Unlock()
+
+				log.Printf("Refresh: Updated metadata for '%s' (%d/%d)", freshM.Title, idx+1, total)
+			}
+			// Small per-worker delay to be nice to APIs, but parallel execution speeds it up
+			time.Sleep(500 * time.Millisecond)
+		}(i, m)
 	}
+
+	wg.Wait()
+
+	statusMu.Lock()
 	GlobalRefreshStatus.IsRunning = false
 	GlobalRefreshStatus.CurrentTitle = ""
 	GlobalRefreshStatus.LastResult = fmt.Sprintf("后台刷新完成，共更新 %d 条元数据", updatedCount)
+	statusMu.Unlock()
+
 	log.Printf("Refresh: Metadata refresh completed. Updated %d items.", updatedCount)
 	return updatedCount
 }
@@ -423,27 +461,42 @@ func (s *LocalAnimeService) EnrichMetadata(m *model.AnimeMetadata, queryTitle st
 	log.Printf("DEBUG: EnrichMetadata for '%s' (ID: %d)", queryTitle, m.ID)
 
 	// ==========================================
-	// 2. Fetch Bangumi Data (Priority: ID > Search)
+	// 2. Fetch Bangumi Data (Priority: ID > Search Candidates)
 	// ==========================================
 	var bgmSubject *bangumi.Subject
 	var err error
 
 	if m.BangumiID != 0 {
-		// ID exists, fetch directly
-		bgmSubject, err = bgmClient.GetSubject(m.BangumiID)
+		// ID exists, fetch directly with retry
+		bgmSubject, err = performWithRetry(func() (*bangumi.Subject, error) {
+			return bgmClient.GetSubject(m.BangumiID)
+		})
 		if err != nil {
-			log.Printf("DEBUG: Bangumi ID %d fetch failed, will try search: %v", m.BangumiID, err)
-			// Don't resetting ID yet, network might be down.
-			// But if we want to repair broken IDs, we could. For now, keep it.
+			log.Printf("DEBUG: Bangumi ID %d fetch failed after retries, will try search: %v", m.BangumiID, err)
 		}
 	}
 
-	if bgmSubject == nil && queryTitle != "" {
-		// No ID or fetch failed, try search
-		if res, err := bgmClient.SearchSubject(queryTitle); err == nil && res != nil {
-			m.BangumiID = res.ID // Set ID for future
-			// Fetch full details
-			bgmSubject, _ = bgmClient.GetSubject(res.ID)
+	if bgmSubject == nil {
+		// Init candidates with current state
+		initialCandidates := getCandidateTitles(m, queryTitle)
+		// Try search with all candidates
+		for _, t := range initialCandidates {
+			if t == "" {
+				continue
+			}
+			// Search with retry
+			res, err := performWithRetry(func() (*bangumi.SearchResult, error) {
+				return bgmClient.SearchSubject(t)
+			})
+			if err == nil && res != nil {
+				log.Printf("DEBUG: Match found on Bangumi using title '%s' -> ID: %d", t, res.ID)
+				m.BangumiID = res.ID
+				// Get details with retry
+				bgmSubject, _ = performWithRetry(func() (*bangumi.Subject, error) {
+					return bgmClient.GetSubject(res.ID)
+				})
+				break // Stop on first match
+			}
 		}
 	}
 
@@ -455,6 +508,7 @@ func (s *LocalAnimeService) EnrichMetadata(m *model.AnimeMetadata, queryTitle st
 		if m.AirDate == "" {
 			m.AirDate = bgmSubject.Date
 		}
+		// Populate titles if missing
 		if m.TitleJP == "" {
 			m.TitleJP = bgmSubject.Name
 		}
@@ -472,27 +526,62 @@ func (s *LocalAnimeService) EnrichMetadata(m *model.AnimeMetadata, queryTitle st
 	}
 
 	// ==========================================
-	// 3. Fetch TMDB Data (Priority: ID > Search)
+	// PHASE 2: Parallel Fetch for TMDB & AniList
 	// ==========================================
-	if tmdbClient != nil {
+
+	// Re-generate candidates including potential new Bangumi titles
+	finalCandidates := getCandidateTitles(m, queryTitle)
+
+	var wg sync.WaitGroup
+	var mu sync.Mutex // Protect m writes
+
+	wg.Add(2)
+
+	// --- 3. TMDB Task ---
+	go func() {
+		defer wg.Done()
+		if tmdbClient == nil {
+			return
+		}
+
 		var tmdbShow *tmdb.TVShow
 
-		if m.TMDBID != 0 {
-			tmdbShow, err = tmdbClient.GetTVDetails(m.TMDBID)
+		// Copy ID to avoid race on read (though integer read is usually fine, being safe)
+		mu.Lock()
+		currentTMDBID := m.TMDBID
+		mu.Unlock()
+
+		if currentTMDBID != 0 {
+			show, err := performWithRetry(func() (*tmdb.TVShow, error) {
+				return tmdbClient.GetTVDetails(currentTMDBID)
+			})
 			if err != nil {
-				log.Printf("DEBUG: TMDB ID %d fetch failed: %v", m.TMDBID, err)
+				log.Printf("DEBUG: TMDB ID %d fetch failed: %v", currentTMDBID, err)
+			} else {
+				tmdbShow = show
 			}
 		}
 
-		if tmdbShow == nil && queryTitle != "" {
-			tmdbSearchQuery := queryTitle
-			if m.TitleCN != "" {
-				tmdbSearchQuery = m.TitleCN
+		if tmdbShow == nil {
+			for _, t := range finalCandidates {
+				if t == "" {
+					continue
+				}
+				show, err := performWithRetry(func() (*tmdb.TVShow, error) {
+					return tmdbClient.SearchTV(t)
+				})
+				if err == nil && show != nil {
+					log.Printf("DEBUG: Match found on TMDB using title '%s' -> ID: %d", t, show.ID)
+					tmdbShow = show
+					break
+				}
 			}
-			tmdbShow, _ = tmdbClient.SearchTV(tmdbSearchQuery)
 		}
 
 		if tmdbShow != nil {
+			imgRaw := s.fetchAndCacheImage(tmdbShow.PosterPath)
+
+			mu.Lock()
 			m.TMDBID = tmdbShow.ID
 			m.TMDBTitle = tmdbShow.Name
 			m.TMDBImage = tmdbShow.PosterPath
@@ -507,34 +596,55 @@ func (s *LocalAnimeService) EnrichMetadata(m *model.AnimeMetadata, queryTitle st
 			if m.TitleJP == "" {
 				m.TitleJP = tmdbShow.OriginalName
 			}
-			// Cache Image
-			m.TMDBImageRaw = s.fetchAndCacheImage(m.TMDBImage)
+			m.TMDBImageRaw = imgRaw
+			mu.Unlock()
 		}
-	}
+	}()
 
-	// ==========================================
-	// 4. Fetch AniList Data (Priority: ID > Search)
-	// ==========================================
-	if anilistClient != nil {
+	// --- 4. AniList Task ---
+	go func() {
+		defer wg.Done()
+		if anilistClient == nil {
+			return
+		}
+
 		var alMedia *anilist.Media
 
-		if m.AniListID != 0 {
-			alMedia, err = anilistClient.GetAnimeDetails(m.AniListID)
+		mu.Lock()
+		currentAniListID := m.AniListID
+		mu.Unlock()
+
+		if currentAniListID != 0 {
+			media, err := performWithRetry(func() (*anilist.Media, error) {
+				return anilistClient.GetAnimeDetails(currentAniListID)
+			})
 			if err != nil {
-				log.Printf("DEBUG: AniList ID %d fetch failed: %v", m.AniListID, err)
+				log.Printf("DEBUG: AniList ID %d fetch failed: %v", currentAniListID, err)
+			} else {
+				alMedia = media
 			}
 		}
 
-		if alMedia == nil && queryTitle != "" {
-			alQuery := queryTitle
-			// Try JP first if available from other sources
-			if m.TitleJP != "" {
-				alQuery = m.TitleJP
+		if alMedia == nil {
+			for _, t := range finalCandidates {
+				if t == "" {
+					continue
+				}
+				media, err := performWithRetry(func() (*anilist.Media, error) {
+					return anilistClient.SearchAnime(t)
+				})
+				if err == nil && media != nil {
+					log.Printf("DEBUG: Match found on AniList using title '%s' -> ID: %d", t, media.ID)
+					alMedia = media
+					break
+				}
 			}
-			alMedia, _ = anilistClient.SearchAnime(alQuery)
 		}
 
 		if alMedia != nil {
+			imgRaw := s.fetchAndCacheImage(alMedia.CoverImage.ExtraLarge)
+
+			mu.Lock()
 			m.AniListID = alMedia.ID
 			m.AniListTitle = alMedia.Title.Romaji
 			m.AniListImage = alMedia.CoverImage.ExtraLarge
@@ -547,8 +657,59 @@ func (s *LocalAnimeService) EnrichMetadata(m *model.AnimeMetadata, queryTitle st
 			if m.TitleJP == "" {
 				m.TitleJP = alMedia.Title.Native
 			}
-			// Cache Image
-			m.AniListImageRaw = s.fetchAndCacheImage(m.AniListImage)
+			m.AniListImageRaw = imgRaw
+			mu.Unlock()
+		}
+	}()
+
+	wg.Wait()
+
+	// ==========================================
+	// PHASE 3: Bangumi Retry (If initial failed but others succeeded)
+	// ==========================================
+	if m.BangumiID == 0 && (m.TMDBID != 0 || m.AniListID != 0) {
+		log.Printf("DEBUG: Bangumi Retry triggered for '%s' (TMDB:%d, AL:%d)", queryTitle, m.TMDBID, m.AniListID)
+
+		retryCandidates := getCandidateTitles(m, queryTitle)
+		for _, t := range retryCandidates {
+			if t == "" {
+				continue
+			}
+			res, err := performWithRetry(func() (*bangumi.SearchResult, error) {
+				return bgmClient.SearchSubject(t)
+			})
+			if err == nil && res != nil {
+				log.Printf("DEBUG: RETRY MATCH on Bangumi using title '%s' -> ID: %d", t, res.ID)
+				m.BangumiID = res.ID
+				bgmSubject, _ = performWithRetry(func() (*bangumi.Subject, error) {
+					return bgmClient.GetSubject(res.ID)
+				})
+				break
+			}
+		}
+
+		// If found in retry, populate fields
+		if bgmSubject != nil {
+			m.BangumiID = bgmSubject.ID
+			m.BangumiImage = bgmSubject.Images.Large
+			m.BangumiSummary = bgmSubject.Summary
+			m.BangumiRating = bgmSubject.Rating.Score
+			if m.AirDate == "" {
+				m.AirDate = bgmSubject.Date
+			}
+			if m.TitleJP == "" {
+				m.TitleJP = bgmSubject.Name
+			}
+			if m.TitleCN == "" {
+				m.TitleCN = bgmSubject.NameCN
+			}
+			// Default fields priority
+			if bgmSubject.NameCN != "" {
+				m.BangumiTitle = bgmSubject.NameCN
+			} else {
+				m.BangumiTitle = bgmSubject.Name
+			}
+			m.BangumiImageRaw = s.fetchAndCacheImage(m.BangumiImage)
 		}
 	}
 
@@ -560,12 +721,15 @@ func (s *LocalAnimeService) EnrichMetadata(m *model.AnimeMetadata, queryTitle st
 	if m.ID == 0 {
 		var existing model.AnimeMetadata
 		found := false
-		// ... (Same dedup logic as before roughly)
+
+		// Check by BangumiID first (Priority)
 		if m.BangumiID != 0 {
 			if err := db.DB.Where("bangumi_id = ?", m.BangumiID).First(&existing).Error; err == nil {
 				found = true
 			}
 		}
+
+		// Fallback checks (TMDB/AniList) - only if not found by Bangumi
 		if !found && m.TMDBID != 0 {
 			if err := db.DB.Where("tmdb_id = ?", m.TMDBID).First(&existing).Error; err == nil {
 				found = true
@@ -588,9 +752,24 @@ func (s *LocalAnimeService) EnrichMetadata(m *model.AnimeMetadata, queryTitle st
 			if m.AniListID != 0 {
 				existing.AniListID = m.AniListID
 			}
-			*m = existing // Point to existing ID
+
+			// Point current object to the existing ID to update it
+			*m = existing
 		} else {
-			db.DB.Create(m)
+			// Create new
+			if err := db.DB.Create(m).Error; err != nil {
+				// Handle race condition: Unique constraint failed?
+				if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+					// Rare race: Try to fetch again
+					if m.BangumiID != 0 {
+						if err := db.DB.Where("bangumi_id = ?", m.BangumiID).First(&existing).Error; err == nil {
+							*m = existing
+						}
+					}
+				} else {
+					log.Printf("ERROR: Failed to create metadata: %v", err)
+				}
+			}
 		}
 	} else {
 		db.DB.Save(m)
@@ -627,6 +806,28 @@ func (s *LocalAnimeService) EnrichMetadata(m *model.AnimeMetadata, queryTitle st
 
 	// Trigger sync to linked records
 	s.SyncMetadataToModels(m)
+}
+
+func getCandidateTitles(m *model.AnimeMetadata, query string) []string {
+	seen := make(map[string]bool)
+	var candidates []string
+
+	add := func(t string) {
+		t = strings.TrimSpace(t)
+		if t != "" && !seen[t] {
+			seen[t] = true
+			candidates = append(candidates, t)
+		}
+	}
+
+	// Priority: CN -> JP -> EN -> Query -> Current Title
+	add(m.TitleCN)
+	add(m.TitleJP)
+	add(m.TitleEN)
+	add(query)
+	add(m.Title)
+
+	return candidates
 }
 
 func (s *LocalAnimeService) fetchAndCacheImage(url string) []byte {
@@ -820,4 +1021,24 @@ func (s *LocalAnimeService) StartMetadataMigration() {
 		}
 		log.Println("Migration: Background image migration completed.")
 	}()
+}
+
+// Helper: Generic Retry with exponential backoff
+// Attempts: 3
+// Backoff: 500ms, 1s
+func performWithRetry[T any](op func() (T, error)) (T, error) {
+	var result T
+	var err error
+	for i := 0; i < 3; i++ {
+		if i > 0 {
+			time.Sleep(time.Duration(1<<(i-1)) * 500 * time.Millisecond)
+		}
+		result, err = op()
+		if err == nil {
+			return result, nil
+		}
+		// Optional: Log retry warning for debugging
+		// log.Printf("DEBUG: API Call retry %d failed: %v", i+1, err)
+	}
+	return result, err
 }

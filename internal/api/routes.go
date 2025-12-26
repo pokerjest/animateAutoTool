@@ -75,6 +75,12 @@ func InitRoutes(r *gin.Engine) {
 		apiGroup.GET("/search/subgroups", GetSubgroupsHandler)
 		apiGroup.GET("/preview", PreviewRSSHandler)
 		apiGroup.GET("/mikan/dashboard", GetMikanDashboardHandler)
+		apiGroup.GET("/mikan/episodes", GetMikanEpisodesHandler) // New route
+
+		apiGroup.POST("/play/magnet", PlayMagnetHandler) // New route
+
+		// Player
+		r.GET("/player", GetPlayerHandler) // Registered at root-ish level for simplicity (not /api)
 		apiGroup.POST("/subscriptions/refresh", RefreshSubscriptionsHandler)
 
 		// Settings

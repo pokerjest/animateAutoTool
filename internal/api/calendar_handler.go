@@ -3,6 +3,7 @@ package api
 import (
 	"log"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -44,16 +45,66 @@ func GetCalendarHandler(c *gin.Context) {
 	isHTMX := c.GetHeader("HX-Request") == "true"
 
 	// Fetch active subscriptions to check status
-	// Map: BangumiID -> SubscriptionID (if subscribed)
-	subMap := make(map[int]uint)
+	type SubInfo struct {
+		ID            uint
+		Total         int
+		Downloaded    int64
+		BangumiStatus int // 1:Wish, 2:Collect, 3:Doing, 4:OnHold, 5:Dropped
+	}
+	subMap := make(map[int]SubInfo)
+	var mu sync.Mutex
+
+	// 1. Load Local Subscriptions
 	var subs []model.Subscription
-	// Preload Metadata to get BangumiID
 	if err := db.DB.Preload("Metadata").Where("is_active = ?", true).Find(&subs).Error; err == nil {
 		for _, sub := range subs {
 			if sub.Metadata != nil && sub.Metadata.BangumiID != 0 {
-				subMap[sub.Metadata.BangumiID] = sub.ID
+				var count int64
+				db.DB.Model(&model.DownloadLog{}).Where("subscription_id = ? AND status = ?", sub.ID, "completed").Count(&count)
+				subMap[sub.Metadata.BangumiID] = SubInfo{
+					ID:         sub.ID,
+					Total:      sub.LastEp,
+					Downloaded: count,
+				}
 			}
 		}
+	}
+
+	// 2. Fetch Bangumi Collection Status (If authenticated)
+	var tokenCfg model.GlobalConfig
+	if err := db.DB.Where("key = ?", model.ConfigKeyBangumiAccessToken).First(&tokenCfg).Error; err == nil && tokenCfg.Value != "" {
+		token := tokenCfg.Value
+		var wg sync.WaitGroup
+
+		// Fetch types 1 (Wish), 2 (Collect), 3 (Doing), 4 (OnHold), 5 (Dropped)
+		// We limit to 50 items per type to avoid slow load, assuming calendar items are recent
+		types := []int{1, 2, 3, 4, 5}
+
+		for _, t := range types {
+			wg.Add(1)
+			go func(status int) {
+				defer wg.Done()
+				// Fetch "me" collection
+				// Use a reasonable limit, e.g., 100
+				items, err := client.GetUserCollection(token, "me", status, 100, 0)
+				if err == nil {
+					mu.Lock()
+					defer mu.Unlock()
+					for _, item := range items {
+						bid := item.SubjectID
+						info, exists := subMap[bid]
+						if !exists {
+							info = SubInfo{}
+						}
+						info.BangumiStatus = status
+						subMap[bid] = info
+					}
+				} else {
+					log.Printf("Failed to fetch collection type %d: %v", status, err)
+				}
+			}(t)
+		}
+		wg.Wait()
 	}
 
 	c.HTML(http.StatusOK, "calendar.html", gin.H{

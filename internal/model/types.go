@@ -42,7 +42,7 @@ type AnimeMetadata struct {
 	TitleJP string `json:"title_jp"`
 
 	// Sources IDs
-	BangumiID int `json:"bangumi_id" gorm:"index"`
+	BangumiID int `json:"bangumi_id" gorm:"uniqueIndex"`
 	TMDBID    int `json:"tmdb_id" gorm:"index"`
 	AniListID int `json:"anilist_id" gorm:"index"`
 

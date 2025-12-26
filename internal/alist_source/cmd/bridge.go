@@ -9,7 +9,9 @@ import (
 
 	"github.com/alist-org/alist/v3/drivers/pikpak"
 	alistdb "github.com/alist-org/alist/v3/internal/db"
+	alistfs "github.com/alist-org/alist/v3/internal/fs"
 	alistmodel "github.com/alist-org/alist/v3/internal/model"
+	offlinetool "github.com/alist-org/alist/v3/internal/offline_download/tool"
 	"github.com/alist-org/alist/v3/internal/op"
 )
 
@@ -110,11 +112,56 @@ func GetPikPakStatus() (string, error) {
 		return "未找到驱动", nil
 	}
 
-	// Driver interface has GetStorage() which has Status field?
-	// No, model.Storage has Status (string).
-	// Let's check model definition if needed, but storage.go indicates storage.Status is used.
-	// Also driverStorage.SetStatus(WORK/err) is used.
-
 	storage := drv.GetStorage()
 	return storage.Status, nil
+}
+
+// AddOfflineDownload adds a magnet or URL to the specified path using the offline download tool
+func AddOfflineDownload(url, targetDir string) error {
+	ctx := context.Background()
+
+	// Use PikPak as the tool
+	// We might need to ensure PikPak tool is initialized or available.
+	// AddURL takes "Tool" string.
+	// Assuming "PikPak" is the tool name registered in AList.
+
+	args := &offlinetool.AddURLArgs{
+		URL:          url,
+		DstDirPath:   targetDir, // e.g. /PikPak/InstantPlay
+		Tool:         "PikPak",
+		DeletePolicy: offlinetool.DeleteOnUploadSucceed, // Or DeleteNever? Usually we want to keep it in cloud
+	}
+
+	// Wait, DeletePolicy refers to the temporary file?
+	// For "PikPak" tool, it adds task to cloud.
+	// If the storage is also PikPak, it's optimized path.
+
+	_, err := offlinetool.AddURL(ctx, args)
+	if err != nil {
+		return fmt.Errorf("failed to add offline download task: %w", err)
+	}
+
+	return nil
+}
+
+// ListFiles lists files in a directory
+func ListFiles(path string) ([]alistmodel.Obj, error) {
+	ctx := context.Background()
+	// Create list args
+	args := &alistfs.ListArgs{
+		NoLog: true,
+	}
+	return alistfs.List(ctx, path, args)
+}
+
+// GetSignUrl gets the direct link for a file
+func GetSignUrl(path string) (*alistmodel.Link, error) {
+	ctx := context.Background()
+	// Create link args
+	args := alistmodel.LinkArgs{
+		IP: "127.0.0.1",
+	}
+	// fs.Link returns (link, file, error)
+	link, _, err := alistfs.Link(ctx, path, args)
+	return link, err
 }

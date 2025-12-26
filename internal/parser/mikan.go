@@ -26,11 +26,20 @@ func NewMikanParser() *MikanParser {
 	}
 }
 
+// SetProxy sets the proxy for the Mikan parser client
+func (p *MikanParser) SetProxy(proxyURL string) {
+	if proxyURL != "" {
+		p.client.SetProxy(proxyURL)
+	}
+}
+
 func (p *MikanParser) Name() string {
 	return "Mikan Project"
 }
 
 // RSS/Atom XML 结构定义
+// Mikan actually uses a custom namespace for the torrent element
+// xmlns="https://mikanani.me/0.1/"
 type MikanRSS struct {
 	Channel struct {
 		Items []struct {
@@ -44,7 +53,7 @@ type MikanRSS struct {
 				Link          string `xml:"link"`
 				ContentLength int64  `xml:"contentLength"`
 				PubDate       string `xml:"pubDate"`
-			} `xml:"torrent"` // Mikan 实际上是标准 RSS 2.0，部分字段可能不同，这里先按标准试
+			} `xml:"https://mikanani.me/0.1/ torrent"`
 			PubDate string `xml:"pubDate"`
 		} `xml:"item"`
 	} `xml:"channel"`
@@ -63,23 +72,50 @@ func (p *MikanParser) Parse(url string) ([]Episode, error) {
 
 	var episodes []Episode
 	for _, item := range rss.Channel.Items {
-		// Mikan 的磁力链通常在 link 中，或者通过 torrent 标签
-		// 实际上 Mikan RSS 的 item.link 是详情页，enclosure.url 是种子/磁力
-		// 或者是 <torrent:link> (如果有命名空间)
-
-		// 修正：根据经验，Mikan RSS 的 item -> enclosure url 属性通常是种子下载链接
-		// Link 标签通常指向 Mikan 网站详情页
-		// 磁力链接有时不在 RSS 直接提供，或者在此处需要进一步处理。
-		// 但大部分用户需要磁力，Mikan RSS 直接给的是 .torrent 下载链接。
-		// 部分客户端(qBit)支持直接把 .torrent URL 传进去下载。
-
 		// 这里简单解析一下 Title
 		ep := ParseTitle(item.Title)
 		ep.TorrentURL = item.Enclosure.URL
 
-		// 处理时间 RFC1123Z ?
-		// Mikan Example: Mon, 23 Dec 2024 10:30:00 +0800
-		t, _ := time.Parse(time.RFC1123Z, item.PubDate)
+		// Fix: 如果没有 Magnet，使用 TorrentURL 作为替代下载链接
+		// 很多 RSS 只提供 .torrent 下载地址，PikPak 等工具支持直接传入
+		if ep.Magnet == "" && ep.TorrentURL != "" {
+			ep.Magnet = ep.TorrentURL
+		}
+
+		// Calculate Size
+		if item.Torrent.ContentLength > 0 {
+			// Simple formatting
+			sizeMB := float64(item.Torrent.ContentLength) / 1024 / 1024
+			if sizeMB > 1024 {
+				ep.Size = fmt.Sprintf("%.2f GB", sizeMB/1024)
+			} else {
+				ep.Size = fmt.Sprintf("%.2f MB", sizeMB)
+			}
+		}
+
+		// 处理时间
+		// Mikan usually puts PubDate inside the torrent element now?
+		// Or if item.PubDate is empty, try torrent.PubDate
+		rawDate := item.PubDate
+		if rawDate == "" {
+			rawDate = item.Torrent.PubDate
+		}
+
+		// Try parsing multiple formats
+		formats := []string{
+			time.RFC1123Z,
+			"2006-01-02T15:04:05.999999", // From XML: 2025-10-28T20:40:03.684339
+			"2006-01-02T15:04:05.999",
+			time.RFC3339,
+		}
+
+		var t time.Time
+		for _, f := range formats {
+			if parsed, err := time.Parse(f, rawDate); err == nil {
+				t = parsed
+				break
+			}
+		}
 		ep.PubDate = t
 
 		episodes = append(episodes, ep)

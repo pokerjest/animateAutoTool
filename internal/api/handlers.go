@@ -223,6 +223,11 @@ func createSubscriptionInternal(sub *model.Subscription) error {
 		}
 	}
 
+	// Auto-fill FilterRule from SubtitleGroup if FilterRule is empty
+	if sub.FilterRule == "" && sub.SubtitleGroup != "" {
+		sub.FilterRule = sub.SubtitleGroup
+	}
+
 	// Enrich Metadata (Bangumi & TMDB)
 	svc := service.NewLocalAnimeService()
 	svc.EnrichSubscriptionMetadata(sub)
