@@ -36,6 +36,22 @@ services:
     networks:
       - animate-net
 
+  alist:
+    image: xhofe/alist:latest
+    container_name: alist
+    restart: unless-stopped
+    volumes:
+      - ./alist:/opt/alist/data
+      - ./downloads:/downloads # Share downloads for mapping
+    ports:
+      - "5244:5244"
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - UMASK=022
+    networks:
+      - animate-net
+
 networks:
   animate-net:
     driver: bridge

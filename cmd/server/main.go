@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/gin-gonic/gin"
+	"github.com/pokerjest/animateAutoTool/internal/alist"
 	"github.com/pokerjest/animateAutoTool/internal/api"
 	"github.com/pokerjest/animateAutoTool/internal/config"
 	"github.com/pokerjest/animateAutoTool/internal/db"
@@ -36,6 +37,9 @@ func main() {
 	sch := scheduler.NewManager()
 	sch.Start()
 	defer sch.Stop()
+
+	// Start Embedded AList Server
+	alist.StartAlistServer()
 
 	port := fmt.Sprintf("%d", config.AppConfig.Server.Port)
 	log.Printf("Server starting on port %s", port)

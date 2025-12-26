@@ -302,20 +302,102 @@
                     </div>
                 </div>
             </div>
-        </div>
 
-        <!-- Save Actions -->
-        <div class="bg-white/60 p-6 rounded-xl border border-white/70 shadow-sm mt-6 flex justify-between items-center">
-            <div id="save-result" class="text-sm transition-all duration-300"></div>
+            <!-- PikPak Integration -->
+            <div class="bg-white/60 p-6 rounded-xl border border-white/70 shadow-sm mt-6">
+                <div class="mb-4">
+                    <div class="flex items-center gap-2 border-b border-gray-200 pb-2 mb-4">
+                        <h3 class="text-lg font-semibold text-gray-800">PikPak 集成 (To AList)</h3>
+                    </div>
 
-            <button type="submit" id="save-settings-btn"
-                class="bg-primary text-white px-8 py-2.5 rounded-lg hover:bg-accent transition shadow-lg shadow-pink-200 disabled:opacity-50 disabled:cursor-not-allowed flex justify-center items-center gap-2 text-lg font-semibold"
-                hx-indicator="#save-settings-btn">
-                <span class="hidden [.htmx-request_&]:inline animate-spin">⌛</span>
-                <span class="[.htmx-request_&]:hidden">💾 保存所有配置</span>
-                <span class="hidden [.htmx-request_&]:inline">正在保存...</span>
-            </button>
-        </div>
+                    <div class="space-y-4">
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Username</label>
+                                <input type="text" name="pikpak_username" value='{{ index .Config "pikpak_username" }}'
+                                    class="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-primary focus:border-transparent outline-none"
+                                    placeholder="PikPak 用户名">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Password</label>
+                                <div class="relative">
+                                    <input type="password" id="pikpak_password_input" name="pikpak_password"
+                                        value='{{ index .Config "pikpak_password" }}'
+                                        class="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-primary focus:border-transparent outline-none pr-10"
+                                        placeholder="PikPak 密码">
+                                    <button type="button" onclick="togglePikPakPasswordVisibility()"
+                                        class="absolute inset-y-0 right-0 px-3 flex items-center text-gray-400 hover:text-gray-600 cursor-pointer focus:outline-none"
+                                        title="显示/隐藏 密码">
+                                        <span id="pikpak-pwd-toggle-icon">👁️</span>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="mt-4">
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Refresh Token (推荐:
+                                解决验证码错误)</label>
+                            <div class="relative">
+                                <input type="password" id="pikpak_refresh_token_input" name="pikpak_refresh_token"
+                                    value=""
+                                    class="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-primary focus:border-transparent outline-none pr-10"
+                                    placeholder="若遇到 4001/Captcha 错误，请粘贴 Refresh Token 以直连">
+                                <button type="button"
+                                    onclick="var i=document.getElementById('pikpak_refresh_token_input'); i.type = i.type==='password'?'text':'password';"
+                                    class="absolute inset-y-0 right-0 px-3 flex items-center text-gray-400 hover:text-gray-600 cursor-pointer focus:outline-none"
+                                    title="显示/隐藏 Token">
+                                    <span>👁️</span>
+                                </button>
+                            </div>
+                            <div class="text-xs text-slate-500 mt-1">
+                                当密码登录报 "4001: captcha_required" 错时，请从浏览器 (F12 > Application > Storage) 获取
+                                `refresh_token` 并填入此处。
+                            </div>
+                        </div>
+
+                        <div class="flex items-start justify-between gap-4 mt-6">
+                            <!-- Connection Status -->
+                            <div id="pikpak-status" hx-get="/api/settings/pikpak-status"
+                                hx-trigger="load, pikpak-synced from:body" hx-target="this" hx-swap="innerHTML"
+                                class="flex-grow min-h-[40px]">
+                                <div class="htmx-indicator flex items-center gap-2 text-gray-500">
+                                    <span class="animate-spin">⌛</span>
+                                    <span>检查连接状态...</span>
+                                </div>
+                                <div class="text-sm text-gray-500 flex items-center gap-2">
+                                    <span>⚪ 等待检查...</span>
+                                </div>
+                            </div>
+
+                            <button type="button" hx-post="/api/settings/pikpak-sync" hx-target="#pikpak-sync-status"
+                                class="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition flex items-center gap-2 text-sm font-medium shadow-sm shadow-indigo-200 whitespace-nowrap"
+                                hx-indicator="#pikpak-indicator">
+                                <span class="hidden [.htmx-request_&]:inline animate-spin">⌛</span>
+                                <span>💾 保存并连接 PikPak</span>
+                            </button>
+                        </div>
+
+                        <div class="flex justify-end items-center gap-2 mt-2">
+                            <div id="pikpak-indicator" class="htmx-indicator text-xs text-gray-500">正在连接 AList...</div>
+                            <div id="pikpak-sync-status" class="text-xs"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Save Actions -->
+            <div
+                class="bg-white/60 p-6 rounded-xl border border-white/70 shadow-sm mt-6 flex justify-between items-center">
+                <div id="save-result" class="text-sm transition-all duration-300"></div>
+
+                <button type="submit" id="save-settings-btn"
+                    class="bg-primary text-white px-8 py-2.5 rounded-lg hover:bg-accent transition shadow-lg shadow-pink-200 disabled:opacity-50 disabled:cursor-not-allowed flex justify-center items-center gap-2 text-lg font-semibold"
+                    hx-indicator="#save-settings-btn">
+                    <span class="hidden [.htmx-request_&]:inline animate-spin">⌛</span>
+                    <span class="[.htmx-request_&]:hidden">💾 保存所有配置</span>
+                    <span class="hidden [.htmx-request_&]:inline">正在保存...</span>
+                </button>
+            </div>
 
     </form>
 
@@ -381,6 +463,20 @@
         function toggleJellyfinTokenVisibility() {
             const input = document.getElementById('jellyfin_api_key_input');
             const icon = document.getElementById('jellyfin-token-toggle-icon');
+            if (input.type === 'password') {
+                input.type = 'text';
+                icon.innerText = '🙈';
+            } else {
+                input.type = 'password';
+                icon.innerText = '👁️';
+            }
+        }
+
+
+
+        function togglePikPakPasswordVisibility() {
+            const input = document.getElementById('pikpak_password_input');
+            const icon = document.getElementById('pikpak-pwd-toggle-icon');
             if (input.type === 'password') {
                 input.type = 'text';
                 icon.innerText = '🙈';

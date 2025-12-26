@@ -103,6 +103,10 @@ const (
 	ConfigKeyJellyfinUrl         = "jellyfin_url"
 	ConfigKeyJellyfinApiKey      = "jellyfin_api_key"
 	ConfigKeyProxyJellyfin       = "proxy_jellyfin_enabled"
+	ConfigKeyAListUrl            = "alist_url"
+	ConfigKeyAListToken          = "alist_token"
+	ConfigKeyPikPakUsername      = "pikpak_username"
+	ConfigKeyPikPakPassword      = "pikpak_password"
 
 	// Cloudflare R2
 	ConfigKeyR2Endpoint  = "r2_endpoint"

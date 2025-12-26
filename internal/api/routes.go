@@ -85,6 +85,8 @@ func InitRoutes(r *gin.Engine) {
 		apiGroup.GET("/settings/tmdb-status", GetTMDBStatusHandler)
 		apiGroup.GET("/settings/anilist-status", GetAniListStatusHandler)
 		apiGroup.GET("/settings/jellyfin-status", GetJellyfinStatusHandler)
+		apiGroup.POST("/settings/pikpak-sync", PikPakSyncHandler)
+		apiGroup.GET("/settings/pikpak-status", GetPikPakStatusHandler)
 		apiGroup.POST("/settings/test-connection", TestConnectionHandler)
 
 		// Local Anime

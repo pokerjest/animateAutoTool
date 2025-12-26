@@ -1,6 +1,7 @@
 package api
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"log"
 	"net/http"
@@ -11,9 +12,11 @@ import (
 	"time"
 
 	"bytes"
+	"encoding/hex"
 	"encoding/json"
 
 	"github.com/gin-gonic/gin"
+	"github.com/pokerjest/animateAutoTool/internal/alist"
 	"github.com/pokerjest/animateAutoTool/internal/bangumi"
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/downloader"
@@ -618,7 +621,10 @@ func UpdateSettingsHandler(c *gin.Context) {
 		model.ConfigKeyProxyAniList,
 		model.ConfigKeyJellyfinUrl,
 		model.ConfigKeyJellyfinApiKey,
+		model.ConfigKeyJellyfinApiKey,
 		model.ConfigKeyProxyJellyfin,
+		model.ConfigKeyPikPakUsername,
+		model.ConfigKeyPikPakPassword,
 	}
 
 	for _, key := range keys {
@@ -698,6 +704,7 @@ func UpdateSettingsHandler(c *gin.Context) {
 		%s
 		%s
 		%s
+		%s
 	`, qbStatusHtml, bangumiStatusOOB, tmdbStatusOOB, anilistStatusOOB, jellyfinStatusOOB))
 }
 
@@ -752,6 +759,68 @@ func QBSaveAndTestHandler(c *gin.Context) {
 	}
 
 	c.String(http.StatusOK, fmt.Sprintf(`<div class="text-emerald-600 bg-emerald-50 px-3 py-1.5 rounded-lg text-sm font-medium flex items-center gap-2 border border-emerald-200 shadow-sm transition-all duration-300 transform scale-100">%s</div>`, statusMsg))
+}
+
+// PikPakSyncHandler synchronizes PikPak settings to AList
+func PikPakSyncHandler(c *gin.Context) {
+	username := c.PostForm("pikpak_username")
+	password := c.PostForm("pikpak_password")
+	refreshToken := c.PostForm("pikpak_refresh_token")
+
+	if username == "" || password == "" {
+		c.String(http.StatusOK, `<span class="text-red-500">❌ 请先填写 PikPak 用户名和密码</span>`)
+		return
+	}
+
+	err := alist.AddPikPakStorage(username, password, refreshToken)
+	if err != nil {
+		log.Printf("Failed to sync PikPak to AList: %v", err)
+
+		// Check for specific PikPak verification error
+		errStr := err.Error()
+		if strings.Contains(errStr, "need verify") || strings.Contains(errStr, "Click Here") {
+			// Extract the link if possible, or just print the raw HTML error which already contains an <a> tag
+			// Clean up the error prefix "failed to create storage: ..."
+			if idx := strings.Index(errStr, "need verify"); idx != -1 {
+				errStr = errStr[idx:]
+			}
+			c.String(http.StatusOK, fmt.Sprintf(`<div class="bg-yellow-50 border border-yellow-200 rounded-lg p-3 text-sm text-yellow-800 flex flex-col gap-2">
+                <div class="font-bold flex items-center gap-2">⚠️ 需要验证</div>
+                <div>由于 PikPak 安全策略，首次登录可能需要验证。</div>
+                <div class="text-blue-600 underline">%s</div>
+                <div class="text-xs text-yellow-600 mt-1">验证完成后，请再次点击“保存并连接”。</div>
+             </div>`, errStr))
+			return
+		}
+
+		c.String(http.StatusOK, fmt.Sprintf(`<span class="text-red-500">❌ 同步失败: %s</span>`, err.Error()))
+		return
+	}
+
+	c.Header("HX-Trigger", "pikpak-synced")
+	c.String(http.StatusOK, `<span class="text-emerald-600">✅ PikPak 已成功挂载到 AList (/PikPak)</span>`)
+}
+
+func GetPikPakStatusHandler(c *gin.Context) {
+	status, err := alist.GetPikPakStatus()
+
+	// Simulate Jellyfin rendering style
+	if err != nil {
+		c.String(http.StatusOK, fmt.Sprintf(`<div class="text-red-600 bg-red-50 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 border border-red-200">❌ Error: %s</div>`, err.Error()))
+		return
+	}
+
+	if status == "work" || status == "WORK" {
+		c.String(http.StatusOK, `<div class="text-emerald-600 bg-emerald-50 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 border border-emerald-200">✅ 运行正常</div>`)
+		return
+	} else if status == "未配置" {
+		// Initial state or not configured
+		c.String(http.StatusOK, `<div class="text-sm text-gray-500 flex items-center gap-2"><span>🔴 未配置</span><span class="text-xs text-gray-400">(请填写账号密码并点击保存连接)</span></div>`)
+		return
+	}
+
+	// Other non-work status
+	c.String(http.StatusOK, fmt.Sprintf(`<div class="text-red-600 bg-red-50 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 border border-red-200">❌ 状态: %s</div>`, status))
 }
 
 // BangumiSaveHandler saves Bangumi settings and returns success
@@ -826,10 +895,28 @@ func TestConnectionHandler(c *gin.Context) {
 	c.String(http.StatusOK, `<div class="text-emerald-600 bg-emerald-50 px-3 py-1.5 rounded-lg text-sm font-medium flex items-center gap-2 border border-emerald-200 shadow-sm transition-all duration-300 transform scale-100">✅ 连接成功! (`+version+`)</div>`)
 }
 
-// GetQBStatusHandler tests connection using stored config
+// Status Caching
+var statusCache sync.Map
+
+type cachedStatus struct {
+	Success    bool
+	Msg        string
+	Msg2       string // Extra info
+	ConfigHash string
+	Expiry     time.Time
+}
+
+func getCacheHash(parts ...string) string {
+	h := sha256.New()
+	for _, p := range parts {
+		h.Write([]byte(p))
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// GetQBStatusHandler tests connection using stored config with caching
 func GetQBStatusHandler(c *gin.Context) {
 	var configs []model.GlobalConfig
-	// Fetch only QB related configs
 	db.DB.Where("key IN ?", []string{model.ConfigKeyQBUrl, model.ConfigKeyQBUsername, model.ConfigKeyQBPassword}).Find(&configs)
 
 	configMap := make(map[string]string)
@@ -846,15 +933,52 @@ func GetQBStatusHandler(c *gin.Context) {
 		return
 	}
 
+	// Calculate Hash
+	hash := getCacheHash(url, username, password)
+
+	// Check Cache
+	if val, ok := statusCache.Load("qb"); ok {
+		stat := val.(cachedStatus)
+		if stat.ConfigHash == hash && time.Now().Before(stat.Expiry) {
+			if stat.Success {
+				c.String(http.StatusOK, fmt.Sprintf(`<div class="text-emerald-600 bg-emerald-50 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 border border-emerald-200">✅ QB 已连接 (缓存) %s</div>`, stat.Msg))
+			} else {
+				c.String(http.StatusOK, fmt.Sprintf(`<div class="text-red-600 bg-red-50 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 border border-red-200">❌ QB 连接失败 (缓存): %s</div>`, stat.Msg))
+			}
+			return
+		}
+	}
+
 	client := downloader.NewQBittorrentClient(url)
 	if err := client.Login(username, password); err != nil {
+		// Cache Failure
+		statusCache.Store("qb", cachedStatus{
+			Success:    false,
+			Msg:        err.Error(),
+			ConfigHash: hash,
+			Expiry:     time.Now().Add(1 * time.Minute), // Short cache for errors
+		})
 		c.String(http.StatusOK, fmt.Sprintf(`<div class="text-red-600 bg-red-50 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 border border-red-200">❌ QB 连接失败: %v</div>`, err))
 		return
 	}
 
 	if ver, err := client.GetVersion(); err == nil {
+		// Cache Success
+		statusCache.Store("qb", cachedStatus{
+			Success:    true,
+			Msg:        fmt.Sprintf("(版本: %s)", ver),
+			ConfigHash: hash,
+			Expiry:     time.Now().Add(5 * time.Minute),
+		})
 		c.String(http.StatusOK, fmt.Sprintf(`<div class="text-emerald-600 bg-emerald-50 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 border border-emerald-200">✅ QB 已连接 (版本: %s)</div>`, ver))
 	} else {
+		// Status Unknown?
+		statusCache.Store("qb", cachedStatus{
+			Success:    false, // Treat as warning/fail for cache?
+			Msg:        "Version unknown",
+			ConfigHash: hash,
+			Expiry:     time.Now().Add(1 * time.Minute),
+		})
 		c.String(http.StatusOK, `<div class="text-amber-600 bg-amber-50 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 border border-amber-200">⚠️ QB 登录成功但版本未知</div>`)
 	}
 }
@@ -1038,6 +1162,24 @@ func CheckTMDBConnection() (bool, string) {
 	}
 
 	token := config.Value
+
+	// Cache Check
+	// We also need proxy config for hash
+	var proxyEnabled model.GlobalConfig
+	var proxyConfig model.GlobalConfig
+	db.DB.Where("key = ?", model.ConfigKeyProxyTMDB).First(&proxyEnabled)
+	if proxyEnabled.Value == "true" {
+		db.DB.Where("key = ?", model.ConfigKeyProxyURL).First(&proxyConfig)
+	}
+
+	hash := getCacheHash(token, proxyEnabled.Value, proxyConfig.Value)
+	if val, ok := statusCache.Load("tmdb"); ok {
+		stat := val.(cachedStatus)
+		if stat.ConfigHash == hash && time.Now().Before(stat.Expiry) {
+			return stat.Success, stat.Msg
+		}
+	}
+
 	req, err := http.NewRequest("GET", "https://api.themoviedb.org/3/configuration", nil)
 	if err != nil {
 		return false, fmt.Sprintf("Internal Error: %v", err)
@@ -1046,17 +1188,11 @@ func CheckTMDBConnection() (bool, string) {
 	req.Header.Set("Accept", "application/json")
 
 	// Check Proxy
-	var proxyConfig model.GlobalConfig
-	var proxyEnabled model.GlobalConfig
+	// Proxy Setup (Reusing variables from Cache Check)
 	var transport *http.Transport
-
-	db.DB.Where("key = ?", model.ConfigKeyProxyTMDB).First(&proxyEnabled)
-
-	if proxyEnabled.Value == "true" {
-		if err := db.DB.Where("key = ?", model.ConfigKeyProxyURL).First(&proxyConfig).Error; err == nil && proxyConfig.Value != "" {
-			if proxyUrl, err := url.Parse(proxyConfig.Value); err == nil {
-				transport = &http.Transport{Proxy: http.ProxyURL(proxyUrl)}
-			}
+	if proxyEnabled.Value == "true" && proxyConfig.Value != "" {
+		if proxyUrl, err := url.Parse(proxyConfig.Value); err == nil {
+			transport = &http.Transport{Proxy: http.ProxyURL(proxyUrl)}
 		}
 	}
 
@@ -1069,17 +1205,39 @@ func CheckTMDBConnection() (bool, string) {
 
 	resp, err := client.Do(req)
 	if err != nil {
+		statusCache.Store("tmdb", cachedStatus{
+			Success:    false,
+			Msg:        err.Error(),
+			ConfigHash: hash,
+			Expiry:     time.Now().Add(1 * time.Minute),
+		})
 		return false, err.Error()
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode == 200 {
+		statusCache.Store("tmdb", cachedStatus{
+			Success:    true,
+			Msg:        "",
+			ConfigHash: hash,
+			Expiry:     time.Now().Add(5 * time.Minute),
+		})
 		return true, ""
 	}
-	if resp.StatusCode == 401 {
-		return false, "Token Invalid"
+
+	errMsg := "Token Invalid"
+	if resp.StatusCode != 401 {
+		errMsg = fmt.Sprintf("HTTP %d", resp.StatusCode)
 	}
-	return false, fmt.Sprintf("HTTP %d", resp.StatusCode)
+
+	statusCache.Store("tmdb", cachedStatus{
+		Success:    false,
+		Msg:        errMsg,
+		ConfigHash: hash,
+		Expiry:     time.Now().Add(1 * time.Minute),
+	})
+
+	return false, errMsg
 }
 
 // Logic for AniList Status
@@ -1156,6 +1314,22 @@ func CheckAniListConnection() (bool, string, string) {
 		return false, "", "Token missing"
 	}
 
+	// Cache Check
+	var proxyConfig model.GlobalConfig
+	var proxyEnabled model.GlobalConfig
+	db.DB.Where("key = ?", model.ConfigKeyProxyAniList).First(&proxyEnabled)
+	if proxyEnabled.Value == "true" {
+		db.DB.Where("key = ?", model.ConfigKeyProxyURL).First(&proxyConfig)
+	}
+
+	hash := getCacheHash(token, proxyEnabled.Value, proxyConfig.Value)
+	if val, ok := statusCache.Load("anilist"); ok {
+		stat := val.(cachedStatus)
+		if stat.ConfigHash == hash && time.Now().Before(stat.Expiry) {
+			return stat.Success, stat.Msg2, stat.Msg // Msg2 is username, Msg is error
+		}
+	}
+
 	query := `{"query": "{ Viewer { name id } }"}`
 
 	req, err := http.NewRequest("POST", "https://graphql.anilist.co", bytes.NewBufferString(query))
@@ -1166,18 +1340,10 @@ func CheckAniListConnection() (bool, string, string) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 
-	// Check Proxy
-	var proxyConfig model.GlobalConfig
-	var proxyEnabled model.GlobalConfig
 	var transport *http.Transport
-
-	db.DB.Where("key = ?", model.ConfigKeyProxyAniList).First(&proxyEnabled)
-
 	if proxyEnabled.Value == "true" {
-		if err := db.DB.Where("key = ?", model.ConfigKeyProxyURL).First(&proxyConfig).Error; err == nil && proxyConfig.Value != "" {
-			if proxyUrl, err := url.Parse(proxyConfig.Value); err == nil {
-				transport = &http.Transport{Proxy: http.ProxyURL(proxyUrl)}
-			}
+		if proxyUrl, err := url.Parse(proxyConfig.Value); err == nil && proxyConfig.Value != "" {
+			transport = &http.Transport{Proxy: http.ProxyURL(proxyUrl)}
 		}
 	}
 
@@ -1190,12 +1356,27 @@ func CheckAniListConnection() (bool, string, string) {
 
 	resp, err := client.Do(req)
 	if err != nil {
+		statusCache.Store("anilist", cachedStatus{
+			Success:    false,
+			Msg:        err.Error(),
+			Msg2:       "",
+			ConfigHash: hash,
+			Expiry:     time.Now().Add(1 * time.Minute),
+		})
 		return false, "", err.Error()
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		return false, "", fmt.Sprintf("HTTP %d", resp.StatusCode)
+		errMsg := fmt.Sprintf("HTTP %d", resp.StatusCode)
+		statusCache.Store("anilist", cachedStatus{
+			Success:    false,
+			Msg:        errMsg,
+			Msg2:       "",
+			ConfigHash: hash,
+			Expiry:     time.Now().Add(1 * time.Minute),
+		})
+		return false, "", errMsg
 	}
 
 	var result AniListResponse
@@ -1206,6 +1387,14 @@ func CheckAniListConnection() (bool, string, string) {
 	if len(result.Errors) > 0 {
 		return false, "", result.Errors[0].Message
 	}
+
+	statusCache.Store("anilist", cachedStatus{
+		Success:    true,
+		Msg:        "",
+		Msg2:       result.Data.Viewer.Name,
+		ConfigHash: hash,
+		Expiry:     time.Now().Add(5 * time.Minute),
+	})
 
 	return true, result.Data.Viewer.Name, ""
 }
@@ -1259,6 +1448,20 @@ func CheckJellyfinConnection() (bool, string) {
 		return false, "Config missing"
 	}
 
+	// Cache Check
+	var proxyConfig model.GlobalConfig
+	if proxyEnabled.Value == "true" {
+		db.DB.Where("key = ?", model.ConfigKeyProxyURL).First(&proxyConfig)
+	}
+
+	hash := getCacheHash(urlCfg.Value, keyCfg.Value, proxyEnabled.Value, proxyConfig.Value)
+	if val, ok := statusCache.Load("jellyfin"); ok {
+		stat := val.(cachedStatus)
+		if stat.ConfigHash == hash && time.Now().Before(stat.Expiry) {
+			return stat.Success, stat.Msg
+		}
+	}
+
 	serverUrl := strings.TrimRight(urlCfg.Value, "/")
 	// Jellyfin common info endpoint
 	apiUrl := fmt.Sprintf("%s/System/Info", serverUrl)
@@ -1275,16 +1478,13 @@ func CheckJellyfinConnection() (bool, string) {
 
 	var transport *http.Transport
 	if proxyEnabled.Value == "true" {
-		var proxyUrlCfg model.GlobalConfig
-		if err := db.DB.Where("key = ?", model.ConfigKeyProxyURL).First(&proxyUrlCfg).Error; err == nil && proxyUrlCfg.Value != "" {
-			if pUrl, err := url.Parse(proxyUrlCfg.Value); err == nil {
-				transport = &http.Transport{Proxy: http.ProxyURL(pUrl)}
-			}
+		if proxyUrl, err := url.Parse(proxyConfig.Value); err == nil && proxyConfig.Value != "" {
+			transport = &http.Transport{Proxy: http.ProxyURL(proxyUrl)}
 		}
 	}
 
 	client := &http.Client{
-		Timeout: 5 * time.Second,
+		Timeout: 5 * time.Second, // Shorter timeout for status check
 	}
 	if transport != nil {
 		client.Transport = transport
@@ -1292,6 +1492,12 @@ func CheckJellyfinConnection() (bool, string) {
 
 	resp, err := client.Do(req)
 	if err != nil {
+		statusCache.Store("jellyfin", cachedStatus{
+			Success:    false,
+			Msg:        err.Error(),
+			ConfigHash: hash,
+			Expiry:     time.Now().Add(1 * time.Minute),
+		})
 		log.Printf("DEBUG: Jellyfin connection error: %v", err)
 		return false, err.Error()
 	}
@@ -1300,12 +1506,28 @@ func CheckJellyfinConnection() (bool, string) {
 	log.Printf("DEBUG: Jellyfin connection response: %d", resp.StatusCode)
 
 	if resp.StatusCode == 200 {
+		statusCache.Store("jellyfin", cachedStatus{
+			Success:    true,
+			Msg:        "",
+			ConfigHash: hash,
+			Expiry:     time.Now().Add(5 * time.Minute),
+		})
 		return true, ""
 	}
+
+	errMsg := fmt.Sprintf("HTTP %d", resp.StatusCode)
 	if resp.StatusCode == 401 {
-		return false, "API Key Invalid"
+		errMsg = "API Key Invalid"
 	}
-	return false, fmt.Sprintf("HTTP %d", resp.StatusCode)
+
+	statusCache.Store("jellyfin", cachedStatus{
+		Success:    false,
+		Msg:        errMsg,
+		ConfigHash: hash,
+		Expiry:     time.Now().Add(1 * time.Minute),
+	})
+
+	return false, errMsg
 }
 
 // GetPosterHandler handles image requests from the database

@@ -4,7 +4,8 @@
 *.dll
 *.so
 *.dylib
-server
+# server (generic match blocks cmd/server)
+/server
 animate-server
 bin/
 

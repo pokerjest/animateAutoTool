@@ -36,6 +36,7 @@ func LoadConfig(configPath string) error {
 	v.SetDefault("server.mode", "release")
 	v.SetDefault("database.path", "data/animate.db")
 	v.SetDefault("log.level", "info")
+	v.SetDefault("alist_url", "http://alist:5244") // Docker internal default
 
 	// 配置文件路径
 	v.SetConfigName("config")
