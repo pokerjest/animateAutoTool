@@ -16,6 +16,8 @@ func GetCalendarHandler(c *gin.Context) {
 	// Use Bangumi Client (Public API, no auth needed)
 	client := bangumi.NewClient("", "", "")
 
+	// Check for HTMX request
+	log.Printf("DEBUG: Calendar Handler: Fetching data...")
 	calendar, err := client.GetCalendar()
 	if err != nil {
 		log.Printf("Calendar: Failed to fetch calendar: %v", err)
@@ -23,6 +25,10 @@ func GetCalendarHandler(c *gin.Context) {
 			"Error": "无法获取番剧日历: " + err.Error(),
 		})
 		return
+	}
+	log.Printf("DEBUG: Got %d days of calendar data", len(calendar))
+	for i, d := range calendar {
+		log.Printf("DEBUG: Day %d: ID=%d, Name=%s, Items=%d", i, d.Weekday.ID, d.Weekday.CN, len(d.Items))
 	}
 
 	// Determine today's weekday for highlighting (1=Mon, 7=Sun)

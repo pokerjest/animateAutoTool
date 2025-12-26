@@ -48,6 +48,13 @@ type Subject struct {
 		CountMap map[string]int `json:"count"`
 		Score    float64        `json:"score"`
 	} `json:"rating"`
+	Collection struct {
+		Wish    int `json:"wish"`
+		Collect int `json:"collect"`
+		Doing   int `json:"doing"`
+		OnHold  int `json:"on_hold"`
+		Dropped int `json:"dropped"`
+	} `json:"collection"`
 	Tags []struct {
 		Name  string `json:"name"`
 		Count int    `json:"count"`

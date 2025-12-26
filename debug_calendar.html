@@ -1,0 +1,291 @@
+
+
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Animate Auto Tool</title>
+    
+    <script src="/static/js/tailwindcss.js?v=2"></script>
+    
+    <script src="/static/js/htmx.min.js?v=2"></script>
+    
+    <script defer src="/static/js/alpine.min.js?v=2"></script>
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#ffb6c1', 
+                        secondary: '#87ceeb', 
+                        accent: '#ff69b4', 
+                        glass: 'rgba(255, 255, 255, 0.7)',
+                    },
+                    fontFamily: {
+                        sans: ['"Noto Sans SC"', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+    <style type="text/tailwindcss">
+        body {
+             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(10px);
+            border-radius: 1rem;
+            border: 1px solid rgba(255, 255, 255, 0.5);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        .nav-link {
+            @apply px-4 py-2 rounded-lg transition-colors duration-200 hover:bg-primary hover:text-white font-medium text-gray-700 block;
+        }
+        .nav-link.active {
+            @apply bg-primary text-white;
+        }
+        
+         
+        .htmx-indicator {
+            display: none;
+        }
+        .htmx-request .htmx-indicator,
+        .htmx-request.htmx-indicator {
+            display: inline-block;
+        }
+        
+         
+        .htmx-swapping {
+            opacity: 0;
+            transform: scale(0.95);
+            transition: all 0.5s ease-out;
+        }
+
+         
+        [x-cloak] {
+            display: none !important;
+        }
+
+        @keyframes shimmer {
+            0% { transform: translateX(-100%); }
+            100% { transform: translateX(100%); }
+        }
+    </style>
+</head>
+
+<body class="min-h-screen text-gray-800"
+    style="background: url('https://w.wallhaven.cc/full/wy/wallhaven-wyw6px.png') no-repeat center center fixed; background-size: cover;">
+
+    <div class="container mx-auto px-4 py-8 flex gap-6 h-screen overflow-hidden">
+        
+        <div class="w-64 glass-panel h-full p-6 flex flex-col shrink-0">
+            <h1 class="text-2xl font-bold text-accent mb-8 flex items-center gap-2">
+                <span>AnimateTool</span>
+            </h1>
+
+            <nav class="flex flex-col gap-2 flex-1">
+                <a href="/" class="nav-link" hx-get="/" hx-target="#main-content" hx-push-url="true">
+                    📊 仪表盘
+                </a>
+                <a href="/calendar" class="nav-link" hx-get="/calendar" hx-target="#main-content" hx-push-url="true">
+                    🗓️ 追番日历
+                </a>
+                <a href="/subscriptions" class="nav-link" hx-get="/subscriptions" hx-target="#main-content"
+                    hx-push-url="true">
+                    📺 订阅管理
+                </a>
+                <a href="/library" class="nav-link" hx-get="/library" hx-target="#main-content" hx-push-url="true">
+                    📚 番剧图鉴
+                </a>
+                <a href="/local-anime" class="nav-link" hx-get="/local-anime" hx-target="#main-content"
+                    hx-push-url="true">
+                    📁 本地番剧
+                </a>
+                <a href="/settings" class="nav-link" hx-get="/settings" hx-target="#main-content" hx-push-url="true">
+                    ⚙️ 系统设置
+                </a>
+                <a href="/backup" class="nav-link" hx-get="/backup" hx-target="#main-content" hx-push-url="true">
+                    📦 备份还原
+                </a>
+            </nav>
+
+            <div class="text-xs text-gray-500 text-center mt-4">
+                v0.2.0 Beta
+            </div>
+        </div>
+
+        
+        <main id="main-content" class="flex-1 glass-panel h-full p-8 overflow-y-auto">
+            
+
+<div class="container mx-auto" x-data="{ 
+    currentTab: 5,
+    modalOpen: false,
+    selectedAnime: null,
+    
+    openSubscribeModal(anime) {
+        this.selectedAnime = anime;
+        this.modalOpen = true;
+    }
+}">
+    
+    <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
+        <div>
+            <h1 class="text-4xl font-black bg-clip-text text-transparent bg-gradient-to-r from-primary to-accent">
+                追番日历
+            </h1>
+            <p class="text-gray-500 mt-2 font-medium">查看本周更新的全部番剧</p>
+        </div>
+
+        
+        <div class="hidden md:flex bg-white/50 backdrop-blur-sm p-1.5 rounded-2xl border border-white/60 shadow-sm">
+            
+            <button @click="currentTab = 1"
+                :class="currentTab === 1 ? 'bg-white text-primary shadow-md font-bold' : 'text-gray-500 hover:text-gray-700 hover:bg-white/50'"
+                class="px-4 py-2 rounded-xl transition-all duration-300 text-sm">
+                星期一
+            </button>
+            
+            <button @click="currentTab = 2"
+                :class="currentTab === 2 ? 'bg-white text-primary shadow-md font-bold' : 'text-gray-500 hover:text-gray-700 hover:bg-white/50'"
+                class="px-4 py-2 rounded-xl transition-all duration-300 text-sm">
+                星期二
+            </button>
+            
+            <button @click="currentTab = 3"
+                :class="currentTab === 3 ? 'bg-white text-primary shadow-md font-bold' : 'text-gray-500 hover:text-gray-700 hover:bg-white/50'"
+                class="px-4 py-2 rounded-xl transition-all duration-300 text-sm">
+                星期三
+            </button>
+            
+            <button @click="currentTab = 4"
+                :class="currentTab === 4 ? 'bg-white text-primary shadow-md font-bold' : 'text-gray-500 hover:text-gray-700 hover:bg-white/50'"
+                class="px-4 py-2 rounded-xl transition-all duration-300 text-sm">
+                星期四
+            </button>
+            
+            <button @click="currentTab = 5"
+                :class="currentTab === 5 ? 'bg-white text-primary shadow-md font-bold' : 'text-gray-500 hover:text-gray-700 hover:bg-white/50'"
+                class="px-4 py-2 rounded-xl transition-all duration-300 text-sm">
+                星期五
+            </button>
+            
+            <button @click="currentTab = 6"
+                :class="currentTab === 6 ? 'bg-white text-primary shadow-md font-bold' : 'text-gray-500 hover:text-gray-700 hover:bg-white/50'"
+                class="px-4 py-2 rounded-xl transition-all duration-300 text-sm">
+                星期六
+            </button>
+            
+            <button @click="currentTab = 7"
+                :class="currentTab === 7 ? 'bg-white text-primary shadow-md font-bold' : 'text-gray-500 hover:text-gray-700 hover:bg-white/50'"
+                class="px-4 py-2 rounded-xl transition-all duration-300 text-sm">
+                星期日
+            </button>
+            
+        </div>
+    </div>
+
+    
+    
+
+    
+    <div class="md:hidden mb-6 flex overflow-x-auto gap-2 pb-2 scrollbar-hide -mx-4 px-4">
+        
+        <button @click="currentTab = 1"
+            :class="currentTab === 1 ? 'bg-primary text-white shadow-lg scale-105' : 'bg-white text-gray-600 border border-gray-100'"
+            class="px-5 py-2.5 rounded-full whitespace-nowrap transition-all duration-200 font-bold text-sm flex-shrink-0">
+            星期一
+        </button>
+        
+        <button @click="currentTab = 2"
+            :class="currentTab === 2 ? 'bg-primary text-white shadow-lg scale-105' : 'bg-white text-gray-600 border border-gray-100'"
+            class="px-5 py-2.5 rounded-full whitespace-nowrap transition-all duration-200 font-bold text-sm flex-shrink-0">
+            星期二
+        </button>
+        
+        <button @click="currentTab = 3"
+            :class="currentTab === 3 ? 'bg-primary text-white shadow-lg scale-105' : 'bg-white text-gray-600 border border-gray-100'"
+            class="px-5 py-2.5 rounded-full whitespace-nowrap transition-all duration-200 font-bold text-sm flex-shrink-0">
+            星期三
+        </button>
+        
+        <button @click="currentTab = 4"
+            :class="currentTab === 4 ? 'bg-primary text-white shadow-lg scale-105' : 'bg-white text-gray-600 border border-gray-100'"
+            class="px-5 py-2.5 rounded-full whitespace-nowrap transition-all duration-200 font-bold text-sm flex-shrink-0">
+            星期四
+        </button>
+        
+        <button @click="currentTab = 5"
+            :class="currentTab === 5 ? 'bg-primary text-white shadow-lg scale-105' : 'bg-white text-gray-600 border border-gray-100'"
+            class="px-5 py-2.5 rounded-full whitespace-nowrap transition-all duration-200 font-bold text-sm flex-shrink-0">
+            星期五
+        </button>
+        
+        <button @click="currentTab = 6"
+            :class="currentTab === 6 ? 'bg-primary text-white shadow-lg scale-105' : 'bg-white text-gray-600 border border-gray-100'"
+            class="px-5 py-2.5 rounded-full whitespace-nowrap transition-all duration-200 font-bold text-sm flex-shrink-0">
+            星期六
+        </button>
+        
+        <button @click="currentTab = 7"
+            :class="currentTab === 7 ? 'bg-primary text-white shadow-lg scale-105' : 'bg-white text-gray-600 border border-gray-100'"
+            class="px-5 py-2.5 rounded-full whitespace-nowrap transition-all duration-200 font-bold text-sm flex-shrink-0">
+            星期日
+        </button>
+        
+    </div>
+
+    
+    <div class="min-h-[500px]">
+        
+        <div x-show="currentTab === 1" x-transition:enter="transition ease-out duration-300"
+            x-transition:enter-start="opacity-0 translate-y-4" x-transition:enter-end="opacity-100 translate-y-0"
+            class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6">
+
+            
+            
+            
+            <div class="group relative bg-white rounded-2xl shadow-sm hover:shadow-xl transition-all duration-300 hover:-translate-y-1 overflow-hidden border border-gray-100"
+                @click="openSubscribeModal({name: '3年Z班银八老师', id: 425208 })">
+
+                
+                
+                <div
+                    class="absolute top-2 left-2 z-20 bg-black/60 backdrop-blur-md text-white text-[10px] font-bold px-2 py-0.5 rounded-md flex items-center gap-1">
+                    <span class="text-yellow-400">★</span> 6.3
+                </div>
+                
+
+                
+                
+
+                
+                <div class="aspect-[2/3] relative overflow-hidden bg-gray-100">
+                    <img src="http://lain.bgm.tv/pic/cover/c/14/25/425208_I2233.jpg" alt="3年Z班银八老师"
+                        class="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
+                        loading="lazy" onerror="this.src='/static/img/placeholder.png'">
+
+                    
+                    <div
+                        class="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-end p-4">
+                        
+                        <button
+                            class="w-full bg-primary text-white py-2 rounded-xl font-bold text-sm shadow-lg transform translate-y-2 group-hover:translate-y-0 transition-transform duration-300">
+                            + 快速订阅
+                        </button>
+                        
+                    </div>
+                </div>
+
+                
+                <div class="p-3">
+                    <h3 class="font-bold text-gray-800 text-sm line-clamp-2 leading-tight group-hover:text-primary transition-colors min-h-[2.5em]"
+                        title="3年Z班银八老师">
+                        3年Z班银八老师
+                    </h3>
+                    <div class="flex justify-between items-center mt-2">
+                        

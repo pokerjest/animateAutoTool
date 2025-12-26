@@ -500,6 +500,14 @@ func (c *Client) GetCalendar() ([]CalendarItem, error) {
 	}
 
 	// Fix images
+	log.Printf("DEBUG: Calendar API returned %d days", len(calendar))
+	for i, day := range calendar {
+		log.Printf("DEBUG: Day %d (%s) has %d items", i, day.Weekday.CN, len(day.Items))
+		for _, item := range day.Items {
+			log.Printf("DEBUG:   - %s (ID: %d)", item.Name, item.ID)
+		}
+	}
+
 	for i := range calendar {
 		for j := range calendar[i].Items {
 			s := &calendar[i].Items[j]
