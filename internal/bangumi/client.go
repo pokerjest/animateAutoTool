@@ -3,6 +3,7 @@ package bangumi
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/url"
 	"regexp"
 	"strconv"
@@ -489,8 +490,12 @@ func (c *Client) GetCalendar() ([]CalendarItem, error) {
 		return nil, fmt.Errorf("fetch calendar failed: %s", string(resp.Body()))
 	}
 
+	// DEBUG LOG
+	// log.Printf("DEBUG: Calendar Raw Response: %s", string(resp.Body()))
+
 	var calendar []CalendarItem
 	if err := json.Unmarshal(resp.Body(), &calendar); err != nil {
+		log.Printf("ERROR: Calendar Unmarshal failed: %v", err)
 		return nil, err
 	}
 

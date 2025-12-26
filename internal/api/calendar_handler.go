@@ -20,7 +20,7 @@ func GetCalendarHandler(c *gin.Context) {
 	if err != nil {
 		log.Printf("Calendar: Failed to fetch calendar: %v", err)
 		c.HTML(http.StatusOK, "calendar.html", gin.H{
-			"Error": "无法获取番剧日历，请稍后重试。",
+			"Error": "无法获取番剧日历: " + err.Error(),
 		})
 		return
 	}
