@@ -107,6 +107,23 @@ CGO_ENABLED=0 go build -ldflags="-s -w" -o animate-server cmd/server/main.go
 ./animate-server
 ```
 
+#### 方式三：使用 Docker (推荐)
+
+项目提供了 `docker-compose.yml`，可一键启动 Animate Auto Tool 和 qBittorrent。
+
+```bash
+# 克隆仓库
+git clone https://github.com/pokerjest/animateAutoTool.git
+cd animateAutoTool
+
+# 启动服务
+docker-compose up -d
+```
+
+访问 `http://localhost:8306` 即可使用。
+默认集成了 qBittorrent，Web UI 地址为 `http://localhost:8080` (用户名: `admin`，密码: `adminadmin`)。
+
+
 ---
 
 ## ⚙️ 配置
@@ -173,7 +190,7 @@ animateAutoTool/
 - [x] 本地番剧库管理
 - [x] TMDB / AniList 增强元数据
 - [x] 完全离线元数据缓存
-- [ ] Docker 支持 (包含 qBittorrent 一体化镜像)
+- [x] Docker 支持 (包含 qBittorrent 一体化镜像)
 - [ ] 多用户支持
 - [ ] 推送通知（WebSocket/Bark）
 - [ ] 移动端适配优化
