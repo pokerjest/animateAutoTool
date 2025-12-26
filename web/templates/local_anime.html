@@ -22,22 +22,27 @@
         this.toast.show = true;
         setTimeout(() => { this.toast.show = false }, 3000);
     },
-    // New: Unified Open Logic
     async openDetails(data) {
         this.modalRaw = data;
         this.showDetailsModal = true;
         this.currentLocalId = data.localId || 0;
         this.currentFileCount = data.fileCount || 0;
 
+        // Reset scroll position immediately
+        this.scrollToTop();
+
         // Auto-select source based on active title vs cached titles
-        // Default to Bangumi if matched, else if TMDB matched use TMDB, else default to 'bangumi' (first choice)
-        // Or simply: check if title matches tmdbTitle strictly?
-        // Let's default to Bangumi unless active Title is clearly TMDB's
         if (data.tmdbId > 0 && data.title === data.tmdbTitle && data.title !== data.bangumiTitle) {
              this.switchSource('tmdb');
         } else {
              this.switchSource('bangumi');
         }
+    },
+    scrollToTop() {
+        this.$nextTick(() => {
+            if (this.$refs.detailsContainer) this.$refs.detailsContainer.scrollTop = 0;
+            if (this.$refs.posterContainer) this.$refs.posterContainer.scrollTop = 0;
+        });
     },
     async switchSource(source) {
         this.activeSource = source;
@@ -240,7 +245,11 @@
         if (!p.endsWith('.mp4')) p += '.mp4';
         return p;
     }
-}" @show-anime-details.window="
+}" x-init="
+    $watch('activeSource', () => scrollToTop());
+    $watch('loadingDetails', (val) => { if (!val) scrollToTop() });
+    $watch('showDetailsModal', value => document.body.style.overflow = value ? 'hidden' : '');
+" @show-anime-details.window="
     $event.stopPropagation();
     openDetails($event.detail);
 ">
@@ -358,43 +367,45 @@
     </div>
 
     <!-- Add Directory Modal -->
-    <div x-show="showAddModal" style="display: none;"
-        class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/60 backdrop-blur-sm"
-        x-transition:enter="transition ease-out duration-300" x-transition:enter-start="opacity-0"
-        x-transition:enter-end="opacity-100" x-transition:leave="transition ease-in duration-200"
-        x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0">
+    <template x-teleport="#modal-layer">
+        <div x-show="showAddModal" style="display: none;"
+            class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/60 backdrop-blur-sm"
+            x-transition:enter="transition ease-out duration-300" x-transition:enter-start="opacity-0"
+            x-transition:enter-end="opacity-100" x-transition:leave="transition ease-in duration-200"
+            x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0">
 
-        <div class="bg-white/95 backdrop-blur-md rounded-2xl shadow-2xl w-full max-w-md p-8 relative border border-white/50"
-            @click.away="showAddModal = false">
-            <h3 class="text-2xl font-bold mb-6 text-gray-800 flex items-center gap-2">
-                <span class="bg-primary/10 text-primary p-2 rounded-lg">📂</span> 添加本地目录
-            </h3>
+            <div class="bg-white/95 backdrop-blur-md rounded-2xl shadow-2xl w-full max-w-md p-8 relative border border-white/50"
+                @click.away="showAddModal = false">
+                <h3 class="text-2xl font-bold mb-6 text-gray-800 flex items-center gap-2">
+                    <span class="bg-primary/10 text-primary p-2 rounded-lg">📂</span> 添加本地目录
+                </h3>
 
-            <form hx-post="/api/local-directories" hx-swap="none"
-                @htmx:after-request="if(event.detail.successful) { showAddModal = false; window.location.reload() }">
-                <div class="mb-4">
-                    <label class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">目录路径</label>
-                    <div class="relative">
-                        <span class="absolute inset-y-0 left-0 pl-3 flex items-center text-gray-400">/</span>
-                        <input type="text" name="path" required
-                            class="w-full pl-6 pr-4 py-3 rounded-xl bg-gray-50 border border-gray-200 focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none font-mono text-sm transition-all shadow-inner"
-                            placeholder="path/to/anime/library">
+                <form hx-post="/api/local-directories" hx-swap="none"
+                    @htmx:after-request="if(event.detail.successful) { showAddModal = false; window.location.reload() }">
+                    <div class="mb-4">
+                        <label class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">目录路径</label>
+                        <div class="relative">
+                            <span class="absolute inset-y-0 left-0 pl-3 flex items-center text-gray-400">/</span>
+                            <input type="text" name="path" required
+                                class="w-full pl-6 pr-4 py-3 rounded-xl bg-gray-50 border border-gray-200 focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none font-mono text-sm transition-all shadow-inner"
+                                placeholder="path/to/anime/library">
+                        </div>
+                        <p class="text-xs text-gray-400 mt-2 ml-1">💡 请输入服务器上的绝对路径，应用将扫描该目录下的子文件夹。</p>
                     </div>
-                    <p class="text-xs text-gray-400 mt-2 ml-1">💡 请输入服务器上的绝对路径，应用将扫描该目录下的子文件夹。</p>
-                </div>
 
-                <div class="flex justify-end gap-3 mt-8 pt-6 border-t border-gray-100">
-                    <button type="button" @click="showAddModal = false"
-                        class="px-6 py-2.5 rounded-xl border border-gray-200 text-gray-600 font-medium hover:bg-gray-50 transition-all">取消</button>
-                    <button type="submit" id="add-dir-btn" hx-indicator="#add-dir-btn"
-                        class="px-6 py-2.5 rounded-xl bg-primary text-white font-bold hover:bg-accent shadow-lg shadow-pink-200 transition-all active:scale-95 disabled:opacity-70 flex items-center gap-2">
-                        <span class="htmx-indicator hidden animate-spin">⌛</span>
-                        <span>确定添加</span>
-                    </button>
-                </div>
-            </form>
+                    <div class="flex justify-end gap-3 mt-8 pt-6 border-t border-gray-100">
+                        <button type="button" @click="showAddModal = false"
+                            class="px-6 py-2.5 rounded-xl border border-gray-200 text-gray-600 font-medium hover:bg-gray-50 transition-all">取消</button>
+                        <button type="submit" id="add-dir-btn" hx-indicator="#add-dir-btn"
+                            class="px-6 py-2.5 rounded-xl bg-primary text-white font-bold hover:bg-accent shadow-lg shadow-pink-200 transition-all active:scale-95 disabled:opacity-70 flex items-center gap-2">
+                            <span class="htmx-indicator hidden animate-spin">⌛</span>
+                            <span>确定添加</span>
+                        </button>
+                    </div>
+                </form>
+            </div>
         </div>
-    </div>
+    </template>
 
     <!-- Toast Notification -->
     <div x-show="toast.show" x-transition:enter="transition ease-out duration-300"
@@ -408,163 +419,167 @@
     </div>
 
     <!-- Anime Details Modal (Redesigned) -->
-    <div x-show="showDetailsModal" style="display: none;"
-        class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md"
-        x-transition:enter="transition ease-out duration-300" x-transition:enter-start="opacity-0 scale-95"
-        x-transition:enter-end="opacity-100 scale-100" x-transition:leave="transition ease-in duration-200"
-        x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95">
+    <template x-teleport="#modal-layer">
+        <div x-show="showDetailsModal" style="display: none;"
+            class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md"
+            x-transition:enter="transition ease-out duration-300" x-transition:enter-start="opacity-0 scale-95"
+            x-transition:enter-end="opacity-100 scale-100" x-transition:leave="transition ease-in duration-200"
+            x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95">
 
-        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col md:flex-row relative"
-            @click.away="showDetailsModal = false">
+            <div class="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col md:flex-row relative"
+                @click.away="showDetailsModal = false">
 
-            <!-- Close Button (Absolute) -->
-            <button @click="showDetailsModal = false"
-                class="absolute top-4 right-4 z-10 p-2 bg-black/50 hover:bg-black/70 text-white rounded-full transition backdrop-blur-sm">
-                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12">
-                    </path>
-                </svg>
-            </button>
+                <!-- Close Button (Absolute) -->
+                <button @click="showDetailsModal = false"
+                    class="absolute top-4 right-4 z-10 p-2 bg-black/50 hover:bg-black/70 text-white rounded-full transition backdrop-blur-sm">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12">
+                        </path>
+                    </svg>
+                </button>
 
-            <!-- Left Column: Poster & Quick Stats -->
-            <div
-                class="w-full md:w-80 bg-gray-50 p-6 flex flex-col gap-4 border-r border-gray-100 flex-shrink-0 overflow-y-auto md:overflow-visible">
-                <!-- Poster -->
-                <div class="relative w-full aspect-[2/3] rounded-xl shadow-lg overflow-hidden group bg-gray-200">
-                    <template x-if="detailsData?.images?.large">
-                        <img :src="detailsData?.images?.large" class="w-full h-full object-cover">
-                    </template>
-                    <template x-if="!detailsData?.images?.large">
-                        <div class="w-full h-full flex items-center justify-center text-gray-400 font-bold">NO COVER
-                        </div>
-                    </template>
-                </div>
+                <!-- Left Column: Poster & Quick Stats -->
+                <div x-ref="posterContainer"
+                    class="w-full md:w-80 bg-gray-50 p-6 flex flex-col gap-4 border-r border-gray-100 flex-shrink-0 overflow-y-auto md:overflow-visible">
+                    <!-- Poster -->
+                    <div class="relative w-full aspect-[2/3] rounded-xl shadow-lg overflow-hidden group bg-gray-200">
+                        <template x-if="detailsData?.images?.large">
+                            <img :src="detailsData?.images?.large" class="w-full h-full object-cover">
+                        </template>
+                        <template x-if="!detailsData?.images?.large">
+                            <div class="w-full h-full flex items-center justify-center text-gray-400 font-bold">NO COVER
+                            </div>
+                        </template>
+                    </div>
 
-                <!-- Source Switcher (Segmented Control) -->
-                <div class="flex p-1 bg-gray-200/50 rounded-lg">
-                    <button @click="switchSource('bangumi')"
-                        :class="activeSource === 'bangumi' ? 'bg-white shadow text-pink-600 font-bold' : 'text-gray-500 hover:text-gray-700'"
-                        class="flex-1 py-1.5 text-xs rounded-md transition-all flex items-center justify-center gap-1">
-                        <span>🌸</span> Bangumi
-                    </button>
-                    <button @click="switchSource('tmdb')"
-                        :class="activeSource === 'tmdb' ? 'bg-white shadow text-blue-600 font-bold' : 'text-gray-500 hover:text-gray-700'"
-                        class="flex-1 py-1.5 text-xs rounded-md transition-all flex items-center justify-center gap-1">
-                        <span>🎬</span> TMDB
-                    </button>
-                    <button @click="switchSource('anilist')"
-                        :class="activeSource === 'anilist' ? 'bg-white shadow text-indigo-600 font-bold' : 'text-gray-500 hover:text-gray-700'"
-                        class="flex-1 py-1.5 text-xs rounded-md transition-all flex items-center justify-center gap-1">
-                        <span>🅰️</span> AniList
-                    </button>
-                </div>
-
-                <!-- File Management Actions -->
-                <div class="mt-auto space-y-2">
-                    <button @click="openRenameModal(currentLocalId, detailsData?.name)"
-                        class="w-full py-2.5 rounded-xl bg-indigo-50 text-indigo-600 hover:bg-indigo-100 font-bold text-sm transition flex items-center justify-center gap-2">
-                        <span>✏️</span> 文件管理
-                    </button>
-
-                    <!-- Apply Source -->
-                    <div x-show="detailsData?.name !== modalRaw?.title || activeSource === (modalRaw.title === modalRaw.tmdbTitle ? 'bangumi' : 'tmdb')"
-                        x-transition>
-                        <button @click="applyCurrentSource()"
-                            class="w-full py-2.5 rounded-xl border border-gray-200 text-gray-600 hover:border-green-300 hover:bg-green-50 hover:text-green-700 font-bold text-sm transition flex items-center justify-center gap-2">
-                            <span>📌</span> 应用当前元数据
+                    <!-- Source Switcher (Segmented Control) -->
+                    <div class="flex p-1 bg-gray-200/50 rounded-lg">
+                        <button @click="switchSource('bangumi')"
+                            :class="activeSource === 'bangumi' ? 'bg-white shadow text-pink-600 font-bold' : 'text-gray-500 hover:text-gray-700'"
+                            class="flex-1 py-1.5 text-xs rounded-md transition-all flex items-center justify-center gap-1">
+                            <span>🌸</span> Bangumi
+                        </button>
+                        <button @click="switchSource('tmdb')"
+                            :class="activeSource === 'tmdb' ? 'bg-white shadow text-blue-600 font-bold' : 'text-gray-500 hover:text-gray-700'"
+                            class="flex-1 py-1.5 text-xs rounded-md transition-all flex items-center justify-center gap-1">
+                            <span>🎬</span> TMDB
+                        </button>
+                        <button @click="switchSource('anilist')"
+                            :class="activeSource === 'anilist' ? 'bg-white shadow text-indigo-600 font-bold' : 'text-gray-500 hover:text-gray-700'"
+                            class="flex-1 py-1.5 text-xs rounded-md transition-all flex items-center justify-center gap-1">
+                            <span>🅰️</span> AniList
                         </button>
                     </div>
-                </div>
-            </div>
 
-            <!-- Right Column: Info & Progress -->
-            <div class="flex-1 p-8 overflow-y-auto custom-scrollbar bg-white">
-                <!-- Loading State -->
-                <div x-show="loadingDetails" class="flex flex-col items-center justify-center h-full space-y-4">
-                    <div class="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-600"></div>
-                    <span class="text-sm text-gray-400">正在加载数据...</span>
-                </div>
+                    <!-- File Management Actions -->
+                    <div class="mt-auto space-y-2">
+                        <button @click="openRenameModal(currentLocalId, detailsData?.name)"
+                            class="w-full py-2.5 rounded-xl bg-indigo-50 text-indigo-600 hover:bg-indigo-100 font-bold text-sm transition flex items-center justify-center gap-2">
+                            <span>✏️</span> 文件管理
+                        </button>
 
-                <div x-show="!loadingDetails && detailsData" class="space-y-6">
-                    <!-- Title Header -->
-                    <div class="space-y-2">
-                        <h2 x-text="detailsData?.name"
-                            class="text-2xl sm:text-3xl font-black text-gray-800 leading-tight"></h2>
-
-                        <div class="flex flex-wrap gap-x-4 gap-y-1 items-center">
-                            <template x-if="modalRaw?.titleCN">
-                                <div class="flex items-center gap-1.5">
-                                    <span
-                                        class="text-[10px] font-bold bg-pink-50 text-pink-500 px-1.5 py-0.5 rounded border border-pink-100">中文</span>
-                                    <span class="text-sm font-medium text-gray-500" x-text="modalRaw.titleCN"></span>
-                                </div>
-                            </template>
-                            <template x-if="modalRaw?.titleEN">
-                                <div class="flex items-center gap-1.5">
-                                    <span
-                                        class="text-[10px] font-bold bg-blue-50 text-blue-500 px-1.5 py-0.5 rounded border border-blue-100">EN</span>
-                                    <span class="text-sm font-medium text-gray-500" x-text="modalRaw.titleEN"></span>
-                                </div>
-                            </template>
-                            <template x-if="modalRaw?.titleJP">
-                                <div class="flex items-center gap-1.5">
-                                    <span
-                                        class="text-[10px] font-bold bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded border border-gray-200">JP</span>
-                                    <span class="text-sm font-medium text-gray-500" x-text="modalRaw.titleJP"></span>
-                                </div>
-                            </template>
+                        <!-- Apply Source -->
+                        <div x-show="detailsData?.name !== modalRaw?.title || activeSource === (modalRaw.title === modalRaw.tmdbTitle ? 'bangumi' : 'tmdb')"
+                            x-transition>
+                            <button @click="applyCurrentSource()"
+                                class="w-full py-2.5 rounded-xl border border-gray-200 text-gray-600 hover:border-green-300 hover:bg-green-50 hover:text-green-700 font-bold text-sm transition flex items-center justify-center gap-2">
+                                <span>📌</span> 应用当前元数据
+                            </button>
                         </div>
                     </div>
+                </div>
 
-                    <!-- Meta Row -->
-                    <div class="flex flex-wrap items-center gap-4 text-sm font-medium">
-                        <!-- Score -->
+                <!-- Right Column: Info & Progress -->
+                <div x-ref="detailsContainer" class="flex-1 p-8 overflow-y-auto custom-scrollbar bg-white">
+                    <!-- Loading State -->
+                    <div x-show="loadingDetails" class="flex flex-col items-center justify-center h-full space-y-4">
+                        <div class="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-600"></div>
+                        <span class="text-sm text-gray-400">正在加载数据...</span>
+                    </div>
+
+                    <div x-show="!loadingDetails && detailsData" class="space-y-6">
+                        <!-- Title Header -->
+                        <div class="space-y-2">
+                            <h2 x-text="detailsData?.name"
+                                class="text-2xl sm:text-3xl font-black text-gray-800 leading-tight"></h2>
+
+                            <div class="flex flex-wrap gap-x-4 gap-y-1 items-center">
+                                <template x-if="modalRaw?.titleCN">
+                                    <div class="flex items-center gap-1.5">
+                                        <span
+                                            class="text-[10px] font-bold bg-pink-50 text-pink-500 px-1.5 py-0.5 rounded border border-pink-100">中文</span>
+                                        <span class="text-sm font-medium text-gray-500"
+                                            x-text="modalRaw.titleCN"></span>
+                                    </div>
+                                </template>
+                                <template x-if="modalRaw?.titleEN">
+                                    <div class="flex items-center gap-1.5">
+                                        <span
+                                            class="text-[10px] font-bold bg-blue-50 text-blue-500 px-1.5 py-0.5 rounded border border-blue-100">EN</span>
+                                        <span class="text-sm font-medium text-gray-500"
+                                            x-text="modalRaw.titleEN"></span>
+                                    </div>
+                                </template>
+                                <template x-if="modalRaw?.titleJP">
+                                    <div class="flex items-center gap-1.5">
+                                        <span
+                                            class="text-[10px] font-bold bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded border border-gray-200">JP</span>
+                                        <span class="text-sm font-medium text-gray-500"
+                                            x-text="modalRaw.titleJP"></span>
+                                    </div>
+                                </template>
+                            </div>
+                        </div>
+
+                        <!-- Meta Row -->
+                        <div class="flex flex-wrap items-center gap-4 text-sm font-medium">
+                            <!-- Score -->
+                            <div
+                                class="flex items-center gap-1 text-amber-500 bg-amber-50 px-2.5 py-1 rounded-full border border-amber-100">
+                                <span class="text-xs">★</span>
+                                <span x-text="detailsData?.rating?.score || 'N/A'"></span>
+                            </div>
+                            <!-- Date -->
+                            <span class="text-gray-400" x-text="detailsData?.air_date || 'Unknown Date'"></span>
+                            <!-- Tags -->
+                            <div class="flex flex-wrap gap-2">
+                                <template x-for="tag in (detailsData?.tags || []).slice(0, 5)">
+                                    <span x-text="tag.name"
+                                        class="text-xs text-indigo-500 bg-indigo-50 px-2 py-1 rounded-md"></span>
+                                </template>
+                            </div>
+                        </div>
+
+                        <!-- Summary -->
                         <div
-                            class="flex items-center gap-1 text-amber-500 bg-amber-50 px-2.5 py-1 rounded-full border border-amber-100">
-                            <span class="text-xs">★</span>
-                            <span x-text="detailsData?.rating?.score || 'N/A'"></span>
+                            class="prose prose-sm text-gray-600 leading-relaxed bg-gray-50/50 p-4 rounded-xl border border-gray-100 max-h-[30vh] overflow-y-auto custom-scrollbar">
+                            <p x-text="detailsData?.summary" class="whitespace-pre-line"></p>
                         </div>
-                        <!-- Date -->
-                        <span class="text-gray-400" x-text="detailsData?.air_date || 'Unknown Date'"></span>
-                        <!-- Tags -->
-                        <div class="flex flex-wrap gap-2">
-                            <template x-for="tag in (detailsData?.tags || []).slice(0, 5)">
-                                <span x-text="tag.name"
-                                    class="text-xs text-indigo-500 bg-indigo-50 px-2 py-1 rounded-md"></span>
-                            </template>
-                        </div>
-                    </div>
 
-                    <!-- Summary -->
-                    <div
-                        class="prose prose-sm text-gray-600 leading-relaxed bg-gray-50/50 p-4 rounded-xl border border-gray-100 max-h-[30vh] overflow-y-auto custom-scrollbar">
-                        <p x-text="detailsData?.summary" class="whitespace-pre-line"></p>
-                    </div>
+                        <!-- User Actions (Collection & Progress) -->
+                        <div class="border-t border-gray-100 pt-6">
+                            <h4
+                                class="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4 flex items-center justify-between">
+                                <span>Bangumi 同步</span>
+                                <span class="text-[10px] font-normal normal-case"
+                                    x-text="modalRaw?.bangumiId ? ('ID: ' + modalRaw.bangumiId) : '未关联'"></span>
+                            </h4>
 
-                    <!-- User Actions (Collection & Progress) -->
-                    <div class="border-t border-gray-100 pt-6">
-                        <h4
-                            class="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4 flex items-center justify-between">
-                            <span>Bangumi 同步</span>
-                            <span class="text-[10px] font-normal normal-case"
-                                x-text="modalRaw?.bangumiId ? ('ID: ' + modalRaw.bangumiId) : '未关联'"></span>
-                        </h4>
-
-                        <template x-if="modalRaw?.bangumiId">
-                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                <!-- Collection Buttons -->
-                                <div class="flex gap-2 p-1 bg-gray-100 rounded-xl">
-                                    <button type="button" :disabled="updatingCollection"
-                                        @click="
+                            <template x-if="modalRaw?.bangumiId">
+                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                    <!-- Collection Buttons -->
+                                    <div class="flex gap-2 p-1 bg-gray-100 rounded-xl">
+                                        <button type="button" :disabled="updatingCollection"
+                                            @click="
                                             updatingCollection = true;
                                             fetch('/api/bangumi/subject/' + modalRaw.bangumiId + '/collection', { 
                                                 method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({status: 3}) 
                                             }).then(r=>r.json()).then(d=>{showToast(d.message||'在看')}).finally(()=>updatingCollection=false)"
-                                        class="flex-1 py-2 rounded-lg text-sm font-bold transition-all hover:bg-white hover:shadow-sm text-pink-500 disabled:opacity-50 flex items-center justify-center gap-1">
-                                        <span x-show="updatingCollection" class="animate-spin text-xs">⏳</span>
-                                        <span>📺 在看</span>
-                                    </button>
-                                    <button type="button" :disabled="updatingComplete" @click="
+                                            class="flex-1 py-2 rounded-lg text-sm font-bold transition-all hover:bg-white hover:shadow-sm text-pink-500 disabled:opacity-50 flex items-center justify-center gap-1">
+                                            <span x-show="updatingCollection" class="animate-spin text-xs">⏳</span>
+                                            <span>📺 在看</span>
+                                        </button>
+                                        <button type="button" :disabled="updatingComplete" @click="
                                             updatingComplete = true;
                                             fetch('/api/bangumi/subject/' + modalRaw.bangumiId + '/collection', { 
                                                 method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({status: 2}) 
@@ -575,146 +590,151 @@
                                             }))
                                             .then(()=>showToast('已标记看过'))
                                             .finally(()=>updatingComplete=false)"
-                                        class="flex-1 py-2 rounded-lg text-sm font-bold transition-all hover:bg-white hover:shadow-sm text-green-500 disabled:opacity-50 flex items-center justify-center gap-1">
-                                        <span x-show="updatingComplete" class="animate-spin text-xs">⏳</span>
-                                        <span>✅ 看过</span>
-                                    </button>
-                                </div>
+                                            class="flex-1 py-2 rounded-lg text-sm font-bold transition-all hover:bg-white hover:shadow-sm text-green-500 disabled:opacity-50 flex items-center justify-center gap-1">
+                                            <span x-show="updatingComplete" class="animate-spin text-xs">⏳</span>
+                                            <span>✅ 看过</span>
+                                        </button>
+                                    </div>
 
-                                <!-- Progress Input -->
-                                <div
-                                    class="flex items-center gap-2 p-1 bg-gray-50 rounded-xl border border-gray-100 px-2">
-                                    <input type="number" x-model="inputProgress" placeholder="0"
-                                        class="w-12 bg-transparent text-center font-bold text-gray-700 focus:outline-none border-b border-transparent focus:border-indigo-500 transition-colors">
-                                    <span class="text-gray-300">/</span>
-                                    <span class="text-gray-400 text-sm font-bold"
-                                        x-text="detailsData?.eps || '?'"></span>
+                                    <!-- Progress Input -->
+                                    <div
+                                        class="flex items-center gap-2 p-1 bg-gray-50 rounded-xl border border-gray-100 px-2">
+                                        <input type="number" x-model="inputProgress" placeholder="0"
+                                            class="w-12 bg-transparent text-center font-bold text-gray-700 focus:outline-none border-b border-transparent focus:border-indigo-500 transition-colors">
+                                        <span class="text-gray-300">/</span>
+                                        <span class="text-gray-400 text-sm font-bold"
+                                            x-text="detailsData?.eps || '?'"></span>
 
-                                    <button
-                                        @click="
+                                        <button
+                                            @click="
                                         updatingProgress = true;
                                         fetch('/api/bangumi/subject/' + modalRaw.bangumiId + '/progress', { 
                                             method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({episode_count: parseInt(inputProgress)}) 
                                         }).then(r=>r.json()).then(d=>showToast(d.message)).finally(()=>updatingProgress=false)"
-                                        class="ml-auto px-3 py-1.5 rounded-lg bg-gray-800 text-white text-xs font-bold hover:bg-gray-700 transition shadow-lg shadow-gray-200 flex items-center gap-1">
-                                        <span x-show="updatingProgress" class="animate-spin">⏳</span>
-                                        同步
-                                    </button>
+                                            class="ml-auto px-3 py-1.5 rounded-lg bg-gray-800 text-white text-xs font-bold hover:bg-gray-700 transition shadow-lg shadow-gray-200 flex items-center gap-1">
+                                            <span x-show="updatingProgress" class="animate-spin">⏳</span>
+                                            同步
+                                        </button>
+                                    </div>
                                 </div>
-                            </div>
-                        </template>
+                            </template>
 
-                        <template x-if="!modalRaw?.bangumiId">
-                            <div class="bg-gray-50 p-4 rounded-xl text-center text-gray-400 text-sm">
-                                ⚠️ 此番剧未关联 Bangumi ID，无法同步进度。
-                            </div>
-                        </template>
+                            <template x-if="!modalRaw?.bangumiId">
+                                <div class="bg-gray-50 p-4 rounded-xl text-center text-gray-400 text-sm">
+                                    ⚠️ 此番剧未关联 Bangumi ID，无法同步进度。
+                                </div>
+                            </template>
 
-                        <!-- BGM Link -->
-                        <template x-if="modalRaw?.bangumiId">
-                            <div class="mt-4 text-center">
-                                <a :href="'https://bgm.tv/subject/' + modalRaw.bangumiId" target="_blank"
-                                    class="inline-flex items-center gap-1 text-xs font-bold text-gray-300 hover:text-pink-400 transition-colors">
-                                    🔗 前往 Bangumi 番剧主页
-                                </a>
-                            </div>
-                        </template>
+                            <!-- BGM Link -->
+                            <template x-if="modalRaw?.bangumiId">
+                                <div class="mt-4 text-center">
+                                    <a :href="'https://bgm.tv/subject/' + modalRaw.bangumiId" target="_blank"
+                                        class="inline-flex items-center gap-1 text-xs font-bold text-gray-300 hover:text-pink-400 transition-colors">
+                                        🔗 前往 Bangumi 番剧主页
+                                    </a>
+                                </div>
+                            </template>
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
-    </div>
+    </template>
 </div>
 
 <!-- Rename Modal -->
-<div x-show="showRenameModal" style="display: none;"
-    class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60 backdrop-blur-sm p-4"
-    x-transition.opacity>
-    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col"
-        @click.away="showRenameModal = false">
-        <!-- Header -->
-        <div class="p-4 border-b flex justify-between items-center bg-gray-50">
-            <h3 class="text-lg font-bold text-gray-800 flex items-center gap-2">
-                <span>✏️</span> 批量重命名 - <span x-text="renameState.title"
-                    class="text-primary truncate max-w-md block"></span>
-            </h3>
-            <button @click="showRenameModal = false" class="text-gray-400 hover:text-gray-600">✕</button>
-        </div>
-
-        <!-- Content -->
-        <div class="p-6 overflow-y-auto custom-scrollbar flex-1">
-            <!-- Rules -->
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                <div class="col-span-2">
-                    <label class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">命名规则模板</label>
-                    <input type="text" x-model="renameState.pattern" @input.debounce.500ms="previewRename()"
-                        class="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-primary focus:border-transparent outline-none font-mono text-sm"
-                        placeholder="{Title} - S{Season}E{Ep}">
-                    <p class="text-[10px] text-gray-400 mt-1">支持变量: {Title}, {Season}, {Ep}, {Ext}</p>
-                </div>
-                <div>
-                    <label class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">季度 (Sxx)</label>
-                    <input type="text" x-model="renameState.season" @input.debounce.500ms="previewRename()"
-                        class="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-primary focus:border-transparent outline-none font-mono text-sm"
-                        placeholder="01">
-                </div>
+<template x-teleport="#modal-layer">
+    <div x-show="showRenameModal" style="display: none;"
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60 backdrop-blur-sm p-4"
+        x-transition.opacity>
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col"
+            @click.away="showRenameModal = false">
+            <!-- Header -->
+            <div class="p-4 border-b flex justify-between items-center bg-gray-50">
+                <h3 class="text-lg font-bold text-gray-800 flex items-center gap-2">
+                    <span>✏️</span> 批量重命名 - <span x-text="renameState.title"
+                        class="text-primary truncate max-w-md block"></span>
+                </h3>
+                <button @click="showRenameModal = false" class="text-gray-400 hover:text-gray-600">✕</button>
             </div>
 
-            <!-- Preview Table -->
-            <div class="bg-gray-50 rounded-xl border border-gray-100 overflow-hidden">
-                <div
-                    class="p-3 bg-gray-100/50 border-b border-gray-200 text-xs font-bold text-gray-500 flex justify-between items-center">
-                    <span>预览结果</span>
-                    <span x-show="renameState.loading" class="flex items-center gap-1 text-primary">
-                        <span class="animate-spin">⏳</span> 生成预览中...
-                    </span>
+            <!-- Content -->
+            <div class="p-6 overflow-y-auto custom-scrollbar flex-1">
+                <!-- Rules -->
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                    <div class="col-span-2">
+                        <label
+                            class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">命名规则模板</label>
+                        <input type="text" x-model="renameState.pattern" @input.debounce.500ms="previewRename()"
+                            class="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-primary focus:border-transparent outline-none font-mono text-sm"
+                            placeholder="{Title} - S{Season}E{Ep}">
+                        <p class="text-[10px] text-gray-400 mt-1">支持变量: {Title}, {Season}, {Ep}, {Ext}</p>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">季度
+                            (Sxx)</label>
+                        <input type="text" x-model="renameState.season" @input.debounce.500ms="previewRename()"
+                            class="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-primary focus:border-transparent outline-none font-mono text-sm"
+                            placeholder="01">
+                    </div>
                 </div>
-                <div class="max-h-[300px] overflow-y-auto">
-                    <table class="w-full text-sm text-left">
-                        <thead class="text-xs text-gray-500 bg-gray-50 sticky top-0">
-                            <tr>
-                                <th class="px-4 py-2 font-medium w-32">所属番剧</th>
-                                <th class="px-4 py-2 font-medium w-1/3">原文件名</th>
-                                <th class="px-4 py-2 font-medium w-1/3">新文件名</th>
-                            </tr>
-                        </thead>
-                        <tbody class="divide-y divide-gray-100">
-                            <template x-for="(item, idx) in renameState.preview" :key="idx">
-                                <tr class="hover:bg-white transition-colors">
-                                    <td class="px-4 py-2 font-medium text-indigo-600 truncate max-w-[150px]"
-                                        :title="item.anime_name" x-text="item.anime_name"></td>
-                                    <td class="px-4 py-2 font-mono text-gray-600 truncate max-w-[200px]"
-                                        :title="item.original" x-text="item.original"></td>
-                                    <td class="px-4 py-2 font-mono truncate max-w-[200px]"
-                                        :class="item.original === item.new ? 'text-gray-400 italic' : 'text-green-600 font-medium'"
-                                        :title="item.new" x-text="item.new"></td>
-                                </tr>
-                            </template>
-                            <template x-if="!renameState.preview || renameState.preview.length === 0">
+
+                <!-- Preview Table -->
+                <div class="bg-gray-50 rounded-xl border border-gray-100 overflow-hidden">
+                    <div
+                        class="p-3 bg-gray-100/50 border-b border-gray-200 text-xs font-bold text-gray-500 flex justify-between items-center">
+                        <span>预览结果</span>
+                        <span x-show="renameState.loading" class="flex items-center gap-1 text-primary">
+                            <span class="animate-spin">⏳</span> 生成预览中...
+                        </span>
+                    </div>
+                    <div class="max-h-[300px] overflow-y-auto">
+                        <table class="w-full text-sm text-left">
+                            <thead class="text-xs text-gray-500 bg-gray-50 sticky top-0">
                                 <tr>
-                                    <td colspan="2" class="px-4 py-8 text-center text-gray-400 italic">
-                                        暂无预览，请检查规则或等待加载...
-                                    </td>
+                                    <th class="px-4 py-2 font-medium w-32">所属番剧</th>
+                                    <th class="px-4 py-2 font-medium w-1/3">原文件名</th>
+                                    <th class="px-4 py-2 font-medium w-1/3">新文件名</th>
                                 </tr>
-                            </template>
-                        </tbody>
-                    </table>
+                            </thead>
+                            <tbody class="divide-y divide-gray-100">
+                                <template x-for="(item, idx) in renameState.preview" :key="idx">
+                                    <tr class="hover:bg-white transition-colors">
+                                        <td class="px-4 py-2 font-medium text-indigo-600 truncate max-w-[150px]"
+                                            :title="item.anime_name" x-text="item.anime_name"></td>
+                                        <td class="px-4 py-2 font-mono text-gray-600 truncate max-w-[200px]"
+                                            :title="item.original" x-text="item.original"></td>
+                                        <td class="px-4 py-2 font-mono truncate max-w-[200px]"
+                                            :class="item.original === item.new ? 'text-gray-400 italic' : 'text-green-600 font-medium'"
+                                            :title="item.new" x-text="item.new"></td>
+                                    </tr>
+                                </template>
+                                <template x-if="!renameState.preview || renameState.preview.length === 0">
+                                    <tr>
+                                        <td colspan="2" class="px-4 py-8 text-center text-gray-400 italic">
+                                            暂无预览，请检查规则或等待加载...
+                                        </td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
-        </div>
 
-        <!-- Footer -->
-        <div class="p-4 border-t bg-gray-50 flex justify-end gap-3">
-            <button @click="showRenameModal = false"
-                class="px-4 py-2 rounded-lg border border-gray-200 text-gray-600 hover:bg-white transition">取消</button>
-            <button @click="applyRename()" :disabled="renameState.loading || !renameState.preview"
-                class="px-6 py-2 rounded-lg bg-primary text-white font-bold hover:bg-accent transition shadow-lg shadow-pink-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2">
-                <span x-show="renameState.loading" class="animate-spin">⏳</span>
-                <span>确认重命名</span>
-            </button>
+            <!-- Footer -->
+            <div class="p-4 border-t bg-gray-50 flex justify-end gap-3">
+                <button @click="showRenameModal = false"
+                    class="px-4 py-2 rounded-lg border border-gray-200 text-gray-600 hover:bg-white transition">取消</button>
+                <button @click="applyRename()" :disabled="renameState.loading || !renameState.preview"
+                    class="px-6 py-2 rounded-lg bg-primary text-white font-bold hover:bg-accent transition shadow-lg shadow-pink-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2">
+                    <span x-show="renameState.loading" class="animate-spin">⏳</span>
+                    <span>确认重命名</span>
+                </button>
+            </div>
         </div>
     </div>
-</div>
+</template>
 
 </div>
 </div>

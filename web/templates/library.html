@@ -47,6 +47,14 @@
                 setTimeout(() => this.showToast = false, 3000);
             },
 
+            scrollToTop() {
+                this.$nextTick(() => {
+                    // Try to find the scrollable container within the modal
+                    const modalContent = document.querySelector('#modal-layer .custom-scrollbar');
+                    if (modalContent) modalContent.scrollTop = 0;
+                });
+            },
+
             openDetails(id) {
                 console.log('Opening details for ID:', id);
                 if (!window.libraryMetadata || !window.libraryMetadata[id]) {
@@ -56,6 +64,10 @@
                 }
                 this.modalRaw = window.libraryMetadata[id];
                 this.showDetailsModal = true;
+
+                // Reset scroll immediately
+                this.scrollToTop();
+
                 const metadata = this.modalRaw;
 
                 // Initial data
@@ -79,6 +91,7 @@
             async switchSource(source) {
                 this.activeSource = source;
                 this.loadingDetails = true;
+                this.scrollToTop();
 
                 try {
                     if (source === 'tmdb') {
@@ -185,7 +198,8 @@
 </script>
 
 <div class="space-y-6" x-data="libraryData()" @keydown.escape="showDetailsModal = false"
-    @open-library-details.window="openDetails($event.detail)">
+    @open-library-details.window="openDetails($event.detail)"
+    x-init="$watch('activeSource', () => scrollToTop()); $watch('loadingDetails', (val) => { if(!val) scrollToTop() }); $watch('showDetailsModal', value => document.body.style.overflow = value ? 'hidden' : '')">
 
     <!-- Header -->
     <div
@@ -334,108 +348,113 @@
     </div>
 
     <!-- Details Modal -->
-    <div x-show="showDetailsModal" x-cloak style="display: none;"
-        class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md"
-        x-transition:enter="transition ease-out duration-300" x-transition:enter-start="opacity-0"
-        x-transition:enter-end="opacity-100" x-transition:leave="transition ease-in duration-200"
-        x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0">
+    <template x-teleport="#modal-layer">
+        <div x-show="showDetailsModal" style="display: none;"
+            class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md"
+            x-transition:enter="transition ease-out duration-300" x-transition:enter-start="opacity-0"
+            x-transition:enter-end="opacity-100" x-transition:leave="transition ease-in duration-200"
+            x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0">
 
-        <div class="bg-white/95 backdrop-blur-xl rounded-[2rem] shadow-2xl w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col md:flex-row relative border border-white/40 ring-1 ring-black/5"
-            @click.away="showDetailsModal = false"
-            x-transition:enter="transition ease-[cubic-bezier(0.19,1,0.22,1)] duration-500"
-            x-transition:enter-start="opacity-0 translate-y-8 scale-95"
-            x-transition:enter-end="opacity-100 translate-y-0 scale-100">
+            <div class="bg-white/95 backdrop-blur-xl rounded-[2rem] shadow-2xl w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col md:flex-row relative border border-white/40 ring-1 ring-black/5"
+                @click.away="showDetailsModal = false"
+                x-transition:enter="transition ease-[cubic-bezier(0.19,1,0.22,1)] duration-500"
+                x-transition:enter-start="opacity-0 translate-y-8 scale-95"
+                x-transition:enter-end="opacity-100 translate-y-0 scale-100">
 
-            <button @click="showDetailsModal = false"
-                class="absolute top-4 right-4 z-20 p-2 bg-black/10 hover:bg-black/20 text-gray-600 rounded-full transition-all backdrop-blur-sm active:scale-90">
-                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12">
-                    </path>
-                </svg>
-            </button>
+                <button @click="showDetailsModal = false"
+                    class="absolute top-4 right-4 z-20 p-2 bg-black/10 hover:bg-black/20 text-gray-600 rounded-full transition-all backdrop-blur-sm active:scale-90">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5"
+                            d="M6 18L18 6M6 6l12 12">
+                        </path>
+                    </svg>
+                </button>
 
-            <!-- Left -->
-            <div
-                class="w-full md:w-96 bg-gray-50/50 p-8 flex flex-col gap-6 border-r border-gray-100 flex-shrink-0 relative overflow-hidden">
-                <!-- Background Blur Image -->
-                <img :src="detailsData?.images?.large"
-                    class="absolute inset-0 w-full h-full object-cover opacity-10 blur-3xl scale-150 pointer-events-none">
-
+                <!-- Left -->
                 <div
-                    class="relative w-full aspect-[2/3] rounded-2xl shadow-[0_20px_50px_-12px_rgba(0,0,0,0.3)] overflow-hidden group">
+                    class="w-full md:w-96 bg-gray-50/50 p-8 flex flex-col gap-6 border-r border-gray-100 flex-shrink-0 relative overflow-hidden">
+                    <!-- Background Blur Image -->
                     <img :src="detailsData?.images?.large"
-                        class="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105">
-                    <div class="absolute inset-0 ring-1 ring-black/5 rounded-2xl"></div>
-                </div>
+                        class="absolute inset-0 w-full h-full object-cover opacity-10 blur-3xl scale-150 pointer-events-none">
 
-                <!-- Source Switcher -->
-                <div class="relative bg-gray-200/50 p-1.5 rounded-xl flex gap-1 backdrop-blur-sm">
-                    <button @click="switchSource('bangumi')"
-                        :class="activeSource === 'bangumi' ? 'bg-white shadow-sm text-pink-600 font-black' : 'text-gray-500 hover:text-gray-700 font-medium'"
-                        class="flex-1 py-2 text-xs rounded-lg transition-all flex items-center justify-center gap-1.5">
-                        <span class="text-sm">🌸</span> BGM
-                    </button>
-                    <button @click="switchSource('tmdb')"
-                        :class="activeSource === 'tmdb' ? 'bg-white shadow-sm text-blue-600 font-black' : 'text-gray-500 hover:text-gray-700 font-medium'"
-                        class="flex-1 py-2 text-xs rounded-lg transition-all flex items-center justify-center gap-1.5">
-                        <span class="text-sm">🎬</span> TMDB
-                    </button>
-                    <button @click="switchSource('anilist')"
-                        :class="activeSource === 'anilist' ? 'bg-white shadow-sm text-indigo-600 font-black' : 'text-gray-500 hover:text-gray-700 font-medium'"
-                        class="flex-1 py-2 text-xs rounded-lg transition-all flex items-center justify-center gap-1.5">
-                        <span class="text-sm">🅰️</span> AL
-                    </button>
-                </div>
-            </div>
-
-            <!-- Right -->
-            <div class="flex-1 p-8 md:p-10 overflow-y-auto custom-scrollbar bg-white/40">
-                <div x-show="loadingDetails" class="flex flex-col items-center justify-center h-full gap-4">
-                    <div class="animate-spin rounded-full h-12 w-12 border-4 border-purple-500 border-t-transparent">
-                    </div>
-                    <span class="text-sm font-bold text-gray-400 tracking-wide">加载元数据中...</span>
-                </div>
-
-                <div x-show="!loadingDetails && detailsData" class="space-y-8">
-                    <div>
-                        <h2 x-text="detailsData?.name"
-                            class="text-3xl md:text-4xl font-black text-gray-900 leading-tight mb-2 tracking-tight">
-                        </h2>
-                        <h3 x-text="detailsData?.name_cn" class="text-xl font-medium text-gray-500 tracking-wide"></h3>
+                    <div
+                        class="relative w-full aspect-[2/3] rounded-2xl shadow-[0_20px_50px_-12px_rgba(0,0,0,0.3)] overflow-hidden group">
+                        <img :src="detailsData?.images?.large"
+                            class="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105">
+                        <div class="absolute inset-0 ring-1 ring-black/5 rounded-2xl"></div>
                     </div>
 
-                    <div class="flex flex-wrap items-center gap-4 text-sm font-bold">
+                    <!-- Source Switcher -->
+                    <div class="relative bg-gray-200/50 p-1.5 rounded-xl flex gap-1 backdrop-blur-sm">
+                        <button @click="switchSource('bangumi')"
+                            :class="activeSource === 'bangumi' ? 'bg-white shadow-sm text-pink-600 font-black' : 'text-gray-500 hover:text-gray-700 font-medium'"
+                            class="flex-1 py-2 text-xs rounded-lg transition-all flex items-center justify-center gap-1.5">
+                            <span class="text-sm">🌸</span> BGM
+                        </button>
+                        <button @click="switchSource('tmdb')"
+                            :class="activeSource === 'tmdb' ? 'bg-white shadow-sm text-blue-600 font-black' : 'text-gray-500 hover:text-gray-700 font-medium'"
+                            class="flex-1 py-2 text-xs rounded-lg transition-all flex items-center justify-center gap-1.5">
+                            <span class="text-sm">🎬</span> TMDB
+                        </button>
+                        <button @click="switchSource('anilist')"
+                            :class="activeSource === 'anilist' ? 'bg-white shadow-sm text-indigo-600 font-black' : 'text-gray-500 hover:text-gray-700 font-medium'"
+                            class="flex-1 py-2 text-xs rounded-lg transition-all flex items-center justify-center gap-1.5">
+                            <span class="text-sm">🅰️</span> AL
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Right -->
+                <div class="flex-1 p-8 md:p-10 overflow-y-auto custom-scrollbar bg-white/40">
+                    <div x-show="loadingDetails" class="flex flex-col items-center justify-center h-full gap-4">
                         <div
-                            class="flex items-center gap-1.5 text-amber-500 bg-amber-50/80 px-3 py-1.5 rounded-full border border-amber-100 shadow-sm">
-                            <span class="text-base">★</span> <span x-text="detailsData?.rating?.score || 'N/A'"
-                                class="pt-0.5"></span>
+                            class="animate-spin rounded-full h-12 w-12 border-4 border-purple-500 border-t-transparent">
                         </div>
-                        <span class="text-gray-400 bg-gray-100/80 px-3 py-1.5 rounded-full border border-gray-100"
-                            x-text="detailsData?.air_date || '未知日期'"></span>
+                        <span class="text-sm font-bold text-gray-400 tracking-wide">加载元数据中...</span>
                     </div>
 
-                    <div class="prose prose-lg text-gray-600 leading-relaxed">
-                        <div class="bg-white/60 p-6 rounded-2xl border border-white/50 shadow-sm backdrop-blur-sm">
-                            <p x-html="detailsData?.summary" class="whitespace-pre-line text-sm md:text-base"></p>
+                    <div x-show="!loadingDetails && detailsData" class="space-y-8">
+                        <div>
+                            <h2 x-text="detailsData?.name"
+                                class="text-3xl md:text-4xl font-black text-gray-900 leading-tight mb-2 tracking-tight">
+                            </h2>
+                            <h3 x-text="detailsData?.name_cn" class="text-xl font-medium text-gray-500 tracking-wide">
+                            </h3>
                         </div>
-                    </div>
 
-                    <div class="border-t border-gray-100/50 pt-8 flex items-center justify-between">
-                        <a :href="'https://bgm.tv/subject/' + modalRaw?.bangumi_id" target="_blank"
-                            x-show="modalRaw?.bangumi_id"
-                            class="inline-flex items-center gap-2 text-sm font-bold text-pink-500 hover:text-pink-600 transition-colors bg-pink-50 hover:bg-pink-100 px-4 py-2 rounded-xl">
-                            <span>🔗</span> 前往 Bangumi 主页
-                        </a>
-                        <a :href="'https://www.themoviedb.org/tv/' + modalRaw?.tmdb_id" target="_blank"
-                            x-show="modalRaw?.tmdb_id"
-                            class="inline-flex items-center gap-2 text-sm font-bold text-blue-500 hover:text-blue-600 transition-colors bg-blue-50 hover:bg-blue-100 px-4 py-2 rounded-xl">
-                            <span>🔗</span> TMDB
-                        </a>
+                        <div class="flex flex-wrap items-center gap-4 text-sm font-bold">
+                            <div
+                                class="flex items-center gap-1.5 text-amber-500 bg-amber-50/80 px-3 py-1.5 rounded-full border border-amber-100 shadow-sm">
+                                <span class="text-base">★</span> <span x-text="detailsData?.rating?.score || 'N/A'"
+                                    class="pt-0.5"></span>
+                            </div>
+                            <span class="text-gray-400 bg-gray-100/80 px-3 py-1.5 rounded-full border border-gray-100"
+                                x-text="detailsData?.air_date || '未知日期'"></span>
+                        </div>
+
+                        <div class="prose prose-lg text-gray-600 leading-relaxed">
+                            <div class="bg-white/60 p-6 rounded-2xl border border-white/50 shadow-sm backdrop-blur-sm">
+                                <p x-html="detailsData?.summary" class="whitespace-pre-line text-sm md:text-base"></p>
+                            </div>
+                        </div>
+
+                        <div class="border-t border-gray-100/50 pt-8 flex items-center justify-between">
+                            <a :href="'https://bgm.tv/subject/' + modalRaw?.bangumi_id" target="_blank"
+                                x-show="modalRaw?.bangumi_id"
+                                class="inline-flex items-center gap-2 text-sm font-bold text-pink-500 hover:text-pink-600 transition-colors bg-pink-50 hover:bg-pink-100 px-4 py-2 rounded-xl">
+                                <span>🔗</span> 前往 Bangumi 主页
+                            </a>
+                            <a :href="'https://www.themoviedb.org/tv/' + modalRaw?.tmdb_id" target="_blank"
+                                x-show="modalRaw?.tmdb_id"
+                                class="inline-flex items-center gap-2 text-sm font-bold text-blue-500 hover:text-blue-600 transition-colors bg-blue-50 hover:bg-blue-100 px-4 py-2 rounded-xl">
+                                <span>🔗</span> TMDB
+                            </a>
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
-    </div>
+    </template>
     <!-- Global Progress Popup (Top Right) -->
     <template x-if="isRefreshing && refreshStatus.is_running">
         <div class="fixed top-8 right-8 z-[60] w-72 transform transition-all duration-500"
