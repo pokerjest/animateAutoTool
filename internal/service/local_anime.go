@@ -263,6 +263,85 @@ func (s *LocalAnimeService) EnrichMissingMetadata() {
 	log.Printf("Enrich: Completed. Enriched %d items.", count)
 }
 
+// MatchSeries Manually match a series to a specific Bangumi ID
+func (s *LocalAnimeService) MatchSeries(animeID uint, bangumiID int) error {
+	var anime model.LocalAnime
+	if err := db.DB.First(&anime, animeID).Error; err != nil {
+		return err
+	}
+
+	// Fetch fresh metadata for this ID or create new
+	var meta model.AnimeMetadata
+	// Check if metadata already exists for this BangumiID
+	if err := db.DB.Where("bangumi_id = ?", bangumiID).First(&meta).Error; err == nil {
+		// Use existing metadata
+	} else {
+		// New metadata entry
+		meta = model.AnimeMetadata{
+			BangumiID: bangumiID,
+		}
+	}
+
+	// Verify ID is valid by fetching from Bangumi
+	bgmClient := bangumi.NewClient("", "", "")
+	// Apply Proxy
+	var bgmProxyConfig model.GlobalConfig
+	if err := db.DB.Where("key = ?", model.ConfigKeyProxyBangumi).First(&bgmProxyConfig).Error; err == nil && bgmProxyConfig.Value == "true" {
+		var p model.GlobalConfig
+		if err := db.DB.Where("key = ?", model.ConfigKeyProxyURL).First(&p).Error; err == nil && p.Value != "" {
+			bgmClient.SetProxy(p.Value)
+		}
+	}
+
+	subject, err := bgmClient.GetSubject(bangumiID)
+	if err != nil {
+		return fmt.Errorf("failed to verify Bangumi ID: %v", err)
+	}
+	if subject == nil {
+		return fmt.Errorf("bangumi ID %d not found", bangumiID)
+	}
+
+	// Update metadata object with fetched data
+	meta.Title = subject.NameCN
+	if meta.Title == "" {
+		meta.Title = subject.Name
+	}
+	meta.BangumiTitle = meta.Title
+	meta.BangumiImage = subject.Images.Large
+	meta.BangumiSummary = subject.Summary
+	meta.TitleCN = subject.NameCN
+	meta.TitleJP = subject.Name
+	meta.AirDate = subject.Date
+	meta.Image = meta.BangumiImage // Set active image
+	meta.Summary = meta.BangumiSummary
+
+	// Save Metadata
+	if meta.ID == 0 {
+		if err := db.DB.Create(&meta).Error; err != nil {
+			return err
+		}
+	} else {
+		if err := db.DB.Save(&meta).Error; err != nil {
+			return err
+		}
+	}
+
+	// Link Anime to Metadata
+	anime.MetadataID = &meta.ID
+	anime.Metadata = &meta
+	db.DB.Save(&anime)
+
+	// Fetch Image Cache
+	meta.BangumiImageRaw = s.fetchAndCacheImage(meta.BangumiImage)
+	db.DB.Save(&meta)
+
+	// Also trigger standard enrich to fill TMDB/AniList if possible
+	// s.EnrichMetadata(&meta, meta.Title) // Optional, might overwrite manual choice?
+	// Let's just update active fields.
+
+	return nil
+}
+
 // EnrichAnimeMetadata tries to find Bangumi ID and valid Title/Image from BOTH sources
 func (s *LocalAnimeService) EnrichAnimeMetadata(anime *model.LocalAnime) {
 	// 1. Ensure Metadata record exists

@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"fmt"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -30,44 +31,90 @@ func ParseFilename(path string) ParsedInfo {
 		Extension: strings.ToLower(strings.TrimPrefix(ext, ".")),
 	}
 
-	// 1. Extract Group (usually at start in [])
+	// 1. Pre-process: Replace delimiters with spaces for easier tokenizing locally
+	// But keep original string for regex mapping
+	// Common delimiters: . _
+	normalized := strings.ReplaceAll(cleanName, "_", " ")
+	// normalized = strings.ReplaceAll(normalized, ".", " ") // Avoid replacing dots inside version numbers? usually safe for anime titles.
+
+	// 2. Extract Group (usually at start in [])
 	// [Group] Title ...
 	groupRegex := regexp.MustCompile(`^\[(.*?)\]`)
 	if match := groupRegex.FindStringSubmatch(cleanName); len(match) > 1 {
 		info.Group = match[1]
 	}
 
-	// 2. Extract Resolution
-	resRegex := regexp.MustCompile(`(?i)(1080p|720p|2160p|4k)`)
-	if match := resRegex.FindStringSubmatch(cleanName); len(match) > 1 {
+	// 3. Extract Resolution (remove from potential title)
+	resRegex := regexp.MustCompile(`(?i)\b(1080p|720p|2160p|4k|360p|480p|FHD|HD)\b`)
+	if match := resRegex.FindStringSubmatch(normalized); len(match) > 1 {
 		info.Resolution = match[1]
 	}
 
-	// 3. Extract Season and Episode
-	// Priority 1: S01E02 standard format
-	sxeRegex := regexp.MustCompile(`(?i)S(\d+)E(\d+)`)
-	if match := sxeRegex.FindStringSubmatch(cleanName); len(match) > 1 {
+	// 4. Extract Season and Episode
+	// Strategy: Try most specific patterns first.
+
+	// Pattern A: "S01E02" / "S1E2"
+	sxeRegex := regexp.MustCompile(`(?i)\bS(\d+)\s*E(\d+)\b`)
+	if match := sxeRegex.FindStringSubmatch(normalized); len(match) > 1 {
 		s, _ := strconv.Atoi(match[1])
 		e, _ := strconv.Atoi(match[2])
 		info.Season = s
 		info.Episode = e
-		// Title is usually before SxxExx
-		// [Group] Title S01E02 ...
-		idx := strings.Index(cleanName, match[0])
+		// Title is everything before the match
+		idx := strings.Index(normalized, match[0])
 		if idx > 0 {
-			t := cleanName[:idx]
-			info.Title = cleanTitle(t)
+			info.Title = cleanTitle(normalized[:idx])
 		}
 		return info
 	}
 
-	// Priority 2: Episode number only (often with - or [] or space)
-	// Title - 01
-	// Title [01]
-	// Title 01 (risky)
+	// Pattern B: "Season 1 - 02" or "2nd Season - 02"
+	// This handles explicit season text.
+	seasonTextRegex := regexp.MustCompile(`(?i)\b(Season|S)\s*(\d+)\b`)
+	seasonMatch := seasonTextRegex.FindStringSubmatch(normalized)
+	if len(seasonMatch) > 0 {
+		sNum, _ := strconv.Atoi(seasonMatch[2])
+		info.Season = sNum
+		// Remove this season part to help finding episode number locally
+		// e.g. "Title Season 2 05" -> "Title  05"
+		tempName := strings.Replace(normalized, seasonMatch[0], "", 1)
 
-	// Try " - 01" usually safe
-	dashEpRegex := regexp.MustCompile(`\s-\s(\d+)(\s|$)`)
+		// Now look for standalone number as episode
+		// Look for number at end or after " - "
+		epRegex := regexp.MustCompile(`\b(\d{1,3})(\s|v\d|$|\[)`) // simple number
+		// Check for " - 05" specific pattern first
+		dashEpRegex := regexp.MustCompile(`\s-\s(\d+)\b`)
+		if m := dashEpRegex.FindStringSubmatch(tempName); len(m) > 1 {
+			e, _ := strconv.Atoi(m[1])
+			info.Episode = e
+		} else {
+			// Find last number? Or number followed by standard tags?
+			// This is risky. Let's limit to specific structure.
+			// "Title 05"
+			// Using existing logic for episode number if season is found
+			matches := epRegex.FindAllStringSubmatch(tempName, -1)
+			if len(matches) > 0 {
+				// Take the last number that looks like an episode?
+				// Often the last number is the episode if resolution is stripped.
+				// For now, let's take the one that was found.
+				// A bit heuristic-heavy.
+				lastM := matches[len(matches)-1]
+				e, _ := strconv.Atoi(lastM[1])
+				info.Episode = e
+			}
+		}
+
+		// Title is strictly before Season text
+		idx := strings.Index(normalized, seasonMatch[0])
+		if idx > 0 {
+			info.Title = cleanTitle(normalized[:idx])
+		}
+		return info
+	}
+
+	// Pattern C: Standard " - 01" or "[01]" (Assumes Season 1)
+	// Title - 01
+	dashEpRegex := regexp.MustCompile(`\s-\s(\d+)(\s|v\d|END|$)`)
 	if match := dashEpRegex.FindStringSubmatch(cleanName); len(match) > 1 {
 		e, _ := strconv.Atoi(match[1])
 		info.Episode = e
@@ -78,39 +125,92 @@ func ParseFilename(path string) ParsedInfo {
 		return info
 	}
 
-	// Try "[01]" but avoid [1080p] [AVC] etc.
-	// Heuristic: Episode number is usually small (< 1000) or we check context
-	bracketEpRegex := regexp.MustCompile(`\[(\d{1,3})\]`) // 1-3 digits
+	// Pattern D: "Title 01.mkv" (Space Separated)
+	// This is very ambiguous (could be year 2012).
+	// We only use this if we stripped resolution/year already.
+	// Logic: Look for the last number in the string that fits 1-999 range.
+
+	// Bracket pattern [01]
+	bracketEpRegex := regexp.MustCompile(`\[(\d{1,3})\]`)
 	matches := bracketEpRegex.FindAllStringSubmatch(cleanName, -1)
 	for _, m := range matches {
 		num, _ := strconv.Atoi(m[1])
-		// Check if it's likely a year or resolution
-		if num > 1900 && num < 2100 {
-			continue // Year
+		if isLikelyEpisodeNumber(num) {
+			info.Episode = num
+			info.Title = cleanTitle(cleanName) // Cannot easily strip for brackets inside title
+			return info
 		}
-		if num == 720 || num == 1080 {
-			continue // Resolution
-		}
-		if num == 264 || num == 265 {
-			continue // Codec
-		}
-		// Likely episode
-		info.Episode = num
-		// For title, we just strip known tags and brackets
-		// This is harder to split cleanly, so we keep using cleanTitle on entire string
-		info.Title = cleanTitle(cleanName)
-		return info
 	}
 
-	// Priority 3: Check Folder Name for Season
-	// If the file is inside "Season 2", we force Season = 2
-	// This logic needs to be handled by the caller or passed in context.
-	// Here we just parse the file string.
+	// Fallback: If filename contains just "01" or "01v2" surrounded by spaces?
+	// Heuristic: "Title 01"
+	// Find the last standalone number.
+	// Avoid years (1900-2099)
+	spaceNumRegex := regexp.MustCompile(`\b(\d{1,3})(v\d)?\b`)
+	allNums := spaceNumRegex.FindAllStringSubmatch(normalized, -1)
+	if len(allNums) > 0 {
+		// Find candidates
+		var candidate int = 0
+		found := false
 
-	// Final fallback cleanup for title if not set by SxxExx
+		// Iterate backwards
+		for i := len(allNums) - 1; i >= 0; i-- {
+			nStr := allNums[i][1]
+			val, _ := strconv.Atoi(nStr)
+			if isLikelyEpisodeNumber(val) {
+				candidate = val
+				found = true
+				break
+			}
+		}
+
+		if found {
+			info.Episode = candidate
+			// Attempt to clean title: Assume Title is everything before this number?
+			// Only if this number is near the end.
+			// Let's just run CleanTitle on full name.
+			info.Title = cleanTitle(cleanName)
+
+			// Refine: if title ends with the episode number, strip it
+			// e.g. "Naruto 01" -> "Naruto"
+			trimPatt := fmt.Sprintf(`\s%02d(\s|$)`, candidate) // 01
+			trimPatt2 := fmt.Sprintf(`\s%d(\s|$)`, candidate)  // 1
+
+			tmpTitle := regexp.MustCompile(trimPatt).ReplaceAllString(info.Title, " ")
+			tmpTitle = regexp.MustCompile(trimPatt2).ReplaceAllString(tmpTitle, " ")
+			info.Title = strings.TrimSpace(tmpTitle)
+
+			return info
+		}
+	}
+
+	// 5. Special tags
+	if strings.Contains(strings.ToLower(cleanName), " ova ") || strings.Contains(strings.ToLower(cleanName), "special") {
+		info.Season = 0
+	}
+
+	// Final cleanup
 	info.Title = cleanTitle(cleanName)
-
 	return info
+}
+
+func isLikelyEpisodeNumber(num int) bool {
+	if num == 0 {
+		return false
+	}
+	// Filter out common resolutions if they appear as standalone numbers (rare but possible)
+	if num == 480 || num == 720 || num == 1080 || num == 2160 {
+		return false
+	}
+	// Filter out years
+	if num > 1900 && num < 2100 {
+		return false
+	}
+	// Filter out video codecs
+	if num == 264 || num == 265 {
+		return false
+	}
+	return true
 }
 
 func cleanTitle(raw string) string {
