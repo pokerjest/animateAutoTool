@@ -25,7 +25,7 @@ go.work
 *.db
 *.db-shm
 *.db-wal
-data/
+/data/
 
 # Log files
 *.log
@@ -40,7 +40,7 @@ data/
 # OS
 .DS_Store
 Thumbs.db
-dist/
+/dist/
 
 # Project Binaries
 animateAutoTool
