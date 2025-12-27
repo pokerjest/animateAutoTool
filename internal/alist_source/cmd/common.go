@@ -23,7 +23,9 @@ func Init() {
 		v3_46_0.ConvertLegacyRoles()
 	}
 
+    log.Info("Starting InitData...")
 	data.InitData()
+    log.Info("Finished InitData...")
 	bootstrap.InitStreamLimit()
 	bootstrap.InitIndex()
 	bootstrap.InitUpgradePatch()

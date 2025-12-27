@@ -83,9 +83,18 @@ Animate Auto Tool 是一个基于 Go 开发的自动化动漫下载工具，通�
 
 ### 前置要求
 
-- Go 1.24+ (仅开发需要)
+- Go 1.24+ (运行 `go version` 检查)
 - qBittorrent 4.0+ (需开启 Web UI)
-- SQLite 3
+- SQLite 3 (可选，用于调试)
+
+### ✅ 依赖检查
+
+确保您的系统已安装 Go 环境：
+
+```bash
+go version
+# 输出示例: go version go1.24.0 darwin/arm64
+```
 
 ### 安装方式
 
@@ -95,16 +104,31 @@ Animate Auto Tool 是一个基于 Go 开发的自动化动漫下载工具，通�
 
 #### 方式二：从源码编译
 
+
 ```bash
 # 克隆仓库
 git clone https://github.com/pokerjest/animateAutoTool.git
 cd animateAutoTool
 
-# 编译 (CGO_ENABLED=0 即可使用纯 Go SQLite 驱动)
-CGO_ENABLED=0 go build -ldflags="-s -w" -o animate-server cmd/server/main.go
+# 🚀 一键启动
+./run.sh
+```
 
-# 运行
-./animate-server
+脚本会自动编译并启动服务。
+
+#### 高级：手动编译与管理
+
+如果您需要更细粒度的控制，可以使用 `scripts/control.sh`：
+
+```bash
+# 仅编译
+./scripts/control.sh build
+
+# 启动、停止、重启、查看状态
+./scripts/control.sh start
+./scripts/control.sh stop
+./scripts/control.sh restart
+./scripts/control.sh status
 ```
 
 #### 方式三：使用 Docker (推荐)
@@ -153,6 +177,25 @@ docker-compose up -d
 - **用户名/密码**：qBittorrent 的 Web UI 凭据
 - **下载保存目录**：下载文件的保存路径
 - **元数据配置**：配置 TMDB API Token 或 AniList Token 以获取增强元数据
+
+---
+
+## ❓ 常见问题 (Troubleshooting)
+
+### 1. 编译失败：Xcode License
+如果您在 macOS 上遇到类似 `You have not agreed to the Xcode...` 的错误：
+```bash
+sudo xcodebuild -license
+# 按空格翻页，最后输入 'agree'
+```
+
+### 2. 端口冲突
+如果 `8306` 端口被占用，请修改 `config.yaml` 或环境变量 `ANIME_SERVER_PORT`。
+
+### 3. qBittorrent 连接失败
+请检查 qBittorrent Web UI 设置：
+- 确保 "对本程序监听的 IP 地址和端口进行 CSRF 保护" **未勾选** (推荐)
+- 确保 Web UI 端口配置正确 (默认 8080)
 
 ---
 

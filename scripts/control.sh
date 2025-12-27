@@ -15,9 +15,19 @@ NC='\033[0m' # No Color
 
 mkdir -p $BIN_DIR
 
+check_deps() {
+    if ! command -v go &> /dev/null; then
+        echo -e "${RED}Error: 'go' is not installed or not in your PATH.${NC}"
+        echo "Please install Go 1.24+ from https://go.dev/dl/"
+        exit 1
+    fi
+}
+
 build() {
+    check_deps
     echo -e "${GREEN}Building $APP_NAME...${NC}"
-    go build -o $BIN_PATH $SRC_PATH
+    # Default to CGO_ENABLED=0 for portability (using pure Go SQLite driver)
+    CGO_ENABLED=0 go build -ldflags="-s -w" -o $BIN_PATH $SRC_PATH
     if [ $? -ne 0 ]; then
         echo -e "${RED}Build failed!${NC}"
         exit 1
