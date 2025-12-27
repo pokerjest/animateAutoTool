@@ -778,7 +778,6 @@ func UpdateSettingsHandler(c *gin.Context) {
 		%s
 		%s
 		%s
-		%s
 	`, qbStatusHtml, bangumiStatusOOB, tmdbStatusOOB, anilistStatusOOB, jellyfinStatusOOB))
 }
 
