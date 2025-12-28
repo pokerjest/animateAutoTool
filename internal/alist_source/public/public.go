@@ -2,5 +2,5 @@ package public
 
 import "embed"
 
-//go:embed all:dist
+//go:embed dist
 var Public embed.FS
