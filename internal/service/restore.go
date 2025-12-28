@@ -18,6 +18,7 @@ type RestoreOptions struct {
 	Subscriptions bool
 	Logs          bool
 	Local         bool
+	Users         bool
 }
 
 type RestoreService struct {
@@ -52,6 +53,7 @@ func (s *RestoreService) PerformRestore(sourcePath string, options RestoreOption
 		dirs     []model.LocalAnimeDirectory
 		animes   []model.LocalAnime
 		episodes []model.LocalEpisode
+		users    []model.User
 	)
 
 	// 3. Parallel Read Phase
@@ -88,6 +90,11 @@ func (s *RestoreService) PerformRestore(sourcePath string, options RestoreOption
 		})
 		eg.Go(func() error {
 			return srcDB.Find(&episodes).Error
+		})
+	}
+	if options.Users {
+		eg.Go(func() error {
+			return srcDB.Find(&users).Error
 		})
 	}
 
@@ -170,6 +177,15 @@ func (s *RestoreService) PerformRestore(sourcePath string, options RestoreOption
 			}
 			if len(episodes) > 0 {
 				if err := createBatch(&episodes); err != nil {
+					return err
+				}
+			}
+		}
+
+		if options.Users {
+			tx.Exec("DELETE FROM users")
+			if len(users) > 0 {
+				if err := createBatch(&users); err != nil {
 					return err
 				}
 			}

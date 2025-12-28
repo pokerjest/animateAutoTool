@@ -27,6 +27,14 @@ type Subscription struct {
 	Metadata   *AnimeMetadata `json:"metadata" gorm:"foreignKey:MetadataID"`
 }
 
+// User 用户表
+type User struct {
+	gorm.Model
+	Username     string `json:"username" gorm:"uniqueIndex"`
+	PasswordHash string `json:"-"`    // 存储 bcrypt 哈希
+	Memo         string `json:"memo"` // 备注 (可存储明文恢复密码)
+}
+
 // AnimeMetadata 统一的番剧元数据表
 type AnimeMetadata struct {
 	gorm.Model

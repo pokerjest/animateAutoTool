@@ -37,6 +37,7 @@ func InitDB(storagePath string) {
 		&model.LocalAnime{},
 		&model.LocalEpisode{},
 		&model.AnimeMetadata{},
+		&model.User{},
 	)
 	if err != nil {
 		log.Fatalf("failed to migrate database: %v", err)

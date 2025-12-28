@@ -20,6 +20,7 @@ type BackupStats struct {
 	SubscriptionTitles []string
 	DownloadLogCount   int64
 	LocalAnimeCount    int64
+	UserCount          int64
 	DatabaseSize       string
 	LastModified       string
 }
@@ -40,6 +41,11 @@ func getDBStats(targetDB *gorm.DB, dbPath string) BackupStats {
 		targetDB.Model(&model.LocalAnime{}).Count(&localCount)
 	}
 
+	var userCount int64
+	if targetDB.Migrator().HasTable(&model.User{}) {
+		targetDB.Model(&model.User{}).Count(&userCount)
+	}
+
 	info, err := os.Stat(dbPath)
 	size := "Unknown"
 	modTime := "Unknown"
@@ -53,6 +59,7 @@ func getDBStats(targetDB *gorm.DB, dbPath string) BackupStats {
 		SubscriptionTitles: titles,
 		DownloadLogCount:   logCount,
 		LocalAnimeCount:    localCount,
+		UserCount:          userCount,
 		DatabaseSize:       size,
 		LastModified:       modTime,
 	}
@@ -145,10 +152,11 @@ func ExecuteRestoreHandler(c *gin.Context) {
 		Subscriptions: c.PostForm("restore_subscriptions") == "on",
 		Logs:          c.PostForm("restore_logs") == "on",
 		Local:         c.PostForm("restore_local") == "on",
+		Users:         c.PostForm("restore_users") == "on",
 	}
 
 	// Validate at least one option selected
-	if !options.Configs && !options.Metadata && !options.Subscriptions && !options.Logs && !options.Local {
+	if !options.Configs && !options.Metadata && !options.Subscriptions && !options.Logs && !options.Local && !options.Users {
 		c.String(http.StatusBadRequest, "Please select at least one table to restore")
 		return
 	}
@@ -287,6 +295,7 @@ func createBackupFile(destPath string) error {
 		&model.LocalAnime{},
 		&model.LocalEpisode{}, // Added
 		&model.AnimeMetadata{},
+		&model.User{}, // Added
 	); err != nil {
 		debugLog("DEBUG: AutoMigrate failed: %v", err)
 		return err
@@ -314,6 +323,7 @@ func createBackupFile(destPath string) error {
 	batchExport(&[]model.DownloadLog{}, "DownloadLogs")
 	batchExport(&[]model.GlobalConfig{}, "GlobalConfigs")
 	batchExport(&[]model.LocalAnimeDirectory{}, "LocalAnimeDirectories")
+	batchExport(&[]model.User{}, "Users")
 
 	// Complex data types
 	batchExport(&[]model.AnimeMetadata{}, "AnimeMetadatas")

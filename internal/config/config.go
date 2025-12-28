@@ -11,6 +11,11 @@ type Config struct {
 	Server   ServerConfig   `mapstructure:"server"`
 	Database DatabaseConfig `mapstructure:"database"`
 	Log      LogConfig      `mapstructure:"log"`
+	Auth     AuthConfig     `mapstructure:"auth"`
+}
+
+type AuthConfig struct {
+	SecretKey string `mapstructure:"secret_key"`
 }
 
 type ServerConfig struct {
@@ -37,6 +42,7 @@ func LoadConfig(configPath string) error {
 	v.SetDefault("database.path", "data/animate.db")
 	v.SetDefault("log.level", "info")
 	v.SetDefault("alist_url", "http://alist:5244") // Docker internal default
+	v.SetDefault("auth.secret_key", "change_me_random_string")
 
 	// 配置文件路径
 	v.SetConfigName("config")
