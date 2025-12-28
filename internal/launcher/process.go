@@ -117,3 +117,78 @@ WebUI\Password_PBKDF2="@ByteArray(ARQ77eY1NUZaQsuDHbIMCA==:0WMRkYTUWVT9wVvdDtHAj
 
 	os.WriteFile(confFile, []byte(configContent), 0644)
 }
+
+func (m *Manager) startJellyfin() error {
+	exeName := "jellyfin.exe"
+	if runtime.GOOS != "windows" {
+		exeName = "jellyfin"
+	}
+	binDir := filepath.Join(m.BinDir, "jellyfin")
+	binPath := filepath.Join(binDir, exeName)
+
+	if _, err := os.Stat(binPath); os.IsNotExist(err) {
+		fmt.Println("Jellyfin binary not found, skipping managed start.")
+		return nil
+	}
+
+	dataDir := filepath.Join(m.DataDir, "jellyfin", "data")
+	configDir := filepath.Join(m.DataDir, "jellyfin", "config")
+	logDir := filepath.Join(m.DataDir, "jellyfin", "log")
+	cacheDir := filepath.Join(m.DataDir, "jellyfin", "cache")
+
+	os.MkdirAll(dataDir, 0755)
+	os.MkdirAll(configDir, 0755)
+	os.MkdirAll(logDir, 0755)
+	os.MkdirAll(cacheDir, 0755)
+
+	// FFmpeg path
+	ffmpegName := "ffmpeg.exe"
+	if runtime.GOOS != "windows" {
+		ffmpegName = "ffmpeg"
+	}
+	ffmpegPath := filepath.Join(m.BinDir, "ffmpeg", ffmpegName)
+
+	// If custom ffmpeg exists, use it. Otherwise let Jellyfin find system ffmpeg.
+	ffmpegArg := ""
+	if _, err := os.Stat(ffmpegPath); err == nil {
+		ffmpegArg = ffmpegPath
+	}
+
+	args := []string{
+		"--datadir", dataDir,
+		"--configdir", configDir,
+		"--logdir", logDir,
+		"--cachedir", cacheDir,
+	}
+
+	// Pass ffmpeg path if we found it.
+	// Note: Jellyfin flag for ffmpeg path might be specific or set in config.
+	// CLI flag --ffmpeg might work for some versions, or ensure it's in PATH.
+	// Actually, best way for portable is to ensure it finds it.
+	// We can set environment variable JELLYFIN_FFMPEG_PATH? Or just simple config.
+	// Let's rely on config. But for first run, maybe passing it is hard.
+	// However, if we put ffmpeg inside binDir/jellyfin/ffmpeg, it might auto detect?
+	// Let's append --ffmpeg if valid flag. Documentation says --ffmpeg <path> is valid for some generic builds.
+	if ffmpegArg != "" {
+		args = append(args, "--ffmpeg", ffmpegArg)
+	}
+
+	cmd := exec.CommandContext(m.Ctx, binPath, args...)
+
+	logFile, _ := os.Create(filepath.Join(logDir, "startup.log"))
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("failed to start Jellyfin: %w", err)
+	}
+
+	m.wg.Add(1)
+	go func() {
+		defer m.wg.Done()
+		cmd.Wait()
+	}()
+
+	fmt.Println("Jellyfin started (Port 8096)")
+	return nil
+}

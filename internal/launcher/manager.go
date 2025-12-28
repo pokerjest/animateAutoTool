@@ -40,6 +40,12 @@ func (m *Manager) EnsureBinaries() error {
 		return err
 	}
 
+	// Check and download Jellyfin
+	if err := m.EnsureJellyfin(); err != nil {
+		fmt.Printf("Jellyfin setup warning: %v\n", err)
+		// Don't fail the whole app for optional component
+	}
+
 	return nil
 }
 
@@ -52,6 +58,11 @@ func (m *Manager) StartAll() error {
 	// Start QBittorrent
 	if err := m.startQB(); err != nil {
 		return err
+	}
+
+	// Start Jellyfin
+	if err := m.startJellyfin(); err != nil {
+		fmt.Printf("Jellyfin start warning: %v\n", err)
 	}
 
 	return nil

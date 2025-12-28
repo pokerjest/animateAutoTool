@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -29,6 +30,16 @@ const (
 	QBUrlWindowsPortable = GhProxy + "https://github.com/c0re100/qBittorrent-Enhanced-Edition/releases/download/release-4.6.1.10/qt6_x64_portable.zip"
 	QBUrlLinuxAmd64      = GhProxy + "https://github.com/c0re100/qBittorrent-Enhanced-Edition/releases/download/release-4.6.1.10/qbittorrent-enhanced-nox_x86_64-linux-musl_static.zip"
 	QBUrlLinuxArm64      = GhProxy + "https://github.com/c0re100/qBittorrent-Enhanced-Edition/releases/download/release-4.6.1.10/qbittorrent-enhanced-nox_aarch64-linux-musl_static.zip"
+
+	// Jellyfin (Direct link)
+	JellyfinUrlWindows = "https://repo.jellyfin.org/files/server/windows/latest-stable/amd64/jellyfin_10.11.5-amd64.zip"
+	JellyfinUrlLinux   = "https://repo.jellyfin.org/files/server/linux/latest-stable/amd64/jellyfin_10.11.5_linux-amd64.tar.gz"
+	JellyfinUrlMac     = "https://repo.jellyfin.org/files/server/macos/latest-stable/amd64/jellyfin_10.11.5_mac-os-amd64.tar.gz"
+
+	// FFmpeg (Jellyfin version)
+	FFmpegUrlWindows = "https://repo.jellyfin.org/files/ffmpeg/windows/latest-7.x/win64/jellyfin-ffmpeg_7.1.3-1_portable_win64-clang-gpl.zip"
+	FFmpegUrlLinux   = "https://repo.jellyfin.org/files/ffmpeg/linux/latest-7.x/amd64/jellyfin-ffmpeg_7.0.2-7_portable_linux-amd64.tar.xz"
+	FFmpegUrlMac     = "https://repo.jellyfin.org/files/ffmpeg/macos/latest-7.x/amd64/jellyfin-ffmpeg_7.0.2-7_portable_mac-amd64.tar.gz"
 )
 
 func (m *Manager) ensureAlist() error {
@@ -128,6 +139,111 @@ func (m *Manager) ensureQB() error {
 	return nil
 }
 
+func (m *Manager) EnsureJellyfin() error {
+	jellyfinDir := filepath.Join(m.BinDir, "jellyfin")
+	ffmpegDir := filepath.Join(m.BinDir, "ffmpeg")
+
+	// 1. Jellyfin Server
+	jfExe := "jellyfin.exe"
+	if runtime.GOOS != "windows" {
+		jfExe = "jellyfin"
+	}
+
+	if _, err := os.Stat(jellyfinDir); err != nil {
+		fmt.Printf("Downloading Jellyfin for %s/%s...\n", runtime.GOOS, runtime.GOARCH)
+		url, err := getJellyfinUrl()
+		if err != nil {
+			return err
+		}
+
+		ext := ".zip"
+		if strings.HasSuffix(url, ".tar.gz") {
+			ext = ".tar.gz"
+		}
+		tmpFile := filepath.Join(m.BinDir, "jellyfin_dl"+ext)
+		if err := downloadFile(url, tmpFile); err != nil {
+			return err
+		}
+		defer os.Remove(tmpFile)
+
+		tmpExtract := filepath.Join(m.BinDir, "jellyfin_tmp")
+		os.RemoveAll(tmpExtract)
+
+		if ext == ".zip" {
+			if err := unzip(tmpFile, tmpExtract); err != nil {
+				return err
+			}
+		} else {
+			if err := untar(tmpFile, tmpExtract); err != nil {
+				return err
+			}
+		}
+
+		entries, _ := os.ReadDir(tmpExtract)
+		srcDir := tmpExtract
+		if len(entries) == 1 && entries[0].IsDir() {
+			srcDir = filepath.Join(tmpExtract, entries[0].Name())
+		}
+
+		os.Rename(srcDir, jellyfinDir)
+		os.RemoveAll(tmpExtract)
+
+		if runtime.GOOS != "windows" {
+			os.Chmod(filepath.Join(jellyfinDir, jfExe), 0755)
+		}
+	}
+
+	// 2. FFmpeg
+	if _, err := os.Stat(ffmpegDir); err != nil {
+		fmt.Printf("Downloading FFmpeg for %s...\n", runtime.GOOS)
+		url, err := getFFmpegUrl()
+		if err != nil {
+			return err
+		}
+
+		ext := ".zip"
+		if strings.HasSuffix(url, ".tar.gz") {
+			ext = ".tar.gz"
+		} else if strings.HasSuffix(url, ".tar.xz") {
+			ext = ".tar.xz"
+		}
+
+		tmpFile := filepath.Join(m.BinDir, "ffmpeg_dl"+ext)
+		if err := downloadFile(url, tmpFile); err != nil {
+			return err
+		}
+		defer os.Remove(tmpFile)
+
+		tmpExtract := filepath.Join(m.BinDir, "ffmpeg_tmp")
+		os.RemoveAll(tmpExtract)
+
+		if ext == ".zip" {
+			if err := unzip(tmpFile, tmpExtract); err != nil {
+				return err
+			}
+		} else {
+			if err := untar(tmpFile, tmpExtract); err != nil {
+				return err
+			}
+		}
+
+		entries, _ := os.ReadDir(tmpExtract)
+		srcDir := tmpExtract
+		if len(entries) == 1 && entries[0].IsDir() {
+			srcDir = filepath.Join(tmpExtract, entries[0].Name())
+		}
+		os.Rename(srcDir, ffmpegDir)
+		os.RemoveAll(tmpExtract)
+
+		if runtime.GOOS != "windows" {
+			os.Chmod(filepath.Join(ffmpegDir, "ffmpeg"), 0755)
+			os.Chmod(filepath.Join(ffmpegDir, "ffprobe"), 0755)
+		}
+	}
+
+	return nil
+}
+
 func getAlistUrl() (string, bool, error) {
 	os := runtime.GOOS
 	arch := runtime.GOARCH
@@ -168,6 +284,32 @@ func getQBUrl() (string, error) {
 		return "", fmt.Errorf("auto-download for macOS qbittorrent not supported yet")
 	default:
 		return "", fmt.Errorf("unsupported OS: %s", os)
+	}
+}
+
+func getJellyfinUrl() (string, error) {
+	switch runtime.GOOS {
+	case "windows":
+		return JellyfinUrlWindows, nil
+	case "linux":
+		return JellyfinUrlLinux, nil
+	case "darwin":
+		return JellyfinUrlMac, nil
+	default:
+		return "", fmt.Errorf("unsupported OS")
+	}
+}
+
+func getFFmpegUrl() (string, error) {
+	switch runtime.GOOS {
+	case "windows":
+		return FFmpegUrlWindows, nil
+	case "linux":
+		return FFmpegUrlLinux, nil
+	case "darwin":
+		return FFmpegUrlMac, nil
+	default:
+		return "", fmt.Errorf("unsupported OS")
 	}
 }
 
@@ -279,12 +421,22 @@ func untar(src, dest string) error {
 	defer file.Close()
 
 	gzr, err := gzip.NewReader(file)
-	if err != nil {
-		return err
+	var tr *tar.Reader
+	if err == nil {
+		defer gzr.Close()
+		tr = tar.NewReader(gzr)
+	} else {
+		// Not gzip? maybe just tar or tar.xz
+		// Reset file
+		file.Seek(0, 0)
+		if strings.HasSuffix(src, ".tar.xz") {
+			// Quick hack: use system tar if available, since pure go xz is not in stdlib
+			// This is "cheating" but effective for zero-dependency portability
+			return untarSystem(src, dest)
+		}
+		// Try plain tar
+		tr = tar.NewReader(file)
 	}
-	defer gzr.Close()
-
-	tr := tar.NewReader(gzr)
 
 	for {
 		header, err := tr.Next()
@@ -318,4 +470,11 @@ func untar(src, dest string) error {
 		}
 	}
 	return nil
+}
+
+func untarSystem(src, dest string) error {
+	os.MkdirAll(dest, 0755)
+	cmd := exec.Command("tar", "-xf", src, "-C", dest)
+	// tar usually handles auto detection of compression (z, J, etc) on modern versions
+	return cmd.Run()
 }
