@@ -5,7 +5,7 @@ APP_NAME="animate-server"
 BIN_DIR="./bin"
 BIN_PATH="$BIN_DIR/$APP_NAME"
 PID_FILE="$BIN_DIR/server.pid"
-LOG_FILE="server.log"
+LOG_FILE="logs/server.log"
 SRC_PATH="cmd/server/main.go"
 
 # 颜色
@@ -14,6 +14,7 @@ RED='\033[0;31m'
 NC='\033[0m' # No Color
 
 mkdir -p $BIN_DIR
+mkdir -p logs
 
 check_deps() {
     if ! command -v go &> /dev/null; then

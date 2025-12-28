@@ -6,10 +6,11 @@ set "APP_NAME=animate-server.exe"
 set "BIN_DIR=bin"
 set "BIN_PATH=%BIN_DIR%\%APP_NAME%"
 set "PID_FILE=%BIN_DIR%\server.pid"
-set "LOG_FILE=server.log"
+set "LOG_FILE=logs\server.log"
 set "SRC_PATH=cmd/server/main.go"
 
 if not exist "%BIN_DIR%" mkdir "%BIN_DIR%"
+if not exist "logs" mkdir "logs"
 
 if "%1"=="" goto help
 if "%1"=="build" goto build

@@ -463,7 +463,8 @@ func DeleteR2BackupHandler(c *gin.Context) {
 }
 
 func debugLog(format string, v ...interface{}) {
-	f, err := os.OpenFile("server_debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	_ = os.MkdirAll("logs", 0755)
+	f, err := os.OpenFile("logs/server_debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		fmt.Println("Error opening debug log:", err)
 		return

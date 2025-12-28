@@ -1,4 +1,5 @@
 @echo off
+cd /d "%~dp0.."
 if not exist "scripts\control.bat" (
     echo Error: scripts\control.bat not found.
     pause
