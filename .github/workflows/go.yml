@@ -39,6 +39,12 @@ jobs:
           version: latest
           args: --timeout=5m
 
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      - name: Run govulncheck
+        run: govulncheck ./...
+
   build:
     name: Build Binaries
     needs: test
@@ -64,11 +70,23 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: 0
         run: |
-          BINARY_NAME=animate-server-${{ matrix.goos }}-${{ matrix.goarch }}
           if [ "${{ matrix.goos }}" = "windows" ]; then
-            BINARY_NAME="${BINARY_NAME}.exe"
+            # Build all binaries in cmd/
+            for dir in cmd/*; do
+              if [ -d "$dir" ]; then
+                target=$(basename "$dir")
+                go build -ldflags="-s -w" -v -o "dist/${target}.exe" "./$dir"
+              fi
+            done
+          else
+            # Build all binaries in cmd/
+            for dir in cmd/*; do
+              if [ -d "$dir" ]; then
+                target=$(basename "$dir")
+                go build -ldflags="-s -w" -v -o "dist/${target}" "./$dir"
+              fi
+            done
           fi
-          go build -ldflags="-s -w" -v -o "dist/${BINARY_NAME}" cmd/server/main.go
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
