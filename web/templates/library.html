@@ -217,7 +217,7 @@
                 class="group flex items-center gap-2 px-5 py-2.5 rounded-2xl font-bold transition-all border backdrop-blur-sm">
 
                 <span x-show="!isRefreshing" class="group-hover:rotate-180 transition-transform duration-700">🔥</span>
-                <span x-text="isRefreshing ? '处理中...' : '重新刮削全部'"></span>
+                <span x-text="isRefreshing ? '处理中...' : '全部重新刮削'"></span>
             </button>
 
             <form hx-get="/library" hx-target="#main-content" hx-push-url="true" class="relative group/search">

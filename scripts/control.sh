@@ -87,10 +87,16 @@ stop() {
     fi
 }
 
+
+run() {
+    echo -e "${GREEN}Starting $APP_NAME in foreground...${NC}"
+    $BIN_PATH
+}
+
 restart() {
     stop
     build
-    start
+    run
 }
 
 status() {
@@ -114,6 +120,10 @@ case "$1" in
         build
         start
         ;;
+    run)
+        build
+        run
+        ;;
     stop)
         stop
         ;;
@@ -124,7 +134,7 @@ case "$1" in
         status
         ;;
     *)
-        echo "Usage: $0 {build|start|stop|restart|status}"
+        echo "Usage: $0 {build|start|run|stop|restart|status}"
         exit 1
         ;;
 esac

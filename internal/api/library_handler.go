@@ -56,7 +56,25 @@ func GetLibraryHandler(c *gin.Context) {
 
 	// Construct items
 	var items []LibraryItem
+	seenBangumiIDs := make(map[int]bool)
+	seenTitles := make(map[string]bool)
+
 	for _, m := range metadata {
+		// Deduplication Strategy:
+		// 1. Filter by BangumiID if it exists and has been seen.
+		if m.BangumiID > 0 {
+			if seenBangumiIDs[m.BangumiID] {
+				continue
+			}
+			seenBangumiIDs[m.BangumiID] = true
+		}
+
+		// 2. Filter by Title if it has been seen.
+		if seenTitles[m.Title] {
+			continue
+		}
+		seenTitles[m.Title] = true
+
 		items = append(items, LibraryItem{
 			AnimeMetadata: m,
 			IsSubscribed:  subMap[m.ID],
