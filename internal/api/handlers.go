@@ -1389,7 +1389,7 @@ func RenderAniListStatus(style string) string {
 		return fmt.Sprintf(`<div id="anilist-status"><div class="text-emerald-600 bg-emerald-50 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 border border-emerald-200">✅ 已连接 AniList (%s)</div></div>`, username)
 	}
 
-	if errStr == "Token missing" {
+	if errStr == ErrTokenMissing {
 		return `<div id="anilist-status"><div class="text-sm text-gray-500 flex items-center gap-2"><span>🔴 未连接</span><span class="text-xs text-gray-400">(请先输入 Token 并保存)</span></div></div>`
 	}
 	if strings.Contains(errStr, "Token Invalid") || strings.Contains(errStr, "401") || strings.Contains(errStr, "400") {
@@ -1416,7 +1416,7 @@ type AniListResponse struct {
 func CheckAniListConnection() (bool, string, string) {
 	var config model.GlobalConfig
 	if err := db.DB.Where("key = ?", model.ConfigKeyAniListToken).First(&config).Error; err != nil || config.Value == "" {
-		return false, "", "Token missing"
+		return false, "", ErrTokenMissing
 	}
 
 	token := strings.TrimSpace(config.Value)
@@ -1427,7 +1427,7 @@ func CheckAniListConnection() (bool, string, string) {
 	}
 
 	if token == "" {
-		return false, "", "Token missing"
+		return false, "", ErrTokenMissing
 	}
 
 	// Cache Check
