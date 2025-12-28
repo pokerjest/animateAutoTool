@@ -18,7 +18,7 @@ import (
 const (
 	// Alist (Using GhProxy for CN acceleration by default, or fallback)
 	// Switch to ghproxy.net which might be more stable
-	GhProxy = "https://ghproxy.net/"
+	GhProxy = "https://gh-proxy.com/"
 
 	AlistUrlWindows   = GhProxy + "https://github.com/alist-org/alist/releases/latest/download/alist-windows-amd64.zip"
 	AlistUrlLinux     = GhProxy + "https://github.com/alist-org/alist/releases/latest/download/alist-linux-amd64.tar.gz"
@@ -33,13 +33,15 @@ const (
 
 	// Jellyfin (Direct link)
 	JellyfinUrlWindows = "https://repo.jellyfin.org/files/server/windows/latest-stable/amd64/jellyfin_10.11.5-amd64.zip"
-	JellyfinUrlLinux   = "https://repo.jellyfin.org/files/server/linux/latest-stable/amd64/jellyfin_10.11.5_linux-amd64.tar.gz"
-	JellyfinUrlMac     = "https://repo.jellyfin.org/files/server/macos/latest-stable/amd64/jellyfin_10.11.5_mac-os-amd64.tar.gz"
+	JellyfinUrlLinux   = "https://repo.jellyfin.org/files/server/linux/latest-stable/amd64/jellyfin_10.11.5-amd64.tar.gz"
+	JellyfinUrlMac     = "https://repo.jellyfin.org/files/server/macos/latest-stable/amd64/jellyfin_10.11.5-amd64.tar.xz"
 
 	// FFmpeg (Jellyfin version)
-	FFmpegUrlWindows = "https://repo.jellyfin.org/files/ffmpeg/windows/latest-7.x/win64/jellyfin-ffmpeg_7.1.3-1_portable_win64-clang-gpl.zip"
-	FFmpegUrlLinux   = "https://repo.jellyfin.org/files/ffmpeg/linux/latest-7.x/amd64/jellyfin-ffmpeg_7.0.2-7_portable_linux-amd64.tar.xz"
-	FFmpegUrlMac     = "https://repo.jellyfin.org/files/ffmpeg/macos/latest-7.x/amd64/jellyfin-ffmpeg_7.0.2-7_portable_mac-amd64.tar.gz"
+	FFmpegUrlWindows    = "https://repo.jellyfin.org/files/ffmpeg/windows/latest-7.x/win64/jellyfin-ffmpeg_7.1.3-1_portable_win64-clang-gpl.zip"
+	FFmpegUrlLinuxAmd64 = "https://repo.jellyfin.org/files/ffmpeg/linux/latest-7.x/amd64/jellyfin-ffmpeg_7.1.3-1_portable_linux64-gpl.tar.xz"
+	FFmpegUrlLinuxArm64 = "https://repo.jellyfin.org/files/ffmpeg/linux/latest-7.x/arm64/jellyfin-ffmpeg_7.1.3-1_portable_linuxarm64-gpl.tar.xz"
+	FFmpegUrlMacAmd64   = "https://repo.jellyfin.org/files/ffmpeg/macos/latest-7.x/x86_64/jellyfin-ffmpeg_7.1.3-1_portable_mac64-gpl.tar.xz"
+	FFmpegUrlMacArm64   = "https://repo.jellyfin.org/files/ffmpeg/macos/latest-7.x/arm64/jellyfin-ffmpeg_7.1.3-1_portable_macarm64-gpl.tar.xz"
 )
 
 func (m *Manager) ensureAlist() error {
@@ -103,7 +105,7 @@ func (m *Manager) ensureQB() error {
 	url, err := getQBUrl()
 	if err != nil {
 		if strings.Contains(err.Error(), "manual_install_required") {
-			fmt.Println("Info: qBittorrent auto-download not available for Windows. Please install it manually if needed.")
+			fmt.Println(err.Error())
 			return nil
 		}
 		// Fallback or warning
@@ -159,6 +161,8 @@ func (m *Manager) EnsureJellyfin() error {
 		ext := ".zip"
 		if strings.HasSuffix(url, ".tar.gz") {
 			ext = ".tar.gz"
+		} else if strings.HasSuffix(url, ".tar.xz") {
+			ext = ".tar.xz"
 		}
 		tmpFile := filepath.Join(m.BinDir, "jellyfin_dl"+ext)
 		if err := downloadFile(url, tmpFile); err != nil {
@@ -273,15 +277,14 @@ func getQBUrl() (string, error) {
 	switch os {
 	case "windows":
 		// Portable zip not consistently available for newer versions.
-		// Fallback to manual install for now to avoid Startup Failure.
-		return "", fmt.Errorf("manual_install_required")
+		return "", fmt.Errorf("manual_install_required: please install qBittorrent manually (e.g. from PortableApps or official installer)")
 	case "linux":
 		if arch == "arm64" {
 			return QBUrlLinuxArm64, nil
 		}
 		return QBUrlLinuxAmd64, nil
 	case "darwin":
-		return "", fmt.Errorf("auto-download for macOS qbittorrent not supported yet")
+		return "", fmt.Errorf("manual_install_required: auto-download for macOS qbittorrent not supported yet. Please install it to /Applications/qbittorrent.app")
 	default:
 		return "", fmt.Errorf("unsupported OS: %s", os)
 	}
@@ -301,13 +304,24 @@ func getJellyfinUrl() (string, error) {
 }
 
 func getFFmpegUrl() (string, error) {
-	switch runtime.GOOS {
+	os := runtime.GOOS
+	arch := runtime.GOARCH
+
+	switch os {
 	case "windows":
 		return FFmpegUrlWindows, nil
 	case "linux":
-		return FFmpegUrlLinux, nil
+		if arch == "amd64" {
+			return FFmpegUrlLinuxAmd64, nil
+		} else if arch == "arm64" {
+			return FFmpegUrlLinuxArm64, nil
+		}
+		return "", fmt.Errorf("unsupported architecture for Linux: %s", arch)
 	case "darwin":
-		return FFmpegUrlMac, nil
+		if arch == "arm64" {
+			return FFmpegUrlMacArm64, nil
+		}
+		return FFmpegUrlMacAmd64, nil
 	default:
 		return "", fmt.Errorf("unsupported OS")
 	}
