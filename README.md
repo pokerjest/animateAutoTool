@@ -79,42 +79,35 @@ Animate Auto Tool 是一个基于 Go 开发的自动化动漫下载工具，通�
 
 ---
 
-## 🚀 快速开始
+### 🚀 快速开始
 
-### 前置要求
+#### 前置要求
 
-- Go 1.24+ (运行 `go version` 检查)
-- qBittorrent 4.0+ (需开启 Web UI)
-- SQLite 3 (可选，用于调试)
+- **Go 1.24+** (运行 `go version` 检查)
+- **qBittorrent 4.0+** (需开启 Web UI)
 
-### ✅ 依赖检查
+> [!NOTE]
+> **中国大陆用户请注意**：
+> 编译前请配置 Go 代理以确保顺利下载依赖：
+> ```bash
+> export GOPROXY=https://goproxy.cn,direct
+> ```
 
-确保您的系统已安装 Go 环境：
-
-```bash
-go version
-# 输出示例: go version go1.24.0 darwin/arm64
-```
-
-### 安装方式
-
-#### 方式一：下载预编译二进制
-
-从 [Releases](https://github.com/pokerjest/animateAutoTool/releases) 页面下载适合您系统的最新版本。
-
-#### 方式二：从源码编译
-
+### ⚡️ 一键安装
 
 ```bash
 # 克隆仓库
 git clone https://github.com/pokerjest/animateAutoTool.git
 cd animateAutoTool
 
-# 🚀 一键启动
+# 编译并启动
 ./run.sh
 ```
 
-脚本会自动编译并启动服务。
+脚本会自动检查 Go 版本、编译代码并启动服务。
+
+#### 手动编译
+如果您想手动控制编译过程：
 
 #### 高级：手动编译与管理
 

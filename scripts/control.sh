@@ -21,6 +21,20 @@ check_deps() {
         echo "Please install Go 1.24+ from https://go.dev/dl/"
         exit 1
     fi
+    
+    # Check Go version
+    GO_VERSION=$(go version | awk '{print $3}' | sed 's/go//')
+    # Simple version check (major.minor)
+    # Assumes version format like 1.24.0 or 1.24rc1
+    MAJOR=$(echo $GO_VERSION | cut -d. -f1)
+    MINOR=$(echo $GO_VERSION | cut -d. -f2 | sed 's/[^0-9].*//')
+    
+    if [ "$MAJOR" -lt 1 ] || ([ "$MAJOR" -eq 1 ] && [ "$MINOR" -lt 24 ]); then
+        echo -e "${RED}Error: Go version 1.24 or higher is required.${NC}"
+        echo -e "Current version: ${GREEN}$GO_VERSION${NC}"
+        echo "Please upgrade Go from https://go.dev/dl/"
+        exit 1
+    fi
 }
 
 build() {
@@ -30,6 +44,8 @@ build() {
     CGO_ENABLED=0 go build -ldflags="-s -w" -o $BIN_PATH $SRC_PATH
     if [ $? -ne 0 ]; then
         echo -e "${RED}Build failed!${NC}"
+        echo -e "If you are in China, you may need to set GOPROXY:"
+        echo -e "${GREEN}export GOPROXY=https://goproxy.cn,direct${NC}"
         exit 1
     fi
     echo -e "${GREEN}Build successful.${NC}"
