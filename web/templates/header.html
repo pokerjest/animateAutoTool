@@ -74,6 +74,25 @@
             100% { transform: translateX(100%); }
         }
     </style>
+    <script>
+        function updateActiveLink() {
+            const currentPath = window.location.pathname;
+            document.querySelectorAll('.nav-link').forEach(link => {
+                const href = link.getAttribute('href');
+                if (href === currentPath || (href !== '/' && currentPath.startsWith(href))) {
+                    link.classList.add('active');
+                } else {
+                    link.classList.remove('active');
+                }
+            });
+        }
+
+        document.addEventListener('DOMContentLoaded', updateActiveLink);
+        document.addEventListener('htmx:pushedIntoHistory', updateActiveLink);
+        document.addEventListener('htmx:historyRestore', updateActiveLink);
+        // Also trigger on generic load to catch pure swaps if needed, though pushedIntoHistory covers most nav
+        document.addEventListener('htmx:afterOnLoad', updateActiveLink);
+    </script>
 </head>
 
 <body class="min-h-screen text-gray-800"

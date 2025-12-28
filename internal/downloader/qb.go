@@ -23,7 +23,7 @@ func NewQBittorrentClient(baseURL string) *QBittorrentClient {
 	baseURL = strings.TrimSuffix(baseURL, "/")
 
 	client := resty.New().
-		SetTimeout(30*time.Second).
+		SetTimeout(5*time.Second).
 		SetBaseURL(baseURL).
 		SetHeader("Referer", baseURL).
 		SetHeader("Origin", baseURL).

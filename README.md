@@ -111,16 +111,22 @@ cd animateAutoTool
 
 #### 高级：手动编译与管理
 
-如果您需要更细粒度的控制，可以使用 `scripts/control.sh`：
+项目根目录提供了便捷的控制脚本：
 
 ```bash
+# 启动 (会自动编译)
+./start.sh
+
+# 停止
+./stop.sh
+
+# 重启
+./restart.sh
+
 # 仅编译
 ./scripts/control.sh build
 
-# 启动、停止、重启、查看状态
-./scripts/control.sh start
-./scripts/control.sh stop
-./scripts/control.sh restart
+# 查看状态
 ./scripts/control.sh status
 ```
 

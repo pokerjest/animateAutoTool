@@ -1,7 +1,168 @@
 {{ define "calendar.html" }}
 {{ if not .SkipLayout }}{{ template "header.html" . }}{{ end }}
 
-<div class="min-h-screen text-gray-800 font-sans selection:bg-pink-200 selection:text-pink-900" x-data="calendarData">
+<div class="min-h-screen text-gray-800 font-sans selection:bg-pink-200 selection:text-pink-900" x-data="{
+    currentTab: {{ if .Today }}{{ .Today }}{{ else }}new Date().getDay() || 7{{ end }},
+
+    init() {
+        console.log('Calendar initialized. Today:', this.currentTab);
+    },
+
+    showDetailModal: false,
+    showSubscribeModal: false,
+
+    selectedAnime: null,
+    episodes: [],
+    filteredEpisodes: [],
+    subgroups: [],
+    selectedSubgroup: 'all',
+    subscribeGroup: '',
+    mikanId: null,
+
+    loadingEpisodes: false,
+    errorMessage: '',
+
+    openDetail(anime) {
+        console.log('Open Detail:', anime);
+        this.selectedAnime = anime;
+        this.showDetailModal = true;
+        this.episodes = [];
+        this.filteredEpisodes = [];
+        this.subgroups = [];
+        this.selectedSubgroup = 'all';
+        this.loadingEpisodes = false;
+        this.errorMessage = '';
+        this.mikanId = null;
+    },
+
+    closeDetail() {
+        this.showDetailModal = false;
+    },
+
+    async watchNow() {
+        if(!this.selectedAnime) return;
+        this.loadingEpisodes = true;
+        this.episodes = [];
+        this.filteredEpisodes = [];
+        this.errorMessage = '';
+
+        try {
+            const resp = await fetch('/api/mikan/episodes?bangumiId=' + this.selectedAnime.id + '&title=' + encodeURIComponent(this.selectedAnime.name));
+            if (resp.ok) {
+                const data = await resp.json();
+                if (data.episodes) {
+                    this.episodes = data.episodes;
+                    this.mikanId = data.mikanId;
+                } else {
+                    this.episodes = Array.isArray(data) ? data : [];
+                }
+
+                this.extractSubgroups();
+                this.filterEpisodes();
+
+                this.$nextTick(() => {
+                    const el = document.getElementById('episode-list-section');
+                    if (el) el.scrollIntoView({ behavior: 'smooth' });
+                });
+            } else {
+                console.error('Failed to load episodes');
+                this.errorMessage = '无法获取资源列表，请检查网络或稍后重试';
+            }
+        } catch (e) {
+            console.error(e);
+            this.errorMessage = '网络请求失败 (' + e.message + ')';
+        } finally {
+            this.loadingEpisodes = false;
+        }
+    },
+
+    extractSubgroups() {
+        const groups = new Set();
+        const regex = /^\[([^\]]+)\]/;
+
+        this.episodes.forEach(ep => {
+            const match = ep.title.match(regex);
+            if (match && match[1]) {
+                groups.add(match[1]);
+            }
+        });
+        this.subgroups = Array.from(groups).sort();
+    },
+
+    filterEpisodes() {
+        if (this.selectedSubgroup === 'all') {
+            this.filteredEpisodes = this.episodes;
+        } else {
+            this.filteredEpisodes = this.episodes.filter(ep => ep.title.includes('[' + this.selectedSubgroup + ']'));
+        }
+    },
+
+    async openSubscribe() {
+        this.showDetailModal = false;
+        this.showSubscribeModal = true;
+
+        if (this.episodes.length === 0) {
+            await this.watchNow();
+        }
+
+        const validID = this.mikanId || this.selectedAnime.id;
+        const rss = 'https://mikanani.me/RSS/Bangumi?bangumiId=' + validID;
+
+        this.subscribeGroup = this.selectedSubgroup !== 'all' ? this.selectedSubgroup : '';
+        this.selectedAnime.rss = rss;
+
+        this.$nextTick(() => {
+            const el = document.getElementById('calendar-preview-results');
+            if (el) el.innerHTML = '';
+        });
+    },
+
+    async previewRSS() {
+        const rssInput = document.getElementById('calendar-rss-url');
+        const url = rssInput ? rssInput.value : '';
+        if (!url) return;
+
+        const previewContainer = document.getElementById('calendar-preview-results');
+        if (!previewContainer) return;
+
+        previewContainer.innerHTML = '<div class=\'p-8 text-center text-gray-400 flex flex-col items-center gap-2\'>' +
+        '<div class=\'animate-spin h-6 w-6 border-2 border-pink-500 border-t-transparent rounded-full\'></div>' +
+        '<span>正在解析预览...</span>' +
+        '</div>';
+
+        try {
+            const resp = await fetch('/api/preview?RSSUrl=' + encodeURIComponent(url));
+            if (resp.ok) {
+                const html = await resp.text();
+                previewContainer.innerHTML = html;
+            } else {
+                previewContainer.innerHTML = '<div class=\'p-4 text-center text-red-500 bg-red-50 rounded-lg\'>解析失败: ' + resp.statusText + '</div>';
+            }
+        } catch (e) {
+            previewContainer.innerHTML = '<div class=\'p-4 text-center text-red-500 bg-red-50 rounded-lg\'>网络错误: ' + e.message + '</div>';
+        }
+    },
+
+    async playEpisode(magnet) {
+        try {
+            const resp = await fetch('/api/play/magnet', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ magnet: magnet })
+            });
+            if (resp.ok) {
+                const data = await resp.json();
+                window.open(data.alistViewUrl, '_blank');
+            } else {
+                console.error('添加任务失败');
+                alert('播放失败: 无法添加下载任务');
+            }
+        } catch (e) {
+            console.error(e);
+            alert('请求失败');
+        }
+    }
+}">
     <!-- Main Content Container with Sticky Header -->
     <div class="-m-8"> <!-- Negate global padding -->
 
@@ -512,194 +673,7 @@
 
         {{ if not .SkipLayout }}{{ template "footer.html" . }}{{ end }}
 
-        <script>
-            document.addEventListener('alpine:init', () => {
-                Alpine.data('calendarData', () => ({
-                    currentTab: {{.Today }},
+        {{ if not .Error }}
 
-                // Modal States
-                showDetailModal: false,
-                showSubscribeModal: false, // Replaces modalOpen
-
-                // Data
-                selectedAnime: null,    // Full anime object
-                episodes: [],           // All fetched episodes
-                filteredEpisodes: [],   // Displayed list
-                subgroups: [],          // Extracted unique subgroups
-                selectedSubgroup: 'all',
-                subscribeGroup: '',
-                mikanId: null,
-
-                // Loading States
-                loadingEpisodes: false,
-                errorMessage: '',       // Error Feedback
-
-                // --- Actions ---
-
-                // Open the new Detail Modal
-                openDetail(anime) {
-                this.selectedAnime = anime;
-                this.showDetailModal = true;
-                this.episodes = [];
-                this.filteredEpisodes = [];
-                this.subgroups = [];
-                this.selectedSubgroup = 'all';
-                this.loadingEpisodes = false;
-                this.errorMessage = '';
-                this.mikanId = null;
-            },
-
-                // Close Detail Modal
-                closeDetail() {
-                this.showDetailModal = false;
-            },
-
-                // 'Watch Now': Fetch episodes directly by Bangumi ID
-                async watchNow() {
-                if(!this.selectedAnime) return;
-            this.loadingEpisodes = true;
-            this.episodes = [];
-            this.filteredEpisodes = [];
-            this.errorMessage = '';
-
-            try {
-                // Direct fetch using ID
-                const resp = await fetch('/api/mikan/episodes?bangumiId=' + this.selectedAnime.id + '&title=' + encodeURIComponent(this.selectedAnime.name));
-                if (resp.ok) {
-                    const data = await resp.json();
-                    // Handle new response format { episodes: [], mikanId: "..." }
-                    if (data.episodes) {
-                        this.episodes = data.episodes;
-                        this.mikanId = data.mikanId;
-                    } else {
-                        // Fallback for array (if API rolled back or legacy)
-                        this.episodes = Array.isArray(data) ? data : [];
-                    }
-
-                    this.extractSubgroups();
-                    this.filterEpisodes();
-
-                    // Scroll to episode list
-                    this.$nextTick(() => {
-                        const el = document.getElementById('episode-list-section');
-                        if (el) el.scrollIntoView({ behavior: 'smooth' });
-                    });
-                } else {
-                    console.error('Failed to load episodes');
-                    this.errorMessage = '无法获取资源列表，请检查网络或稍后重试';
-                }
-            } catch (e) {
-                console.error(e);
-                this.errorMessage = '网络请求失败 (' + e.message + ')';
-            } finally {
-                this.loadingEpisodes = false;
-            }
-         },
-
-            // Extract unique subgroups from titles
-            extractSubgroups() {
-                const groups = new Set();
-                const regex = /^\[([^\]]+)\]/; // Matches [LoliHouse] at start
-
-                this.episodes.forEach(ep => {
-                    const match = ep.title.match(regex);
-                    if (match && match[1]) {
-                        groups.add(match[1]);
-                    }
-                });
-                this.subgroups = Array.from(groups).sort();
-            },
-
-            // Filter logic
-            filterEpisodes() {
-                if (this.selectedSubgroup === 'all') {
-                    this.filteredEpisodes = this.episodes;
-                } else {
-                    this.filteredEpisodes = this.episodes.filter(ep => ep.title.includes('[' + this.selectedSubgroup + ']'));
-                }
-            },
-
-         // 'Subscribe': Open the subscription config
-         async openSubscribe() {
-                this.showDetailModal = false; // Close detail
-                this.showSubscribeModal = true; // Open sub form
-
-                // Auto-fetch episodes if empty to populate subgroups logic
-                if (this.episodes.length === 0) {
-                    // Trigger background fetch, don't await to keep UI responsive? 
-                    // Actually await is better so subgroups appear.
-                    await this.watchNow();
-                }
-
-                // Construct RSS properly using the verified Mikan ID if available, otherwise fallback to Subject ID (which might fail but is all we have)
-                // If watchNow() was called, `this.mikanId` should be set.
-                const validID = this.mikanId || this.selectedAnime.id;
-                const rss = 'https://mikanani.me/RSS/Bangumi?bangumiId=' + validID;
-
-                this.subscribeGroup = this.selectedSubgroup !== 'all' ? this.selectedSubgroup : '';
-                // The form uses :value for inputs. Let's ensure selectedAnime has rss struct or we assign it.
-                this.selectedAnime.rss = rss;
-
-                // Clear preview
-                this.$nextTick(() => {
-                    const el = document.getElementById('calendar-preview-results');
-                    if (el) el.innerHTML = '';
-                });
-            },
-
-         // Preview RSS Manual Fetch
-         async previewRSS() {
-                const rssInput = document.getElementById('calendar-rss-url');
-                const url = rssInput ? rssInput.value : '';
-                if (!url) return;
-
-                const previewContainer = document.getElementById('calendar-preview-results');
-                if (!previewContainer) return;
-
-                previewContainer.innerHTML = `<div class="p-8 text-center text-gray-400 flex flex-col items-center gap-2">
-                <div class="animate-spin h-6 w-6 border-2 border-pink-500 border-t-transparent rounded-full"></div>
-                <span>正在解析预览...</span>
-            </div>`;
-
-                try {
-                    const resp = await fetch('/api/preview?RSSUrl=' + encodeURIComponent(url));
-                    if (resp.ok) {
-                        const html = await resp.text();
-                        previewContainer.innerHTML = html;
-                    } else {
-                        previewContainer.innerHTML = `<div class="p-4 text-center text-red-500 bg-red-50 rounded-lg">解析失败: ${resp.statusText}</div>`;
-                    }
-                } catch (e) {
-                    previewContainer.innerHTML = `<div class="p-4 text-center text-red-500 bg-red-50 rounded-lg">网络错误: ${e.message}</div>`;
-                }
-            },
-
-
-// Play specific episode
-async playEpisode(magnet) {
-                // Track loading state locally if needed, or simple feedback
-                // UI feedback handled by button state ideally
-
-                try {
-                    const resp = await fetch('/api/play/magnet', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ magnet: magnet })
-                    });
-                    if (resp.ok) {
-                        const data = await resp.json();
-                        window.open(data.alistViewUrl, '_blank');
-                    } else {
-                        console.error('添加任务失败');
-                        alert('播放失败: 无法添加下载任务');
-                    }
-                } catch (e) {
-                    console.error(e);
-                    alert('请求失败');
-                }
-            }
-
-        }));
-    });
-        </script>
+        {{ end }}
         {{ end }}

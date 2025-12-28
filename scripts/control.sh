@@ -89,7 +89,7 @@ stop() {
 
 restart() {
     stop
-    sleep 1
+    build
     start
 }
 

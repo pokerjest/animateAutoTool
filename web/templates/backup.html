@@ -94,7 +94,7 @@
                     <span>☁️</span> Cloudflare R2 云备份
                 </h3>
 
-                <div x-data="r2Backup" class="space-y-4">
+                <div x-data="r2BackupData()" class="space-y-4">
 
                     <!-- Config Form -->
                     <div
@@ -233,8 +233,9 @@
 </div>
 
 <script>
-    document.addEventListener('alpine:init', () => {
-        Alpine.data('r2Backup', () => ({
+    // Defined as a global function to ensure availability during HTMX swaps
+    function r2BackupData() {
+        return {
             config: { endpoint: '', access_key: '', secret_key: '', bucket: '' },
             backups: [],
             loading: true,
@@ -479,8 +480,8 @@
                     })
                     .finally(() => this.modalLoading = false);
             }
-        }));
-    });
+        };
+    }
 </script>
 
 

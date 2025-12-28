@@ -4,203 +4,177 @@
     {{ json .Metadata }}
 </script>
 
-<script>
-    console.log('Initializing library metadata from JSON...');
-    try {
-        const rawMetadata = JSON.parse(document.getElementById('library-metadata').textContent);
-        window.libraryMetadata = rawMetadata.reduce((acc, item) => {
-            acc[item.ID] = item;
-            return acc;
-        }, {});
-    } catch (e) {
-        console.error('Failed to parse metadata:', e);
-        window.libraryMetadata = {};
-    }
-    console.log('Library metadata loaded:', Object.keys(window.libraryMetadata).length, 'items');
 
-    // Define global data function for Alpine
-    window.libraryData = function () {
-        return {
-            showDetailsModal: false,
-            modalRaw: null,
-            detailsData: null,
-            activeSource: 'bangumi',
-            loadingDetails: false,
-            isRefreshing: false,
-            refreshStatus: { total: 0, current: 0, is_running: false, last_result: '' },
-            refreshInterval: null,
 
-            // Toast Notification logic
-            showToast: false,
-            toastMessage: '',
-            toastType: 'info',
+<div class="space-y-6" x-data="{
+    showDetailsModal: false,
+    modalRaw: null,
+    detailsData: null,
+    activeSource: 'bangumi',
+    loadingDetails: false,
+    isRefreshing: false,
+    refreshStatus: { total: 0, current: 0, is_running: false, last_result: '' },
+    refreshInterval: null,
+    libraryMetadata: {}, // Local metadata store
 
-            init() {
-                console.log('Alpine component initialized.');
-                window.libraryComponent = this;
-            },
+    // Toast Notification logic
+    showToast: false,
+    toastMessage: '',
+    toastType: 'info',
 
-            toast(msg, type = 'info') {
-                this.toastMessage = msg;
-                this.toastType = type;
-                this.showToast = true;
-                setTimeout(() => this.showToast = false, 3000);
-            },
-
-            scrollToTop() {
-                this.$nextTick(() => {
-                    // Try to find the scrollable container within the modal
-                    const modalContent = document.querySelector('#modal-layer .custom-scrollbar');
-                    if (modalContent) modalContent.scrollTop = 0;
-                });
-            },
-
-            openDetails(id) {
-                console.log('Opening details for ID:', id);
-                if (!window.libraryMetadata || !window.libraryMetadata[id]) {
-                    console.error('Metadata not found for ID:', id);
-                    this.toast('数据加载失败', 'error');
-                    return;
-                }
-                this.modalRaw = window.libraryMetadata[id];
-                this.showDetailsModal = true;
-
-                // Reset scroll immediately
-                this.scrollToTop();
-
-                const metadata = this.modalRaw;
-
-                // Initial data
-                this.detailsData = {
-                    name: metadata.title,
-                    name_cn: metadata.title_cn,
-                    images: { large: metadata.image },
-                    summary: metadata.summary || '暂无简介',
-                    tags: [],
-                    rating: { score: '...' },
-                    air_date: metadata.air_date
-                };
-
-                // Fetch logic...
-                if (metadata.bangumi_id > 0) this.switchSource('bangumi');
-                else if (metadata.tmdb_id > 0) this.switchSource('tmdb');
-                else if (metadata.anilist_id > 0) this.switchSource('anilist');
-                else this.loadingDetails = false;
-            },
-
-            async switchSource(source) {
-                this.activeSource = source;
-                this.loadingDetails = true;
-                this.scrollToTop();
-
-                try {
-                    if (source === 'tmdb') {
-                        this.detailsData = {
-                            name: this.modalRaw.tmdb_title || this.modalRaw.title,
-                            name_cn: this.modalRaw.title_cn,
-                            images: { large: this.modalRaw.tmdb_image },
-                            summary: this.modalRaw.tmdb_summary || '暂无 TMDB 简介',
-                            rating: { score: this.modalRaw.tmdb_rating || 'N/A' },
-                            air_date: this.modalRaw.air_date
-                        };
-                    } else if (source === 'anilist') {
-                        this.detailsData = {
-                            name: this.modalRaw.anilist_title || this.modalRaw.title,
-                            name_cn: '',
-                            images: { large: this.modalRaw.anilist_image },
-                            summary: this.modalRaw.anilist_summary || '暂无 AniList 简介',
-                            rating: { score: this.modalRaw.anilist_rating || 'N/A' },
-                            air_date: this.modalRaw.air_date
-                        };
-                    } else {
-                        // Bangumi
-                        if (this.modalRaw.bangumi_id && this.modalRaw.bangumi_id > 0) {
-                            const res = await fetch('/api/bangumi/subject/' + this.modalRaw.bangumi_id);
-                            if (res.ok) {
-                                const d = await res.json();
-                                if (!d.error) this.detailsData = d;
-                            }
-                        } else {
-                            this.detailsData = {
-                                name: this.modalRaw.title,
-                                summary: '未关联 Bangumi ID',
-                                images: { large: this.modalRaw.image }
-                            };
-                        }
-                    }
-                } catch (e) { console.error(e); }
-                finally { this.loadingDetails = false; }
-            },
-
-            async refreshLibrary(force = false) {
-                if (this.isRefreshing) return;
-
-                try {
-                    const url = force ? '/library/refresh?force=true' : '/library/refresh';
-                    const res = await fetch(url, { method: 'POST' });
-                    if (res.ok) {
-                        this.isRefreshing = true;
-                        this.startPollingStatus();
-                    } else {
-                        this.toast('请求失败，请稍后重试', 'error');
-                    }
-                } catch (e) {
-                    console.error('Refresh start failed:', e);
-                    this.toast('请求出错: ' + e.message, 'error');
-                }
-            },
-
-            async refreshSingle(id, event) {
-                if (event) event.stopPropagation(); // Don't open modal
-
-                this.toast('正在刷新该条元数据...', 'info');
-
-                try {
-                    const res = await fetch(`/api/library/metadata/${id}/refresh`, { method: 'POST' });
-                    if (res.ok) {
-                        this.toast('元数据刷新成功，即将刷新页面...', 'success');
-                        setTimeout(() => {
-                            htmx.ajax('GET', '/library', { target: '#main-content', pushUrl: true });
-                        }, 800);
-                    } else {
-                        const data = await res.json();
-                        this.toast(data.message || '刷新失败', 'error');
-                    }
-                } catch (e) {
-                    this.toast('刷新出错: ' + e.message, 'error');
-                }
-            },
-
-            async startPollingStatus() {
-                if (this.refreshInterval) clearInterval(this.refreshInterval);
-                this.refreshInterval = setInterval(async () => {
-                    try {
-                        const res = await fetch('/api/library/refresh/status');
-                        if (res.ok) {
-                            const data = await res.json();
-                            this.refreshStatus = data;
-                            if (!data.is_running) {
-                                clearInterval(this.refreshInterval);
-                                this.isRefreshing = false;
-                                if (data.last_result) {
-                                    this.toast(data.last_result, 'success');
-                                }
-                            }
-                        }
-                    } catch (e) {
-                        console.error('Poll failed:', e);
-                    }
-                }, 1000);
+    init() {
+        console.log('Inline Alpine initialized. Parsing metadata...');
+        try {
+            const el = document.getElementById('library-metadata');
+            if(el) {
+                const rawMetadata = JSON.parse(el.textContent);
+                this.libraryMetadata = rawMetadata.reduce((acc, item) => {
+                    acc[item.ID] = item;
+                    return acc;
+                }, {});
+                console.log('Metadata parsed:', Object.keys(this.libraryMetadata).length);
             }
+        } catch (e) {
+            console.error('Failed to parse metadata in init:', e);
+        }
+        
+        // Watchers
+        this.$watch('activeSource', () => this.scrollToTop());
+        this.$watch('loadingDetails', (val) => { if(!val) this.scrollToTop() }); 
+        this.$watch('showDetailsModal', value => document.body.style.overflow = value ? 'hidden' : '');
+    },
+
+    toast(msg, type = 'info') {
+        this.toastMessage = msg;
+        this.toastType = type;
+        this.showToast = true;
+        setTimeout(() => this.showToast = false, 3000);
+    },
+
+    scrollToTop() {
+        this.$nextTick(() => {
+            const modalContent = document.querySelector('#modal-layer .custom-scrollbar');
+            if (modalContent) modalContent.scrollTop = 0;
+        });
+    },
+
+    openDetails(id) {
+        if (!this.libraryMetadata || !this.libraryMetadata[id]) {
+            console.error('Metadata not found for ID:', id);
+            this.toast('数据加载失败', 'error');
+            return;
+        }
+        this.modalRaw = this.libraryMetadata[id];
+        this.showDetailsModal = true;
+        this.scrollToTop();
+
+        const metadata = this.modalRaw;
+        this.detailsData = {
+            name: metadata.title,
+            name_cn: metadata.title_cn,
+            images: { large: metadata.image },
+            summary: metadata.summary || '暂无简介',
+            tags: [],
+            rating: { score: '...' },
+            air_date: metadata.air_date
         };
-    };
 
-</script>
+        if (metadata.bangumi_id > 0) this.switchSource('bangumi');
+        else if (metadata.tmdb_id > 0) this.switchSource('tmdb');
+        else if (metadata.anilist_id > 0) this.switchSource('anilist');
+        else this.loadingDetails = false;
+    },
 
-<div class="space-y-6" x-data="libraryData()" @keydown.escape="showDetailsModal = false"
-    @open-library-details.window="openDetails($event.detail)"
-    x-init="$watch('activeSource', () => scrollToTop()); $watch('loadingDetails', (val) => { if(!val) scrollToTop() }); $watch('showDetailsModal', value => document.body.style.overflow = value ? 'hidden' : '')">
+    async switchSource(source) {
+        this.activeSource = source;
+        this.loadingDetails = true;
+        this.scrollToTop();
 
+        try {
+            if (source === 'tmdb') {
+                this.detailsData = {
+                    name: this.modalRaw.tmdb_title || this.modalRaw.title,
+                    name_cn: this.modalRaw.title_cn,
+                    images: { large: this.modalRaw.tmdb_image },
+                    summary: this.modalRaw.tmdb_summary || '暂无 TMDB 简介',
+                    rating: { score: this.modalRaw.tmdb_rating || 'N/A' },
+                    air_date: this.modalRaw.air_date
+                };
+            } else if (source === 'anilist') {
+                this.detailsData = {
+                    name: this.modalRaw.anilist_title || this.modalRaw.title,
+                    name_cn: '',
+                    images: { large: this.modalRaw.anilist_image },
+                    summary: this.modalRaw.anilist_summary || '暂无 AniList 简介',
+                    rating: { score: this.modalRaw.anilist_rating || 'N/A' },
+                    air_date: this.modalRaw.air_date
+                };
+            } else {
+                if (this.modalRaw.bangumi_id && this.modalRaw.bangumi_id > 0) {
+                    const res = await fetch('/api/bangumi/subject/' + this.modalRaw.bangumi_id);
+                    if (res.ok) {
+                        const d = await res.json();
+                        if (!d.error) this.detailsData = d;
+                    }
+                } else {
+                    this.detailsData = {
+                        name: this.modalRaw.title,
+                        summary: '未关联 Bangumi ID',
+                        images: { large: this.modalRaw.image }
+                    };
+                }
+            }
+        } catch (e) { console.error(e); }
+        finally { this.loadingDetails = false; }
+    },
+
+    async refreshLibrary(force = false) {
+        if (this.isRefreshing) return;
+        try {
+            const url = force ? '/library/refresh?force=true' : '/library/refresh';
+            const res = await fetch(url, { method: 'POST' });
+            if (res.ok) {
+                this.isRefreshing = true;
+                this.startPollingStatus();
+            } else { this.toast('请求失败', 'error'); }
+        } catch (e) { this.toast('请求出错: ' + e.message, 'error'); }
+    },
+
+    async refreshSingle(id, event) {
+        if (event) event.stopPropagation();
+        this.toast('正在刷新该条元数据...', 'info');
+        try {
+            const res = await fetch(`/api/library/metadata/${id}/refresh`, { method: 'POST' });
+            if (res.ok) {
+                this.toast('刷新成功，页面即将更新...', 'success');
+                setTimeout(() => {
+                    htmx.ajax('GET', '/library', { target: '#main-content', pushUrl: true });
+                }, 800);
+            } else {
+                const data = await res.json();
+                this.toast(data.message || '刷新失败', 'error');
+            }
+        } catch (e) { this.toast('刷新出错: ' + e.message, 'error'); }
+    },
+
+    async startPollingStatus() {
+        if (this.refreshInterval) clearInterval(this.refreshInterval);
+        this.refreshInterval = setInterval(async () => {
+            try {
+                const res = await fetch('/api/library/refresh/status');
+                if (res.ok) {
+                    const data = await res.json();
+                    this.refreshStatus = data;
+                    if (!data.is_running) {
+                        clearInterval(this.refreshInterval);
+                        this.isRefreshing = false;
+                        if (data.last_result) this.toast(data.last_result, 'success');
+                    }
+                }
+            } catch (e) { console.error('Poll failed:', e); }
+        }, 1000);
+    }
+}" @keydown.escape="showDetailsModal = false">
     <!-- Header -->
     <div
         class="flex justify-between items-center bg-white/60 backdrop-blur-xl p-6 rounded-3xl border border-white/50 shadow-lg mb-8 relative overflow-hidden group">
@@ -260,8 +234,7 @@
     <!-- Grid -->
     <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-8 px-2">
         {{ range .Metadata }}
-        <div class="group relative flex flex-col cursor-pointer"
-            onclick="if(window.libraryComponent){ window.libraryComponent.openDetails({{.ID}}) }">
+        <div class="group relative flex flex-col cursor-pointer" @click="openDetails({{.ID}})">
 
             <!-- Card Poster -->
             <div

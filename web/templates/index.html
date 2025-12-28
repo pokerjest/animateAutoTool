@@ -128,18 +128,13 @@
                 <!-- QB Status -->
                 <div class="flex items-center justify-between text-sm py-1 border-b border-gray-100/50 last:border-0">
                     <span class="text-gray-600 font-medium">qBittorrent</span>
-                    {{ if .QBConnected }}
-                    <span
-                        class="text-emerald-600 font-bold flex items-center gap-1.5 bg-emerald-50 px-2 py-0.5 rounded-full text-xs"
-                        title="{{.QBVersion}}">
-                        <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> 已连接
-                    </span>
-                    {{ else }}
-                    <span
-                        class="text-red-500 font-bold flex items-center gap-1.5 bg-red-50 px-2 py-0.5 rounded-full text-xs">
-                        <span class="w-1.5 h-1.5 rounded-full bg-red-500"></span> 未连接
-                    </span>
-                    {{ end }}
+                    <div id="qb-status-dashboard" hx-get="/api/dashboard/qb-status" hx-trigger="load"
+                        hx-swap="outerHTML">
+                        <span
+                            class="text-gray-400 font-bold flex items-center gap-1.5 bg-gray-50 px-2 py-0.5 rounded-full text-xs">
+                            <span class="w-1.5 h-1.5 rounded-full bg-gray-300 animate-pulse"></span> 检查中
+                        </span>
+                    </div>
                 </div>
                 <!-- Bangumi Status -->
                 <div class="flex items-center justify-between text-sm py-1 border-b border-gray-100/50 last:border-0">
@@ -248,36 +243,46 @@
     </div>
     {{ end }}
 
-    <!-- 1. Watching List -->
-    {{ if .WatchingList }}
-    <div class="space-y-4">
-        <h3 class="text-xl font-black text-gray-800 flex items-center gap-3">
-            <span class="w-1.5 h-6 bg-pink-500 rounded-full"></span>
-            在看
-            <span class="text-xs font-bold text-gray-400 bg-gray-100 px-3 py-1 rounded-full">{{ len .WatchingList
-                }}</span>
-        </h3>
-        {{ template "anime_grid" .WatchingList }}
+    <!-- Async Bangumi Data Loader -->
+    {{ if .BangumiLogin }}
+    <div id="bangumi-data-container" hx-get="/api/dashboard/bangumi-data" hx-trigger="load" hx-swap="innerHTML"
+        class="min-h-[200px]">
+        <!-- Skeleton / Loading State -->
+        <div class="space-y-6 animate-pulse">
+            <!-- Watching Skeleton -->
+            <div class="space-y-4">
+                <div class="flex items-center gap-3">
+                    <div class="w-1.5 h-6 bg-gray-200 rounded-full"></div>
+                    <div class="h-6 w-20 bg-gray-200 rounded"></div>
+                    <div class="h-5 w-8 bg-gray-200 rounded-full"></div>
+                </div>
+                <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-6">
+                    {{ range $i, $e := slice 1 2 3 4 5 6 }}
+                    <div class="aspect-[2/3] bg-gray-200 rounded-2xl"></div>
+                    {{ end }}
+                </div>
+            </div>
+            <!-- Completed Skeleton -->
+            <div class="space-y-4">
+                <div class="flex items-center gap-3">
+                    <div class="w-1.5 h-6 bg-gray-200 rounded-full"></div>
+                    <div class="h-6 w-20 bg-gray-200 rounded"></div>
+                    <div class="h-5 w-8 bg-gray-200 rounded-full"></div>
+                </div>
+                <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-6">
+                    {{ range $i, $e := slice 1 2 3 4 5 6 }}
+                    <div class="aspect-[2/3] bg-gray-200 rounded-2xl"></div>
+                    {{ end }}
+                </div>
+            </div>
+        </div>
     </div>
-    {{ end }}
-
-    <!-- 2. Completed List -->
-    {{ if .CompletedList }}
-    <div class="space-y-4">
-        <h3 class="text-xl font-black text-gray-800 flex items-center gap-3">
-            <span class="w-1.5 h-6 bg-emerald-500 rounded-full"></span>
-            已看
-            <span class="text-xs font-bold text-gray-400 bg-gray-100 px-3 py-1 rounded-full">{{ len .CompletedList
-                }}</span>
-        </h3>
-        {{ template "anime_grid" .CompletedList }}
-    </div>
-    {{ end }}
-
-    {{ if and (not .WatchingList) (not .CompletedList) .BangumiLogin }}
+    {{ else }}
     <div class="text-center py-20 bg-white/40 rounded-3xl border-2 border-dashed border-gray-200">
-        <div class="text-4xl mb-3 opacity-30">📦</div>
-        <p class="text-gray-400 font-medium">暂无相关动画数据</p>
+        <div class="text-4xl mb-3 opacity-30">🔐</div>
+        <p class="text-gray-400 font-medium">请先登录 Bangumi 以查看进度</p>
+        <a href="/api/bangumi/login"
+            class="inline-block mt-4 px-6 py-2 bg-pink-500 text-white rounded-xl shadow-lg shadow-pink-500/30 hover:bg-pink-600 transition-all font-bold text-sm">立即登录</a>
     </div>
     {{ end }}
 
