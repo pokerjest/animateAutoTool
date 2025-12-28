@@ -65,7 +65,7 @@ func applyProxyToBangumiClient(client *bangumi.Client) {
 	// Check if enabled for Bangumi (default to false if not set, or true? User says "checkbox", so explicit enable)
 	// But traditionally if not set, maybe we want it off.
 	// We check if "proxy_bangumi_enabled" == "true"
-	if err := db.DB.Where("key = ?", model.ConfigKeyProxyBangumi).First(&enabledConfig).Error; err != nil || enabledConfig.Value != "true" {
+	if err := db.DB.Where("key = ?", model.ConfigKeyProxyBangumi).First(&enabledConfig).Error; err != nil || enabledConfig.Value != model.ConfigValueTrue {
 		return
 	}
 

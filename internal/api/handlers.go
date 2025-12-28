@@ -123,7 +123,7 @@ func fetchQBConfig() (string, string, string) {
 	// Fetch all to avoid scope pollution from sequential First() calls
 	if err := db.DB.Find(&configs).Error; err != nil {
 		log.Printf("Error fetching configs: %v", err)
-		return "http://localhost:8080", "", ""
+		return DefaultServerURL, "", ""
 	}
 
 	cfgMap := make(map[string]string)
@@ -645,19 +645,19 @@ func SwitchSubscriptionSourceHandler(c *gin.Context) {
 
 	m := sub.Metadata
 	switch source {
-	case "tmdb":
+	case SourceTMDB:
 		if m.TMDBID != 0 {
 			m.Title = m.TMDBTitle
 			m.Image = m.TMDBImage
 			m.Summary = m.TMDBSummary
 		}
-	case "bangumi":
+	case SourceBangumi:
 		if m.BangumiID != 0 {
 			m.Title = m.BangumiTitle
 			m.Image = m.BangumiImage
 			m.Summary = m.BangumiSummary
 		}
-	case "anilist":
+	case SourceAniList:
 		if m.AniListID != 0 {
 			m.Title = m.AniListTitle
 			m.Image = m.AniListImage
@@ -678,6 +678,19 @@ func SwitchSubscriptionSourceHandler(c *gin.Context) {
 }
 
 // === Settings ===
+
+const (
+	DefaultServerURL     = "http://localhost:8080"
+	StatusNotConnected   = "未连接"
+	StatusConnected      = "已连接"
+	StatusConnectedHTML  = `<span class="text-emerald-600 font-bold flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-emerald-500"></span> ` + StatusConnected + `</span>`
+	StatusConnectionFail = "连接失败"
+	ErrTokenMissing      = "Token missing"
+	StyleDashboard       = "dashboard"
+	SourceBangumi        = "bangumi"
+	SourceAniList        = "anilist"
+	SourceTMDB           = "tmdb"
+)
 
 func SettingsHandler(c *gin.Context) {
 	skip := isHTMX(c)
@@ -1228,15 +1241,15 @@ func RenderTMDBStatus(style string) string {
 	connected, errStr := CheckTMDBConnection()
 
 	// Dashboard Style
-	if style == "dashboard" {
+	if style == StyleDashboard {
 		if connected {
-			return `<span class="text-emerald-600 font-bold flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-emerald-500"></span> 已连接</span>`
+			return StatusConnectedHTML
 		}
-		errText := "未连接"
+		errText := StatusNotConnected
 		if strings.Contains(errStr, "Token") {
 			errText = "未连接 (Token无效)"
 		} else if errStr != "" {
-			errText = "连接失败"
+			errText = StatusConnectionFail
 		}
 		return fmt.Sprintf(`<span class="text-red-500 font-bold flex items-center gap-1" title="%s"><span class="w-2 h-2 rounded-full bg-red-500"></span> %s</span>`, errStr, errText)
 	}
@@ -1247,7 +1260,7 @@ func RenderTMDBStatus(style string) string {
 	}
 
 	// Error cases
-	if errStr == "Token missing" {
+	if errStr == ErrTokenMissing {
 		return `<div id="tmdb-status"><div class="text-sm text-gray-500 flex items-center gap-2"><span>🔴 未连接</span><span class="text-xs text-gray-400">(请先输入 Token 并保存)</span></div></div>`
 	}
 	if strings.Contains(errStr, "Token Invalid") {

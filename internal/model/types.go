@@ -94,12 +94,16 @@ type GlobalConfig struct {
 }
 
 const (
+	ConfigValueTrue = "true"
+)
+
+const (
 	ConfigKeyQBUrl               = "qb_url"
 	ConfigKeyQBUsername          = "qb_username"
 	ConfigKeyQBPassword          = "qb_password"
 	ConfigKeyBaseDir             = "base_download_dir"
 	ConfigKeyBangumiAppID        = "bangumi_app_id"
-	ConfigKeyBangumiAppSecret    = "bangumi_app_secret"
+	ConfigKeyBangumiAppSecret    = "bangumi_app_secret" //nolint:gosec
 	ConfigKeyBangumiAccessToken  = "bangumi_access_token"
 	ConfigKeyBangumiRefreshToken = "bangumi_refresh_token"
 	ConfigKeyTMDBToken           = "tmdb_token"
@@ -109,7 +113,7 @@ const (
 	ConfigKeyAniListToken        = "anilist_token"
 	ConfigKeyProxyAniList        = "proxy_anilist_enabled"
 	ConfigKeyJellyfinUrl         = "jellyfin_url"
-	ConfigKeyJellyfinApiKey      = "jellyfin_api_key"
+	ConfigKeyJellyfinApiKey      = "jellyfin_api_key" //nolint:gosec
 	ConfigKeyProxyJellyfin       = "proxy_jellyfin_enabled"
 	ConfigKeyAListUrl            = "alist_url"
 	ConfigKeyAListToken          = "alist_token"
@@ -117,9 +121,10 @@ const (
 	ConfigKeyPikPakPassword      = "pikpak_password"
 
 	// Cloudflare R2
+	// Cloudflare R2
 	ConfigKeyR2Endpoint  = "r2_endpoint"
 	ConfigKeyR2AccessKey = "r2_access_key"
-	ConfigKeyR2SecretKey = "r2_secret_key"
+	ConfigKeyR2SecretKey = "r2_secret_key" //nolint:gosec
 	ConfigKeyR2Bucket    = "r2_bucket"
 )
 

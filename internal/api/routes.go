@@ -38,7 +38,7 @@ func InitRoutes(r *gin.Engine) {
 		},
 		"json": func(v interface{}) template.JS {
 			a, _ := json.Marshal(v)
-			return template.JS(a)
+			return template.JS(a) //nolint:gosec // json.Marshal escapes HTML
 		},
 		"toJson": func(v interface{}) string {
 			a, _ := json.Marshal(v)

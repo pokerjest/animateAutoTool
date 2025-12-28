@@ -262,7 +262,7 @@ func ImportBackupHandler(c *gin.Context) {
 		return
 	}
 
-	if err := os.WriteFile(db.CurrentDBPath, input, 0644); err != nil {
+	if err := os.WriteFile(db.CurrentDBPath, input, 0600); err != nil {
 		// Try to reopen DB if fail
 		db.InitDB(db.CurrentDBPath)
 		c.String(http.StatusInternalServerError, "Failed to write database file: "+err.Error())
