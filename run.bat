@@ -5,7 +5,7 @@ if not exist "scripts\control.bat" (
     exit /b 1
 )
 
-call scripts\control.bat start
+call scripts\control.bat run
 if %ERRORLEVEL% neq 0 (
     echo Failed to start server.
     pause

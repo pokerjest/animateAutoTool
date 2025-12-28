@@ -15,6 +15,7 @@ if not exist "%BIN_DIR%" mkdir "%BIN_DIR%"
 if "%1"=="" goto help
 if "%1"=="build" goto build
 if "%1"=="start" goto start
+if "%1"=="run" goto run
 if "%1"=="stop" goto stop
 if "%1"=="restart" goto restart
 if "%1"=="status" goto status
@@ -83,6 +84,14 @@ goto help
     ) else (
         echo Started, but could not capture PID. Check %LOG_FILE% for details.
     )
+    exit /b 0
+
+:run
+    call :build
+    if %ERRORLEVEL% neq 0 exit /b 1
+
+    echo Starting %APP_NAME% in foreground...
+    "%BIN_PATH%"
     exit /b 0
 
 :stop
