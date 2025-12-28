@@ -9,6 +9,7 @@ import (
 	"github.com/alist-org/alist/v3/cmd/flags"
 	"github.com/alist-org/alist/v3/internal/conf"
 	"github.com/alist-org/alist/v3/internal/db"
+	glebarez "github.com/glebarez/sqlite"
 	log "github.com/sirupsen/logrus"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
@@ -46,6 +47,13 @@ func InitDB() {
 	} else {
 		database := conf.Conf.Database
 		switch database.Type {
+		case "sqlite":
+			{
+				if !(strings.HasSuffix(database.DBFile, ".db") && len(database.DBFile) > 3) {
+					log.Fatalf("db name error.")
+				}
+				dB, err = gorm.Open(glebarez.Open(database.DBFile), gormConfig)
+			}
 		case "sqlite3":
 			{
 				if !(strings.HasSuffix(database.DBFile, ".db") && len(database.DBFile) > 3) {

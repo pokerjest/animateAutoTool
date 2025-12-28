@@ -40,7 +40,6 @@ check_deps() {
 build() {
     check_deps
     echo -e "${GREEN}Building $APP_NAME...${NC}"
-    # Default to CGO_ENABLED=0 for portability (using pure Go SQLite driver)
     CGO_ENABLED=0 go build -ldflags="-s -w" -o $BIN_PATH $SRC_PATH
     if [ $? -ne 0 ]; then
         echo -e "${RED}Build failed!${NC}"

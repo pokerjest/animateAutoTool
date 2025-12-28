@@ -29,6 +29,7 @@ go.work
 
 # Log files
 *.log
+*.pid
 
 # IDE
 .vscode/
@@ -41,8 +42,16 @@ go.work
 .DS_Store
 Thumbs.db
 /dist/
+*.tar.gz
+
+# Local Configuration
+config.yaml
 
 # Project Binaries
 animateAutoTool
 remote_server
 animate_server
+
+# Debug Artifacts
+debug_calendar.html
+mikan_home.html
