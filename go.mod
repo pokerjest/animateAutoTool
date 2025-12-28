@@ -1,6 +1,6 @@
 module github.com/pokerjest/animateAutoTool
 
-go 1.24.3
+go 1.24.11
 
 require (
 	github.com/alist-org/alist/v3 v3.56.0
