@@ -138,7 +138,7 @@ func DefaultConfig() *Config {
 		TokenExpiresIn: 48,
 		TempDir:        tempDir,
 		Database: Database{
-			Type:        "sqlite3",
+			Type:        "sqlite",
 			Port:        0,
 			TablePrefix: "x_",
 			DBFile:      dbPath,
