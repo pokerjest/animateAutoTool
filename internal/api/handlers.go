@@ -690,6 +690,7 @@ const (
 	SourceBangumi        = "bangumi"
 	SourceAniList        = "anilist"
 	SourceTMDB           = "tmdb"
+	ValueTrue            = "true"
 )
 
 func SettingsHandler(c *gin.Context) {
@@ -1273,7 +1274,7 @@ func RenderTMDBStatus(style string) string {
 func CheckTMDBConnection() (bool, string) {
 	var config model.GlobalConfig
 	if err := db.DB.Where("key = ?", model.ConfigKeyTMDBToken).First(&config).Error; err != nil || config.Value == "" {
-		return false, "Token missing"
+		return false, ErrTokenMissing
 	}
 
 	token := config.Value
@@ -1283,7 +1284,7 @@ func CheckTMDBConnection() (bool, string) {
 	var proxyEnabled model.GlobalConfig
 	var proxyConfig model.GlobalConfig
 	db.DB.Where("key = ?", model.ConfigKeyProxyTMDB).First(&proxyEnabled)
-	if proxyEnabled.Value == "true" {
+	if proxyEnabled.Value == ValueTrue {
 		db.DB.Where("key = ?", model.ConfigKeyProxyURL).First(&proxyConfig)
 	}
 
@@ -1305,7 +1306,7 @@ func CheckTMDBConnection() (bool, string) {
 	// Check Proxy
 	// Proxy Setup (Reusing variables from Cache Check)
 	var transport *http.Transport
-	if proxyEnabled.Value == "true" && proxyConfig.Value != "" {
+	if proxyEnabled.Value == ValueTrue && proxyConfig.Value != "" {
 		if proxyUrl, err := url.Parse(proxyConfig.Value); err == nil {
 			transport = &http.Transport{Proxy: http.ProxyURL(proxyUrl)}
 		}
@@ -1433,7 +1434,7 @@ func CheckAniListConnection() (bool, string, string) {
 	var proxyConfig model.GlobalConfig
 	var proxyEnabled model.GlobalConfig
 	db.DB.Where("key = ?", model.ConfigKeyProxyAniList).First(&proxyEnabled)
-	if proxyEnabled.Value == "true" {
+	if proxyEnabled.Value == ValueTrue {
 		db.DB.Where("key = ?", model.ConfigKeyProxyURL).First(&proxyConfig)
 	}
 
@@ -1456,7 +1457,7 @@ func CheckAniListConnection() (bool, string, string) {
 	req.Header.Set("Accept", "application/json")
 
 	var transport *http.Transport
-	if proxyEnabled.Value == "true" {
+	if proxyEnabled.Value == ValueTrue {
 		if proxyUrl, err := url.Parse(proxyConfig.Value); err == nil && proxyConfig.Value != "" {
 			transport = &http.Transport{Proxy: http.ProxyURL(proxyUrl)}
 		}
@@ -1565,7 +1566,7 @@ func CheckJellyfinConnection() (bool, string) {
 
 	// Cache Check
 	var proxyConfig model.GlobalConfig
-	if proxyEnabled.Value == "true" {
+	if proxyEnabled.Value == ValueTrue {
 		db.DB.Where("key = ?", model.ConfigKeyProxyURL).First(&proxyConfig)
 	}
 
@@ -1592,7 +1593,7 @@ func CheckJellyfinConnection() (bool, string) {
 	req.Header.Set("Accept", "application/json")
 
 	var transport *http.Transport
-	if proxyEnabled.Value == "true" {
+	if proxyEnabled.Value == ValueTrue {
 		if proxyUrl, err := url.Parse(proxyConfig.Value); err == nil && proxyConfig.Value != "" {
 			transport = &http.Transport{Proxy: http.ProxyURL(proxyUrl)}
 		}

@@ -42,7 +42,7 @@ func GetCalendarHandler(c *gin.Context) {
 	}
 
 	// Check for HTMX request
-	isHTMX := c.GetHeader("HX-Request") == "true"
+	isHTMX := c.GetHeader("HX-Request") == ValueTrue
 
 	// Fetch active subscriptions to check status
 	type SubInfo struct {

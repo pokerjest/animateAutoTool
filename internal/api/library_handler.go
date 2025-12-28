@@ -73,7 +73,7 @@ func GetLibraryHandler(c *gin.Context) {
 
 // RefreshLibraryMetadataHandler triggers a background global refresh
 func RefreshLibraryMetadataHandler(c *gin.Context) {
-	force := c.Query("force") == "true"
+	force := c.Query("force") == ValueTrue
 	svc := service.NewLocalAnimeService()
 	if service.GlobalRefreshStatus.IsRunning {
 		c.JSON(http.StatusOK, gin.H{"message": "已经在刷新中", "status": "running"})
