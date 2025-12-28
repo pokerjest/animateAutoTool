@@ -57,7 +57,10 @@ func LoginPostHandler(c *gin.Context) {
 		})
 	}
 
-	session.Save()
+	if err := session.Save(); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save session"})
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Login successful"})
 }
@@ -65,7 +68,10 @@ func LoginPostHandler(c *gin.Context) {
 func LogoutHandler(c *gin.Context) {
 	session := sessions.Default(c)
 	session.Clear()
-	session.Save()
+	if err := session.Save(); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save session"})
+		return
+	}
 	c.Redirect(http.StatusFound, "/login")
 }
 

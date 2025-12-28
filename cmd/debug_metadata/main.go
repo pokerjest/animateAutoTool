@@ -45,7 +45,10 @@ func main() {
 		var notnull int
 		var dfltValue sql.NullString
 		var pk int
-		rows.Scan(&cid, &name, &ctype, &notnull, &dfltValue, &pk)
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dfltValue, &pk); err != nil {
+			log.Printf("Failed to scan row: %v", err)
+			continue
+		}
 		fmt.Printf("- %s\n", name)
 		cols = append(cols, name)
 	}
@@ -85,7 +88,10 @@ func checkDuplicates(db *gorm.DB, tableName, col string) {
 	for rows.Next() {
 		var val interface{}
 		var cnt int
-		rows.Scan(&val, &cnt)
+		if err := rows.Scan(&val, &cnt); err != nil {
+			log.Printf("Failed to scan row: %v", err)
+			continue
+		}
 
 		fmt.Printf("- %s: %v (Count: %d)\n", col, val, cnt)
 		count++
