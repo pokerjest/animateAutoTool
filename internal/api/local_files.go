@@ -2,6 +2,7 @@ package api
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -330,6 +331,7 @@ func PreviewDirectoryRenameHandler(c *gin.Context) {
 	}
 
 	// 1. Get Directory
+	log.Printf("DEBUG: Preview Rename Request: Pattern='%s', Season='%s', Manual=%v", req.Pattern, req.Season, req.IsManual)
 	var dir model.LocalAnimeDirectory
 	if err := db.DB.First(&dir, id).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "未找到目录记录"})
@@ -486,20 +488,6 @@ func generateRenamePreview(files []FileInfo, anime model.LocalAnime, req RenameR
 		pattern = "{Title} - S{Season}E{Ep}.{Ext}"
 	}
 
-	seasonVal := req.Season
-	if seasonVal == "" {
-		// Try to use DB season if available
-		if anime.Season > 0 {
-			seasonVal = fmt.Sprintf("%d", anime.Season)
-		} else {
-			seasonVal = "01"
-		}
-	}
-	// Pad season to 2 digits
-	if len(seasonVal) == 1 {
-		seasonVal = "0" + seasonVal
-	}
-
 	// Prepare Metadata Variables
 	titleCN := anime.Title
 	titleJP := anime.Title
@@ -552,6 +540,24 @@ func generateRenamePreview(files []FileInfo, anime model.LocalAnime, req RenameR
 			continue
 		}
 
+		// Determine Season for this file
+		epSeasonVal := req.Season // Priority 1: User Override
+		if epSeasonVal == "" {
+			// Priority 2: Per-Episode Season (from DB or Parser)
+			if parsed.Season > 0 {
+				epSeasonVal = strconv.Itoa(parsed.Season)
+			} else if anime.Season > 0 {
+				// Priority 3: Series Level Default
+				epSeasonVal = strconv.Itoa(anime.Season)
+			} else {
+				epSeasonVal = "01"
+			}
+		}
+		// Pad to 2 digits
+		if len(epSeasonVal) == 1 {
+			epSeasonVal = "0" + epSeasonVal
+		}
+
 		newName := pattern
 		// 1. Basic Variables
 		newName = strings.ReplaceAll(newName, "{Title}", anime.Title)
@@ -559,7 +565,7 @@ func generateRenamePreview(files []FileInfo, anime model.LocalAnime, req RenameR
 		newName = strings.ReplaceAll(newName, "{TitleJP}", titleJP)
 		newName = strings.ReplaceAll(newName, "{TitleEN}", titleEN)
 		newName = strings.ReplaceAll(newName, "{Year}", year)
-		newName = strings.ReplaceAll(newName, "{Season}", seasonVal)
+		newName = strings.ReplaceAll(newName, "{Season}", epSeasonVal)
 
 		// 2. Technical Variables
 		newName = strings.ReplaceAll(newName, "{SubGroup}", parsed.Group)

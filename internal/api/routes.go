@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/pokerjest/animateAutoTool/internal/config"
 	"github.com/pokerjest/animateAutoTool/internal/service"
+	"github.com/pokerjest/animateAutoTool/internal/worker"
 )
 
 func InitRoutes(r *gin.Engine) {
@@ -18,6 +19,9 @@ func InitRoutes(r *gin.Engine) {
 	svc := service.NewLocalAnimeService()
 	svc.CleanupGarbage()
 	svc.StartMetadataMigration() // Start background image caching
+
+	// Start Event Workers
+	worker.StartMetadataWorker()
 
 	// Create default user if needed
 	authSvc := service.NewAuthService()
@@ -170,6 +174,9 @@ func InitRoutes(r *gin.Engine) {
 			// Dashboard Async Data
 			apiGroup.GET("/dashboard/bangumi-data", DashboardBangumiDataHandler)
 			apiGroup.GET("/dashboard/qb-status", DashboardQBStatusHandler)
+
+			// SSE
+			apiGroup.GET("/events", SSEHandler)
 		}
 	}
 }

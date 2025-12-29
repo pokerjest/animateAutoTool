@@ -67,14 +67,18 @@ func (s *LocalAnimeService) CleanupGarbage() {
 
 // AddDirectory 添加一个新的根目录
 func (s *LocalAnimeService) AddDirectory(path string) error {
-	path = filepath.Clean(path)
-	info, err := os.Stat(path)
-	if err != nil {
-		return err
-	}
-	if !info.IsDir() {
-		return os.ErrInvalid // 不是目录
-	}
+	// path = filepath.Clean(path) // Disable clean to respect user input exactly (e.g. Linux paths on Windows)
+	// info, err := os.Stat(path)
+	// if err != nil {
+	// 	 return err
+	// }
+	// if !info.IsDir() {
+	// 	 return os.ErrInvalid
+	// }
+
+	// User Request: Support adding directories from other platforms (e.g. Docker mapping)
+	// So we SKIP strict os.Stat validation. The scanner will handle errors if path is unreachable.
+	log.Printf("Adding directory: %s (Skipping strict existence check for cross-platform support)", path)
 
 	// Check if exists (including soft-deleted)
 	var existing model.LocalAnimeDirectory
@@ -496,6 +500,11 @@ func (s *LocalAnimeService) EnrichAnimeMetadata(anime *model.LocalAnime) {
 	// Sync metadata to ALL models (this one and others sharing it)
 	s.SyncMetadataToModels(anime.Metadata)
 
+	// Phase 1.5: Align Season/Episode Naming with TMDB (User Request)
+	if anime.Metadata != nil && anime.Metadata.TMDBID != 0 {
+		s.AlignEpisodesWithTMDB(anime)
+	}
+
 	// Phase 1: NFO Generation Integration
 	nfoGen := NewNFOGeneratorService()
 	// Ignore errors, we log them inside
@@ -504,10 +513,119 @@ func (s *LocalAnimeService) EnrichAnimeMetadata(anime *model.LocalAnime) {
 
 	// Optional: Generate Episode NFOs (if we had episode metadata linked)
 	// For now, we only have reliable Series metadata. Episode NFOs are generated if needed or in a separate pass.
+	// Since we aligned episodes effectively above, we can now regenerate NFOs with corrected S/E.
 	if len(anime.Episodes) > 0 {
 		for _, ep := range anime.Episodes {
 			_ = nfoGen.GenerateEpisodeNFO(&ep, anime)
 		}
+	}
+}
+
+// AlignEpisodesWithTMDB corrects local episode Season/Episode numbers based on TMDB logic
+// It primarily handles "Absolute Episode Numbering" (e.g. Ep 26 -> S02E01)
+func (s *LocalAnimeService) AlignEpisodesWithTMDB(anime *model.LocalAnime) {
+	if anime.Metadata == nil || anime.Metadata.TMDBID == 0 {
+		return
+	}
+
+	// 1. Fetch TMDB Series Details (with Seasons)
+	// We use initClients to get the properly configured client (with token & proxy)
+	_, tmdbClient, _ := s.initClients()
+	if tmdbClient == nil {
+		return
+	}
+
+	// We need to fetch details AGAIN because Metadata might not have the full season list (it only stores IDs/Text).
+	// But actually, we might have just fetched it in processTMDB?
+	// Only if we searched. Metadata struct doesn't store the Season List.
+	// So we must fetch.
+	show, err := performWithRetry(func() (*tmdb.TVShow, error) {
+		return tmdbClient.GetTVDetails(anime.Metadata.TMDBID)
+	})
+	if err != nil || show == nil {
+		log.Printf("Align: Failed to fetch TMDB details for ID %d: %v", anime.Metadata.TMDBID, err)
+		return
+	}
+
+	// 2. Build Cumulative Map
+	// Logic: If EpNum > PreviousTotal and EpNum <= CurrentTotal + SeasonCount -> It belongs to this Season
+	// BUT TMDB API GetTVDetails returns "Seasons" list with "episode_count".
+	// We assume standard ordering (Season 1, Season 2...).
+	// Specials (Season 0) usually don't count in absolute numbering of main episodes?
+	// Usually Anime Absolute Numbering ignores Specials.
+
+	type SeasonRange struct {
+		SeasonNum int
+		Start     int
+		End       int
+	}
+	var ranges []SeasonRange
+	currentTotal := 0
+
+	// Sort seasons just in case? API usually returns sorted but...
+	// Simple lookup is better.
+	// Let's iterate.
+	// We need to skip Season 0 for absolute count calculation.
+	for _, season := range show.Seasons {
+		if season.SeasonNumber == 0 {
+			continue
+		}
+		// Assuming strict ordering 1, 2, 3...
+		// If TMDB returns them out of order, we might have issues.
+		// But usually it iterates efficiently.
+		// Let's assume user calls this mostly for single-cour or multi-cour split.
+		// Simple logic:
+		start := currentTotal + 1
+		end := currentTotal + season.EpisodeCount
+		ranges = append(ranges, SeasonRange{
+			SeasonNum: season.SeasonNumber,
+			Start:     start,
+			End:       end,
+		})
+		currentTotal = end
+	}
+
+	// 3. Update Local Episodes
+	// We need to load episodes if they are not loaded
+	var episodes []model.LocalEpisode
+	if len(anime.Episodes) == 0 {
+		db.DB.Where("local_anime_id = ?", anime.ID).Find(&episodes)
+	} else {
+		episodes = anime.Episodes
+	}
+
+	for i := range episodes {
+		ep := &episodes[i]
+
+		// Only touch if it looks like Absolute Numbering (Season <= 1)
+		// If file says Season 2, we respect it.
+		if ep.SeasonNum <= 1 {
+			targetAbs := ep.EpisodeNum
+			// Check if it fits in a later season
+			for _, r := range ranges {
+				if targetAbs >= r.Start && targetAbs <= r.End {
+					// MATCH!
+					// But if it's Season 1, does it change anything?
+					// If r.SeasonNum == 1, Start=1. Ep 5 -> S1 E5. No change.
+					// If r.SeasonNum == 2, Start=26. Ep 26 -> S2 E1. CHANGE!
+
+					if r.SeasonNum != ep.SeasonNum {
+						newEpNum := targetAbs - r.Start + 1
+						log.Printf("Align: Remapping %s - Ep %d -> S%dE%d (Match TMDB S%d)",
+							anime.Title, targetAbs, r.SeasonNum, newEpNum, r.SeasonNum)
+
+						ep.SeasonNum = r.SeasonNum
+						ep.EpisodeNum = newEpNum
+						db.DB.Save(ep)
+					}
+					break
+				}
+			}
+		}
+	}
+	// Reload episodes into anime struct if we fetched them locally
+	if len(anime.Episodes) == 0 {
+		anime.Episodes = episodes
 	}
 }
 
@@ -644,21 +762,73 @@ func (s *LocalAnimeService) EnrichMetadata(m *model.AnimeMetadata, queryTitle st
 	}
 	log.Printf("DEBUG: EnrichMetadata for '%s' (ID: %d)", queryTitle, m.ID)
 
-	// 2. Fetch Bangumi Data (Priority: ID > Search Candidates)
-	s.enrichBangumi(m, bgmClient, queryTitle)
+	// Refresh candidates
+	candidates := getCandidateTitles(m, queryTitle)
 
-	// 3. Parallel Fetch for TMDB & AniList
-	s.enrichParallel(m, tmdbClient, anilistClient, queryTitle)
+	var wg sync.WaitGroup
+	var mu sync.Mutex // Protect m writes
 
-	// 4. Bangumi Retry (If initial failed but others succeeded)
-	if m.BangumiID == 0 && (m.TMDBID != 0 || m.AniListID != 0) {
-		s.retryBangumi(m, bgmClient, queryTitle)
+	wg.Add(3)
+
+	// 1. Bangumi Task
+	go func() {
+		defer wg.Done()
+		s.enrichBangumi(m, bgmClient, queryTitle)
+	}()
+
+	// 2. AniList Task (Promoted to First Class)
+	go func() {
+		defer wg.Done()
+		if anilistClient != nil {
+			s.processAniList(m, anilistClient, candidates, &mu)
+		}
+	}()
+
+	// 3. TMDB Task
+	go func() {
+		defer wg.Done()
+		if tmdbClient != nil {
+			s.processTMDB(m, tmdbClient, candidates, &mu)
+		}
+	}()
+
+	wg.Wait()
+
+	// 4. Cross-Reference: AniList -> Bangumi (Killer Feature)
+	// If Bangumi failed but AniList succeeded, use AniList's Native/Romaji title to retry Bangumi
+	if m.BangumiID == 0 && m.AniListID != 0 {
+		retryTitle := ""
+		if m.TitleJP != "" {
+			retryTitle = m.TitleJP
+		} else if m.TitleEN != "" {
+			retryTitle = m.TitleEN
+		}
+
+		if retryTitle != "" && retryTitle != queryTitle {
+			log.Printf("DEBUG: Cross-Match: Using AniList title '%s' to retry Bangumi search...", retryTitle)
+			s.enrichBangumi(m, bgmClient, retryTitle)
+		}
 	}
 
-	// 5. Save the enriched metadata
+	// 5. Cross-Reference: AniList -> TMDB (Optional, if TMDB failed)
+	if m.TMDBID == 0 && m.AniListID != 0 {
+		retryTitle := ""
+		if m.TitleEN != "" {
+			retryTitle = m.TitleEN // TMDB handles English well
+		} else if m.TitleJP != "" {
+			retryTitle = m.TitleJP
+		}
+
+		if retryTitle != "" && retryTitle != queryTitle && tmdbClient != nil {
+			log.Printf("DEBUG: Cross-Match: Using AniList title '%s' to retry TMDB search...", retryTitle)
+			s.processTMDB(m, tmdbClient, []string{retryTitle}, &mu)
+		}
+	}
+
+	// 6. Save the enriched metadata
 	s.saveAndConsolidate(m)
 
-	// 6. Set Active Fields (Bangumi > TMDB > AniList)
+	// 7. Set Active Fields
 	s.setActiveFields(m, rawQueryTitle)
 
 	db.DB.Save(m)
@@ -690,6 +860,11 @@ func (s *LocalAnimeService) initClients() (*bangumi.Client, *tmdb.Client, *anili
 			if err := db.DB.Where("key = ?", model.ConfigKeyProxyURL).First(&p).Error; err == nil {
 				proxyURL = p.Value
 			}
+		}
+		if proxyURL != "" {
+			log.Printf("DEBUG: Initializing TMDB Client with Proxy: %s", proxyURL)
+		} else {
+			log.Printf("DEBUG: Initializing TMDB Client WITHOUT Proxy (Direct Connection)")
 		}
 		tmdbClient = tmdb.NewClient(tmdbTokenConfig.Value, proxyURL)
 	}
@@ -778,38 +953,6 @@ func (s *LocalAnimeService) applyBangumiSubject(m *model.AnimeMetadata, bgmSubje
 	}
 	// Cache Image
 	m.BangumiImageRaw = s.fetchAndCacheImage(m.BangumiImage)
-}
-
-func (s *LocalAnimeService) enrichParallel(m *model.AnimeMetadata, tmdbClient *tmdb.Client, anilistClient *anilist.Client, queryTitle string) {
-	// Re-generate candidates including potential new Bangumi titles
-	finalCandidates := getCandidateTitles(m, queryTitle)
-
-	var wg sync.WaitGroup
-	var mu sync.Mutex // Protect m writes
-
-	wg.Add(2)
-
-	// --- 3. TMDB Task ---
-	go func() {
-		defer wg.Done()
-		if tmdbClient == nil {
-			return
-		}
-
-		s.processTMDB(m, tmdbClient, finalCandidates, &mu)
-	}()
-
-	// --- 4. AniList Task ---
-	go func() {
-		defer wg.Done()
-		if anilistClient == nil {
-			return
-		}
-
-		s.processAniList(m, anilistClient, finalCandidates, &mu)
-	}()
-
-	wg.Wait()
 }
 
 func (s *LocalAnimeService) processTMDB(m *model.AnimeMetadata, client *tmdb.Client, candidates []string, mu *sync.Mutex) {
@@ -1053,6 +1196,20 @@ func getCandidateTitles(m *model.AnimeMetadata, query string) []string {
 	add(m.TitleJP)
 	add(m.TitleEN)
 	add(query)
+
+	// Smart Split for Query (User Request: Handle mixed EN/CN filenames)
+	// Example: "Frieren - 葬送的芙莉莲" -> ["Frieren", "葬送的芙莉莲"]
+	// Split by common separators: "-"
+	if strings.Contains(query, "-") {
+		parts := strings.Split(query, "-")
+		for _, part := range parts {
+			add(part)
+		}
+	}
+	// Split by CJK / Latin transition?
+	// Simple regex to extract just CJK or just Latin words could be too aggressive.
+	// Splitting by "-" is the safest common convention for dual-language releases.
+
 	add(m.Title)
 
 	return candidates

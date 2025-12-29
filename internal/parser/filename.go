@@ -8,6 +8,16 @@ import (
 	"strings"
 )
 
+// IsVideoFile checks if the file is a video based on extension
+func IsVideoFile(path string) bool {
+	ext := strings.ToLower(filepath.Ext(path))
+	switch ext {
+	case ".mp4", ".mkv", ".avi", ".mov", ".flv", ".wmv", ".ts", ".rmvb", ".webm", ".m2ts":
+		return true
+	}
+	return false
+}
+
 // ParsedInfo 包含从文件名解析出的信息
 type ParsedInfo struct {
 	Title      string

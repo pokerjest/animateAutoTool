@@ -143,18 +143,18 @@ func DeleteLocalDirectoryHandler(c *gin.Context) {
 func ScanLocalDirectoryHandler(c *gin.Context) {
 	scanner := service.NewScannerService()
 	go func() {
-		// Phase 1: Scanner
+		// Phase 1: Scanner (Events emitted via EventBus)
 		if err := scanner.ScanAll(); err != nil {
 			fmt.Printf("Error scanning all directories: %v\n", err)
 			return
 		}
 
-		// Phase 2: Agent
+		// Phase 2: Agent (Should also be triggered via EventBus in future, but explicit here for now)
 		agent := service.NewAgentService()
 		agent.RunAgentForLibrary()
 	}()
 
-	c.String(http.StatusOK, "扫描(Phase1)与刮削(Phase2)已在后台启动")
+	c.JSON(http.StatusOK, gin.H{"status": "started", "message": "扫描已在后台启动"})
 }
 
 // RegenerateNFOHandler 手动触发 NFO 重建

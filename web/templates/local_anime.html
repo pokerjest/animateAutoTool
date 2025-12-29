@@ -402,7 +402,7 @@ preview: null, // Array of {original, new, path}
 async openRenameModal(id, title) {
 this.renameState.id = id;
 this.renameState.title = title;
-this.renameState.season = '01'; // Reset default
+this.renameState.season = ''; // Reset default (Empty = Auto)
 this.renameState.preview = null;
 this.showDetailsModal = false; // Close details
 this.showRenameModal = true;
@@ -469,8 +469,36 @@ p = p.replace('{Year}', '2024');
 p = p.replace('{Ext}', 'mp4');
 if (!p.endsWith('.mp4')) p += '.mp4';
 return p;
-}
+    },
+    sseSource: null,
+    connectSSE() {
+        if (this.sseSource) return;
+        this.sseSource = new EventSource('/api/events');
+        
+        this.sseSource.addEventListener('scan_progress', (e) => {
+            const data = JSON.parse(e.data);
+            if (data.type === 'start') {
+                this.scanning = true;
+                this.showToast(`🚀 开始扫描: ${data.dir}`);
+            }
+        });
+        
+        this.sseSource.addEventListener('scan_complete', (e) => {
+            const res = JSON.parse(e.data);
+            this.scanning = false;
+            this.showToast(`✅ 扫描完成! 新增: ${res.Added}, 更新: ${res.Updated}`);
+            setTimeout(() => window.location.reload(), 1500);
+        });
+
+        this.sseSource.addEventListener('metadata_updated', (e) => {
+            const data = JSON.parse(e.data);
+            if (data.type === 'new_anime') {
+                this.showToast(`✨ 发现新番剧: ${data.title}`);
+            }
+        });
+    }
 }" x-init="
+    connectSSE();
 $watch('activeSource', () => scrollToTop());
 $watch('loadingDetails', (val) => { if (!val) scrollToTop() });
 $watch('showDetailsModal', value => document.body.style.overflow = value ? 'hidden' : '');
@@ -524,7 +552,7 @@ openDetails($event.detail);
                 <label class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">默认季度 (Sxx)</label>
                 <input type="text" x-model="renameState.season"
                     class="w-full px-4 py-2 rounded-lg bg-gray-50 border border-gray-200 focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none font-mono text-sm transition-all shadow-inner"
-                    placeholder="01">
+                    placeholder="留空自动识别 (默认 S01)">
             </div>
         </div>
 

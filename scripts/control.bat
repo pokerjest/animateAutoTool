@@ -45,8 +45,8 @@ goto help
 
 :start
     if exist "%PID_FILE%" (
-        set /p PID=<"%PID_FILE%"
-        tasklist /FI "PID eq !PID!" | find "!PID!" >nul
+        for /f "usebackq" %%i in ("%PID_FILE%") do set PID=%%i
+        tasklist /FI "PID eq !PID!" 2>nul ^| find "!PID!" >nul
         if not errorlevel 1 (
             echo %APP_NAME% is already running (PID: !PID!).
             exit /b 0
@@ -88,7 +88,7 @@ goto help
         exit /b 0
     )
 
-    set /p PID=<"%PID_FILE%"
+    for /f "usebackq" %%i in ("%PID_FILE%") do set PID=%%i
     echo Stopping %APP_NAME% (PID: !PID!)...
     taskkill /F /PID !PID! >nul 2>nul
     if !ERRORLEVEL! equ 0 (
@@ -107,8 +107,8 @@ goto help
 
 :status
     if exist "%PID_FILE%" (
-        set /p PID=<"%PID_FILE%"
-        tasklist /FI "PID eq !PID!" | find "!PID!" >nul
+        for /f "usebackq" %%i in ("%PID_FILE%") do set PID=%%i
+        tasklist /FI "PID eq !PID!" 2>nul ^| find "!PID!" >nul
         if not errorlevel 1 (
             echo %APP_NAME% is running (PID: !PID!).
         ) else (
