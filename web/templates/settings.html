@@ -252,13 +252,18 @@
                 <div class="mb-4">
                     <div class="flex items-center gap-2 border-b border-gray-200 pb-2 mb-4">
                         <h3 class="text-lg font-semibold text-gray-800">Jellyfin 集成</h3>
+                        <button type="button" onclick="openJellyfin()"
+                            class="ml-auto text-sm text-blue-600 hover:text-blue-800 hover:underline flex items-center gap-1">
+                            <span>🔗 管理后台</span>
+                        </button>
                     </div>
 
                     <div class="space-y-4">
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-1">Server URL</label>
-                                <input type="text" name="jellyfin_url" value='{{ index .Config "jellyfin_url" }}'
+                                <input type="text" id="jellyfin_url_input" name="jellyfin_url"
+                                    value='{{ index .Config "jellyfin_url" }}'
                                     class="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-primary focus:border-transparent outline-none"
                                     placeholder="http://localhost:8096">
                             </div>
@@ -483,6 +488,8 @@
     </form>
 
     <script>
+        const jellyfinServerId = '{{.JellyfinServerID}}';
+
         function togglePassword() {
             const input = document.getElementById('qb_password_input');
             const icon = document.getElementById('pwd-toggle-icon');
@@ -539,6 +546,29 @@
             }
             const url = `https://anilist.co/api/v2/oauth/authorize?client_id=${clientId}&response_type=token`;
             window.open(url, '_blank');
+        }
+
+        function openJellyfin() {
+            let url = document.getElementById('jellyfin_url_input').value;
+            if (!url) {
+                console.error('请先输入 Jellyfin URL');
+                return;
+            }
+
+            // Normalize URL
+            url = url.replace(/\/$/, '');
+            let targetUrl = url;
+            if (jellyfinServerId) {
+                targetUrl = url + "/web/index.html?serverId=" + jellyfinServerId;
+            }
+
+            // Direct open without confirmation
+            window.open(targetUrl, '_blank');
+
+            // Try to copy to clipboard (optional help)
+            navigator.clipboard.writeText("admin").catch(err => {
+                console.error("Failed to copy password:", err);
+            });
         }
 
         function toggleJellyfinTokenVisibility() {

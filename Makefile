@@ -3,38 +3,33 @@
 # 默认目标：显示帮助信息
 all: help
 
-# 赋予脚本执行权限 (Windows下如果使用Git Bash通常有效，CMD下可能忽略)
+# 赋予脚本执行权限
 prepare:
-	@chmod +x scripts/control.sh 2>/dev/null || true
+	@chmod +x scripts/manage.sh 2>/dev/null || true
 
 # 编译项目
 build: prepare
-	@echo "正在编译..."
-	@./scripts/control.sh build
+	@./scripts/manage.sh build
 
 # 运行 (前台模式) - 适合调试
 run: prepare
-	@echo "正在启动 (前台模式)..."
-	@./scripts/control.sh run
+	@./scripts/manage.sh run
 
 # 启动 (后台模式)
 start: prepare
-	@echo "正在启动 (后台模式)..."
-	@./scripts/control.sh start
+	@./scripts/manage.sh start
 
 # 停止服务
 stop: prepare
-	@echo "正在停止..."
-	@./scripts/control.sh stop
+	@./scripts/manage.sh stop
 
 # 重启服务
 restart: prepare
-	@echo "正在重启..."
-	@./scripts/control.sh restart
+	@./scripts/manage.sh restart
 
 # 查看服务状态
 status: prepare
-	@./scripts/control.sh status
+	@./scripts/manage.sh status
 
 # 查看实时日志
 log:

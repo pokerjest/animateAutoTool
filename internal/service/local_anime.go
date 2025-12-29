@@ -41,8 +41,8 @@ func NewLocalAnimeService() *LocalAnimeService {
 
 // CleanupGarbage 清理数据库中的无效数据
 func (s *LocalAnimeService) CleanupGarbage() {
-	// 1. 删除没有视频文件的“垃圾”记录
-	if err := db.DB.Unscoped().Where("file_count = 0").Delete(&model.LocalAnime{}).Error; err != nil {
+	// 1. 删除没有关联剧集的“垃圾”记录 (Check actual episodes, not just file_count cache)
+	if err := db.DB.Unscoped().Where("id NOT IN (?)", db.DB.Model(&model.LocalEpisode{}).Select("DISTINCT local_anime_id")).Delete(&model.LocalAnime{}).Error; err != nil {
 		log.Printf("Cleanup: Failed to remove empty anime entries: %v", err)
 	} else {
 		log.Println("Cleanup: Removed empty anime entries from DB")
@@ -263,81 +263,187 @@ func (s *LocalAnimeService) EnrichMissingMetadata() {
 	log.Printf("Enrich: Completed. Enriched %d items.", count)
 }
 
-// MatchSeries Manually match a series to a specific Bangumi ID
-func (s *LocalAnimeService) MatchSeries(animeID uint, bangumiID int) error {
+// MatchSeries Manually match a series to a specific Source ID and trigger full scrape
+func (s *LocalAnimeService) MatchSeries(animeID uint, source string, sourceID int) error {
 	var anime model.LocalAnime
 	if err := db.DB.First(&anime, animeID).Error; err != nil {
 		return err
 	}
 
-	// Fetch fresh metadata for this ID or create new
+	// 1. Fetch fresh metadata for this ID or create new
 	var meta model.AnimeMetadata
-	// Check if metadata already exists for this BangumiID
-	if err := db.DB.Where("bangumi_id = ?", bangumiID).First(&meta).Error; err == nil {
-		// Use existing metadata
-	} else {
-		// New metadata entry
-		meta = model.AnimeMetadata{
-			BangumiID: bangumiID,
+
+	// Check if we already have a metadata link
+	if anime.MetadataID != nil && *anime.MetadataID != 0 {
+		if err := db.DB.First(&meta, *anime.MetadataID).Error; err != nil {
+			// If missing, reset
+			meta = model.AnimeMetadata{}
 		}
 	}
 
-	// Verify ID is valid by fetching from Bangumi
-	bgmClient := bangumi.NewClient("", "", "")
-	// Apply Proxy
-	var bgmProxyConfig model.GlobalConfig
-	if err := db.DB.Where("key = ?", model.ConfigKeyProxyBangumi).First(&bgmProxyConfig).Error; err == nil && bgmProxyConfig.Value == "true" {
-		var p model.GlobalConfig
-		if err := db.DB.Where("key = ?", model.ConfigKeyProxyURL).First(&p).Error; err == nil && p.Value != "" {
-			bgmClient.SetProxy(p.Value)
+	// 2. Identify the source and fetch PRIMARY data
+	bgmClient, tmdbClient, anilistClient := s.initClients()
+
+	log.Printf("MatchSeries: Linking Anime %d to %s ID %d", animeID, source, sourceID)
+
+	switch source {
+	case "bangumi":
+		meta.BangumiID = sourceID
+		// Fetch Bangumi Data
+		if bgmClient != nil {
+			subject, err := performWithRetry(func() (*bangumi.Subject, error) {
+				return bgmClient.GetSubject(sourceID)
+			})
+			if err != nil {
+				return fmt.Errorf("failed to verify Bangumi ID: %v", err)
+			}
+			if subject == nil {
+				return fmt.Errorf("bangumi ID %d not found", sourceID)
+			}
+			s.applyBangumiSubject(&meta, subject)
 		}
-	}
-
-	subject, err := bgmClient.GetSubject(bangumiID)
-	if err != nil {
-		return fmt.Errorf("failed to verify Bangumi ID: %v", err)
-	}
-	if subject == nil {
-		return fmt.Errorf("bangumi ID %d not found", bangumiID)
-	}
-
-	// Update metadata object with fetched data
-	meta.Title = subject.NameCN
-	if meta.Title == "" {
-		meta.Title = subject.Name
-	}
-	meta.BangumiTitle = meta.Title
-	meta.BangumiImage = subject.Images.Large
-	meta.BangumiSummary = subject.Summary
-	meta.TitleCN = subject.NameCN
-	meta.TitleJP = subject.Name
-	meta.AirDate = subject.Date
-	meta.Image = meta.BangumiImage // Set active image
-	meta.Summary = meta.BangumiSummary
-
-	// Save Metadata
-	if meta.ID == 0 {
-		if err := db.DB.Create(&meta).Error; err != nil {
-			return err
+	case "tmdb":
+		meta.TMDBID = sourceID
+		// Fetch TMDB Data
+		if tmdbClient != nil {
+			show, err := performWithRetry(func() (*tmdb.TVShow, error) {
+				return tmdbClient.GetTVDetails(sourceID)
+			})
+			if err != nil {
+				return fmt.Errorf("failed to verify TMDB ID: %v", err)
+			}
+			if show == nil {
+				return fmt.Errorf("TMDB ID %d not found", sourceID)
+			}
+			var mu sync.Mutex // Dummy mutex for reusing processTMDB logic or just apply manually
+			// Manual apply for primary source to be precise
+			imgRaw := s.fetchAndCacheImage(show.PosterPath)
+			meta.TMDBTitle = show.Name
+			meta.TMDBImage = show.PosterPath
+			meta.TMDBSummary = show.Overview
+			meta.TMDBRating = show.VoteAverage
+			if meta.AirDate == "" {
+				meta.AirDate = show.FirstAirDate
+			}
+			if meta.TitleCN == "" {
+				meta.TitleCN = show.Name
+			}
+			if meta.TitleJP == "" {
+				meta.TitleJP = show.OriginalName
+			}
+			meta.TMDBImageRaw = imgRaw
+			mu.Lock() // No-op
+			mu.Unlock()
 		}
-	} else {
-		if err := db.DB.Save(&meta).Error; err != nil {
-			return err
+	case "anilist":
+		meta.AniListID = sourceID
+		// Fetch AniList Data
+		if anilistClient != nil {
+			media, err := performWithRetry(func() (*anilist.Media, error) {
+				return anilistClient.GetAnimeDetails(sourceID)
+			})
+			if err != nil {
+				return fmt.Errorf("failed to verify AniList ID: %v", err)
+			}
+			if media == nil {
+				return fmt.Errorf("AniList ID %d not found", sourceID)
+			}
+
+			imgRaw := s.fetchAndCacheImage(media.CoverImage.ExtraLarge)
+			meta.AniListTitle = media.Title.Romaji
+			meta.AniListImage = media.CoverImage.ExtraLarge
+			meta.AniListSummary = media.Description
+			meta.AniListRating = float64(media.AverageScore) / 10.0
+			if meta.TitleEN == "" {
+				meta.TitleEN = media.Title.English
+			}
+			if meta.TitleJP == "" {
+				meta.TitleJP = media.Title.Native
+			}
+			meta.AniListImageRaw = imgRaw
 		}
+	default:
+		return fmt.Errorf("unknown source: %s", source)
 	}
 
-	// Link Anime to Metadata
+	// 3. Save partially updated metadata to ensure we have an ID
+	s.saveAndConsolidate(&meta)
+
+	// Link Anime to Metadata immediately
 	anime.MetadataID = &meta.ID
 	anime.Metadata = &meta
 	db.DB.Save(&anime)
 
-	// Fetch Image Cache
-	meta.BangumiImageRaw = s.fetchAndCacheImage(meta.BangumiImage)
+	// 4. Trigger Cross-Source Scraping (Parallel)
+	// Use titles (CN, JP, EN) from the primary source to find others
+	log.Println("MatchSeries: Starting cross-source scraping...")
+
+	// We reuse enrichParallel but we need to ensure we don't overwrite the PRIMARY source we just set.
+	// enrichParallel checks if ID != 0 and skips fetching if so (logic in processTMDB/AniList).
+	// But it does NOT skip fetching if ID IS set, it refreshes it. That is fine.
+	// However, searching typically happens if ID == 0.
+
+	// We need to construct candidates from the updated metadata
+	queryTitle := meta.TitleCN
+	if queryTitle == "" {
+		queryTitle = meta.TitleJP
+	}
+	if queryTitle == "" {
+		queryTitle = meta.Title // Fallback
+	}
+
+	// Manually trigger the missing sources
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+
+	// Bangumi (If primary was NOT bangumi)
+	if source != "bangumi" {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if bgmClient != nil {
+				s.enrichBangumi(&meta, bgmClient, queryTitle)
+			}
+		}()
+	}
+
+	// TMDB & AniList (If primary was NOT them)
+	// We can use enrichParallel but we should customize it or just call the sub-functions.
+	// enrichParallel does exactly what we want: checks IDs, if missing, searches.
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		if source != "tmdb" && tmdbClient != nil {
+			// Get updated candidates
+			candidates := getCandidateTitles(&meta, queryTitle)
+			s.processTMDB(&meta, tmdbClient, candidates, &mu)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		if source != "anilist" && anilistClient != nil {
+			// Get updated candidates
+			candidates := getCandidateTitles(&meta, queryTitle)
+			s.processAniList(&meta, anilistClient, candidates, &mu)
+		}
+	}()
+	wg.Wait()
+
+	// 5. Final Save and Sync
+	s.saveAndConsolidate(&meta)
+
+	// Set Active Fields based on priority or the specific source user chose?
+	// User chose a specific source match, so maybe we should prefer that title?
+	// The current logic `setActiveFields` prioritizes Bangumi > TMDB > AniList.
+	// If user matched with TMDB, but we concurrently found Bangumi, should we switch to Bangumi title?
+	// The user request says "fix match... scrape others". It implies data completeness.
+	// Usually users prefer Bangumi for CN titles.
+	// Let's stick to standard `setActiveFields` logic which enforces consistency.
+	s.setActiveFields(&meta, queryTitle)
 	db.DB.Save(&meta)
 
-	// Also trigger standard enrich to fill TMDB/AniList if possible
-	// s.EnrichMetadata(&meta, meta.Title) // Optional, might overwrite manual choice?
-	// Let's just update active fields.
+	// 6. STRICT SYNC to all models
+	s.SyncMetadataToModels(&meta)
 
 	return nil
 }
@@ -346,10 +452,28 @@ func (s *LocalAnimeService) MatchSeries(animeID uint, bangumiID int) error {
 func (s *LocalAnimeService) EnrichAnimeMetadata(anime *model.LocalAnime) {
 	// 1. Ensure Metadata record exists
 	if anime.MetadataID == nil || *anime.MetadataID == 0 {
-		// Try to find by title if we had one? Or just create new.
-		// For new anime, we just create. For existing, we might find by ID below.
-		m := &model.AnimeMetadata{}
-		anime.Metadata = m
+		// Try to find by title if we had one?
+		// Fix: Attempt to match existing metadata in DB by Title/TitleCN/TitleJP/TitleEN
+		queryTitle := CleanTitle(anime.Title)
+		log.Printf("Enrich: Attempting to link '%s' (Clean: '%s') to existing metadata...", anime.Title, queryTitle)
+
+		var existing model.AnimeMetadata
+		// Priority search
+		err := db.DB.Where("title = ? OR title_cn = ? OR title_jp = ? OR title_en = ?",
+			queryTitle, queryTitle, queryTitle, queryTitle).First(&existing).Error
+
+		if err == nil && existing.ID != 0 {
+			log.Printf("Enrich: FOUND link for '%s' -> Metadata ID %d (%s)", anime.Title, existing.ID, existing.Title)
+			anime.Metadata = &existing
+			anime.MetadataID = &existing.ID
+			// Save the link immediately
+			db.DB.Save(anime)
+		} else {
+			// Not found, create new empty
+			log.Printf("Enrich: No link found for '%s', creating new metadata container.", queryTitle)
+			m := &model.AnimeMetadata{Title: queryTitle} // Pre-fill title
+			anime.Metadata = m
+		}
 	} else if anime.Metadata == nil {
 		var m model.AnimeMetadata
 		if err := db.DB.Preload("Metadata").First(&anime, anime.ID).Error; err == nil && anime.Metadata != nil {
@@ -360,11 +484,31 @@ func (s *LocalAnimeService) EnrichAnimeMetadata(anime *model.LocalAnime) {
 		}
 	}
 
+	// 2. Enrich content
 	queryTitle := CleanTitle(anime.Title)
 	s.EnrichMetadata(anime.Metadata, queryTitle)
 
+	// Update pointer to ensure GORM saves the relationship correctly
+	if anime.Metadata != nil && anime.Metadata.ID != 0 {
+		anime.MetadataID = &anime.Metadata.ID
+	}
+
 	// Sync metadata to ALL models (this one and others sharing it)
 	s.SyncMetadataToModels(anime.Metadata)
+
+	// Phase 1: NFO Generation Integration
+	nfoGen := NewNFOGeneratorService()
+	// Ignore errors, we log them inside
+	_ = nfoGen.SaveLocalImages(anime)
+	_ = nfoGen.GenerateTVShowNFO(anime)
+
+	// Optional: Generate Episode NFOs (if we had episode metadata linked)
+	// For now, we only have reliable Series metadata. Episode NFOs are generated if needed or in a separate pass.
+	if len(anime.Episodes) > 0 {
+		for _, ep := range anime.Episodes {
+			_ = nfoGen.GenerateEpisodeNFO(&ep, anime)
+		}
+	}
 }
 
 // RefreshAllMetadata updates metadata records. If force is false, it skips already scraped items.
@@ -692,12 +836,12 @@ func (s *LocalAnimeService) processTMDB(m *model.AnimeMetadata, client *tmdb.Cli
 			if t == "" {
 				continue
 			}
-			show, err := performWithRetry(func() (*tmdb.TVShow, error) {
+			shows, err := performWithRetry(func() ([]tmdb.TVShow, error) { // Updated return type
 				return client.SearchTV(t)
 			})
-			if err == nil && show != nil {
-				log.Printf("DEBUG: Match found on TMDB using title '%s' -> ID: %d", t, show.ID)
-				tmdbShow = show
+			if err == nil && len(shows) > 0 {
+				log.Printf("DEBUG: Match found on TMDB using title '%s' -> ID: %d", t, shows[0].ID)
+				tmdbShow = &shows[0] // Take the first one
 				break
 			}
 		}
@@ -942,33 +1086,26 @@ func (s *LocalAnimeService) fetchAndCacheImage(url string) []byte {
 
 // CleanTitle removes common tags like [Group] or [1080p] to get a search-friendly title
 func CleanTitle(raw string) string {
-	// 1. Remove leading [...]
-	// 2. Remove trailing [...] or (...)
-	// 3. Remove date patterns like (2024), [2024], 2024
-
-	// Simple heuristic: Take the "middle" part if wrapped in tags, or just the string
-	// [Group] Title [Res] -> Title
-
 	s := raw
-	// Remove leading [...]
-	s = regexp.MustCompile(`^\[.*?\]\s*`).ReplaceAllString(s, "")
-	// Remove trailing [...]
-	s = regexp.MustCompile(`\s*\[.*?\]$`).ReplaceAllString(s, "")
-	// Remove trailing (...)
-	s = regexp.MustCompile(`\s*\(.*?\)$`).ReplaceAllString(s, "")
 
-	// Remove S1, S01, Season 1 suffix (case insensitive)
-	// Matches: space + S + digits OR space + Season + space + digits at end of string
-	s = regexp.MustCompile(`(?i)\s+S\d+$`).ReplaceAllString(s, "")
-	s = regexp.MustCompile(`(?i)\s+Season\s*\d+$`).ReplaceAllString(s, "")
+	// 1. Remove all [...] content
+	s = regexp.MustCompile(`\[.*?\]`).ReplaceAllString(s, "")
 
-	// Split by '/' and take the first part
-	// This handles dual language titles like "CN / EN"
-	if idx := strings.Index(s, "/"); idx != -1 {
-		s = s[:idx]
+	// 2. Remove all (...) content
+	s = regexp.MustCompile(`\(.*?\)`).ReplaceAllString(s, "")
+
+	// 3. Remove Season info (Series/Season X, Sxx, 第x季, Part x)
+	reSeason := regexp.MustCompile(`(?i)(season\s*\d+|s\d{1,2}|第\s*\d+\s*季|part\s*\d+)`)
+	s = reSeason.ReplaceAllString(s, "")
+
+	// 4. Cleanup: Remove extra spaces and leading/trailing dashes/spaces
+	s = strings.TrimSpace(regexp.MustCompile(`\s+`).ReplaceAllString(s, " "))
+	s = strings.Trim(s, "- ")
+
+	if s == "" {
+		return raw // Fallback if we stripped everything
 	}
-
-	return strings.TrimSpace(s)
+	return s
 }
 
 func (s *LocalAnimeService) countVideos(path string) (int, int64) {
@@ -1044,19 +1181,27 @@ func (s *LocalAnimeService) SyncMetadataToModels(m *model.AnimeMetadata) {
 		return
 	}
 
+	// STRICT SYNC: Force update specific fields to ensure consistency
+	updates := map[string]interface{}{
+		"image":   m.Image,
+		"title":   m.Title,
+		"summary": m.Summary,
+	}
+
 	// 1. Update Subscriptions
-	db.DB.Model(&model.Subscription{}).Where("metadata_id = ?", m.ID).Updates(map[string]interface{}{
-		"image": m.Image,
-		"title": m.Title, // Optional: should we sync Title? Usually yes if they match.
-	})
+	// Subscription struct might not have summary/air_date, but checking types.go...
+	// Subscription has Image, Title. No Summary.
+	db.DB.Model(&model.Subscription{}).Where("metadata_id = ?", m.ID).Updates(updates)
 
 	// 2. Update LocalAnime
-	db.DB.Model(&model.LocalAnime{}).Where("metadata_id = ?", m.ID).Updates(map[string]interface{}{
+	// LocalAnime has Title, Image, Summary, AirDate
+	localUpdates := map[string]interface{}{
 		"image":    m.Image,
 		"title":    m.Title,
 		"summary":  m.Summary,
 		"air_date": m.AirDate,
-	})
+	}
+	db.DB.Model(&model.LocalAnime{}).Where("metadata_id = ?", m.ID).Updates(localUpdates)
 }
 
 // StartMetadataMigration background task to cache images for existing records
@@ -1125,4 +1270,35 @@ func performWithRetry[T any](op func() (T, error)) (T, error) {
 		// log.Printf("DEBUG: API Call retry %d failed: %v", i+1, err)
 	}
 	return result, err
+}
+
+// RegenerateAllNFOs triggers NFO generation for ALL local animes.
+// Designed for backup restoration scenarios.
+func (s *LocalAnimeService) RegenerateAllNFOs() (int, error) {
+	var list []model.LocalAnime
+	// Preload Metadata and Episodes
+	if err := db.DB.Preload("Metadata").Preload("Episodes").Find(&list).Error; err != nil {
+		return 0, err
+	}
+
+	count := 0
+	nfoGen := NewNFOGeneratorService()
+	for _, anime := range list {
+		if anime.Metadata == nil {
+			continue
+		}
+		// Check path validity
+		if _, err := os.Stat(anime.Path); os.IsNotExist(err) {
+			continue // Skip missing directories
+		}
+
+		_ = nfoGen.SaveLocalImages(&anime)
+		_ = nfoGen.GenerateTVShowNFO(&anime)
+		for _, ep := range anime.Episodes {
+			_ = nfoGen.GenerateEpisodeNFO(&ep, &anime)
+		}
+		count++
+	}
+	log.Printf("Restore: Regenerated NFOs for %d series.", count)
+	return count, nil
 }

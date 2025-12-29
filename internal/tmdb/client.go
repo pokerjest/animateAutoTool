@@ -48,8 +48,8 @@ type TVShow struct {
 	VoteAverage  float64 `json:"vote_average"`
 }
 
-// SearchTV searches for a TV show by query
-func (c *Client) SearchTV(query string) (*TVShow, error) {
+// SearchTV searches for a TV show by query and returns a list of results
+func (c *Client) SearchTV(query string) ([]TVShow, error) {
 	// Search in Chinese first (zh-CN)
 	resp, err := c.client.R().
 		SetQueryParam("query", query).
@@ -68,14 +68,12 @@ func (c *Client) SearchTV(query string) (*TVShow, error) {
 		return nil, err
 	}
 
-	if len(result.Results) > 0 {
-		show := result.Results[0]
-		show.PosterPath = c.fixImage(show.PosterPath)
-		show.BackdropPath = c.fixImage(show.BackdropPath)
-		return &show, nil
+	for i := range result.Results {
+		result.Results[i].PosterPath = c.fixImage(result.Results[i].PosterPath)
+		result.Results[i].BackdropPath = c.fixImage(result.Results[i].BackdropPath)
 	}
 
-	return nil, nil // Not found
+	return result.Results, nil
 }
 
 // GetTVDetails fetches details including overview for a specific ID

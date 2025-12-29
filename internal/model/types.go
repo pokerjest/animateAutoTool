@@ -146,6 +146,9 @@ type LocalAnime struct {
 	TotalSize   int64  `json:"total_size"`                 // 总大小 (bytes)
 	AirDate     string `json:"air_date" gorm:"default:''"` // 放送日期
 	Summary     string `json:"summary"`                    // 当前显示的简介 (Deprecated: moved to Metadata)
+	Season      int    `json:"season" gorm:"default:1"`    // 季度号 (默认 1)
+
+	JellyfinSeriesID string `json:"jellyfin_series_id" gorm:"index"` // Cached Jellyfin Series ID
 
 	// Refactored Metadata
 	MetadataID *uint          `json:"metadata_id"`
@@ -165,11 +168,17 @@ type LocalEpisode struct {
 	Container    string `json:"container"`                   // 容器格式 (mkv, mp4)
 	FileSize     int64  `json:"file_size"`                   // 文件大小
 
+	JellyfinItemID string `json:"jellyfin_item_id" gorm:"index"` // Cached Jellyfin Episode ID
+
 	// Offline Metadata / Raw Parsed Data
 	ParsedTitle  string `json:"parsed_title"`  // 从文件名解析出的原始系列标题
 	ParsedSeason string `json:"parsed_season"` // 解析出的季度字符串
 	Resolution   string `json:"resolution"`    // 解析出的分辨率
 	SubGroup     string `json:"sub_group"`     // 解析出的字幕组
+	VideoCodec   string `json:"video_codec"`   // 视频编码
+	AudioCodec   string `json:"audio_codec"`   // 音频编码
+	BitDepth     string `json:"bit_depth"`     // 位深
+	Source       string `json:"source"`        // 来源
 }
 
 // Append AniList Config Key

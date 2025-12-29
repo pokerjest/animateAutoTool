@@ -1,6 +1,9 @@
 {{ if not .SkipLayout }}{{ template "header.html" . }}{{ end }}
+<script src="/static/js/artplayer.js"></script>
 
 <div class="space-y-6" x-data="{ 
+    jellyfinUrl: '{{.JellyfinURL}}'.replace(/\/$/, ''),
+    jellyfinServerId: '{{.JellyfinServerID}}',
     showAddModal: false,
     showDeleteModal: false,
     deleteId: null,
@@ -9,13 +12,30 @@
     detailsData: null,
     modalRaw: null,        // New: Raw event data
     activeSource: 'bangumi', // New: 'bangumi' or 'tmdb'
+    activeTab: 'info',     // 'info' or 'episodes'
     currentFileCount: 0,
     currentLocalId: 0,
+    currentDirectoryId: 0,
     inputProgress: 0,
+    // Player State
+    showPlayer: false,
+    player: null,
+    playerTitle: '',
+    episodeList: [],
+    loadingEpisodes: false,
+    
     updatingCollection: false,
     updatingComplete: false,
     updatingProgress: false,
+    scanning: false, // New scanning state
     toast: { show: false, message: '', type: 'success' },
+
+    // Fix Match State
+    fixMatchQuery: '',
+    fixMatchResults: [],
+    fixMatchSource: 'bangumi', // Default
+    searchingMetadata: false,
+    showFixMatch: false,
     showToast(msg, type = 'success') {
         this.toast.message = msg;
         this.toast.type = type;
@@ -26,6 +46,11 @@
         this.modalRaw = data;
         this.showDetailsModal = true;
         this.currentLocalId = data.localId || 0;
+        this.currentDirectoryId = data.directoryId || 0;
+        this.currentFileCount = data.fileCount || 0;
+        this.activeTab = 'info';
+        this.episodeList = [];
+        this.fetchEpisodes(); // Start fetching immediately
         this.currentFileCount = data.fileCount || 0;
 
         // Reset scroll position immediately
@@ -122,7 +147,7 @@
         }
     },
     async applyCurrentSource() {
-        if (!confirm('确定将当前数据源应用为封面和标题吗？')) return;
+        // if (!confirm('确定将当前数据源应用为封面和标题吗？')) return;
         try {
             const res = await fetch(`/api/local-anime/${this.currentLocalId}/switch-source?source=${this.activeSource}`, { 
                 method: 'POST' 
@@ -138,8 +163,50 @@
         }
     },
 
+    async searchMetadata() {
+        if (!this.fixMatchQuery) return;
+        this.searchingMetadata = true;
+        try {
+            const resp = await fetch(`/api/metadata/search?q=${encodeURIComponent(this.fixMatchQuery)}&source=${this.fixMatchSource}`);
+            const data = await resp.json();
+            // Data might be a single object or list depending on API
+            this.fixMatchResults = Array.isArray(data) ? data : (data ? [data] : []);
+        } catch (e) {
+            this.showToast('搜索失败', 'error');
+        } finally {
+            this.searchingMetadata = false;
+        }
+    },
+    async applyFixMatch(id) {
+        // if (!confirm('确定将该番剧关联到此元数据吗？')) return;
+        try {
+            const resp = await fetch('/api/library/fix_match', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    anime_id: this.currentLocalId,
+                    source: this.fixMatchSource,
+                    source_id: parseInt(id)
+                })
+            });
+            if (resp.ok) {
+                this.showToast('✅ 关联成功，正在全网刮削并刷新...', 'success');
+                this.showFixMatch = false;
+                // Wait longer for scrape? Handled by backend async? 
+                // Currently backend is synchronous in MatchSeries, so when it returns, it's done.
+                // We reload page to see results.
+                setTimeout(() => window.location.reload(), 2500);
+            } else {
+                const d = await resp.json();
+                this.showToast('❌ ' + (d.error || '关联失败'), 'error');
+            }
+        } catch (e) {
+            this.showToast('❌ 网络错误', 'error');
+        }
+    },
+
     async deleteDirectory(id) {
-        if (!confirm('确定要移除该目录吗？')) return;
+        // if (!confirm('确定要移除该目录吗？')) return;
         try {
             const resp = await fetch('/api/local-directories/' + id, { method: 'DELETE' });
             if (resp.ok) {
@@ -153,105 +220,263 @@
         }
     },
     async scanDirectory() {
+        if (this.scanning) return;
+        this.scanning = true;
         try {
             const resp = await fetch('/api/local-directories/scan', { method: 'POST' });
             if (resp.ok) {
-                this.showToast('✅ 扫描任务已启动');
-                setTimeout(() => window.location.reload(), 2000);
+                this.showToast('✅ 扫描任务已后台启动，稍后请刷新');
+                // Don't reload immediately, let user know it's background
+                setTimeout(() => { this.scanning = false; }, 2000); 
             } else {
                 this.showToast('❌ 启动扫描失败', 'error');
+                this.scanning = false;
             }
         } catch (e) {
             this.showToast('❌ 网络错误', 'error');
+            this.scanning = false;
         }
     },
-    // Rename Logic
-    showRenameModal: false,
-    renameState: {
-        id: 0,
-        title: '',
-        pattern: '{Title} - S{Season}E{Ep}',
-        season: '01',
-        loading: false,
-        preview: null, // Array of {original, new, path}
-    },
-    async openRenameModal(id, title) {
-        this.renameState.id = id;
-        this.renameState.title = title;
-        this.renameState.season = '01'; // Reset default
-        this.renameState.preview = null;
-        this.showDetailsModal = false; // Close details
-        this.showRenameModal = true;
-        this.previewRename(); // Auto preview on open with default
-    },
-    async previewRename() {
-        if (!this.renameState.id) return;
-        this.renameState.loading = true;
+    async fetchEpisodes() {
+        if (!this.currentLocalId) return;
+        this.loadingEpisodes = true;
         try {
-            const resp = await fetch(`/api/local-directories/${this.renameState.id}/rename-preview`, {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
+            const res = await fetch('/api/local-anime/' + this.currentLocalId + '/files');
+            if (res.ok) {
+                this.episodeList = await res.json();
+            }
+        } catch(e) {
+            console.error(e);
+        } finally {
+            this.loadingEpisodes = false;
+        }
+    },
+    async startPlayer(epId) {
+        if (!epId) return;
+        this.showPlayer = true;
+        try {
+            const res = await fetch('/api/jellyfin/play/' + epId);
+            const data = await res.json();
+            
+            if (data.error) {
+                this.showToast('❌ 播放失败: ' + data.error, 'error');
+                this.showPlayer = false;
+                return;
+            }
+            
+            this.playerTitle = data.episode_title;
+            this.directStreamUrl = data.direct_stream_url;
+            
+            this.$nextTick(() => {
+                if (this.player) this.player.destroy();
+                this.player = new Artplayer({
+                    container: '#artplayer',
+                    url: data.stream_url,
+                    title: data.episode_title,
+                    poster: data.poster_url,
+                    volume: 0.5,
+                    isLive: false,
+                    muted: false,
+                    autoplay: true,
+                    pip: true,
+                    autoSize: true,
+                    autoMini: true,
+                    setting: true,
+                    loop: false,
+                    flip: true,
+                    playbackRate: true,
+                    aspectRatio: true,
+                    fullscreen: true,
+                    fullscreenWeb: true,
+                    subtitleOffset: true,
+                    miniProgressBar: true,
+                    mutex: true,
+                    backdrop: true,
+                    playsInline: true,
+                    autoPlayback: true,
+                    airplay: true,
+                    theme: '#23ade5',
+                    controls: [
+                        {
+                            position: 'right',
+                            html: '🔗 直连',
+                            tooltip: '在新窗口打开直连播放',
+                            click: function () {
+                                window.open(data.direct_stream_url, '_blank');
+                            },
+                            style: {
+                                color: 'white',
+                                fontSize: '14px',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                            }
+                        }
+                    ],
+                });
+                
+                // Seek to resume
+                if (data.resume_ticks > 0) {
+                    // Ticks to Seconds (1 Tick = 100ns = 0.0001ms = 0.0000001s)
+                    // Jellyfin Ticks: 10,000,000 ticks = 1 second
+                    const seconds = data.resume_ticks / 10000000;
+                    if (seconds > 10) {
+                        this.player.on('ready', () => {
+                            this.player.seek = seconds;
+                            this.showToast('已恢复上次播放进度');
+                        });
+                    }
+                } else if (this.episodeList.find(e => e.id === epId)?.watched) {
+// Optional: this.showToast('重播已看过的剧集');
+}
+
+// Events for Progress Reporting
+this.player.on('destroy', () => {
+this.reportProgress(epId, 'destroy', this.player.currentTime);
+});
+
+this.player.on('pause', () => {
+this.reportProgress(epId, 'pause', this.player.currentTime);
+});
+
+this.player.on('video:ended', () => {
+this.reportProgress(epId, 'ended', this.player.currentTime);
+});
+
+// Debounced timeupdate (every 10s roughly or handled by backend? Backend handles basic Logic)
+// Let's send update every 15s to avoid flooding
+let lastUpdate = 0;
+this.player.on('video:timeupdate', () => {
+const now = Date.now();
+if (now - lastUpdate > 15000) {
+this.reportProgress(epId, 'timeupdate', this.player.currentTime);
+lastUpdate = now;
+}
+});
+
+});
+} catch(e) {
+console.error(e);
+this.showToast('❌ 播放请求错误', 'error');
+this.showPlayer = false;
+}
+},
+async reportProgress(epId, event, seconds) {
+if (!epId) return;
+// Convert to Ticks
+const ticks = Math.floor(seconds * 10000000);
+try {
+await fetch('/api/jellyfin/progress', {
+method: 'POST',
+headers: {'Content-Type': 'application/json'},
+body: JSON.stringify({
+episode_id: epId,
+event: event,
+ticks: ticks
+})
+});
+if (event === 'ended') {
+this.showToast('🎉 已同步播放状态 (看过)');
+}
+} catch(e) {
+console.error('Progress report failed', e);
+}
+},
+closePlayer() {
+if (this.player) {
+this.player.destroy();
+this.player = null;
+}
+this.showPlayer = false;
+},
+// Rename Logic
+showRenameModal: false,
+renameState: {
+id: 0,
+title: '',
+pattern: '{Title} - S{Season}E{Ep}',
+season: '01',
+loading: false,
+preview: null, // Array of {original, new, path}
+},
+async openRenameModal(id, title) {
+this.renameState.id = id;
+this.renameState.title = title;
+this.renameState.season = '01'; // Reset default
+this.renameState.preview = null;
+this.showDetailsModal = false; // Close details
+this.showRenameModal = true;
+this.previewRename(); // Auto preview on open with default
+},
+async previewRename() {
+if (!this.renameState.id) return;
+this.renameState.loading = true;
+try {
+const resp = await fetch(`/api/local-directories/${this.renameState.id}/rename-preview`, {
+method: 'POST',
+headers: {'Content-Type': 'application/json'},
+body: JSON.stringify({
+pattern: this.renameState.pattern,
+season: this.renameState.season
+})
+});
+if (resp.ok) {
+this.renameState.preview = await resp.json();
+} else {
+this.showToast('❌ 预览失败', 'error');
+}
+} catch (e) {
+this.showToast('❌ 网络错误', 'error');
+} finally {
+this.renameState.loading = false;
+}
+},
+            async applyRename() {
+                // if (!confirm('确定要重命名这些文件吗？此操作不可撤销。')) return;
+                this.renameState.loading = true;
+try {
+const resp = await fetch(`/api/local-directories/${this.renameState.id}/rename`, {
+method: 'POST',
+headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
                     pattern: this.renameState.pattern,
-                    season: this.renameState.season
+                    season: this.renameState.season,
+                    is_manual: false
                 })
             });
-            if (resp.ok) {
-                this.renameState.preview = await resp.json();
-            } else {
-                this.showToast('❌ 预览失败', 'error');
-            }
-        } catch (e) {
-            this.showToast('❌ 网络错误', 'error');
-        } finally {
-            this.renameState.loading = false;
-        }
-    },
-    async applyRename() {
-        if (!confirm('确定要重命名这些文件吗？此操作不可撤销。')) return;
-        this.renameState.loading = true;
-        try {
-            const resp = await fetch(`/api/local-directories/${this.renameState.id}/rename`, {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
-                    pattern: this.renameState.pattern,
-                    season: this.renameState.season
-                })
-            });
-            const data = await resp.json();
-            if (resp.ok) {
-                this.showToast(`✅ ${data.message}`);
-                this.showRenameModal = false;
-                // Optional: Refresh details if needed, or just toast
-            } else {
-                this.showToast('❌ ' + (data.error || '重命名失败'), 'error');
-            }
-        } catch (e) {
-            this.showToast('❌ 网络错误', 'error');
-        } finally {
-            this.renameState.loading = false;
-        }
-    },
-    getLivePreview() {
-        let p = this.renameState.pattern || '{Title} - S{Season}E{Ep}';
-        const s = this.renameState.season || '01';
-        p = p.replace('{Title}', 'Example Anime');
-        p = p.replace('{Season}', s);
-        p = p.replace('{Ep}', '01');
-        p = p.replace('{SubGroup}', 'SubGroup');
-        p = p.replace('{Year}', '2024');
-        p = p.replace('{Ext}', 'mp4');
-        if (!p.endsWith('.mp4')) p += '.mp4';
-        return p;
-    }
+const data = await resp.json();
+if (resp.ok) {
+this.showToast(`✅ ${data.message}`);
+this.showRenameModal = false;
+// Optional: Refresh details if needed, or just toast
+} else {
+this.showToast('❌ ' + (data.error || '重命名失败'), 'error');
+}
+} catch (e) {
+this.showToast('❌ 网络错误', 'error');
+} finally {
+this.renameState.loading = false;
+}
+},
+getLivePreview() {
+let p = this.renameState.pattern || '{Title} - S{Season}E{Ep}';
+const s = this.renameState.season || '01';
+p = p.replace('{Title}', 'Example Anime');
+p = p.replace('{Season}', s);
+p = p.replace('{Ep}', '01');
+p = p.replace('{SubGroup}', 'SubGroup');
+p = p.replace('{Year}', '2024');
+p = p.replace('{Ext}', 'mp4');
+if (!p.endsWith('.mp4')) p += '.mp4';
+return p;
+}
 }" x-init="
-    $watch('activeSource', () => scrollToTop());
-    $watch('loadingDetails', (val) => { if (!val) scrollToTop() });
-    $watch('showDetailsModal', value => document.body.style.overflow = value ? 'hidden' : '');
+$watch('activeSource', () => scrollToTop());
+$watch('loadingDetails', (val) => { if (!val) scrollToTop() });
+$watch('showDetailsModal', value => document.body.style.overflow = value ? 'hidden' : '');
 " @show-anime-details.window="
-    $event.stopPropagation();
-    openDetails($event.detail);
+$event.stopPropagation();
+openDetails($event.detail);
 ">
     <!-- Header Section -->
     <div class="flex justify-between items-center">
@@ -259,9 +484,11 @@
             <span>📂</span> 本地番剧目录
         </h2>
         <div class="flex gap-2">
-            <button @click="scanDirectory()"
-                class="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600 transition shadow-md flex items-center gap-2">
-                <span>🔄</span> 重新扫描
+            <button @click="scanDirectory()" :disabled="scanning"
+                :class="scanning ? 'opacity-75 cursor-not-allowed' : 'hover:bg-blue-600'"
+                class="bg-blue-500 text-white px-4 py-2 rounded-lg transition shadow-md flex items-center gap-2">
+                <span :class="scanning ? 'animate-spin' : ''">🔄</span>
+                <span x-text="scanning ? '扫描中...' : '重新扫描'"></span>
             </button>
             <button @click="showAddModal = true"
                 class="bg-primary text-white px-4 py-2 rounded-lg hover:bg-accent transition shadow-md flex items-center gap-2">
@@ -426,8 +653,8 @@
             x-transition:enter-end="opacity-100 scale-100" x-transition:leave="transition ease-in duration-200"
             x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95">
 
-            <div class="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col md:flex-row relative"
-                @click.away="showDetailsModal = false">
+            <div class="bg-white rounded-2xl shadow-2xl w-full max-h-[90vh] overflow-hidden flex flex-col md:flex-row relative transition-all duration-300 ease-in-out"
+                :class="activeTab === 'episodes' ? 'max-w-7xl' : 'max-w-4xl'" @click.away="showDetailsModal = false">
 
                 <!-- Close Button (Absolute) -->
                 <button @click="showDetailsModal = false"
@@ -441,6 +668,23 @@
                 <!-- Left Column: Poster & Quick Stats -->
                 <div x-ref="posterContainer"
                     class="w-full md:w-80 bg-gray-50 p-6 flex flex-col gap-4 border-r border-gray-100 flex-shrink-0 overflow-y-auto md:overflow-visible">
+
+                    <!-- Tabs Switcher (Mobile/Desktop) -->
+                    <div class="flex p-1 bg-white rounded-xl shadow-sm border border-gray-100 mb-2">
+                        <button @click="activeTab = 'info'"
+                            :class="activeTab === 'info' ? 'bg-indigo-50 text-indigo-600 font-bold' : 'text-gray-500 hover:text-gray-700'"
+                            class="flex-1 py-2 rounded-lg text-sm transition-all flex items-center justify-center gap-2">
+                            <span>ℹ️</span> 详情
+                        </button>
+                        <button @click="activeTab = 'episodes'"
+                            :class="activeTab === 'episodes' ? 'bg-indigo-50 text-indigo-600 font-bold' : 'text-gray-500 hover:text-gray-700'"
+                            class="flex-1 py-2 rounded-lg text-sm transition-all flex items-center justify-center gap-2 relative">
+                            <span>▶️</span> 剧集
+                            <span class="bg-gray-100 text-gray-500 text-[10px] px-1.5 rounded-full"
+                                x-text="episodeList.length || 0"></span>
+                        </button>
+                    </div>
+
                     <!-- Poster -->
                     <div class="relative w-full aspect-[2/3] rounded-xl shadow-lg overflow-hidden group bg-gray-200">
                         <template x-if="detailsData?.images?.large">
@@ -473,7 +717,7 @@
 
                     <!-- File Management Actions -->
                     <div class="mt-auto space-y-2">
-                        <button @click="openRenameModal(currentLocalId, detailsData?.name)"
+                        <button @click="openRenameModal(currentDirectoryId, detailsData?.name)"
                             class="w-full py-2.5 rounded-xl bg-indigo-50 text-indigo-600 hover:bg-indigo-100 font-bold text-sm transition flex items-center justify-center gap-2">
                             <span>✏️</span> 文件管理
                         </button>
@@ -497,7 +741,7 @@
                         <span class="text-sm text-gray-400">正在加载数据...</span>
                     </div>
 
-                    <div x-show="!loadingDetails && detailsData" class="space-y-6">
+                    <div x-show="!loadingDetails && detailsData && activeTab === 'info'" class="space-y-6">
                         <!-- Title Header -->
                         <div class="space-y-2">
                             <h2 x-text="detailsData?.name"
@@ -561,9 +805,77 @@
                             <h4
                                 class="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4 flex items-center justify-between">
                                 <span>Bangumi 同步</span>
-                                <span class="text-[10px] font-normal normal-case"
-                                    x-text="modalRaw?.bangumiId ? ('ID: ' + modalRaw.bangumiId) : '未关联'"></span>
+                                <div class="flex items-center gap-2">
+                                    <button
+                                        @click="showFixMatch = !showFixMatch; if(showFixMatch) { fixMatchQuery = modalRaw.title; fixMatchResults = [] }"
+                                        class="px-2 py-0.5 rounded bg-gray-100 text-gray-600 hover:bg-indigo-50 hover:text-indigo-600 transition text-[10px] font-bold border border-gray-200">
+                                        修正匹配
+                                    </button>
+                                    <span class="text-[10px] font-normal normal-case"
+                                        x-text="modalRaw?.bangumiId ? ('ID: ' + modalRaw.bangumiId) : '未关联'"></span>
+                                </div>
                             </h4>
+
+                            <!-- Fix Match Search UI -->
+                            <div x-show="showFixMatch" x-transition
+                                class="mb-6 p-4 bg-indigo-50/50 rounded-xl border border-indigo-100 space-y-4">
+
+                                <!-- Source Selector -->
+                                <div class="flex p-1 bg-white rounded-lg border border-indigo-100 w-fit">
+                                    <button @click="fixMatchSource = 'bangumi'; fixMatchResults = []"
+                                        :class="fixMatchSource === 'bangumi' ? 'bg-pink-50 text-pink-600 font-bold' : 'text-gray-500 hover:text-gray-700'"
+                                        class="px-3 py-1.5 text-xs rounded-md transition-all flex items-center gap-1">
+                                        <span>🌸</span> Bangumi
+                                    </button>
+                                    <button @click="fixMatchSource = 'tmdb'; fixMatchResults = []"
+                                        :class="fixMatchSource === 'tmdb' ? 'bg-blue-50 text-blue-600 font-bold' : 'text-gray-500 hover:text-gray-700'"
+                                        class="px-3 py-1.5 text-xs rounded-md transition-all flex items-center gap-1">
+                                        <span>🎬</span> TMDB
+                                    </button>
+                                    <button @click="fixMatchSource = 'anilist'; fixMatchResults = []"
+                                        :class="fixMatchSource === 'anilist' ? 'bg-indigo-50 text-indigo-600 font-bold' : 'text-gray-500 hover:text-gray-700'"
+                                        class="px-3 py-1.5 text-xs rounded-md transition-all flex items-center gap-1">
+                                        <span>🅰️</span> AniList
+                                    </button>
+                                </div>
+
+                                <div class="flex gap-2">
+                                    <input type="text" x-model="fixMatchQuery" @keyup.enter="searchMetadata()"
+                                        :placeholder="'搜索 ' + fixMatchSource + ' 标题...'"
+                                        class="flex-1 px-4 py-2 rounded-lg border border-indigo-200 focus:ring-2 focus:ring-indigo-500/20 outline-none text-sm">
+                                    <button @click="searchMetadata()" :disabled="searchingMetadata"
+                                        class="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-bold hover:bg-indigo-700 transition disabled:opacity-50">
+                                        <span x-show="!searchingMetadata">搜索</span>
+                                        <span x-show="searchingMetadata" class="animate-spin inline-block">⌛</span>
+                                    </button>
+                                </div>
+
+                                <!-- Search Results -->
+                                <div class="space-y-2 max-h-60 overflow-y-auto custom-scrollbar">
+                                    <template x-for="res in fixMatchResults" :key="res.id">
+                                        <div class="flex items-center gap-3 p-2 bg-white rounded-lg border border-gray-100 hover:border-indigo-300 transition cursor-pointer group"
+                                            @click="applyFixMatch(res.id)">
+                                            <img :src="res.images.large || '/static/img/no_poster.jpg'"
+                                                class="w-10 h-14 object-cover rounded shadow-sm bg-gray-200">
+                                            <div class="flex-1 min-w-0">
+                                                <div class="font-bold text-sm text-gray-800 truncate"
+                                                    x-text="res.name_cn || res.name"></div>
+                                                <div class="text-[10px] text-gray-400 truncate" x-text="res.name"></div>
+                                                <div class="text-[10px] text-indigo-500 font-medium mt-1">ID: <span
+                                                        x-text="res.id"></span></div>
+                                            </div>
+                                            <div class="opacity-0 group-hover:opacity-100 transition-opacity">
+                                                <span
+                                                    class="text-xs bg-indigo-600 text-white px-2 py-1 rounded-md font-bold">关联</span>
+                                            </div>
+                                        </div>
+                                    </template>
+                                    <template
+                                        x-if="!searchingMetadata && fixMatchResults.length === 0 && fixMatchQuery">
+                                        <div class="text-center py-4 text-xs text-gray-400 italic">未找到匹配的番剧</div>
+                                    </template>
+                                </div>
+                            </div>
 
                             <template x-if="modalRaw?.bangumiId">
                                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -634,13 +946,160 @@
                                     </a>
                                 </div>
                             </template>
+
+                            <!-- Jellyfin Link -->
+                            <template x-if="modalRaw?.jellyfin_series_id && jellyfinUrl">
+                                <div class="mt-4 flex items-center gap-3">
+                                    <a :href="jellyfinUrl + '/web/index.html?serverId=' + jellyfinServerId + '#!/details?id=' + modalRaw.jellyfin_series_id"
+                                        target="_blank"
+                                        class="flex items-center px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition shadow-md hover:shadow-lg gap-2">
+                                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                                d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14">
+                                            </path>
+                                        </svg>
+                                        在 Jellyfin 中打开
+                                    </a>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+
+                    <!-- Episodes Tab -->
+                    <div x-show="activeTab === 'episodes'" class="space-y-4">
+                        <div class="flex items-center justify-between mb-2">
+                            <h3 class="font-bold text-gray-800">剧集列表</h3>
+                            <span class="text-xs text-gray-400" x-show="loadingEpisodes">加载中...</span>
+                        </div>
+
+                        <div class="flex flex-col space-y-4">
+                            <template x-for="ep in episodeList" :key="ep.path">
+                                <div
+                                    class="group bg-white rounded-xl border border-gray-100 shadow-sm hover:shadow-md hover:border-indigo-100 transition-all duration-300 overflow-hidden flex flex-col md:flex-row">
+
+                                    <!-- Thumbnail Section (Left) -->
+                                    <div class="relative w-full md:w-64 md:h-36 aspect-[16/9] flex-shrink-0 cursor-pointer overflow-hidden bg-gray-100"
+                                        @click="ep.playable && startPlayer(ep.id)">
+                                        <!-- Image -->
+                                        <template x-if="ep.thumbnail">
+                                            <div class="absolute inset-0 bg-cover bg-center transition-transform duration-500 group-hover:scale-105"
+                                                :style="`background-image: url('${ep.thumbnail}')`"></div>
+                                        </template>
+                                        <template x-if="!ep.thumbnail">
+                                            <div class="absolute inset-0 flex items-center justify-center">
+                                                <span class="text-4xl grayscale opacity-20">🎞️</span>
+                                            </div>
+                                        </template>
+
+                                        <!-- Play Overlay -->
+                                        <div
+                                            class="absolute inset-0 flex items-center justify-center bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity backdrop-blur-[1px]">
+                                            <div
+                                                class="w-12 h-12 rounded-full bg-white/30 backdrop-blur-md flex items-center justify-center text-white border border-white/50 shadow-lg scale-90 group-hover:scale-100 transition-transform">
+                                                <svg class="w-6 h-6 ml-1" fill="currentColor" viewBox="0 0 24 24">
+                                                    <path d="M8 5v14l11-7z" />
+                                                </svg>
+                                            </div>
+                                        </div>
+
+                                        <!-- Duration Badge -->
+                                        <template x-if="ep.duration">
+                                            <div class="absolute bottom-2 right-2 px-1.5 py-0.5 rounded-md bg-black/70 text-white text-[10px] font-bold backdrop-blur-sm"
+                                                x-text="ep.duration"></div>
+                                        </template>
+
+                                        <!-- Watched Badge -->
+                                        <template x-if="ep.watched">
+                                            <div
+                                                class="absolute top-2 left-2 px-2 py-1 rounded-md bg-green-500/90 text-white text-[10px] font-bold backdrop-blur-sm shadow-sm flex items-center gap-1">
+                                                <svg class="w-3 h-3" fill="none" stroke="currentColor"
+                                                    viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round"
+                                                        stroke-width="3" d="M5 13l4 4L19 7"></path>
+                                                </svg>
+                                                <span>WATCHED</span>
+                                            </div>
+                                        </template>
+                                    </div>
+
+                                    <!-- Content Section (Right) -->
+                                    <div class="flex-1 p-4 flex flex-col justify-between">
+                                        <div>
+                                            <div class="flex justify-between items-start gap-4">
+                                                <div class="flex-1">
+                                                    <h4 class="text-lg font-bold text-gray-800 flex items-center gap-2 group-hover:text-indigo-600 transition-colors cursor-pointer"
+                                                        @click="ep.playable && startPlayer(ep.id)">
+                                                        <span class="text-indigo-500 font-mono text-xl"
+                                                            x-text="ep.episode > 0 ? ep.episode : '#'"></span>
+                                                        <span x-text="ep.name.replace(/\.mp4$|\.mkv$/i, '')"
+                                                            class="line-clamp-1"></span>
+                                                    </h4>
+
+                                                    <!-- Meta Row -->
+                                                    <div
+                                                        class="flex flex-wrap items-center gap-3 mt-1.5 text-xs font-semibold text-gray-400 font-mono">
+                                                        <template x-if="ep.rating > 0">
+                                                            <span
+                                                                class="flex items-center gap-1 text-amber-500 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-100">
+                                                                ★ <span x-text="ep.rating.toFixed(1)"></span>
+                                                            </span>
+                                                        </template>
+                                                        <template x-if="ep.air_date">
+                                                            <span class="flex items-center gap-1">
+                                                                📅 <span x-text="ep.air_date"></span>
+                                                            </span>
+                                                        </template>
+                                                        <span class="text-gray-300">|</span>
+                                                        <span
+                                                            x-text="(ep.size/1024/1024/1024).toFixed(2) + ' GB'"></span>
+                                                    </div>
+                                                </div>
+
+                                                <button
+                                                    class="px-3 py-1.5 rounded-lg bg-indigo-50 text-indigo-600 font-bold text-xs hover:bg-indigo-100 transition whitespace-nowrap opacity-0 group-hover:opacity-100 translate-x-2 group-hover:translate-x-0 transition-all"
+                                                    @click="ep.playable && startPlayer(ep.id)">
+                                                    播放
+                                                </button>
+                                            </div>
+
+                                            <!-- Overview -->
+                                            <div class="mt-3 relative" x-data="{ expanded: false }">
+                                                <p class="text-sm text-gray-600 leading-relaxed"
+                                                    :class="expanded ? '' : 'line-clamp-2'"
+                                                    x-text="ep.overview || '暂无简介...'">
+                                                </p>
+                                                <template x-if="ep.overview && ep.overview.length > 100">
+                                                    <button @click="expanded = !expanded"
+                                                        class="text-[10px] font-bold text-indigo-500 hover:text-indigo-700 mt-1 flex items-center gap-0.5 transition-colors select-none">
+                                                        <span x-text="expanded ? '收起' : '展开'"></span>
+                                                        <svg class="w-3 h-3 transition-transform duration-200"
+                                                            :class="expanded ? 'rotate-180' : ''" fill="none"
+                                                            stroke="currentColor" viewBox="0 0 24 24">
+                                                            <path stroke-linecap="round" stroke-linejoin="round"
+                                                                stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                                                        </svg>
+                                                    </button>
+                                                </template>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </template>
+                            <template x-if="!loadingEpisodes && episodeList.length === 0">
+                                <div class="text-center py-10 text-gray-400">
+                                    暂无文件列表
+                                </div>
+                            </template>
                         </div>
                     </div>
                 </div>
             </div>
+
+
         </div>
-    </template>
 </div>
+</div>
+</template>
 
 <!-- Rename Modal -->
 <template x-teleport="#modal-layer">
@@ -668,14 +1127,34 @@
                         <input type="text" x-model="renameState.pattern" @input.debounce.500ms="previewRename()"
                             class="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-primary focus:border-transparent outline-none font-mono text-sm"
                             placeholder="{Title} - S{Season}E{Ep}">
-                        <p class="text-[10px] text-gray-400 mt-1">支持变量: {Title}, {Season}, {Ep}, {Ext}</p>
+
+                        <!-- Variable Shortcuts -->
+                        <div class="mt-2 flex flex-wrap gap-1">
+                            <template
+                                x-for="tag in ['{Title}', '{TitleCN}', '{TitleJP}', '{TitleEN}', '{Season}', '{Ep}', '{Year}', '{SubGroup}', '{Resolution}', '{VideoCodec}', '{BitDepth}', '{Ext}']">
+                                <button @click="renameState.pattern += tag; previewRename()"
+                                    class="text-[10px] bg-gray-100 hover:bg-gray-200 text-gray-600 px-1.5 py-0.5 rounded transition-colors"
+                                    x-text="tag"></button>
+                            </template>
+                        </div>
+                        <p class="text-[10px] text-gray-400 mt-1">💡 点击上方标签可直接插入。支持使用 <code
+                                class="bg-gray-50 px-0.5 rounded">/</code> 自动整理文件夹。</p>
                     </div>
                     <div>
                         <label class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">季度
                             (Sxx)</label>
-                        <input type="text" x-model="renameState.season" @input.debounce.500ms="previewRename()"
-                            class="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-primary focus:border-transparent outline-none font-mono text-sm"
-                            placeholder="01">
+                        <div class="flex gap-2">
+                            <input type="text" x-model="renameState.season" @input.debounce.500ms="previewRename()"
+                                class="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-primary focus:border-transparent outline-none font-mono text-sm"
+                                placeholder="01">
+                        </div>
+                        <div class="mt-2">
+                            <button
+                                @click="renameState.pattern = '{TitleCN} ({Year}) / Season {Season} / {TitleCN} - S{Season}E{Ep}.{Ext}'; previewRename()"
+                                class="w-full py-1.5 px-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-[10px] font-bold rounded border border-indigo-200 transition-colors">
+                                🌟 预设: Jellyfin/Plex 标准
+                            </button>
+                        </div>
                     </div>
                 </div>
 
@@ -700,18 +1179,18 @@
                             <tbody class="divide-y divide-gray-100">
                                 <template x-for="(item, idx) in renameState.preview" :key="idx">
                                     <tr class="hover:bg-white transition-colors">
-                                        <td class="px-4 py-2 font-medium text-indigo-600 truncate max-w-[150px]"
-                                            :title="item.anime_name" x-text="item.anime_name"></td>
-                                        <td class="px-4 py-2 font-mono text-gray-600 truncate max-w-[200px]"
-                                            :title="item.original" x-text="item.original"></td>
-                                        <td class="px-4 py-2 font-mono truncate max-w-[200px]"
+                                        <td class="px-4 py-2 font-medium text-indigo-600" :title="item.anime_name"
+                                            x-text="item.anime_name"></td>
+                                        <td class="px-4 py-2 font-mono text-gray-600 break-all" :title="item.original"
+                                            x-text="item.original"></td>
+                                        <td class="px-4 py-2 font-mono break-all"
                                             :class="item.original === item.new ? 'text-gray-400 italic' : 'text-green-600 font-medium'"
                                             :title="item.new" x-text="item.new"></td>
                                     </tr>
                                 </template>
                                 <template x-if="!renameState.preview || renameState.preview.length === 0">
                                     <tr>
-                                        <td colspan="2" class="px-4 py-8 text-center text-gray-400 italic">
+                                        <td colspan="3" class="px-4 py-8 text-center text-gray-400 italic">
                                             暂无预览，请检查规则或等待加载...
                                         </td>
                                     </tr>
@@ -733,6 +1212,29 @@
                 </button>
             </div>
         </div>
+    </div>
+</template>
+
+<!-- Player Modal -->
+<template x-teleport="#modal-layer">
+    <div x-show="showPlayer" style="display: none;" class="fixed inset-0 z-[60] bg-black flex flex-col"
+        x-transition.opacity>
+
+        <!-- Player Header -->
+        <div
+            class="absolute top-0 left-0 right-0 z-10 p-4 bg-gradient-to-b from-black/80 to-transparent flex justify-between items-center pointer-events-none">
+            <h3 class="text-white font-medium text-lg drop-shadow-md truncate max-w-2xl px-4" x-text="playerTitle"></h3>
+            <button @click="closePlayer()"
+                class="pointer-events-auto bg-white/10 hover:bg-white/20 text-white rounded-full p-2 backdrop-blur-md transition">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12">
+                    </path>
+                </svg>
+            </button>
+        </div>
+
+        <!-- Player Container -->
+        <div id="artplayer" class="w-full h-full bg-black"></div>
     </div>
 </template>
 

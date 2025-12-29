@@ -19,6 +19,7 @@ type RestoreOptions struct {
 	Logs          bool
 	Local         bool
 	Users         bool
+	RegenerateNFO bool
 }
 
 type RestoreService struct {

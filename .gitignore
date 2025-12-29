@@ -51,6 +51,7 @@ config.yaml
 animateAutoTool
 remote_server
 animate_server
+animate_tool
 
 # Debug Artifacts
 debug_calendar.html

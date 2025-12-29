@@ -16,6 +16,10 @@ type ParsedInfo struct {
 	Resolution string
 	Group      string
 	Extension  string
+	VideoCodec string
+	AudioCodec string
+	BitDepth   string // "10bit" or empty
+	Source     string // "WebRip", "BDRip", etc.
 }
 
 // ParseFilename 解析文件名
@@ -44,14 +48,41 @@ func ParseFilename(path string) ParsedInfo {
 		info.Group = match[1]
 	}
 
-	// 3. Extract Resolution (remove from potential title)
-	resRegex := regexp.MustCompile(`(?i)\b(1080p|720p|2160p|4k|360p|480p|FHD|HD)\b`)
+	// 3. Extract Resolution
+	resRegex := regexp.MustCompile(`(?i)\b(1080p|720p|2160p|4k|360p|480p|FHD|HD|1920x1080|1280x720|3840x2160)\b`)
 	if match := resRegex.FindStringSubmatch(normalized); len(match) > 1 {
-		info.Resolution = match[1]
+		info.Resolution = strings.ToLower(match[1])
+	}
+
+	// 3b. Extract Technical Tags
+	// Video Codec
+	codecRegex := regexp.MustCompile(`(?i)\b(h264|h265|x264|x265|av1|hevc|vp9)\b`)
+	if match := codecRegex.FindStringSubmatch(normalized); len(match) > 1 {
+		info.VideoCodec = strings.ToUpper(match[1])
+	}
+	// Audio Codec
+	audioRegex := regexp.MustCompile(`(?i)\b(flac|aac|aacx2|aacx4|aacx3|ac3|eac3|dts|dts-hd|truehd|opus|mp3)\b`)
+	if match := audioRegex.FindStringSubmatch(normalized); len(match) > 1 {
+		info.AudioCodec = strings.ToUpper(match[1])
+	}
+	// Bit Depth
+	bitRegex := regexp.MustCompile(`(?i)\b(10bit|8bit|hi10p|ma10p)\b`)
+	if match := bitRegex.FindStringSubmatch(normalized); len(match) > 1 {
+		if strings.Contains(strings.ToLower(match[1]), "10") {
+			info.BitDepth = "10bit"
+		} else {
+			info.BitDepth = "8bit"
+		}
+	}
+	// Source
+	sourceRegex := regexp.MustCompile(`(?i)\b(web-?rip|bd-?rip|web-?dl|bluray|dvd-?rip|hdtv)\b`)
+	if match := sourceRegex.FindStringSubmatch(normalized); len(match) > 1 {
+		info.Source = match[1]
 	}
 
 	// 4. Extract Season and Episode
-	// Strategy: Try most specific patterns first.
+	// Try the new ParseSeason logic for a first pass at season
+	info.Season = ParseSeason(cleanName)
 
 	// Pattern A: "S01E02" / "S1E2"
 	sxeRegex := regexp.MustCompile(`(?i)\bS(\d+)\s*E(\d+)\b`)

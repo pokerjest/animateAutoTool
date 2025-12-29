@@ -6,6 +6,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+
+	"github.com/pokerjest/animateAutoTool/internal/db"
+	"github.com/pokerjest/animateAutoTool/internal/jellyfin"
+	"github.com/pokerjest/animateAutoTool/internal/model"
+	"gorm.io/gorm/clause"
 )
 
 func (m *Manager) startAlist() error {
@@ -190,5 +195,26 @@ func (m *Manager) startJellyfin() error {
 	}()
 
 	fmt.Println("Jellyfin started (Port 8096)")
+
+	// Attempt Zero-Config
+	// We do this asynchronously so we don't block the main flow waiting for startup
+	go func() {
+		// Use default credentials or maybe configurable ones in future?
+		// For now: admin / admin
+		// Note: This password is weak, but user can change it.
+		// Ideally we instruct user to change it.
+		key, err := jellyfin.AttemptZeroConfig("http://localhost:8096", "admin", "admin")
+		if err == nil && key != "" {
+			fmt.Printf("✨ Jellyfin Zero-Config Success! API Key: %s\n", key)
+			// Save to DB
+			db.DB.Clauses(clause.OnConflict{UpdateAll: true}).Create(&model.GlobalConfig{Key: model.ConfigKeyJellyfinUrl, Value: "http://localhost:8096"})
+			db.DB.Clauses(clause.OnConflict{UpdateAll: true}).Create(&model.GlobalConfig{Key: model.ConfigKeyJellyfinApiKey, Value: key})
+		} else if err != nil {
+			// Quietly fail if it's just not a fresh install
+			// But can log verify errors
+			fmt.Printf("Jellyfin Zero-Config note: %v\n", err)
+		}
+	}()
+
 	return nil
 }

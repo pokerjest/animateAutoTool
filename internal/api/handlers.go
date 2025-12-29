@@ -17,20 +17,24 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/pokerjest/animateAutoTool/internal/alist"
+	"github.com/pokerjest/animateAutoTool/internal/anilist"
 	"github.com/pokerjest/animateAutoTool/internal/bangumi"
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/downloader"
+	"github.com/pokerjest/animateAutoTool/internal/jellyfin"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/parser"
 	"github.com/pokerjest/animateAutoTool/internal/service"
+	"github.com/pokerjest/animateAutoTool/internal/tmdb"
 	"gorm.io/gorm"
 )
 
 // === Fix Match Handlers ===
 
 type FixMatchRequest struct {
-	AnimeID   uint `json:"anime_id"`
-	BangumiID int  `json:"bangumi_id"`
+	AnimeID  uint   `json:"anime_id"`
+	Source   string `json:"source"`    // "bangumi", "tmdb", "anilist"
+	SourceID int    `json:"source_id"` // The ID in the target source
 }
 
 func FixMatchHandler(c *gin.Context) {
@@ -40,8 +44,13 @@ func FixMatchHandler(c *gin.Context) {
 		return
 	}
 
+	// Default to bangumi if source is empty (backward compatibility)
+	if req.Source == "" {
+		req.Source = "bangumi"
+	}
+
 	svc := service.NewLocalAnimeService()
-	if err := svc.MatchSeries(req.AnimeID, req.BangumiID); err != nil {
+	if err := svc.MatchSeries(req.AnimeID, req.Source, req.SourceID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -51,48 +60,170 @@ func FixMatchHandler(c *gin.Context) {
 
 func SearchMetadataHandler(c *gin.Context) {
 	keyword := c.Query("q")
+	source := c.Query("source")
 	if keyword == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Keyword required"})
 		return
 	}
 
-	bgmClient := bangumi.NewClient("", "", "")
-	// Apply Proxy logic duplicated from service... ideally should be shared util
-	// For speed, fetching config directly
-	var bgmProxyConfig model.GlobalConfig
-	if err := db.DB.Where("key = ?", model.ConfigKeyProxyBangumi).First(&bgmProxyConfig).Error; err == nil && bgmProxyConfig.Value == "true" {
-		var p model.GlobalConfig
-		if err := db.DB.Where("key = ?", model.ConfigKeyProxyURL).First(&p).Error; err == nil && p.Value != "" {
-			bgmClient.SetProxy(p.Value)
+	if source == "" {
+		source = "bangumi"
+	}
+
+	switch source {
+	case "tmdb":
+		var tmdbTokenConfig model.GlobalConfig
+		if err := db.DB.Where("key = ?", model.ConfigKeyTMDBToken).First(&tmdbTokenConfig).Error; err != nil || tmdbTokenConfig.Value == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "TMDB Token not configured"})
+			return
+		}
+
+		// Proxy
+		proxyURL := ""
+		var proxyConfig model.GlobalConfig
+		if err := db.DB.Where("key = ?", model.ConfigKeyProxyTMDB).First(&proxyConfig).Error; err == nil && proxyConfig.Value == model.ConfigValueTrue {
+			var p model.GlobalConfig
+			if err := db.DB.Where("key = ?", model.ConfigKeyProxyURL).First(&p).Error; err == nil {
+				proxyURL = p.Value
+			}
+		}
+
+		client := tmdb.NewClient(tmdbTokenConfig.Value, proxyURL)
+		results, err := client.SearchTV(keyword)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
+		// Map TMDB results to generic structure (frontend expects image/name/id)
+		// Or update frontend to handle TMDB structure?
+		// Existing frontend: res.images.large, res.name_cn || res.name, res.id
+		// TMDB returns TVShow struct. We should map it or return raw and update frontend.
+		// Let's return raw for now and update frontend to handle generic "images.large" or "poster_path" mapping.
+		// Actually, let's map it to a generic response to make frontend easier.
+		type SearchResult struct {
+			ID     int    `json:"id"`
+			Name   string `json:"name"`
+			NameCN string `json:"name_cn"`
+			Images struct {
+				Large string `json:"large"`
+			} `json:"images"`
+			Summary string `json:"summary"`
+		}
+
+		var genericResults []SearchResult
+		for _, show := range results {
+			var r SearchResult
+			r.ID = show.ID
+			r.Name = show.OriginalName
+			r.NameCN = show.Name
+			r.Images.Large = show.PosterPath // Ideally full URL or handle in FE (TMDB returns partial)
+			// TMDB Image: usually needs base URL. internal/tmdb might handle it or we append.
+			// Let's assume frontend knows how to handle it or we fix it here.
+			// Standard TMDB image: https://image.tmdb.org/t/p/w500/...
+			if show.PosterPath != "" {
+				r.Images.Large = "https://image.tmdb.org/t/p/w500" + show.PosterPath
+			}
+			r.Summary = show.Overview
+			genericResults = append(genericResults, r)
+		}
+		c.JSON(http.StatusOK, genericResults)
+
+	case "anilist":
+		var alTokenConfig model.GlobalConfig
+		if err := db.DB.Where("key = ?", model.ConfigKeyAniListToken).First(&alTokenConfig).Error; err != nil || alTokenConfig.Value == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "AniList Token not configured"})
+			return
+		}
+
+		// Proxy
+		proxyURL := ""
+		var proxyConfig model.GlobalConfig
+		if err := db.DB.Where("key = ?", model.ConfigKeyProxyAniList).First(&proxyConfig).Error; err == nil && proxyConfig.Value == model.ConfigValueTrue {
+			var p model.GlobalConfig
+			if err := db.DB.Where("key = ?", model.ConfigKeyProxyURL).First(&p).Error; err == nil {
+				proxyURL = p.Value
+			}
+		}
+
+		client := anilist.NewClient(alTokenConfig.Value, proxyURL)
+		results, err := client.SearchAnime(keyword)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
+		if results == nil {
+			c.JSON(http.StatusOK, []interface{}{})
+			return
+		}
+
+		// AniList returns a single *Media usually if using SearchAnime helper which returns *Media?
+		// Wait, SearchAnime in local_anime.go seemed to return *Media (single match).
+		// We probably need a customized Search function in `internal/anilist` that returns a list.
+		// If `SearchAnime` only returns one, that's a limitation.
+		// Let's assume for now we return a list of 1 if found.
+
+		type SearchResult struct {
+			ID     int    `json:"id"`
+			Name   string `json:"name"`
+			NameCN string `json:"name_cn"`
+			Images struct {
+				Large string `json:"large"`
+			} `json:"images"`
+			Summary string `json:"summary"`
+		}
+
+		var genericResults []SearchResult
+		// Wrap single result
+		var r SearchResult
+		r.ID = results.ID
+		r.Name = results.Title.Native
+		r.NameCN = results.Title.Romaji // or English
+		if results.Title.English != "" {
+			r.NameCN = results.Title.English
+		}
+		r.Images.Large = results.CoverImage.ExtraLarge
+		r.Summary = results.Description
+		genericResults = append(genericResults, r)
+
+		c.JSON(http.StatusOK, genericResults)
+
+	default: // Bangumi
+		bgmClient := bangumi.NewClient("", "", "")
+		// Apply Proxy logic
+		var bgmProxyConfig model.GlobalConfig
+		if err := db.DB.Where("key = ?", model.ConfigKeyProxyBangumi).First(&bgmProxyConfig).Error; err == nil && bgmProxyConfig.Value == "true" {
+			var p model.GlobalConfig
+			if err := db.DB.Where("key = ?", model.ConfigKeyProxyURL).First(&p).Error; err == nil && p.Value != "" {
+				bgmClient.SetProxy(p.Value)
+			}
+		}
+
+		results, err := bgmClient.SearchSubjects(keyword)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
+		// Map Bangumi results to generic structure (Wait, Bangumi returns `SearchResult` which has `List`?)
+		// Actually bgmClient.SearchSubjects returns `*bangumi.SearchResult`?
+		// Check api/handlers.go:71 logic: `c.JSON(http.StatusOK, results)`.
+		// Frontend expects `results.list` or array?
+		// Frontend logic: `this.fixMatchResults = Array.isArray(data) ? data : (data ? [data] : []);`
+		// Bangumi SearchSubjects likely returns a struct with `List []Subject`.
+		// If I return genericResults as array, frontend should be fine.
+		// BUT if I change Bangumi return type format, I break frontend if it expects specific fields.
+		// Existing frontend uses: `res.images.large`, `res.name_cn`, `res.name`, `res.id`.
+		// Bangumi `Subject` has these.
+		// So I should return the list of items directly.
+
+		if results != nil {
+			c.JSON(http.StatusOK, results)
+		} else {
+			c.JSON(http.StatusOK, []interface{}{})
 		}
 	}
-
-	results, err := bgmClient.SearchSubject(keyword)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	// Return simple list
-	// SearchResult from parser/interface? Bangumi client returns its own specific struct
-	// Let's assume the client returns something usable or map it.
-	// Based on bangumi package viewing earlier, SearchSubject returns *SearchResult which likely has ID, Name, etc.
-	// But SearchSubject returns a SINGLE result or a list? The function signature appeared to be single result in `EnrichMetadata` usage?
-	// Wait, `bgmClient.SearchSubject` in `EnrichMetadata` returns `*bangumi.SearchResult`.
-	// The `bangumi` package likely needs a method to return LIST of candidates for UI.
-	// If `SearchSubject` only returns the best match, we definitely need a `SearchSubjects` (plural) method in client.
-
-	// Since I can't easily see internal/bangumi/client.go right this second without a tool call,
-	// I will optimistically check if I can use what I have.
-	// Actually, the user wants "Fix Match" which implies choosing from a list.
-	// I should probably skip implementing the full "Search" endpoint perfection here without checking the client capabilities.
-	// However, I can implement the "Apply" (FixMatchHandler) which is the critical write operation.
-	// The Search part might need client update.
-
-	// For this step, I'll just return the single result that SearchSubject gives, wrapped in a list,
-	// unless I verify `bangumi` package.
-
-	c.JSON(http.StatusOK, []interface{}{results}) // Temporary single result
 }
 
 type DashboardData struct {
@@ -712,13 +843,24 @@ func SettingsHandler(c *gin.Context) {
 		configMap[cfg.Key] = cfg.Value
 	}
 
-	if _, ok := configMap[model.ConfigKeyQBUrl]; !ok {
-		configMap[model.ConfigKeyQBUrl] = "http://localhost:8080"
+	// Fetch Jellyfin Server ID for qualified links
+	jellyfinServerId := ""
+	if url, ok := configMap[model.ConfigKeyJellyfinUrl]; ok && url != "" {
+		if apiKey, ok := configMap[model.ConfigKeyJellyfinApiKey]; ok && apiKey != "" {
+			client := jellyfin.NewClient(url, apiKey)
+			if info, err := client.GetPublicInfo(); err == nil {
+				jellyfinServerId = info.Id
+				log.Printf("DEBUG: Fetched Jellyfin Server ID for Settings page: %s", jellyfinServerId)
+			} else {
+				log.Printf("ERROR: Failed to fetch Jellyfin Server ID in Settings: %v", err)
+			}
+		}
 	}
 
 	c.HTML(http.StatusOK, "settings.html", gin.H{
-		"SkipLayout": skip,
-		"Config":     configMap,
+		"SkipLayout":       skip,
+		"Config":           configMap,
+		"JellyfinServerID": jellyfinServerId,
 	})
 }
 

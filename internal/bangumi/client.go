@@ -135,11 +135,10 @@ type SearchResult struct {
 	Images Images `json:"images"`
 }
 
-// SearchSubject searches for a subject by keyword and returns the first match with details
-func (c *Client) SearchSubject(keyword string) (*SearchResult, error) {
-	// GET https://api.bgm.tv/search/subject/{keywords}?type=2&responseGroup=small
+// SearchSubjects searches for subjects by keyword and returns a list of matches
+func (c *Client) SearchSubjects(keyword string) ([]SearchResult, error) {
 	encodedKeyword := url.QueryEscape(keyword)
-	u := fmt.Sprintf("https://api.bgm.tv/search/subject/%s?type=2&responseGroup=small&max_results=1", encodedKeyword)
+	u := fmt.Sprintf("https://api.bgm.tv/search/subject/%s?type=2&responseGroup=small&max_results=10", encodedKeyword)
 
 	resp, err := c.client.R().
 		SetHeader("User-Agent", "pokerjest/animateAutoTool/1.0 (https://github.com/pokerjest/animateAutoTool)").
@@ -160,24 +159,35 @@ func (c *Client) SearchSubject(keyword string) (*SearchResult, error) {
 		return nil, err
 	}
 
-	if len(result.List) > 0 {
-		// Fix image urls
-		item := &result.List[0]
-		fixImage := func(url string) string {
-			if strings.HasPrefix(url, "//") {
-				return "https:" + url
-			}
-			return url
+	fixImage := func(url string) string {
+		if strings.HasPrefix(url, "//") {
+			return "https:" + url
 		}
+		return url
+	}
+
+	for i := range result.List {
+		item := &result.List[i]
 		item.Images.Large = fixImage(item.Images.Large)
 		item.Images.Common = fixImage(item.Images.Common)
 		item.Images.Medium = fixImage(item.Images.Medium)
 		item.Images.Small = fixImage(item.Images.Small)
 		item.Images.Grid = fixImage(item.Images.Grid)
-		return item, nil
 	}
 
-	return nil, nil // Not found
+	return result.List, nil
+}
+
+// SearchSubject searches for a subject by keyword and returns the first match with details
+func (c *Client) SearchSubject(keyword string) (*SearchResult, error) {
+	list, err := c.SearchSubjects(keyword)
+	if err != nil {
+		return nil, err
+	}
+	if len(list) > 0 {
+		return &list[0], nil
+	}
+	return nil, nil
 }
 
 func (c *Client) GetSubject(id int) (*Subject, error) {

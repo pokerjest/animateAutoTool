@@ -3,6 +3,7 @@ package api
 import (
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"time"
@@ -153,6 +154,7 @@ func ExecuteRestoreHandler(c *gin.Context) {
 		Logs:          c.PostForm("restore_logs") == "on",
 		Local:         c.PostForm("restore_local") == "on",
 		Users:         c.PostForm("restore_users") == "on",
+		RegenerateNFO: c.PostForm("restore_nfo") == "on",
 	}
 
 	// Validate at least one option selected
@@ -166,6 +168,20 @@ func ExecuteRestoreHandler(c *gin.Context) {
 	if err := svc.PerformRestore(tempPath, options); err != nil {
 		c.String(http.StatusInternalServerError, fmt.Sprintf("Restore Failed: %v", err))
 		return
+	}
+
+	// Optional: Regenerate NFOs
+	if options.RegenerateNFO {
+		go func() {
+			log.Println("Restore: Triggering NFO regeneration...")
+			localSvc := service.NewLocalAnimeService()
+			count, err := localSvc.RegenerateAllNFOs()
+			if err != nil {
+				log.Printf("Restore: NFO regeneration failed: %v", err)
+			} else {
+				log.Printf("Restore: NFO regeneration completed. Processed %d series.", count)
+			}
+		}()
 	}
 
 	// Success response: Send HTMX trigger or redirect

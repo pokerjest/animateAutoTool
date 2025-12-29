@@ -2,20 +2,25 @@ package api
 
 import (
 	"fmt"
+	"log"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pokerjest/animateAutoTool/internal/db"
+	"github.com/pokerjest/animateAutoTool/internal/jellyfin"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/service"
 )
 
 type LocalAnimeData struct {
-	SkipLayout  bool
-	Directories []model.LocalAnimeDirectory
-	AnimeList   []model.LocalAnime
+	SkipLayout       bool
+	Directories      []model.LocalAnimeDirectory
+	AnimeList        []model.LocalAnime
+	JellyfinURL      string
+	JellyfinServerID string // Added Server ID
 }
 
 // LocalAnimePageHandler 渲染本地番剧管理页面
@@ -28,10 +33,46 @@ func LocalAnimePageHandler(c *gin.Context) {
 	var animes []model.LocalAnime
 	db.DB.Preload("Metadata").Find(&animes) // TODO: Pagination? For now fetch all
 
+	var urlCfg, keyCfg model.GlobalConfig
+	db.DB.Where("key = ?", model.ConfigKeyJellyfinUrl).First(&urlCfg)
+	db.DB.Where("key = ?", model.ConfigKeyJellyfinApiKey).First(&keyCfg)
+
+	serverId := ""
+	if urlCfg.Value != "" && keyCfg.Value != "" {
+		// Best effort fetch of Server ID
+		// We could cache this, but fetching here ensures freshness if server changes
+		// Or we can rely on cached status if we had one. Simple fetch is safe enough for page load.
+		go func() {
+			// Optional: Async check or sync?
+			// Doing it sync for page load might be slow if JF is down.
+			// Ideally we cache this in DB or memory on startup.
+			// For now, let's just create a client and try quickly.
+		}()
+
+		// Let's try to fetch it quickly with short timeout or rely on stored config if we had it?
+		// Better: We can store it in DB when we test connection?
+		// For now, let's try to fetch it synchronously but with short timeout?
+		// Actually, `jellyfin.NewClient` is cheap. `GetPublicInfo` does an HTTP request.
+		// If Jellyfin is local, it's fast.
+		// NOTE: To avoid blocking page load if Jellyfin is down, we should probably fetch this async or use a cached value.
+		// However, for this specific "fix mismatch" user request, let's fetch it.
+		// Optimization: We could reuse the client from elsewhere?
+		client := jellyfin.NewClient(urlCfg.Value, keyCfg.Value)
+		info, err := client.GetPublicInfo()
+		if err == nil {
+			serverId = info.Id
+			log.Printf("DEBUG: Fetched Jellyfin Server ID for LocalAnime page: %s", serverId)
+		} else {
+			log.Printf("ERROR: Failed to fetch Jellyfin Server ID: %v", err)
+		}
+	}
+
 	data := LocalAnimeData{
-		SkipLayout:  skip,
-		Directories: dirs,
-		AnimeList:   animes,
+		SkipLayout:       skip,
+		Directories:      dirs,
+		AnimeList:        animes,
+		JellyfinURL:      urlCfg.Value,
+		JellyfinServerID: serverId,
 	}
 
 	c.HTML(http.StatusOK, "local_anime.html", data)
@@ -51,8 +92,24 @@ func AddLocalDirectoryHandler(c *gin.Context) {
 		return
 	}
 
-	// Trigger immediate scan
+	// Trigger immediate scan and Jellyfin sync
 	go func() {
+		// Sync to Jellyfin
+		var urlCfg, keyCfg model.GlobalConfig
+		db.DB.Where("key = ?", model.ConfigKeyJellyfinUrl).First(&urlCfg)
+		db.DB.Where("key = ?", model.ConfigKeyJellyfinApiKey).First(&keyCfg)
+
+		if urlCfg.Value != "" && keyCfg.Value != "" {
+			client := jellyfin.NewClient(urlCfg.Value, keyCfg.Value)
+			libName := filepath.Base(path)
+			// Use "tvshows" as default for Anime
+			if err := client.CreateLibrary(libName, path, "tvshows"); err != nil {
+				log.Printf("Failed to auto-create Jellyfin library: %v", err)
+			} else {
+				log.Printf("Successfully created Jellyfin library: %s", libName)
+			}
+		}
+
 		scanner := service.NewScannerService()
 		if err := scanner.ScanAll(); err != nil {
 			fmt.Printf("Error scanning all directories: %v\n", err)
@@ -98,4 +155,19 @@ func ScanLocalDirectoryHandler(c *gin.Context) {
 	}()
 
 	c.String(http.StatusOK, "扫描(Phase1)与刮削(Phase2)已在后台启动")
+}
+
+// RegenerateNFOHandler 手动触发 NFO 重建
+func RegenerateNFOHandler(c *gin.Context) {
+	svc := service.NewLocalAnimeService()
+	go func() {
+		count, err := svc.RegenerateAllNFOs()
+		if err != nil {
+			log.Printf("ERROR: NFO Regeneration failed: %v", err)
+		} else {
+			log.Printf("INFO: NFO Regeneration completed. Processed %d series.", count)
+		}
+	}()
+
+	c.String(http.StatusOK, "NFO 重建任务已在后台启动，详情请查看日志")
 }

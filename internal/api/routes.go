@@ -127,6 +127,15 @@ func InitRoutes(r *gin.Engine) {
 			apiGroup.POST("/library/fix_match", FixMatchHandler)
 			apiGroup.GET("/metadata/search", SearchMetadataHandler)
 			apiGroup.POST("/local-anime/:id/switch-source", SwitchLocalAnimeSourceHandler)
+			// NFO
+			apiGroup.POST("/library/nfo/regenerate", RegenerateNFOHandler)
+
+			// Jellyfin Proxy (Public for Player Access)
+			apiGroup.GET("/jellyfin/stream/:id", ProxyVideoHandler)
+
+			// Jellyfin Player
+			apiGroup.GET("/jellyfin/play/:id", GetPlayInfoHandler)
+			apiGroup.POST("/jellyfin/progress", ReportProgressHandler)
 
 			// Backup
 			apiGroup.GET("/backup/export", ExportBackupHandler)

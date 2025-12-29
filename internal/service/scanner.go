@@ -30,12 +30,17 @@ func NewScannerService() *ScannerService {
 
 // ScanResult holds the processed data for a single file
 type ScanResult struct {
-	FilePath   string
-	FileSize   int64
-	ParsedInfo parser.ParsedInfo
-	// Derived Series Info
+	FilePath    string
+	FileSize    int64
+	ParsedInfo  parser.ParsedInfo
 	SeriesPath  string
 	SeriesTitle string
+	DirectoryID uint
+}
+
+type ScanJob struct {
+	Path        string
+	DirectoryID uint
 }
 
 func (s *ScannerService) ScanAll() error {
@@ -48,7 +53,7 @@ func (s *ScannerService) ScanAll() error {
 	}
 
 	// 1. Prepare Channels
-	jobs := make(chan string, 1000)
+	jobs := make(chan ScanJob, 1000)
 	results := make(chan ScanResult, 1000)
 	var wg sync.WaitGroup
 
@@ -71,7 +76,7 @@ func (s *ScannerService) ScanAll() error {
 	// 4. Start Producer (File Walker)
 	go func() {
 		for _, d := range dirs {
-			s.walkDirectory(d.Path, jobs)
+			s.walkDirectory(d.Path, d.ID, jobs)
 		}
 		close(jobs)
 	}()
@@ -85,6 +90,10 @@ func (s *ScannerService) ScanAll() error {
 	if err := db.DB.Exec("UPDATE local_animes SET file_count = (SELECT count(*) FROM local_episodes WHERE local_episodes.local_anime_id = local_animes.id)").Error; err != nil {
 		log.Printf("Scanner: Failed to update file counts: %v", err)
 	}
+	// Update total sizes (COALESCE to handle 0)
+	if err := db.DB.Exec("UPDATE local_animes SET total_size = (SELECT COALESCE(SUM(file_size), 0) FROM local_episodes WHERE local_episodes.local_anime_id = local_animes.id)").Error; err != nil {
+		log.Printf("Scanner: Failed to update total sizes: %v", err)
+	}
 
 	log.Printf("Scanner: Full scan completed in %v", time.Since(start))
 
@@ -94,7 +103,7 @@ func (s *ScannerService) ScanAll() error {
 	return nil
 }
 
-func (s *ScannerService) walkDirectory(root string, jobs chan<- string) {
+func (s *ScannerService) walkDirectory(root string, directoryID uint, jobs chan<- ScanJob) {
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			log.Printf("Scanner: Error accessing %s: %v", path, err)
@@ -111,7 +120,7 @@ func (s *ScannerService) walkDirectory(root string, jobs chan<- string) {
 		// Check extension
 		ext := strings.ToLower(filepath.Ext(d.Name()))
 		if IsVideoExt(ext) {
-			jobs <- path
+			jobs <- ScanJob{Path: path, DirectoryID: directoryID}
 		}
 		return nil
 	})
@@ -120,8 +129,9 @@ func (s *ScannerService) walkDirectory(root string, jobs chan<- string) {
 	}
 }
 
-func (s *ScannerService) worker(jobs <-chan string, results chan<- ScanResult) {
-	for path := range jobs {
+func (s *ScannerService) worker(jobs <-chan ScanJob, results chan<- ScanResult) {
+	for job := range jobs {
+		path := job.Path
 		info, err := os.Stat(path)
 		if err != nil {
 			continue
@@ -178,6 +188,7 @@ func (s *ScannerService) worker(jobs <-chan string, results chan<- ScanResult) {
 			ParsedInfo:  parsed,
 			SeriesPath:  seriesPath,
 			SeriesTitle: seriesTitle,
+			DirectoryID: job.DirectoryID,
 		}
 	}
 }
@@ -198,7 +209,7 @@ func (s *ScannerService) aggregator(results <-chan ScanResult) {
 		// SQLite batch size limits apply, so 100 is safe.
 		if err := db.DB.Clauses(clause.OnConflict{
 			Columns:   []clause.Column{{Name: "path"}},
-			DoUpdates: clause.AssignmentColumns([]string{"file_size", "season_num", "episode_num", "title", "container"}),
+			DoUpdates: clause.AssignmentColumns([]string{"local_anime_id", "file_size", "season_num", "episode_num", "title", "container"}),
 		}).Create(&batch).Error; err != nil {
 			log.Printf("Scanner: Batch insert failed: %v", err)
 		}
@@ -218,8 +229,9 @@ func (s *ScannerService) aggregator(results <-chan ScanResult) {
 				series = model.LocalAnime{
 					Title:       res.SeriesTitle,
 					Path:        res.SeriesPath,
-					FileCount:   0, // will update later? or maybe just ignore count for now
-					DirectoryID: 0, // We might need to find which root reg it belongs to, or make specific logic
+					FileCount:   0,
+					DirectoryID: res.DirectoryID,
+					Season:      res.ParsedInfo.Season, // Initial season from filename analysis
 				}
 				// Try to match directory ID logic if strictly required, but for now 0 is fine or we fix it.
 				// Actually we should assign DirectoryID if possible for permission/scope logic.
@@ -228,6 +240,12 @@ func (s *ScannerService) aggregator(results <-chan ScanResult) {
 				if err := db.DB.Create(&series).Error; err != nil {
 					log.Printf("Scanner: Failed to create series %s: %v", res.SeriesTitle, err)
 					continue
+				}
+			} else {
+				// Update season if it's default 1 and we found a better one
+				if series.Season <= 1 && res.ParsedInfo.Season > 1 {
+					series.Season = res.ParsedInfo.Season
+					db.DB.Model(&series).Update("season", series.Season)
 				}
 			}
 			seriesID = series.ID
@@ -247,6 +265,10 @@ func (s *ScannerService) aggregator(results <-chan ScanResult) {
 			ParsedSeason: strconv.Itoa(res.ParsedInfo.Season),
 			Resolution:   res.ParsedInfo.Resolution,
 			SubGroup:     res.ParsedInfo.Group,
+			VideoCodec:   res.ParsedInfo.VideoCodec,
+			AudioCodec:   res.ParsedInfo.AudioCodec,
+			BitDepth:     res.ParsedInfo.BitDepth,
+			Source:       res.ParsedInfo.Source,
 		}
 
 		// If Ep Title is same as Series Title (common in parsing), maybe clear it to look cleaner?
@@ -261,4 +283,19 @@ func (s *ScannerService) aggregator(results <-chan ScanResult) {
 
 	// Final flush
 	flush()
+
+	// Proactive Fix: Link orphaned animes to their directories if they were scanned with ID 0
+	s.fixOrphanedAnimes()
+}
+
+func (s *ScannerService) fixOrphanedAnimes() {
+	var dirs []model.LocalAnimeDirectory
+	db.DB.Find(&dirs)
+
+	for _, d := range dirs {
+		// Update animes that start with this path and have DirectoryID 0
+		db.DB.Model(&model.LocalAnime{}).
+			Where("directory_id = 0 AND path LIKE ?", d.Path+"%").
+			Update("directory_id", d.ID)
+	}
 }

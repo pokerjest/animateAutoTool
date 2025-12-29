@@ -5,9 +5,11 @@
     <!-- Card Header/Cover (Poster Aspect Ratio) -->
     <div class="relative w-full aspect-[2/3] bg-gray-100 overflow-hidden cursor-pointer" @click="$dispatch('show-anime-details', { 
             localId: {{ .ID }}, 
+            directoryId: {{ .DirectoryID }},
             bangumiId: {{ if .Metadata }}{{ .Metadata.BangumiID }}{{ else }}0{{ end }}, 
             tmdbId: {{ if .Metadata }}{{ .Metadata.TMDBID }}{{ else }}0{{ end }}, 
             fileCount: {{ .FileCount }}, 
+            jellyfin_series_id: '{{ .JellyfinSeriesID }}',
             
             title: `{{ .Title }}`, 
             image: `{{ .Image }}`, 
@@ -55,10 +57,18 @@
             <span>{{ .FileCount }}</span>
         </div>
 
-        <!-- Size Badge (Top Left) -->
-        <div
-            class="absolute top-2 left-2 bg-black/60 backdrop-blur-sm text-white text-[10px] font-bold px-2 py-1 rounded-full border border-white/10 shadow-sm">
-            {{ .TotalSize | toGB }}
+        <!-- Season & Size Badge (Top Left) -->
+        <div class="absolute top-2 left-2 flex flex-col gap-1">
+            {{ if gt .Season 0 }}
+            <div
+                class="bg-indigo-600/80 backdrop-blur-sm text-white text-[10px] font-bold px-2 py-1 rounded-full border border-white/10 shadow-sm text-center">
+                S{{ if lt .Season 10 }}0{{ end }}{{ .Season }}
+            </div>
+            {{ end }}
+            <div
+                class="bg-black/60 backdrop-blur-sm text-white text-[10px] font-bold px-2 py-1 rounded-full border border-white/10 shadow-sm text-center">
+                {{ .TotalSize | toGB }}
+            </div>
         </div>
     </div>
 
@@ -72,6 +82,7 @@
                     bangumiId: {{ if .Metadata }}{{ .Metadata.BangumiID }}{{ else }}0{{ end }}, 
                     tmdbId: {{ if .Metadata }}{{ .Metadata.TMDBID }}{{ else }}0{{ end }}, 
                     fileCount: {{ .FileCount }}, 
+                    jellyfin_series_id: '{{ .JellyfinSeriesID }}',
                     
                     title: `{{ .Title }}`, 
                     image: `{{ .Image }}`, 

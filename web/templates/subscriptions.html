@@ -338,7 +338,7 @@
         }
     },
     async applyCurrentSource() {
-        if (!confirm('确定将当前数据源应用为封面和标题吗？')) return;
+        // if (!confirm('确定将当前数据源应用为封面和标题吗？')) return;
         try {
             const res = await fetch(`/api/subscriptions/${this.currentSubId}/switch-source?source=${this.activeSource}`, { 
                 method: 'POST' 

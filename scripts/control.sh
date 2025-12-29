@@ -40,6 +40,9 @@ check_deps() {
 
 build() {
     check_deps
+    echo -e "${GREEN}Installing dependencies...${NC}"
+    go mod tidy
+    go mod download
     echo -e "${GREEN}Building $APP_NAME...${NC}"
     CGO_ENABLED=0 go build -ldflags="-s -w" -o $BIN_PATH $SRC_PATH
     if [ $? -ne 0 ]; then
