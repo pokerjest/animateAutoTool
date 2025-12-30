@@ -1,9 +1,25 @@
 {{ if not .SkipLayout }}{{ template "header.html" . }}{{ end }}
 <script src="/static/js/artplayer.js"></script>
+<script>
+    window.animeMap = {};
+    try {
+        const allAnime = {{ .AnimeList | json
+    }};
+    if (allAnime) {
+        allAnime.forEach(a => {
+            const id = a.ID || a.id;
+            if (id) window.animeMap[id] = a;
+        });
+    }
+    console.log('Loaded animeMap:', Object.keys(window.animeMap).length, 'items');
+    } catch (e) {
+        console.error('Failed to init animeMap', e);
+    }
+</script>
 
 <div class="space-y-6" x-data="{ 
-    jellyfinUrl: '{{.JellyfinURL}}'.replace(/\/$/, ''),
-    jellyfinServerId: '{{.JellyfinServerID}}',
+    jellyfinUrl: ({{.JellyfinURL | json }} || '').replace(/\/$/, ''),
+    jellyfinServerId: {{.JellyfinServerID | json }} || '',
     showAddModal: false,
     showDeleteModal: false,
     deleteId: null,
@@ -28,6 +44,13 @@
     updatingComplete: false,
     updatingProgress: false,
     scanning: false, // New scanning state
+    renameState: {
+        pattern: '{Title} - S{Season}E{Ep}',
+        season: '',
+        preview: [],
+        loading: false,
+        id: 0
+    },
     toast: { show: false, message: '', type: 'success' },
 
     // Fix Match State
@@ -42,22 +65,41 @@
         this.toast.show = true;
         setTimeout(() => { this.toast.show = false }, 3000);
     },
+    openDetailsById(id) {
+        console.log('openDetailsById called with:', id);
+        if (!window.animeMap) {
+             console.error('window.animeMap is missing');
+             this.showToast('数据未加载，请刷新重试', 'error');
+             return;
+        }
+        // Try both number and string key
+        const data = window.animeMap[id] || window.animeMap[String(id)];
+        if (data) {
+             this.openDetails(data);
+        } else {
+             console.error('Data key not found for id:', id, 'Keys:', Object.keys(window.animeMap));
+             this.showToast('无法找到番剧数据', 'error');
+        }
+    },
     async openDetails(data) {
+        if (!data) return;
         this.modalRaw = data;
         this.showDetailsModal = true;
-        this.currentLocalId = data.localId || 0;
-        this.currentDirectoryId = data.directoryId || 0;
-        this.currentFileCount = data.fileCount || 0;
+        this.currentLocalId = data.ID || data.id || 0;
+        this.currentDirectoryId = data.directory_id || 0;
+        this.currentFileCount = data.file_count || 0;
         this.activeTab = 'info';
         this.episodeList = [];
         this.fetchEpisodes(); // Start fetching immediately
-        this.currentFileCount = data.fileCount || 0;
 
         // Reset scroll position immediately
         this.scrollToTop();
 
+        // Helper to get metadata safely
+        const m = data.metadata || {};
+
         // Auto-select source based on active title vs cached titles
-        if (data.tmdbId > 0 && data.title === data.tmdbTitle && data.title !== data.bangumiTitle) {
+        if (m.tmdb_id > 0 && data.title === m.tmdb_title && data.title !== m.bangumi_title) {
              this.switchSource('tmdb');
         } else {
              this.switchSource('bangumi');
@@ -71,37 +113,39 @@
     },
     async switchSource(source) {
         this.activeSource = source;
+        const m = this.modalRaw.metadata || {};
+        
         if (source === 'tmdb') {
             this.loadingDetails = false;
             // Use Cached TMDB Data
             // Map to Bangumi-like structure for the template
             this.detailsData = {
-                id: this.modalRaw.tmdbId,
-                name: this.modalRaw.tmdbTitle,
+                id: m.tmdb_id,
+                name: m.tmdb_title,
                 name_cn: '', 
-                images: { large: this.modalRaw.tmdbImage },
-                summary: this.modalRaw.tmdbSummary || '暂无 TMDB 简介',
+                images: { large: m.tmdb_image },
+                summary: m.tmdb_summary || '暂无 TMDB 简介',
                 tags: [],
-                rating: { score: this.modalRaw.tmdbRating || 'N/A' },
+                rating: { score: m.tmdb_rating || 'N/A' },
                 air_date: ''
             };
-            if (!this.modalRaw.tmdbId) {
+            if (!m.tmdb_id) {
                 this.detailsData.summary = '未关联 TMDB';
                 this.detailsData.name = '无 TMDB 数据';
             }
         } else if (source === 'anilist') {
             this.loadingDetails = false;
             this.detailsData = {
-                id: this.modalRaw.anilistId,
-                name: this.modalRaw.anilistTitle,
+                id: m.anilist_id,
+                name: m.anilist_title,
                 name_cn: '', 
-                images: { large: this.modalRaw.anilistImage },
-                summary: this.modalRaw.anilistSummary || '暂无 AniList 简介',
+                images: { large: m.anilist_image },
+                summary: m.anilist_summary || '暂无 AniList 简介',
                 tags: [],
-                rating: { score: this.modalRaw.anilistRating || 'N/A' },
+                rating: { score: m.anilist_rating || 'N/A' },
                 air_date: ''
             };
-            if (!this.modalRaw.anilistId) {
+            if (!m.anilist_id) {
                 this.detailsData.summary = '未关联 AniList';
                 this.detailsData.name = '无 AniList 数据';
             }
@@ -109,17 +153,17 @@
             // Bangumi Logic
             // First set fallback from cache
             this.detailsData = {
-                id: this.modalRaw.bangumiId,
-                name: this.modalRaw.bangumiTitle || this.modalRaw.title,
+                id: m.bangumi_id,
+                name: m.bangumi_title || this.modalRaw?.title,
                 name_cn: '', 
-                images: { large: this.modalRaw.bangumiImage || this.modalRaw.image },
-                summary: this.modalRaw.bangumiSummary || '正在加载详细信息...',
+                images: { large: m.bangumi_image || this.modalRaw?.image },
+                summary: m.bangumi_summary || '正在加载详细信息...',
                 tags: [],
-                rating: { score: this.modalRaw.bangumiRating || '...' },
+                rating: { score: m.bangumi_rating || '...' },
                 air_date: ''
             };
 
-            if (!this.modalRaw.bangumiId) {
+            if (!m.bangumi_id) {
                 this.loadingDetails = false;
                 this.detailsData.summary = '未关联 Bangumi';
                 this.detailsData.name = '无 Bangumi 数据';
@@ -127,7 +171,7 @@
             }
 
             this.loadingDetails = true;
-            fetch('/api/bangumi/subject/' + this.modalRaw.bangumiId)
+            fetch('/api/bangumi/subject/' + m.bangumi_id)
                 .then(res => {
                     if (!res.ok) throw new Error('API Error');
                     return res.json();
@@ -158,10 +202,32 @@
             } else {
                 this.showToast('❌ 切换失败', 'error');
             }
-        } catch(e) {
-             this.showToast('❌ 切换失败', 'error');
-        }
-    },
+            } catch(e) {
+                 this.showToast('❌ 切换失败', 'error');
+            }
+        },
+        shouldShowApplyButton() {
+            if (!this.detailsData || !this.modalRaw) return false;
+            // Use optional chaining for safety even inside check
+            const title = this.modalRaw.title || '';
+            const tmdbTitle = this.modalRaw.tmdbTitle || '';
+            
+            const nameMismatch = this.detailsData.name !== title;
+            // Logic: if modalRaw title matches tmdbTitle, then default source is tmdb. 
+            // If activeSource matches that default, we might NOT show button?
+            // Original logic: activeSource === (title === tmdbTitle ? 'bangumi' : 'tmdb')
+            // Wait, logic was 'OR activeSource === ...'.
+            // If activeSource IS the calculated source, show button?
+            // Logic: activeSource === (modalRaw.title === modalRaw.tmdbTitle ? 'bangumi' : 'tmdb')
+            // If title == tmdbTitle, usually implies Bangumi title is different? 
+            // Actually, usually users want to applies whatever is active.
+            // But let's keep original logic strict:
+            const targetSource = (title === tmdbTitle) ? 'bangumi' : 'tmdb';
+            const sourceMismatch = this.activeSource === targetSource;
+            
+            return nameMismatch || sourceMismatch;
+        },
+
 
     async searchMetadata() {
         if (!this.fixMatchQuery) return;
@@ -469,13 +535,15 @@ p = p.replace('{Year}', '2024');
 p = p.replace('{Ext}', 'mp4');
 if (!p.endsWith('.mp4')) p += '.mp4';
 return p;
-    },
     }
 }
 " x-init="
 $watch('activeSource', () => scrollToTop());
 $watch('loadingDetails', (val) => { if (!val) scrollToTop() });
 $watch('showDetailsModal', value => document.body.style.overflow = value ? 'hidden' : '');
+" @show-anime-details-id.window="
+$event.stopPropagation();
+openDetailsById($event.detail);
 " @show-anime-details.window="
 $event.stopPropagation();
 openDetails($event.detail);
@@ -725,8 +793,7 @@ openDetails($event.detail);
                         </button>
 
                         <!-- Apply Source -->
-                        <div x-show="detailsData?.name !== modalRaw?.title || activeSource === (modalRaw.title === modalRaw.tmdbTitle ? 'bangumi' : 'tmdb')"
-                            x-transition>
+                        <div x-show="shouldShowApplyButton()" x-transition>
                             <button @click="applyCurrentSource()"
                                 class="w-full py-2.5 rounded-xl border border-gray-200 text-gray-600 hover:border-green-300 hover:bg-green-50 hover:text-green-700 font-bold text-sm transition flex items-center justify-center gap-2">
                                 <span>📌</span> 应用当前元数据
@@ -755,7 +822,7 @@ openDetails($event.detail);
                                         <span
                                             class="text-[10px] font-bold bg-pink-50 text-pink-500 px-1.5 py-0.5 rounded border border-pink-100">中文</span>
                                         <span class="text-sm font-medium text-gray-500"
-                                            x-text="modalRaw.titleCN"></span>
+                                            x-text="modalRaw?.titleCN"></span>
                                     </div>
                                 </template>
                                 <template x-if="modalRaw?.titleEN">
@@ -763,7 +830,7 @@ openDetails($event.detail);
                                         <span
                                             class="text-[10px] font-bold bg-blue-50 text-blue-500 px-1.5 py-0.5 rounded border border-blue-100">EN</span>
                                         <span class="text-sm font-medium text-gray-500"
-                                            x-text="modalRaw.titleEN"></span>
+                                            x-text="modalRaw?.titleEN"></span>
                                     </div>
                                 </template>
                                 <template x-if="modalRaw?.titleJP">
@@ -771,7 +838,7 @@ openDetails($event.detail);
                                         <span
                                             class="text-[10px] font-bold bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded border border-gray-200">JP</span>
                                         <span class="text-sm font-medium text-gray-500"
-                                            x-text="modalRaw.titleJP"></span>
+                                            x-text="modalRaw?.titleJP"></span>
                                     </div>
                                 </template>
                             </div>
@@ -799,7 +866,7 @@ openDetails($event.detail);
                         <!-- Summary -->
                         <div
                             class="prose prose-sm text-gray-600 leading-relaxed bg-gray-50/50 p-4 rounded-xl border border-gray-100 max-h-[30vh] overflow-y-auto custom-scrollbar">
-                            <p x-text="detailsData?.summary" class="whitespace-pre-line"></p>
+                            <div x-html="detailsData?.summary"></div>
                         </div>
 
                         <!-- User Actions (Collection & Progress) -->
@@ -809,7 +876,7 @@ openDetails($event.detail);
                                 <span>Bangumi 同步</span>
                                 <div class="flex items-center gap-2">
                                     <button
-                                        @click="showFixMatch = !showFixMatch; if(showFixMatch) { fixMatchQuery = modalRaw.title; fixMatchResults = [] }"
+                                        @click="showFixMatch = !showFixMatch; if(showFixMatch) { fixMatchQuery = modalRaw?.title || ''; fixMatchResults = [] }"
                                         class="px-2 py-0.5 rounded bg-gray-100 text-gray-600 hover:bg-indigo-50 hover:text-indigo-600 transition text-[10px] font-bold border border-gray-200">
                                         修正匹配
                                     </button>
@@ -952,7 +1019,7 @@ openDetails($event.detail);
                             <!-- Jellyfin Link -->
                             <template x-if="modalRaw?.jellyfin_series_id && jellyfinUrl">
                                 <div class="mt-4 flex items-center gap-3">
-                                    <a :href="jellyfinUrl + '/web/index.html?serverId=' + jellyfinServerId + '#!/details?id=' + modalRaw.jellyfin_series_id"
+                                    <a :href="jellyfinUrl + '/web/index.html?serverId=' + jellyfinServerId + '#!/details?id=' + modalRaw?.jellyfin_series_id"
                                         target="_blank"
                                         class="flex items-center px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition shadow-md hover:shadow-lg gap-2">
                                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

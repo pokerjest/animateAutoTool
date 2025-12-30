@@ -3,38 +3,9 @@
     class="bg-white rounded-2xl shadow-sm border border-gray-100 hover:shadow-xl transition-all duration-300 overflow-hidden flex flex-col h-full group relative">
 
     <!-- Card Header/Cover (Poster Aspect Ratio) -->
-    <div class="relative w-full aspect-[2/3] bg-gray-100 overflow-hidden cursor-pointer" @click="$dispatch('show-anime-details', { 
-            localId: {{ .ID }}, 
-            directoryId: {{ .DirectoryID }},
-            bangumiId: {{ if .Metadata }}{{ .Metadata.BangumiID }}{{ else }}0{{ end }}, 
-            tmdbId: {{ if .Metadata }}{{ .Metadata.TMDBID }}{{ else }}0{{ end }}, 
-            fileCount: {{ .FileCount }}, 
-            jellyfin_series_id: '{{ .JellyfinSeriesID }}',
-            
-            title: `{{ .Title }}`, 
-            image: `{{ .Image }}`, 
-            summary: `{{ .Summary }}`,
-
-            bangumiTitle: `{{ if .Metadata }}{{ .Metadata.BangumiTitle }}{{ end }}`,
-            bangumiImage: `{{ if .Metadata }}{{ .Metadata.BangumiImage }}{{ end }}`,
-            bangumiSummary: `{{ if .Metadata }}{{ .Metadata.BangumiSummary }}{{ end }}`,
-            bangumiRating: {{ if .Metadata }}{{ .Metadata.BangumiRating }}{{ else }}0{{ end }},
-
-            tmdbTitle: `{{ if .Metadata }}{{ .Metadata.TMDBTitle }}{{ end }}`,
-            tmdbImage: `{{ if .Metadata }}{{ .Metadata.TMDBImage }}{{ end }}`,
-            tmdbSummary: `{{ if .Metadata }}{{ .Metadata.TMDBSummary }}{{ end }}`,
-            tmdbRating: {{ if .Metadata }}{{ .Metadata.TMDBRating }}{{ else }}0{{ end }},
-
-            anilistId: {{ if .Metadata }}{{ .Metadata.AniListID }}{{ else }}0{{ end }},
-            anilistTitle: `{{ if .Metadata }}{{ .Metadata.AniListTitle }}{{ end }}`,
-            anilistImage: `{{ if .Metadata }}{{ .Metadata.AniListImage }}{{ end }}`,
-            anilistSummary: `{{ if .Metadata }}{{ .Metadata.AniListSummary }}{{ end }}`,
-            anilistRating: {{ if .Metadata }}{{ .Metadata.AniListRating }}{{ else }}0{{ end }},
-
-            titleCN: `{{ if .Metadata }}{{ .Metadata.TitleCN }}{{ end }}`,
-            titleEN: `{{ if .Metadata }}{{ .Metadata.TitleEN }}{{ end }}`,
-            titleJP: `{{ if .Metadata }}{{ .Metadata.TitleJP }}{{ end }}`
-        })">
+    <!-- Card Header/Cover (Poster Aspect Ratio) -->
+    <div class="relative w-full aspect-[2/3] bg-gray-100 overflow-hidden cursor-pointer"
+        @click="console.log('Clicked card ID:', {{.ID}}); $dispatch('show-anime-details-id', {{.ID}})">
         {{ if .Image }}
         <img src="{{ .Image }}" alt="{{ .Title }}" loading="lazy"
             class="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110">
@@ -77,37 +48,7 @@
         <!-- Title -->
         <div class="flex justify-between items-start gap-2 mb-2">
             <h3 class="font-bold text-gray-800 text-sm leading-snug line-clamp-2 cursor-pointer hover:text-primary transition-colors h-10"
-                title="{{ .Title }}" @click="$dispatch('show-anime-details', { 
-                    localId: {{ .ID }}, 
-                    bangumiId: {{ if .Metadata }}{{ .Metadata.BangumiID }}{{ else }}0{{ end }}, 
-                    tmdbId: {{ if .Metadata }}{{ .Metadata.TMDBID }}{{ else }}0{{ end }}, 
-                    fileCount: {{ .FileCount }}, 
-                    jellyfin_series_id: '{{ .JellyfinSeriesID }}',
-                    
-                    title: `{{ .Title }}`, 
-                    image: `{{ .Image }}`, 
-                    summary: `{{ .Summary }}`,
-
-                    bangumiTitle: `{{ if .Metadata }}{{ .Metadata.BangumiTitle }}{{ end }}`,
-                    bangumiImage: `{{ if .Metadata }}{{ .Metadata.BangumiImage }}{{ end }}`,
-                    bangumiSummary: `{{ if .Metadata }}{{ .Metadata.BangumiSummary }}{{ end }}`,
-                    bangumiRating: {{ if .Metadata }}{{ .Metadata.BangumiRating }}{{ else }}0{{ end }},
-
-                    tmdbTitle: `{{ if .Metadata }}{{ .Metadata.TMDBTitle }}{{ end }}`,
-                    tmdbImage: `{{ if .Metadata }}{{ .Metadata.TMDBImage }}{{ end }}`,
-                    tmdbSummary: `{{ if .Metadata }}{{ .Metadata.TMDBSummary }}{{ end }}`,
-                    tmdbRating: {{ if .Metadata }}{{ .Metadata.TMDBRating }}{{ else }}0{{ end }},
-
-                    anilistId: {{ if .Metadata }}{{ .Metadata.AniListID }}{{ else }}0{{ end }},
-                    anilistTitle: `{{ if .Metadata }}{{ .Metadata.AniListTitle }}{{ end }}`,
-                    anilistImage: `{{ if .Metadata }}{{ .Metadata.AniListImage }}{{ end }}`,
-                    anilistSummary: `{{ if .Metadata }}{{ .Metadata.AniListSummary }}{{ end }}`,
-                    anilistRating: {{ if .Metadata }}{{ .Metadata.AniListRating }}{{ else }}0{{ end }},
-
-                    titleCN: `{{ if .Metadata }}{{ .Metadata.TitleCN }}{{ end }}`,
-                    titleEN: `{{ if .Metadata }}{{ .Metadata.TitleEN }}{{ end }}`,
-                    titleJP: `{{ if .Metadata }}{{ .Metadata.TitleJP }}{{ end }}`
-                })">
+                title="{{ .Title }}" @click="$dispatch('show-anime-details-id', {{.ID}})">
                 {{ .Title }}
             </h3>
         </div>

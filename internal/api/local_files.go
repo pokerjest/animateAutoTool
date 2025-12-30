@@ -402,8 +402,13 @@ func ApplyDirectoryRenameHandler(c *gin.Context) {
 			}
 
 			oldPath := item.Path
-			// NewPath might contain subdirectories
-			newPath := filepath.Join(filepath.Dir(oldPath), item.New)
+			// NewPath should be relative to the Anime Root Path, not the file's current directory
+			// This prevents recursive nesting (e.g. Season 1/Season 1/...)
+			newPath := filepath.Join(anime.Path, item.New)
+
+			if oldPath == newPath {
+				continue
+			}
 
 			// Ensure parent directory exists (for Season folders)
 			newDir := filepath.Dir(newPath)

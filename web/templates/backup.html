@@ -236,7 +236,8 @@
 
 <script>
     // Defined as a global function to ensure availability during HTMX swaps
-    function r2BackupData() {
+    // Defined as a global function to ensure availability during HTMX swaps
+    window.r2BackupData = function () {
         return {
             config: { endpoint: '', access_key: '', secret_key: '', bucket: '' },
             backups: [],

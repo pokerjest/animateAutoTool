@@ -6,6 +6,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Animate Auto Tool</title>
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
     <!-- Tailwind CSS -->
     <script src="/static/js/tailwindcss.js?v=3"></script>
     <!-- HTMX & Extensions -->
@@ -99,7 +102,7 @@
         document.addEventListener('htmx:afterOnLoad', updateActiveLink);
 
         // Global Error Handling for HTMX
-        document.body.addEventListener('htmx:responseError', function (evt) {
+        document.addEventListener('htmx:responseError', function (evt) {
             if (evt.detail.xhr.status === 401) {
                 window.location.href = '/login';
             }
