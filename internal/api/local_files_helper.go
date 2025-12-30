@@ -62,7 +62,7 @@ func fetchJellyfinProgress(anime *model.LocalAnime) (map[string]JfEpisodeData, s
 
 	if seriesId == "" && anime.Metadata != nil {
 		// Priority: Based on DataSource or fallback
-		targetProvider := "bangumi"
+		targetProvider := SourceBangumi
 		targetID := strconv.Itoa(anime.Metadata.BangumiID)
 
 		if dataSource == "tmdb" && anime.Metadata.TMDBID != 0 {
@@ -74,7 +74,7 @@ func fetchJellyfinProgress(anime *model.LocalAnime) (map[string]JfEpisodeData, s
 			sid, err := client.GetItemByProviderID(targetProvider, targetID)
 			if err == nil {
 				seriesId = sid
-			} else if targetProvider == "bangumi" {
+			} else if targetProvider == SourceBangumi {
 				// Try lowercase "Bangumi"
 				sid, err = client.GetItemByProviderID("Bangumi", targetID)
 				if err == nil {
