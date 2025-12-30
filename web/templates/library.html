@@ -13,6 +13,65 @@
     activeSource: 'bangumi',
     loadingDetails: false,
     libraryMetadata: {},
+    // Fix Match State
+    fixMatchQuery: '',
+    fixMatchResults: [],
+    fixMatchSource: 'bangumi',
+    searchingMetadata: false,
+    showFixMatch: false,
+    showToast(msg, type = 'success') {
+        window.dispatchEvent(new CustomEvent('toast', { detail: { msg: msg, type: type } }));
+    },
+    // Fix Match Methods
+    async searchMetadata() {
+        if (!this.fixMatchQuery) return;
+        this.searchingMetadata = true;
+        try {
+            const resp = await fetch(`/api/metadata/search?q=${encodeURIComponent(this.fixMatchQuery)}&source=${this.fixMatchSource}`);
+            const data = await resp.json();
+            this.fixMatchResults = Array.isArray(data) ? data : (data ? [data] : []);
+        } catch (e) {
+            this.showToast('搜索失败', 'error');
+        } finally {
+            this.searchingMetadata = false;
+        }
+    },
+    async applyFixMatch(id) {
+        // Confirm not needed if UI is clear
+        try {
+            const body = {
+                source: this.fixMatchSource,
+                source_id: parseInt(id)
+            };
+            
+            // Determine type and ID
+            const item = this.modalRaw;
+            if (item.is_local && item.local_anime_id > 0) {
+                body.type = 'local';
+                body.id = item.local_anime_id;
+            } else {
+                body.type = 'metadata';
+                body.id = item.ID;
+            }
+
+            const resp = await fetch('/api/library/fix_match', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(body)
+            });
+
+            if (resp.ok) {
+                this.showToast('✅ 关联成功，正在刷新元数据...', 'success');
+                this.showFixMatch = false;
+                setTimeout(() => window.location.reload(), 2500); 
+            } else {
+                const d = await resp.json();
+                this.showToast('❌ ' + (d.error || '关联失败'), 'error');
+            }
+        } catch (e) {
+            this.showToast('❌ 网络错误', 'error');
+        }
+    },
     init() {
         console.log('Library Alpine initialized. Parsing metadata...');
         try {
@@ -345,6 +404,84 @@
                         <div class="prose prose-lg text-gray-600 leading-relaxed">
                             <div class="bg-white/60 p-6 rounded-2xl border border-white/50 shadow-sm backdrop-blur-sm">
                                 <p x-html="detailsData?.summary" class="whitespace-pre-line text-sm md:text-base"></p>
+                            </div>
+                        </div>
+
+                        <!-- Fix Match Section -->
+                        <div class="border-t border-gray-100/50 pt-6">
+                            <div class="flex items-center justify-between mb-4">
+                                <h4
+                                    class="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center gap-2">
+                                    <span>元数据关联</span>
+                                    <span class="px-1.5 py-0.5 rounded-md bg-gray-100/80 text-[10px] font-mono"
+                                        x-text="'ID: ' + (modalRaw?.bangumi_id || '未关联')"></span>
+                                </h4>
+                                <button
+                                    @click="showFixMatch = !showFixMatch; if(showFixMatch) { fixMatchQuery = modalRaw?.title || ''; fixMatchResults = [] }"
+                                    class="text-xs font-bold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-lg transition-colors">
+                                    🔧 修正匹配
+                                </button>
+                            </div>
+
+                            <div x-show="showFixMatch" x-transition
+                                class="mb-6 p-4 bg-white/60 rounded-xl border border-indigo-100 space-y-4 shadow-sm">
+
+                                <!-- Source Selector -->
+                                <div
+                                    class="flex p-1 bg-white/80 rounded-lg border border-indigo-50 w-fit backdrop-blur-sm">
+                                    <button @click="fixMatchSource = 'bangumi'; fixMatchResults = []"
+                                        :class="fixMatchSource === 'bangumi' ? 'bg-pink-50 text-pink-600 font-bold shadow-sm' : 'text-gray-500 hover:text-gray-700'"
+                                        class="px-3 py-1.5 text-xs rounded-md transition-all flex items-center gap-1">
+                                        <span>🌸</span> Bangumi
+                                    </button>
+                                    <button @click="fixMatchSource = 'tmdb'; fixMatchResults = []"
+                                        :class="fixMatchSource === 'tmdb' ? 'bg-blue-50 text-blue-600 font-bold shadow-sm' : 'text-gray-500 hover:text-gray-700'"
+                                        class="px-3 py-1.5 text-xs rounded-md transition-all flex items-center gap-1">
+                                        <span>🎬</span> TMDB
+                                    </button>
+                                    <button @click="fixMatchSource = 'anilist'; fixMatchResults = []"
+                                        :class="fixMatchSource === 'anilist' ? 'bg-indigo-50 text-indigo-600 font-bold shadow-sm' : 'text-gray-500 hover:text-gray-700'"
+                                        class="px-3 py-1.5 text-xs rounded-md transition-all flex items-center gap-1">
+                                        <span>🅰️</span> AniList
+                                    </button>
+                                </div>
+
+                                <div class="flex gap-2">
+                                    <input type="text" x-model="fixMatchQuery" @keyup.enter="searchMetadata()"
+                                        :placeholder="'搜索 ' + fixMatchSource + ' 标题...'"
+                                        class="flex-1 px-4 py-2 rounded-lg border border-indigo-200 focus:ring-2 focus:ring-indigo-500/20 outline-none text-sm bg-white/80">
+                                    <button @click="searchMetadata()" :disabled="searchingMetadata"
+                                        class="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-bold hover:bg-indigo-700 transition disabled:opacity-50">
+                                        <span x-show="!searchingMetadata">搜索</span>
+                                        <span x-show="searchingMetadata" class="animate-spin inline-block">⌛</span>
+                                    </button>
+                                </div>
+
+                                <!-- Search Results -->
+                                <div class="space-y-2 max-h-60 overflow-y-auto custom-scrollbar">
+                                    <template x-for="res in fixMatchResults" :key="res.id">
+                                        <div class="flex items-center gap-3 p-2 bg-white/80 rounded-lg border border-gray-100 hover:border-indigo-300 transition cursor-pointer group hover:shadow-sm"
+                                            @click="applyFixMatch(res.id)">
+                                            <img :src="res.images.large || '/static/img/no_poster.jpg'"
+                                                class="w-10 h-14 object-cover rounded shadow-sm bg-gray-200">
+                                            <div class="flex-1 min-w-0">
+                                                <div class="font-bold text-sm text-gray-800 truncate"
+                                                    x-text="res.name_cn || res.name"></div>
+                                                <div class="text-[10px] text-gray-400 truncate" x-text="res.name"></div>
+                                                <div class="text-[10px] text-indigo-500 font-medium mt-1">ID: <span
+                                                        x-text="res.id"></span></div>
+                                            </div>
+                                            <div class="opacity-0 group-hover:opacity-100 transition-opacity">
+                                                <span
+                                                    class="text-xs bg-indigo-600 text-white px-2 py-1 rounded-md font-bold">关联</span>
+                                            </div>
+                                        </div>
+                                    </template>
+                                    <template
+                                        x-if="!searchingMetadata && fixMatchResults.length === 0 && fixMatchQuery">
+                                        <div class="text-center py-4 text-xs text-gray-400 italic">未找到匹配的番剧</div>
+                                    </template>
+                                </div>
                             </div>
                         </div>
 

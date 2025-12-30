@@ -296,63 +296,23 @@ func ImportBackupHandler(c *gin.Context) {
 func createBackupFile(destPath string) error {
 	debugLog("DEBUG: Creating backup at %s using Source DB: %s", destPath, db.CurrentDBPath)
 
-	exportDB, err := gorm.Open(sqlite.Open(destPath), &gorm.Config{})
+	// For SQLite, the most reliable backup method is simply copying the file
+	// This preserves ALL data including blobs, constraints, indexes, etc.
+	input, err := os.ReadFile(db.CurrentDBPath)
 	if err != nil {
-		debugLog("DEBUG: Failed to open export DB: %v", err)
-		return err
+		debugLog("DEBUG: Failed to read source DB: %v", err)
+		return fmt.Errorf("failed to read source database: %v", err)
 	}
 
-	// 1. Migrate All Tables (Including LocalEpisode)
-	if err := exportDB.AutoMigrate(
-		&model.Subscription{},
-		&model.DownloadLog{},
-		&model.GlobalConfig{},
-		&model.LocalAnimeDirectory{},
-		&model.LocalAnime{},
-		&model.LocalEpisode{}, // Added
-		&model.AnimeMetadata{},
-		&model.User{}, // Added
-	); err != nil {
-		debugLog("DEBUG: AutoMigrate failed: %v", err)
-		return err
+	if err := os.WriteFile(destPath, input, 0600); err != nil {
+		debugLog("DEBUG: Failed to write backup file: %v", err)
+		return fmt.Errorf("failed to write backup: %v", err)
 	}
-
-	// Helper to batch export
-	batchExport := func(model interface{}, name string) {
-		var count int64
-		db.DB.Model(model).Count(&count)
-		if count == 0 {
-			debugLog("DEBUG: No %s found.", name)
-			return
-		}
-
-		debugLog("DEBUG: Exporting %d %s...", count, name)
-
-		// Use a large batch size for SQLite inserts
-		db.DB.Model(model).FindInBatches(model, 1000, func(tx *gorm.DB, batch int) error {
-			return exportDB.Create(tx.Statement.Dest).Error
-		})
-	}
-
-	// 2. Export Data (Batch Processing)
-	batchExport(&[]model.Subscription{}, "Subscriptions")
-	batchExport(&[]model.DownloadLog{}, "DownloadLogs")
-	batchExport(&[]model.GlobalConfig{}, "GlobalConfigs")
-	batchExport(&[]model.LocalAnimeDirectory{}, "LocalAnimeDirectories")
-	batchExport(&[]model.User{}, "Users")
-
-	// Complex data types
-	batchExport(&[]model.AnimeMetadata{}, "AnimeMetadatas")
-	batchExport(&[]model.LocalAnime{}, "LocalAnimes")
-	batchExport(&[]model.LocalEpisode{}, "LocalEpisodes") // Added
-
-	sqlDB, _ := exportDB.DB()
-	sqlDB.Close()
 
 	// Verify file size
 	fi, err := os.Stat(destPath)
 	if err == nil {
-		debugLog("DEBUG: Final Backup Size: %d bytes", fi.Size())
+		debugLog("DEBUG: Final Backup Size: %d bytes (%.2f MB)", fi.Size(), float64(fi.Size())/1024/1024)
 	}
 
 	return nil

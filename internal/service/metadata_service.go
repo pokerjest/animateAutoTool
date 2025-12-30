@@ -883,3 +883,28 @@ func (s *MetadataService) RefreshSingleMetadata(id uint) error {
 	s.EnrichMetadata(&m, queryTitle)
 	return nil
 }
+
+// MatchMetadata links a metadata record directly to a source ID
+// This is used for Library items that might not be LocalAnime (e.g. Subscriptions)
+func (s *MetadataService) MatchMetadata(metadataID uint, source string, sourceID int) error {
+	var m model.AnimeMetadata
+	if err := db.DB.First(&m, metadataID).Error; err != nil {
+		return err
+	}
+
+	switch source {
+	case "bangumi":
+		m.BangumiID = sourceID
+	case "tmdb":
+		m.TMDBID = sourceID
+	case "anilist":
+		m.AniListID = sourceID
+	}
+
+	// Re-enrich with fixed ID
+	s.EnrichMetadata(&m, m.Title)
+	db.DB.Save(&m)
+	s.SyncMetadataToModels(&m)
+
+	return nil
+}

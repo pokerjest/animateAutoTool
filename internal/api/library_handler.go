@@ -18,6 +18,7 @@ type LibraryItem struct {
 	model.AnimeMetadata
 	IsSubscribed bool `json:"is_subscribed"`
 	IsLocal      bool `json:"is_local"`
+	LocalAnimeID uint `json:"local_anime_id"` // 0 if not local
 }
 
 func GetLibraryHandler(c *gin.Context) {
@@ -53,12 +54,12 @@ func GetLibraryHandler(c *gin.Context) {
 		}
 	}
 
-	localMap := make(map[uint]bool)
+	localMap := make(map[uint]uint) // MetadataID -> LocalAnimeID
 	var localAnimes []model.LocalAnime
-	db.DB.Select("metadata_id").Where("metadata_id IS NOT NULL").Find(&localAnimes)
+	db.DB.Select("id, metadata_id").Where("metadata_id IS NOT NULL").Find(&localAnimes)
 	for _, l := range localAnimes {
 		if l.MetadataID != nil {
-			localMap[*l.MetadataID] = true
+			localMap[*l.MetadataID] = l.ID
 		}
 	}
 
@@ -83,7 +84,8 @@ func GetLibraryHandler(c *gin.Context) {
 		seenTitles[m.Title] = true
 
 		isSub := subMap[m.ID]
-		isLocal := localMap[m.ID]
+		localID := localMap[m.ID]
+		isLocal := localID > 0
 
 		// Apply Status Filter
 		if statusFilter == "subscribed" && !isSub {
@@ -97,6 +99,7 @@ func GetLibraryHandler(c *gin.Context) {
 			AnimeMetadata: m,
 			IsSubscribed:  isSub,
 			IsLocal:       isLocal,
+			LocalAnimeID:  localID,
 		})
 	}
 
@@ -157,9 +160,12 @@ func GetRefreshStatusHandler(c *gin.Context) {
 }
 
 type FixMatchRequest struct {
-	AnimeID  uint   `json:"anime_id"`
+	ID       uint   `json:"id"`   // Can be AnimeID or MetadataID depending on Type
+	Type     string `json:"type"` // "local" or "metadata"
 	Source   string `json:"source"`
 	SourceID int    `json:"source_id"`
+	// Backwards compatibility
+	AnimeID uint `json:"anime_id"`
 }
 
 func FixMatchHandler(c *gin.Context) {
@@ -175,9 +181,23 @@ func FixMatchHandler(c *gin.Context) {
 	}
 
 	metaSvc := service.NewMetadataService()
-	if err := metaSvc.MatchSeries(req.AnimeID, req.Source, req.SourceID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+
+	// Logic for Local Anime (legacy or explicit)
+	if req.Type == "local" || (req.Type == "" && req.AnimeID > 0) {
+		id := req.ID
+		if req.AnimeID > 0 {
+			id = req.AnimeID
+		}
+		if err := metaSvc.MatchSeries(id, req.Source, req.SourceID); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+	} else {
+		// Metadata only fix
+		if err := metaSvc.MatchMetadata(req.ID, req.Source, req.SourceID); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Match updated successfully"})

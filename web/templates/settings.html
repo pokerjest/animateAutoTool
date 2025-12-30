@@ -69,11 +69,19 @@
                 </div>
 
                 <div class="relative">
-                    <div id="qb-status" class="mt-6 p-4 rounded-xl bg-gray-50/50 border border-gray-100 min-h-[50px]"
-                        hx-get="/api/settings/qb-status" hx-trigger="revealed" hx-target="this" hx-swap="innerHTML">
+                    <div id="qb-status"
+                        class="mt-6 p-4 rounded-xl bg-gray-50/50 border border-gray-100 min-h-[50px] relative group"
+                        hx-get="/api/settings/qb-status" hx-trigger="revealed, load delay:500ms" hx-target="this"
+                        hx-swap="innerHTML">
                         <span class="text-sm text-gray-400 flex items-center gap-2">
                             <span class="animate-spin text-xs">⌛</span> 等待检查...
                         </span>
+                        <button type="button" hx-get="/api/settings/qb-status" hx-target="#qb-status"
+                            hx-indicator="#qb-status"
+                            class="absolute right-2 top-2 p-1.5 text-gray-400 hover:text-primary hover:bg-white rounded-lg opacity-0 group-hover:opacity-100 transition-all"
+                            title="刷新状态">
+                            🔄
+                        </button>
                     </div>
                 </div>
 
@@ -130,9 +138,15 @@
                         </div>
 
                         <div class="flex items-center gap-4">
-                            <div id="bangumi-status" hx-get="/api/bangumi/profile" hx-trigger="revealed"
-                                class="flex-grow p-4 rounded-xl bg-pink-50/30 border border-pink-100/50 min-h-[50px]">
+                            <div id="bangumi-status" hx-get="/api/bangumi/profile"
+                                hx-trigger="revealed, tab-metadata from:body, load delay:500ms"
+                                class="flex-grow p-4 rounded-xl bg-pink-50/30 border border-pink-100/50 min-h-[50px] relative group">
                                 <span class="text-xs text-gray-400">等待加载 Bangumi 状态...</span>
+                                <button type="button" hx-get="/api/bangumi/profile" hx-target="#bangumi-status"
+                                    class="absolute right-2 top-2 p-1.5 text-pink-300 hover:text-pink-500 hover:bg-white rounded-lg opacity-0 group-hover:opacity-100 transition-all"
+                                    title="刷新状态">
+                                    🔄
+                                </button>
                             </div>
                             <a href="/api/bangumi/login" target="_blank"
                                 class="px-6 py-3 bg-pink-500 text-white rounded-xl font-bold hover:bg-pink-600 transition-all shadow-lg shadow-pink-200/50 flex items-center gap-2 whitespace-nowrap">
@@ -166,9 +180,15 @@
                                 </button>
                             </div>
                         </div>
-                        <div id="tmdb-status" hx-get="/api/settings/tmdb-status" hx-trigger="revealed"
-                            class="p-4 rounded-xl bg-blue-50/30 border border-blue-100/50 min-h-[50px]">
+                        <div id="tmdb-status" hx-get="/api/settings/tmdb-status"
+                            hx-trigger="revealed, tab-metadata from:body, load delay:500ms"
+                            class="p-4 rounded-xl bg-blue-50/30 border border-blue-100/50 min-h-[50px] relative group">
                             <span class="text-xs text-gray-400">等待加载 TMDB 状态...</span>
+                            <button type="button" hx-get="/api/settings/tmdb-status" hx-target="#tmdb-status"
+                                class="absolute right-2 top-2 p-1.5 text-blue-300 hover:text-blue-500 hover:bg-white rounded-lg opacity-0 group-hover:opacity-100 transition-all"
+                                title="刷新状态">
+                                🔄
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -196,9 +216,15 @@
                                 </button>
                             </div>
                         </div>
-                        <div id="anilist-status" hx-get="/api/settings/anilist-status" hx-trigger="revealed"
-                            class="p-4 rounded-xl bg-cyan-50/30 border border-cyan-100/50 min-h-[50px]">
+                        <div id="anilist-status" hx-get="/api/settings/anilist-status"
+                            hx-trigger="revealed, tab-metadata from:body, load delay:500ms"
+                            class="p-4 rounded-xl bg-cyan-50/30 border border-cyan-100/50 min-h-[50px] relative group">
                             <span class="text-xs text-gray-400">等待加载 AniList 状态...</span>
+                            <button type="button" hx-get="/api/settings/anilist-status" hx-target="#anilist-status"
+                                class="absolute right-2 top-2 p-1.5 text-cyan-300 hover:text-cyan-500 hover:bg-white rounded-lg opacity-0 group-hover:opacity-100 transition-all"
+                                title="刷新状态">
+                                🔄
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -277,11 +303,17 @@
                 </div>
 
                 <div class="relative mt-4">
-                    <div id="jellyfin-status" hx-get="/api/settings/jellyfin-status" hx-trigger="revealed"
-                        hx-target="this" class="p-4 rounded-xl bg-purple-50/50 border border-purple-100 min-h-[50px]">
+                    <div id="jellyfin-status" hx-get="/api/settings/jellyfin-status"
+                        hx-trigger="revealed, load delay:500ms" hx-target="this"
+                        class="p-4 rounded-xl bg-purple-50/50 border border-purple-100 min-h-[50px] relative group">
                         <span class="text-sm text-purple-400 flex items-center gap-2">
                             <span class="animate-spin text-xs">⌛</span> 检查连接...
                         </span>
+                        <button type="button" hx-get="/api/settings/jellyfin-status" hx-target="#jellyfin-status"
+                            class="absolute right-2 top-2 p-1.5 text-purple-300 hover:text-purple-500 hover:bg-white rounded-lg opacity-0 group-hover:opacity-100 transition-all"
+                            title="刷新状态">
+                            🔄
+                        </button>
                     </div>
                 </div>
             </div>
@@ -350,11 +382,17 @@
 
                 <div
                     class="flex items-center justify-between gap-4 p-4 rounded-xl bg-purple-50/30 border border-purple-100/50 mt-4">
-                    <div class="relative flex-1">
-                        <div id="pikpak-status" hx-get="/api/settings/pikpak-status" hx-trigger="revealed"
-                            hx-target="this" hx-swap="innerHTML" class="text-sm font-medium text-purple-700">
+                    <div class="relative flex-1 group">
+                        <div id="pikpak-status" hx-get="/api/settings/pikpak-status"
+                            hx-trigger="revealed, load delay:500ms" hx-target="this" hx-swap="innerHTML"
+                            class="text-sm font-medium text-purple-700 min-h-[24px]">
                             等待检查...
                         </div>
+                        <button type="button" hx-get="/api/settings/pikpak-status" hx-target="#pikpak-status"
+                            class="absolute right-0 top-1/2 -translate-y-1/2 p-1 text-purple-300 hover:text-purple-500 rounded-lg opacity-0 group-hover:opacity-100 transition-all"
+                            title="刷新状态">
+                            🔄
+                        </button>
                     </div>
                     <div class="flex gap-2">
                         <button type="submit"
@@ -477,9 +515,8 @@
         class="space-y-6">
 
         <script>
-            // Defined as a global function to ensure availability during HTMX swaps
-            window.r2BackupData = function () {
-                return {
+            document.addEventListener('alpine:init', () => {
+                Alpine.data('r2Backup', () => ({
                     config: { endpoint: '', access_key: '', secret_key: '', bucket: '' },
                     backups: [],
                     loading: true,
@@ -599,11 +636,9 @@
                     modalLoading: false,
 
                     confirmRestore(key) {
-                        this.loading = true;
-
                         // Scroll to preview area
                         const previewEl = document.getElementById('restore-preview');
-                        previewEl.scrollIntoView({ behavior: 'smooth' });
+                        if (previewEl) previewEl.scrollIntoView({ behavior: 'smooth' });
 
                         // Initial State
                         this.renderProgress(previewEl, key, 0, 'starting');
@@ -623,7 +658,6 @@
                             })
                             .catch(e => {
                                 this.renderError(previewEl, e);
-                                this.loading = false;
                             });
                     },
 
@@ -634,9 +668,10 @@
                                 .then(data => {
                                     if (data.status === 'completed') {
                                         clearInterval(interval);
-                                        previewEl.innerHTML = data.result_html;
-                                        if (window.htmx) htmx.process(previewEl);
-                                        this.loading = false;
+                                        if (previewEl) {
+                                            previewEl.innerHTML = data.result_html;
+                                            if (window.htmx) htmx.process(previewEl);
+                                        }
                                     } else if (data.status === 'error') {
                                         clearInterval(interval);
                                         throw new Error(data.error || 'Unknown error');
@@ -652,40 +687,41 @@
                                 .catch(e => {
                                     clearInterval(interval);
                                     this.renderError(previewEl, "Progress check failed: " + e);
-                                    this.loading = false;
                                 });
                         }, 1000);
                     },
 
                     renderProgress(el, key, percent, status) {
+                        if (!el) return;
                         const statusText = status === 'analyzing' ? '正在分析数据...' : (status === 'starting' ? '正在启动任务...' : `已下载 ${percent.toFixed(1)}%`);
 
                         el.innerHTML = `
-                                <div class="bg-blue-50 border border-blue-200 rounded-lg p-6 text-center animate-fade-in-up">
-                                    <div class="mb-3">
-                                        <span class="inline-block animate-bounce text-3xl">☁️</span>
-                                    </div>
-                                    <h4 class="text-blue-800 font-bold text-lg mb-1">正在从云端下载备份...</h4>
-                                    <p class="text-blue-600 text-sm mb-4">文件名: ${key}</p>
-                                    
-                                    <div class="w-full max-w-xs mx-auto bg-blue-200 rounded-full h-4 overflow-hidden relative">
-                                        <div class="bg-blue-500 h-full rounded-full transition-all duration-500 ease-out" style="width: ${percent}%"></div>
-                                    </div>
-                                    <div class="mt-2 flex justify-between text-xs text-blue-500 max-w-xs mx-auto">
-                                        <span>${statusText}</span>
-                                        <span>${percent.toFixed(0)}%</span>
-                                    </div>
-                                </div>
-                            `;
+                        <div class="bg-blue-50 border border-blue-200 rounded-lg p-6 text-center animate-fade-in-up">
+                            <div class="mb-3">
+                                <span class="inline-block animate-bounce text-3xl">☁️</span>
+                            </div>
+                            <h4 class="text-blue-800 font-bold text-lg mb-1">正在从云端下载备份...</h4>
+                            <p class="text-blue-600 text-sm mb-4">文件名: ${key}</p>
+                            
+                            <div class="w-full max-w-xs mx-auto bg-blue-200 rounded-full h-4 overflow-hidden relative">
+                                <div class="bg-blue-500 h-full rounded-full transition-all duration-500 ease-out" style="width: ${percent}%"></div>
+                            </div>
+                            <div class="mt-2 flex justify-between text-xs text-blue-500 max-w-xs mx-auto">
+                                <span>${statusText}</span>
+                                <span>${percent.toFixed(0)}%</span>
+                            </div>
+                        </div>
+                    `;
                     },
 
                     renderError(el, error) {
+                        if (!el) return;
                         el.innerHTML = `
-                                <div class="bg-red-50 border border-red-200 rounded-lg p-4 text-center">
-                                    <div class="text-red-500 font-bold mb-1">下载/分析失败</div>
-                                    <div class="text-sm text-red-600">${error}</div>
-                                </div>
-                            `;
+                        <div class="bg-red-50 border border-red-200 rounded-lg p-4 text-center">
+                            <div class="text-red-500 font-bold mb-1">下载/分析失败</div>
+                            <div class="text-sm text-red-600">${error}</div>
+                        </div>
+                    `;
                     },
 
                     confirmDelete(key) {
@@ -724,8 +760,8 @@
                             })
                             .finally(() => this.modalLoading = false);
                     }
-                };
-            }
+                }));
+            });
         </script>
 
         <!-- Backup UI -->
@@ -741,13 +777,12 @@
                                 .Stats.SubscriptionCount }}</span></div>
                         <div class="flex justify-between"><span>历史记录:</span> <span class="font-bold">{{
                                 .Stats.DownloadLogCount }}</span></div>
-                        <div class="flex justify-between"><span>用户账号:</span> <span class="font-bold">{{
-                                .Stats.UserCount }}</span></div>
+                        <div class="flex justify-between"><span>用户账号:</span> <span class="font-bold">{{ .Stats.UserCount
+                                }}</span></div>
                         <div class="flex justify-between text-gray-400"><span>本地番剧:</span> <span class="font-bold">{{
                                 .Stats.LocalAnimeCount }} (仅本地)</span></div>
                         <div class="flex justify-between"><span>数据库大小:</span> <span class="font-bold">{{
-                                .Stats.DatabaseSize
-                                }}</span></div>
+                                .Stats.DatabaseSize }}</span></div>
                         <div class="flex justify-between"><span>最后修改:</span> <span class="font-mono text-xs">{{
                                 .Stats.LastModified }}</span></div>
 
@@ -756,8 +791,7 @@
                             <div class="text-xs text-gray-500 mb-1">包含的订阅:</div>
                             <div class="max-h-[100px] overflow-y-auto space-y-1 pr-1 custom-scrollbar">
                                 {{ range .Stats.SubscriptionTitles }}
-                                <div class="text-xs bg-white px-2 py-1 rounded border border-gray-100 truncate">{{ .
-                                    }}
+                                <div class="text-xs bg-white px-2 py-1 rounded border border-gray-100 truncate">{{ . }}
                                 </div>
                                 {{ end }}
                             </div>
@@ -821,14 +855,13 @@
                         <span>☁️</span> Cloudflare R2 云备份
                     </h3>
 
-                    <div x-data="r2BackupData()" x-init="init()" class="space-y-4">
+                    <div x-data="r2Backup" class="space-y-4">
 
                         <!-- Config Form -->
                         <div
                             class="grid grid-cols-1 md:grid-cols-2 gap-4 bg-white/50 p-4 rounded-lg border border-gray-100">
                             <div>
-                                <label class="block text-xs font-semibold text-gray-500 mb-1">R2 Endpoint
-                                    (端点地址)</label>
+                                <label class="block text-xs font-semibold text-gray-500 mb-1">R2 Endpoint (端点地址)</label>
                                 <input type="text" x-model="config.endpoint"
                                     placeholder="https://<account>.r2.cloudflarestorage.com"
                                     class="w-full text-sm px-3 py-2 bg-white rounded border border-gray-200 focus:border-orange-500 outline-none">
@@ -845,8 +878,7 @@
                                     class="w-full text-sm px-3 py-2 bg-white rounded border border-gray-200 focus:border-orange-500 outline-none">
                             </div>
                             <div>
-                                <label class="block text-xs font-semibold text-gray-500 mb-1">Secret Access
-                                    Key</label>
+                                <label class="block text-xs font-semibold text-gray-500 mb-1">Secret Access Key</label>
                                 <input type="password" x-model="config.secret_key" placeholder="********"
                                     class="w-full text-sm px-3 py-2 bg-white rounded border border-gray-200 focus:border-orange-500 outline-none">
                             </div>
@@ -888,8 +920,7 @@
                         <div
                             class="bg-white/50 rounded-lg border border-gray-100 min-h-[100px] max-h-[300px] overflow-y-auto custom-scrollbar p-2">
                             <template x-if="loading">
-                                <div class="flex items-center justify-center h-20 text-gray-400 text-sm">加载中...
-                                </div>
+                                <div class="flex items-center justify-center h-20 text-gray-400 text-sm">加载中...</div>
                             </template>
                             <template x-if="!loading && backups.length === 0">
                                 <div class="flex items-center justify-center h-20 text-gray-400 text-sm">暂无备份</div>
