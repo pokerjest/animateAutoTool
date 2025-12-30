@@ -4,9 +4,10 @@
     activeTab: 'download',
     tabs: [
         { id: 'download', name: '下载管理', icon: '📥' },
-        { id: 'metadata', name: '元数据', icon: '🏷️' },
+        { id: 'metadata', name: '数据源', icon: '🏷️' },
         { id: 'media', name: '媒体/同步', icon: '🎬' },
-        { id: 'network', name: '网络代理', icon: '🌐' },
+        { id: 'network', name: '网络', icon: '🌐' },
+        { id: 'backup', name: '备份还原', icon: '📦' },
         { id: 'security', name: '账户安全', icon: '🔐' }
     ]
 }">
@@ -24,9 +25,12 @@
         </div>
     </div>
 
-    <form hx-post="/api/settings" hx-target="#save-result" hx-swap="innerHTML" class="relative">
-        <!-- Download Tab -->
-        <div x-show="activeTab === 'download'" x-transition class="space-y-6">
+    <div id="save-result" class="hidden"></div>
+
+    <!-- Download Tab -->
+    <div x-show="activeTab === 'download'" x-transition class="space-y-6">
+        <form hx-post="/api/settings" hx-target="#save-result" hx-swap="innerHTML">
+            <input type="hidden" name="settings_scope" value="download">
             <div class="glass-panel p-8">
                 <h3 class="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2">
                     <span class="w-2 h-6 bg-primary rounded-full"></span>
@@ -72,231 +76,267 @@
                         </span>
                     </div>
                 </div>
-            </div>
-        </div>
 
-        <!-- Metadata Tab -->
-        <div x-show="activeTab === 'metadata'" x-transition x-cloak class="space-y-6">
-            <div class="glass-panel p-8">
-                <h3 class="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2">
-                    <span class="w-2 h-6 bg-pink-400 rounded-full"></span>
-                    Bangumi 集成
-                </h3>
-                <div class="space-y-4">
-                    <div class="space-y-1.5" x-data="{ show: false }">
-                        <label class="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">Access
-                            Token</label>
-                        <div class="relative">
-                            <input :type="show ? 'text' : 'password'" name="bangumi_access_token"
-                                value='{{ index .Config "bangumi_access_token" }}'
-                                class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 focus:bg-white focus:border-pink-300 focus:ring-4 focus:ring-pink-500/10 outline-none transition-all font-medium pr-12"
-                                placeholder="Personal Access Token">
-                            <button type="button" @click="show = !show"
-                                class="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
-                                <span x-text="show ? '🙈' : '👁️'"></span>
-                            </button>
-                        </div>
-                    </div>
-                    <div class="relative">
-                        <div id="bangumi-status" hx-get="/api/bangumi/profile" hx-trigger="revealed" hx-target="this"
-                            hx-swap="innerHTML"
-                            class="p-4 rounded-xl bg-pink-50/30 border border-pink-100/50 min-h-[60px]">
-                            <span class="text-xs text-gray-400">等待加载 Bangumi 状态...</span>
-                        </div>
-                    </div>
+                <!-- Save Button for Download Tab -->
+                <div class="mt-6 flex justify-end">
+                    <button type="submit"
+                        class="bg-primary text-white px-8 py-3 rounded-xl font-bold hover:bg-accent transition-all shadow-lg active:scale-95 flex items-center gap-2">
+                        <span class="[.htmx-request_&]:hidden">💾 保存更改</span>
+                        <span class="hidden [.htmx-request_&]:inline animate-spin">⌛</span>
+                    </button>
                 </div>
             </div>
+        </form>
+    </div>
 
-            <div class="glass-panel p-8">
-                <h3 class="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2">
-                    <span class="w-2 h-6 bg-blue-400 rounded-full"></span>
-                    The Movie Database (TMDB)
-                </h3>
-                <div class="space-y-4">
-                    <div class="space-y-1.5" x-data="{ show: false }">
-                        <label class="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">API Key (v4
-                            Token)</label>
-                        <div class="relative">
-                            <input :type="show ? 'text' : 'password'" name="tmdb_token"
-                                value='{{ index .Config "tmdb_token" }}'
-                                class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 focus:bg-white focus:border-blue-300 focus:ring-4 focus:ring-blue-500/10 outline-none transition-all font-medium pr-12">
-                            <button type="button" @click="show = !show"
-                                class="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
-                                <span x-text="show ? '🙈' : '👁️'"></span>
-                            </button>
+    <!-- Metadata Tab -->
+    <div x-show="activeTab === 'metadata'" x-transition x-cloak class="space-y-6">
+        <form hx-post="/api/settings" hx-target="#save-result" hx-swap="innerHTML">
+            <input type="hidden" name="settings_scope" value="data-sources">
+            <div class="glass-panel p-8 space-y-8">
+
+                <!-- Bangumi Section -->
+                <div>
+                    <h3 class="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
+                        <span class="w-2 h-6 bg-pink-400 rounded-full"></span>
+                        Bangumi (主数据源)
+                    </h3>
+                    <div class="space-y-4">
+                        <div class="space-y-1.5 mb-4">
+                            <label class="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">Access Token
+                                (手动填入)</label>
+                            <input type="password" name="bangumi_access_token"
+                                value='{{ index .Config "bangumi_access_token" }}'
+                                class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 focus:bg-white focus:border-pink-300 focus:ring-4 focus:ring-pink-500/10 outline-none transition-all font-medium"
+                                placeholder="如果已有 Access Token 可直接在此填入，无需 App ID">
                         </div>
+
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div class="space-y-1.5">
+                                <label class="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">App
+                                    ID</label>
+                                <input type="text" name="bangumi_app_id" value='{{ index .Config "bangumi_app_id" }}'
+                                    class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 focus:bg-white focus:border-pink-300 focus:ring-4 focus:ring-pink-500/10 outline-none transition-all font-medium"
+                                    placeholder="Bangumi App ID">
+                            </div>
+                            <div class="space-y-1.5">
+                                <label class="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">App
+                                    Secret</label>
+                                <input type="password" name="bangumi_app_secret"
+                                    value='{{ index .Config "bangumi_app_secret" }}'
+                                    class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 focus:bg-white focus:border-pink-300 focus:ring-4 focus:ring-pink-500/10 outline-none transition-all font-medium"
+                                    placeholder="Bangumi App Secret">
+                            </div>
+                        </div>
+
+                        <div class="flex items-center gap-4">
+                            <div id="bangumi-status" hx-get="/api/bangumi/profile" hx-trigger="revealed"
+                                class="flex-grow p-4 rounded-xl bg-pink-50/30 border border-pink-100/50 min-h-[50px]">
+                                <span class="text-xs text-gray-400">等待加载 Bangumi 状态...</span>
+                            </div>
+                            <a href="/api/bangumi/login" target="_blank"
+                                class="px-6 py-3 bg-pink-500 text-white rounded-xl font-bold hover:bg-pink-600 transition-all shadow-lg shadow-pink-200/50 flex items-center gap-2 whitespace-nowrap">
+                                🚀 登录/授权
+                            </a>
+                        </div>
+                        <p class="text-xs text-gray-400 ml-1">注：如果填写了 Token，可忽略 App ID/Secret 和登录按钮。</p>
                     </div>
-                    <div class="relative">
-                        <div id="tmdb-status" hx-get="/api/settings/tmdb-status" hx-trigger="revealed" hx-target="this"
-                            hx-swap="innerHTML"
+                </div>
+
+                <hr class="border-gray-200/50">
+
+                <!-- TMDB Section -->
+                <div>
+                    <h3 class="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
+                        <span class="w-2 h-6 bg-blue-400 rounded-full"></span>
+                        TMDB (元数据增强)
+                    </h3>
+                    <div class="space-y-4">
+                        <div class="space-y-1.5" x-data="{ show: false }">
+                            <label class="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">API Read Access
+                                Token</label>
+                            <div class="relative">
+                                <input :type="show ? 'text' : 'password'" name="tmdb_token"
+                                    value='{{ index .Config "tmdb_token" }}'
+                                    class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 focus:bg-white focus:border-blue-300 focus:ring-4 focus:ring-blue-500/10 outline-none transition-all font-medium pr-12"
+                                    placeholder="eyJhbGciOiJIUzI1Ni...">
+                                <button type="button" @click="show = !show"
+                                    class="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                                    <span x-text="show ? '🙈' : '👁️'"></span>
+                                </button>
+                            </div>
+                        </div>
+                        <div id="tmdb-status" hx-get="/api/settings/tmdb-status" hx-trigger="revealed"
                             class="p-4 rounded-xl bg-blue-50/30 border border-blue-100/50 min-h-[50px]">
                             <span class="text-xs text-gray-400">等待加载 TMDB 状态...</span>
                         </div>
                     </div>
                 </div>
-            </div>
 
-            <div class="glass-panel p-8">
-                <h3 class="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2">
-                    <span class="w-2 h-6 bg-cyan-400 rounded-full"></span>
-                    AniList 集成
-                </h3>
-                <div class="space-y-6">
+                <hr class="border-gray-200/50">
+
+                <!-- AniList Section -->
+                <div>
+                    <h3 class="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
+                        <span class="w-2 h-6 bg-cyan-400 rounded-full"></span>
+                        AniList (备用数据源)
+                    </h3>
                     <div class="space-y-4">
-                        <div class="space-y-1.5">
-                            <label class="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">步骤 1: Client
-                                ID</label>
-                            <div class="flex gap-3">
-                                <input type="text" id="anilist_client_id"
-                                    class="flex-1 px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 focus:bg-white focus:border-cyan-300 focus:ring-4 focus:ring-cyan-500/10 outline-none transition-all font-medium"
-                                    placeholder="例如: 12345">
-                                <button type="button" onclick="openAniListAuth()"
-                                    class="bg-cyan-500 text-white px-6 py-3 rounded-2xl font-bold hover:bg-cyan-600 transition-all shadow-lg active:scale-95 whitespace-nowrap">
-                                    🔗 获取 Token
-                                </button>
-                            </div>
-                        </div>
-
                         <div class="space-y-1.5" x-data="{ show: false }">
-                            <label class="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">步骤 2: Access
+                            <label class="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">Personal Access
                                 Token</label>
                             <div class="relative">
-                                <input :type="show ? 'text' : 'password'" id="anilist_token_input" name="anilist_token"
+                                <input :type="show ? 'text' : 'password'" name="anilist_token"
                                     value='{{ index .Config "anilist_token" }}'
                                     class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 focus:bg-white focus:border-cyan-300 focus:ring-4 focus:ring-cyan-500/10 outline-none transition-all font-medium pr-12"
-                                    placeholder="粘贴获取到的 Token">
+                                    placeholder="Paste AniList Token Here">
                                 <button type="button" @click="show = !show"
                                     class="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
                                     <span x-text="show ? '🙈' : '👁️'"></span>
                                 </button>
                             </div>
                         </div>
-                    </div>
-                    <div class="relative">
                         <div id="anilist-status" hx-get="/api/settings/anilist-status" hx-trigger="revealed"
-                            hx-target="this" hx-swap="innerHTML"
                             class="p-4 rounded-xl bg-cyan-50/30 border border-cyan-100/50 min-h-[50px]">
                             <span class="text-xs text-gray-400">等待加载 AniList 状态...</span>
                         </div>
                     </div>
                 </div>
-            </div>
-        </div>
 
-        <!-- Media Tab -->
-        <div x-show="activeTab === 'media'" x-transition x-cloak class="space-y-6">
-            <div class="glass-panel p-8">
-                <div class="flex items-center justify-between mb-6">
-                    <h3 class="text-xl font-bold text-gray-800 flex items-center gap-2">
-                        <span class="w-2 h-6 bg-orange-400 rounded-full"></span>
-                        Jellyfin 管理
-                    </h3>
-                    <button type="button" onclick="openJellyfin()"
-                        class="text-sm font-bold text-orange-600 hover:text-orange-700 hover:underline flex items-center gap-1.5">
-                        <span>🔗 打开控制台</span>
-                    </button>
-                </div>
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div class="space-y-1.5">
-                        <label class="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">服务器
-                            URL</label>
-                        <input type="text" id="jellyfin_url_input" name="jellyfin_url"
-                            value='{{ index .Config "jellyfin_url" }}'
-                            class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 focus:bg-white focus:border-orange-300 focus:ring-4 focus:ring-orange-500/10 outline-none transition-all font-medium">
-                    </div>
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div class="space-y-1.5">
-                            <label class="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">用户名</label>
-                            <input type="text" name="jellyfin_username" value='{{ index .Config "jellyfin_username" }}'
-                                class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 focus:bg-white focus:border-orange-300 focus:ring-4 focus:ring-orange-500/10 outline-none transition-all font-medium"
-                                placeholder="默认为 admin">
-                        </div>
-                        <div class="space-y-1.5" x-data="{ show: false }">
-                            <label class="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">密码</label>
-                            <div class="relative">
-                                <input :type="show ? 'text' : 'password'" name="jellyfin_password"
-                                    value='{{ index .Config "jellyfin_password" }}'
-                                    class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 focus:bg-white focus:border-orange-300 focus:ring-4 focus:ring-orange-500/10 outline-none transition-all font-medium pr-12"
-                                    placeholder="默认为 admin">
-                                <button type="button" @click="show = !show"
-                                    class="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
-                                    <span x-text="show ? '🙈' : '👁️'"></span>
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="space-y-1.5 opacity-75">
-                        <label
-                            class="text-xs font-bold text-gray-400 uppercase tracking-wider ml-1 flex items-center gap-2">
-                            <span>API 密钥 (自动生成)</span>
-                        </label>
-                        <div class="relative">
-                            <input type="text" name="jellyfin_api_key" value='{{ index .Config "jellyfin_api_key" }}'
-                                readonly
-                                class="w-full px-5 py-2 rounded-xl bg-gray-50 border border-gray-200 text-gray-500 text-sm font-mono focus:outline-none cursor-not-allowed">
-                        </div>
-                    </div>
-                </div>
-                <div class="relative">
-                    <div id="jellyfin-status" hx-get="/api/settings/jellyfin-status" hx-trigger="revealed"
-                        hx-target="this" hx-swap="innerHTML"
-                        class="mt-6 p-4 rounded-xl bg-orange-50/30 border border-orange-100/50 min-h-[50px]">
-                        <span class="text-xs text-gray-400">等待加载 Jellyfin 状态...</span>
-                    </div>
-                </div>
             </div>
 
+            <!-- Data Sources Save Button -->
+            <div class="mt-6 flex justify-end">
+                <button type="submit"
+                    class="bg-pink-500 text-white px-8 py-3 rounded-xl font-bold hover:bg-pink-600 transition-all shadow-lg shadow-pink-200 active:scale-95 flex items-center gap-2">
+                    <span class="[.htmx-request_&]:hidden">💾 保存数据源设置</span>
+                    <span class="hidden [.htmx-request_&]:inline animate-spin">⌛</span>
+                </button>
+            </div>
+        </form>
+    </div>
+
+    <!-- Media & Sync Tab -->
+    <div x-show="activeTab === 'media'" x-transition x-cloak class="space-y-6">
+
+        <!-- Jellyfin Config Form -->
+        <form hx-post="/api/settings" hx-target="#save-result" hx-swap="innerHTML">
+            <input type="hidden" name="settings_scope" value="media">
             <div class="glass-panel p-8">
                 <h3 class="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2">
                     <span class="w-2 h-6 bg-purple-400 rounded-full"></span>
-                    PikPak 集成 (Via AList)
+                    Jellyfin 集成
                 </h3>
-                <div class="space-y-6">
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div class="space-y-1.5">
-                            <label class="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">用户名</label>
-                            <input type="text" name="pikpak_username" value='{{ index .Config "pikpak_username" }}'
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div class="space-y-1.5">
+                        <label class="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">服务器地址</label>
+                        <div class="flex gap-2">
+                            <input type="text" id="jellyfin_url_input" name="jellyfin_url"
+                                value='{{ index .Config "jellyfin_url" }}'
                                 class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 focus:bg-white focus:border-purple-300 focus:ring-4 focus:ring-purple-500/10 outline-none transition-all font-medium"
-                                placeholder="PikPak 用户名">
-                        </div>
-                        <div class="space-y-1.5" x-data="{ show: false }">
-                            <label class="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">密码</label>
-                            <div class="relative">
-                                <input :type="show ? 'text' : 'password'" name="pikpak_password"
-                                    value='{{ index .Config "pikpak_password" }}'
-                                    class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 focus:bg-white focus:border-purple-300 focus:ring-4 focus:ring-purple-500/10 outline-none transition-all font-medium pr-12"
-                                    placeholder="PikPak 密码">
-                                <button type="button" @click="show = !show"
-                                    class="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
-                                    <span x-text="show ? '🙈' : '👁️'"></span>
-                                </button>
-                            </div>
+                                placeholder="http://localhost:8096">
+                            <button type="button" onclick="openJellyfin()"
+                                class="bg-gray-100 text-gray-600 px-4 rounded-xl hover:bg-gray-200 transition">↗</button>
                         </div>
                     </div>
+                    <div class="space-y-1.5">
+                        <label class="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">API Key</label>
+                        <input type="text" name="jellyfin_api_key" value='{{ index .Config "jellyfin_api_key" }}'
+                            class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 focus:bg-white focus:border-purple-300 focus:ring-4 focus:ring-purple-500/10 outline-none transition-all font-medium"
+                            placeholder="留空则自动获取">
+                    </div>
 
-                    <div class="space-y-1.5" x-data="{ show: false }">
-                        <label class="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">Refresh
-                            Token
-                            (推荐)</label>
-                        <div class="relative">
-                            <input :type="show ? 'text' : 'password'" id="pikpak_refresh_token_input"
-                                name="pikpak_refresh_token" value='{{ index .Config "pikpak_refresh_token" }}'
-                                class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 focus:bg-white focus:border-purple-300 focus:ring-4 focus:ring-purple-500/10 outline-none transition-all font-medium pr-12"
-                                placeholder="遇到 Captcha 错误时填写">
+                    <!-- New Username/Password Fields -->
+                    <div class="space-y-1.5">
+                        <label class="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">用户名</label>
+                        <input type="text" name="jellyfin_username" value='{{ index .Config "jellyfin_username" }}'
+                            class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 focus:bg-white focus:border-purple-300 focus:ring-4 focus:ring-purple-500/10 outline-none transition-all font-medium"
+                            placeholder="Admin User">
+                    </div>
+                    <div class="space-y-1.5">
+                        <label class="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">密码</label>
+                        <div class="relative" x-data="{ show: false }">
+                            <input :type="show ? 'text' : 'password'" name="jellyfin_password"
+                                value='{{ index .Config "jellyfin_password" }}'
+                                class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 focus:bg-white focus:border-purple-300 focus:ring-4 focus:ring-purple-500/10 outline-none transition-all font-medium pr-12">
                             <button type="button" @click="show = !show"
                                 class="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
                                 <span x-text="show ? '🙈' : '👁️'"></span>
                             </button>
                         </div>
                     </div>
+                </div>
 
-                    <div class="space-y-1.5" x-data="{ show: false }">
-                        <label class="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">验证码
-                            Token (Captcha
-                            Token)</label>
-                        <div class="relative">
+                <!-- Jellyfin Save Button -->
+                <div class="mt-6 flex justify-end">
+                    <button type="submit"
+                        class="bg-purple-500 text-white px-6 py-2 rounded-xl font-bold hover:bg-purple-600 transition-all shadow-md active:scale-95 flex items-center gap-2">
+                        <span class="[.htmx-request_&]:hidden">💾 保存 Jellyfin 设置</span>
+                        <span class="hidden [.htmx-request_&]:inline animate-spin">⌛</span>
+                    </button>
+                </div>
+
+                <div class="relative mt-4">
+                    <div id="jellyfin-status" hx-get="/api/settings/jellyfin-status" hx-trigger="revealed"
+                        hx-target="this" class="p-4 rounded-xl bg-purple-50/50 border border-purple-100 min-h-[50px]">
+                        <span class="text-sm text-purple-400 flex items-center gap-2">
+                            <span class="animate-spin text-xs">⌛</span> 检查连接...
+                        </span>
+                    </div>
+                </div>
+            </div>
+        </form>
+
+        <!-- PikPak Config Form -->
+        <form hx-post="/api/settings" hx-target="#save-result" hx-swap="innerHTML">
+            <input type="hidden" name="settings_scope" value="pikpak">
+            <div class="glass-panel p-8">
+                <h3 class="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2">
+                    <span class="w-2 h-6 bg-purple-600 rounded-full"></span>
+                    PikPak & AList
+                </h3>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div class="space-y-1.5">
+                        <label class="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">PikPak 用户名</label>
+                        <input type="text" name="pikpak_username" value='{{ index .Config "pikpak_username" }}'
+                            class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 focus:bg-white focus:border-purple-300 focus:ring-4 focus:ring-purple-500/10 outline-none transition-all font-medium">
+                    </div>
+                    <div class="space-y-1.5">
+                        <label class="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">PikPak 密码</label>
+                        <div class="relative" x-data="{ show: false }">
+                            <input :type="show ? 'text' : 'password'" name="pikpak_password"
+                                value='{{ index .Config "pikpak_password" }}'
+                                class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 focus:bg-white focus:border-purple-300 focus:ring-4 focus:ring-purple-500/10 outline-none transition-all font-medium pr-12">
+                            <button type="button" @click="show = !show"
+                                class="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                                <span x-text="show ? '🙈' : '👁️'"></span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Separate logic for Tokens which are long -->
+                <div class="mt-4 space-y-4">
+                    <div class="space-y-1.5">
+                        <label class="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">Refresh Token (可选,
+                            推荐)</label>
+                        <div class="relative" x-data="{ show: false }">
+                            <input :type="show ? 'text' : 'password'" name="pikpak_refresh_token"
+                                value='{{ index .Config "pikpak_refresh_token" }}'
+                                class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 focus:bg-white focus:border-purple-300 focus:ring-4 focus:ring-purple-500/10 outline-none transition-all font-medium pr-12"
+                                placeholder="填入 Refresh Token 可避免频繁重新登录">
+                            <button type="button" @click="show = !show"
+                                class="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                                <span x-text="show ? '🙈' : '👁️'"></span>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="space-y-1.5">
+                        <label class="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">Captcha Token
+                            (验证码报错时填)</label>
+                        <div class="relative" x-data="{ show: false }">
                             <input :type="show ? 'text' : 'password'" name="pikpak_captcha_token"
+                                value='{{ index .Config "pikpak_captcha_token" }}'
                                 class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 focus:bg-white focus:border-purple-300 focus:ring-4 focus:ring-purple-500/10 outline-none transition-all font-medium pr-12"
                                 placeholder="如果 Alist 报错 'captcha_token expired'，请在此填写">
                             <button type="button" @click="show = !show"
@@ -306,89 +346,627 @@
                         </div>
                         <p class="text-xs text-gray-400 ml-1">从浏览器控制台获取，或在 Alist 网页版登录后抓包获取。</p>
                     </div>
+                </div>
 
-                    <div
-                        class="flex items-center justify-between gap-4 p-4 rounded-xl bg-purple-50/30 border border-purple-100/50">
-                        <div class="relative flex-1">
-                            <div id="pikpak-status" hx-get="/api/settings/pikpak-status" hx-trigger="revealed"
-                                hx-target="this" hx-swap="innerHTML" class="text-sm font-medium text-purple-700">
-                                等待检查...
-                            </div>
+                <div
+                    class="flex items-center justify-between gap-4 p-4 rounded-xl bg-purple-50/30 border border-purple-100/50 mt-4">
+                    <div class="relative flex-1">
+                        <div id="pikpak-status" hx-get="/api/settings/pikpak-status" hx-trigger="revealed"
+                            hx-target="this" hx-swap="innerHTML" class="text-sm font-medium text-purple-700">
+                            等待检查...
                         </div>
+                    </div>
+                    <div class="flex gap-2">
+                        <button type="submit"
+                            class="bg-gray-700 text-white px-4 py-2.5 rounded-xl font-bold hover:bg-gray-800 transition-all shadow-md active:scale-95 flex items-center gap-2">
+                            <span class="[.htmx-request_&]:hidden">💾 仅保存</span>
+                            <span class="hidden [.htmx-request_&]:inline animate-spin">⌛</span>
+                        </button>
                         <button type="button" hx-post="/api/settings/pikpak-sync" hx-target="#pikpak-sync-status"
-                            class="bg-purple-600 text-white px-6 py-2.5 rounded-xl font-bold hover:bg-purple-700 transition-all shadow-md active:scale-95 flex items-center gap-2">
+                            class="bg-purple-600 text-white px-4 py-2.5 rounded-xl font-bold hover:bg-purple-700 transition-all shadow-md active:scale-95 flex items-center gap-2">
                             <span class="htmx-indicator animate-spin text-xs">⌛</span>
-                            <span>💾 保存并同步</span>
+                            <span>🔄 保存并同步</span>
                         </button>
                     </div>
-                    <div id="pikpak-sync-status" class="text-xs font-bold text-purple-400 text-right mt-1">
+                </div>
+                <div id="pikpak-sync-status" class="text-xs font-bold text-purple-400 text-right mt-1">
+                </div>
+
+                <!-- Token Guide -->
+                <div
+                    class="mt-4 p-4 rounded-xl bg-purple-50/50 border border-purple-100/50 text-sm text-purple-900 space-y-3">
+                    <h4 class="font-bold flex items-center gap-2">📚 如何获取 Token?</h4>
+                    <ul class="list-disc list-inside space-y-1.5 opacity-90 text-xs">
+                        <li>
+                            <span class="font-bold">Refresh Token (推荐):</span>
+                            登录 <a href="https://mypikpak.com" target="_blank"
+                                class="underline hover:text-purple-600 font-bold">PikPak 网页版</a>，按 F12
+                            打开开发者工具 →
+                            Application (应用) → Local Storage → 找到 <code
+                                class="bg-purple-100 px-1 rounded">refresh_token</code>。
+                        </li>
+                        <li>
+                            <span class="font-bold">Captcha Token:</span>
+                            仅在 Alist 报错 <code class="bg-red-50 text-red-600 px-1 rounded">captcha_token expired</code>
+                            时需要。
+                            <a href="https://alist.nn.ci/zh/guide/drivers/pikpak.html" target="_blank"
+                                class="underline hover:text-purple-600 font-bold">👉 查看 Alist 官方文档</a>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        </form>
+    </div>
+
+    <!-- Network Tab -->
+    <div x-show="activeTab === 'network'" x-transition:enter="transition ease-out duration-300"
+        x-transition:enter-start="opacity-0 translate-y-4" x-transition:enter-end="opacity-100 translate-y-0"
+        class="space-y-6">
+
+        <form hx-post="/api/settings" hx-target="#save-result" hx-swap="innerHTML">
+            <input type="hidden" name="settings_scope" value="network">
+            <div class="bg-white/60 p-6 rounded-xl border border-white/70 shadow-sm relative overflow-hidden group">
+                <div class="relative z-10">
+                    <h3 class="text-lg font-semibold mb-4 text-gray-800 flex items-center gap-2">
+                        <span>🌐</span> 网络设置
+                    </h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div class="col-span-2">
+                            <label class="block text-sm font-medium text-gray-700 mb-1">HTTP/S Proxy URL</label>
+                            <input type="text" name="proxy_url" value="{{ .Config.proxy_url }}"
+                                placeholder="http://127.0.0.1:7890"
+                                class="w-full px-4 py-2 bg-white/50 rounded-lg border border-gray-300 focus:ring-2 focus:ring-primary focus:border-primary outline-none transition-all hover:bg-white/80">
+                            <p class="mt-1 text-xs text-gray-500">
+                                格式: http://ip:port 或 socks5://ip:port. 留空则不使用代理。
+                            </p>
+                        </div>
+
+                        <!-- Proxy Scope -->
+                        <div class="col-span-2">
+                            <label class="block text-sm font-medium text-gray-700 mb-2">应用范围</label>
+                            <div class="flex flex-wrap gap-4">
+                                <label class="inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" name="proxy_bangumi_enabled" value="true" {{ if eq
+                                        .Config.proxy_bangumi_enabled "true" }}checked{{ end }}
+                                        class="form-checkbox h-5 w-5 text-primary rounded border-gray-300 focus:ring-primary">
+                                    <span class="ml-2 text-gray-700">Bangumi API</span>
+                                </label>
+                                <label class="inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" name="proxy_tmdb_enabled" value="true" {{ if eq
+                                        .Config.proxy_tmdb_enabled "true" }}checked{{ end }}
+                                        class="form-checkbox h-5 w-5 text-primary rounded border-gray-300 focus:ring-primary">
+                                    <span class="ml-2 text-gray-700">TMDB API</span>
+                                </label>
+                                <label class="inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" name="proxy_anilist_enabled" value="true" {{ if eq
+                                        .Config.proxy_anilist_enabled "true" }}checked{{ end }}
+                                        class="form-checkbox h-5 w-5 text-primary rounded border-gray-300 focus:ring-primary">
+                                    <span class="ml-2 text-gray-700">AniList API</span>
+                                </label>
+                                <label class="inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" name="proxy_jellyfin_enabled" value="true" {{ if eq
+                                        .Config.proxy_jellyfin_enabled "true" }}checked{{ end }}
+                                        class="form-checkbox h-5 w-5 text-primary rounded border-gray-300 focus:ring-primary">
+                                    <span class="ml-2 text-gray-700">Jellyfin API</span>
+                                </label>
+                            </div>
+                        </div>
                     </div>
 
-                    <!-- Token Guide -->
-                    <div
-                        class="mt-4 p-4 rounded-xl bg-purple-50/50 border border-purple-100/50 text-sm text-purple-900 space-y-3">
-                        <h4 class="font-bold flex items-center gap-2">📚 如何获取 Token?</h4>
-                        <ul class="list-disc list-inside space-y-1.5 opacity-90 text-xs">
-                            <li>
-                                <span class="font-bold">Refresh Token (推荐):</span>
-                                登录 <a href="https://mypikpak.com" target="_blank"
-                                    class="underline hover:text-purple-600 font-bold">PikPak 网页版</a>，按 F12
-                                打开开发者工具 →
-                                Application (应用) → Local Storage → 找到 <code
-                                    class="bg-purple-100 px-1 rounded">refresh_token</code>。
-                            </li>
-                            <li>
-                                <span class="font-bold">Captcha Token:</span>
-                                仅在 Alist 报错 <code
-                                    class="bg-red-50 text-red-600 px-1 rounded">captcha_token expired</code>
-                                时需要。
-                                <a href="https://alist.nn.ci/zh/guide/drivers/pikpak.html" target="_blank"
-                                    class="underline hover:text-purple-600 font-bold">👉 查看 Alist 官方文档</a>
-                            </li>
-                        </ul>
+                    <!-- Network Save Button -->
+                    <div class="mt-6 flex justify-end">
+                        <button type="submit"
+                            class="bg-blue-600 text-white px-8 py-3 rounded-xl font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 active:scale-95 flex items-center gap-2">
+                            <span class="[.htmx-request_&]:hidden">💾 保存网络设置</span>
+                            <span class="hidden [.htmx-request_&]:inline animate-spin">⌛</span>
+                        </button>
                     </div>
+                </div>
+                <!-- Decor -->
+                <div
+                    class="absolute -right-6 -bottom-6 text-9xl text-blue-100 opacity-50 group-hover:scale-110 transition duration-500 select-none">
+                    🌐
+                </div>
+            </div>
+        </form>
+    </div>
+
+    <!-- Backup Tab -->
+    <div x-show="activeTab === 'backup'" x-transition:enter="transition ease-out duration-300"
+        x-transition:enter-start="opacity-0 translate-y-4" x-transition:enter-end="opacity-100 translate-y-0"
+        class="space-y-6">
+
+        <script>
+            // Defined as a global function to ensure availability during HTMX swaps
+            window.r2BackupData = function () {
+                return {
+                    config: { endpoint: '', access_key: '', secret_key: '', bucket: '' },
+                    backups: [],
+                    loading: true,
+
+                    init() {
+                        this.loadConfig();
+                        this.loadBackups();
+                    },
+
+                    loadConfig() {
+                        fetch('/api/backup/r2/config')
+                            .then(r => r.json())
+                            .then(data => {
+                                this.config = data;
+                            });
+                    },
+
+                    testMessage: '',
+                    testError: false,
+                    testConnection() {
+                        this.loading = true;
+                        this.testMessage = '测试中...';
+                        this.testError = false;
+
+                        fetch('/api/backup/r2/test', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(this.config)
+                        })
+                            .then(r => r.json())
+                            .then(data => {
+                                this.loading = false;
+                                if (data.error) {
+                                    this.testError = true;
+                                    this.testMessage = '连接失败: ' + data.error;
+                                } else {
+                                    this.testError = false;
+                                    this.testMessage = '连接成功: ' + data.message;
+                                }
+                                setTimeout(() => this.testMessage = '', 5000);
+                            })
+                            .catch(e => {
+                                this.loading = false;
+                                this.testError = true;
+                                this.testMessage = '请求错误: ' + e;
+                                setTimeout(() => this.testMessage = '', 5000);
+                            });
+                    },
+
+                    saveConfig() {
+                        this.testMessage = '保存中...';
+                        fetch('/api/backup/r2/config', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(this.config)
+                        })
+                            .then(r => r.json())
+                            .then(() => {
+                                this.testError = false;
+                                this.testMessage = '配置已保存';
+                                this.loadBackups();
+                                setTimeout(() => this.testMessage = '', 3000);
+                            })
+                            .catch(e => {
+                                this.testError = true;
+                                this.testMessage = '保存失败: ' + e;
+                                setTimeout(() => this.testMessage = '', 5000);
+                            });
+                    },
+
+                    uploadMessage: '',
+                    uploadError: false,
+                    upload() {
+                        this.loading = true;
+                        this.uploadMessage = '上传中...';
+                        this.uploadError = false;
+
+                        fetch('/api/backup/r2/upload', { method: 'POST' })
+                            .then(r => r.json())
+                            .then(data => {
+                                if (data.error) {
+                                    this.uploadError = true;
+                                    this.uploadMessage = '上传失败: ' + data.error;
+                                } else {
+                                    this.uploadError = false;
+                                    this.uploadMessage = '上传成功';
+                                    this.loadBackups();
+                                }
+                                setTimeout(() => this.uploadMessage = '', 5000);
+                            })
+                            .catch(e => {
+                                this.uploadError = true;
+                                this.uploadMessage = '上传错误: ' + e;
+                                setTimeout(() => this.uploadMessage = '', 5000);
+                            })
+                            .finally(() => this.loading = false);
+                    },
+
+                    loadBackups() {
+                        this.loading = true;
+                        fetch('/api/backup/r2/list')
+                            .then(r => r.json())
+                            .then(data => {
+                                if (data.error) console.error(data.error);
+                                else this.backups = data.backups || [];
+                            })
+                            .catch(console.error)
+                            .finally(() => this.loading = false);
+                    },
+
+                    showConfirm: false,
+                    confirmTitle: '',
+                    confirmMessage: '',
+                    confirmButtonText: '',
+                    confirmType: '',
+                    currentKey: '',
+                    modalLoading: false,
+
+                    confirmRestore(key) {
+                        this.loading = true;
+
+                        // Scroll to preview area
+                        const previewEl = document.getElementById('restore-preview');
+                        previewEl.scrollIntoView({ behavior: 'smooth' });
+
+                        // Initial State
+                        this.renderProgress(previewEl, key, 0, 'starting');
+
+                        const formData = new FormData();
+                        formData.append('key', key);
+
+                        fetch('/api/backup/r2/stage', {
+                            method: 'POST',
+                            body: formData
+                        })
+                            .then(r => r.json())
+                            .then(data => {
+                                if (data.error) throw new Error(data.error);
+                                if (!data.task_id) throw new Error("No Task ID returned");
+                                this.startPolling(data.task_id, key, previewEl);
+                            })
+                            .catch(e => {
+                                this.renderError(previewEl, e);
+                                this.loading = false;
+                            });
+                    },
+
+                    startPolling(taskId, key, previewEl) {
+                        const interval = setInterval(() => {
+                            fetch('/api/backup/r2/progress/' + taskId)
+                                .then(r => r.json())
+                                .then(data => {
+                                    if (data.status === 'completed') {
+                                        clearInterval(interval);
+                                        previewEl.innerHTML = data.result_html;
+                                        if (window.htmx) htmx.process(previewEl);
+                                        this.loading = false;
+                                    } else if (data.status === 'error') {
+                                        clearInterval(interval);
+                                        throw new Error(data.error || 'Unknown error');
+                                    } else {
+                                        // Update Progress
+                                        let percent = 0;
+                                        if (data.total_bytes > 0) {
+                                            percent = (data.downloaded / data.total_bytes) * 100;
+                                        }
+                                        this.renderProgress(previewEl, key, percent, data.status);
+                                    }
+                                })
+                                .catch(e => {
+                                    clearInterval(interval);
+                                    this.renderError(previewEl, "Progress check failed: " + e);
+                                    this.loading = false;
+                                });
+                        }, 1000);
+                    },
+
+                    renderProgress(el, key, percent, status) {
+                        const statusText = status === 'analyzing' ? '正在分析数据...' : (status === 'starting' ? '正在启动任务...' : `已下载 ${percent.toFixed(1)}%`);
+
+                        el.innerHTML = `
+                                <div class="bg-blue-50 border border-blue-200 rounded-lg p-6 text-center animate-fade-in-up">
+                                    <div class="mb-3">
+                                        <span class="inline-block animate-bounce text-3xl">☁️</span>
+                                    </div>
+                                    <h4 class="text-blue-800 font-bold text-lg mb-1">正在从云端下载备份...</h4>
+                                    <p class="text-blue-600 text-sm mb-4">文件名: ${key}</p>
+                                    
+                                    <div class="w-full max-w-xs mx-auto bg-blue-200 rounded-full h-4 overflow-hidden relative">
+                                        <div class="bg-blue-500 h-full rounded-full transition-all duration-500 ease-out" style="width: ${percent}%"></div>
+                                    </div>
+                                    <div class="mt-2 flex justify-between text-xs text-blue-500 max-w-xs mx-auto">
+                                        <span>${statusText}</span>
+                                        <span>${percent.toFixed(0)}%</span>
+                                    </div>
+                                </div>
+                            `;
+                    },
+
+                    renderError(el, error) {
+                        el.innerHTML = `
+                                <div class="bg-red-50 border border-red-200 rounded-lg p-4 text-center">
+                                    <div class="text-red-500 font-bold mb-1">下载/分析失败</div>
+                                    <div class="text-sm text-red-600">${error}</div>
+                                </div>
+                            `;
+                    },
+
+                    confirmDelete(key) {
+                        this.currentKey = key;
+                        this.confirmType = 'delete';
+                        this.confirmTitle = '确认删除';
+                        this.confirmMessage = '确定要删除备份 ' + key + ' 吗？此操作不可逆！';
+                        this.confirmButtonText = '确认删除';
+                        this.showConfirm = true;
+                    },
+
+                    executeConfirmAction() {
+                        this.modalLoading = true;
+                        if (this.confirmType === 'delete') {
+                            this.doDelete();
+                        }
+                    },
+
+                    doDelete() {
+                        const formData = new FormData();
+                        formData.append('key', this.currentKey);
+                        fetch('/api/backup/r2/delete', { method: 'POST', body: formData })
+                            .then(r => r.json())
+                            .then(data => {
+                                if (data.error) {
+                                    this.confirmMessage = '删除失败: ' + data.error;
+                                    this.confirmTitle = '错误';
+                                } else {
+                                    this.showConfirm = false;
+                                    this.loadBackups();
+                                }
+                            })
+                            .catch(e => {
+                                this.confirmMessage = '删除错误: ' + e;
+                                this.confirmTitle = '错误';
+                            })
+                            .finally(() => this.modalLoading = false);
+                    }
+                };
+            }
+        </script>
+
+        <!-- Backup UI -->
+        <div class="space-y-6 text-gray-800">
+            <!-- Backup Section -->
+            <div class="bg-white/60 p-6 rounded-xl border border-white/70 shadow-sm relative overflow-hidden group">
+                <div class="relative z-10">
+                    <h3 class="text-lg font-semibold mb-2 flex items-center gap-2">
+                        <span>📦</span> 备份数据
+                    </h3>
+                    <div class="mb-4 text-sm text-gray-600 space-y-1 bg-white/50 p-3 rounded-lg border border-gray-100">
+                        <div class="flex justify-between"><span>订阅总数:</span> <span class="font-bold">{{
+                                .Stats.SubscriptionCount }}</span></div>
+                        <div class="flex justify-between"><span>历史记录:</span> <span class="font-bold">{{
+                                .Stats.DownloadLogCount }}</span></div>
+                        <div class="flex justify-between"><span>用户账号:</span> <span class="font-bold">{{
+                                .Stats.UserCount }}</span></div>
+                        <div class="flex justify-between text-gray-400"><span>本地番剧:</span> <span class="font-bold">{{
+                                .Stats.LocalAnimeCount }} (仅本地)</span></div>
+                        <div class="flex justify-between"><span>数据库大小:</span> <span class="font-bold">{{
+                                .Stats.DatabaseSize
+                                }}</span></div>
+                        <div class="flex justify-between"><span>最后修改:</span> <span class="font-mono text-xs">{{
+                                .Stats.LastModified }}</span></div>
+
+                        {{ if .Stats.SubscriptionTitles }}
+                        <div class="mt-2 pt-2 border-t border-gray-200">
+                            <div class="text-xs text-gray-500 mb-1">包含的订阅:</div>
+                            <div class="max-h-[100px] overflow-y-auto space-y-1 pr-1 custom-scrollbar">
+                                {{ range .Stats.SubscriptionTitles }}
+                                <div class="text-xs bg-white px-2 py-1 rounded border border-gray-100 truncate">{{ .
+                                    }}
+                                </div>
+                                {{ end }}
+                            </div>
+                        </div>
+                        {{ end }}
+                    </div>
+                    <p class="text-sm text-gray-600 mb-4">
+                        下载经过筛选的数据库文件 (仅包含订阅、日志和设置，不含本地番剧索引)。
+                    </p>
+                    <a href="/api/backup/export" target="_blank"
+                        class="inline-flex items-center gap-2 px-6 py-2 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition shadow-lg shadow-emerald-200">
+                        <span>⬇️</span> 下载备份
+                    </a>
+                </div>
+                <div
+                    class="absolute -right-10 -bottom-10 text-9xl text-emerald-100 opacity-50 group-hover:scale-110 transition duration-500 select-none">
+                    💾
+                </div>
+            </div>
+
+            <!-- Restore Section -->
+            <div class="bg-white/60 p-6 rounded-xl border border-white/70 shadow-sm relative overflow-hidden group">
+                <div class="relative z-10">
+                    <h3 class="text-lg font-semibold mb-2 flex items-center gap-2 text-red-600">
+                        <span>⚠️</span> 还原数据
+                    </h3>
+                    <p class="text-sm text-gray-600 mb-4">
+                        上传备份文件进行分析，预览数据后再确认还原。
+                    </p>
+
+                    <form hx-post="/api/backup/analyze" hx-encoding="multipart/form-data" hx-target="#restore-preview"
+                        hx-indicator="#analyze-btn" class="flex items-end gap-4 mb-4">
+                        <div class="flex-1">
+                            <label class="block text-sm font-medium text-gray-700 mb-1">选择备份文件 (.db)</label>
+                            <input type="file" name="backup_file" accept=".db" required
+                                class="w-full px-4 py-2 bg-white/50 rounded-lg border border-gray-300 focus:ring-2 focus:ring-red-500 focus:border-red-500 outline-none file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-red-50 file:text-red-700 hover:file:bg-red-100">
+                        </div>
+                        <div>
+                            <button type="submit" id="analyze-btn"
+                                class="inline-flex items-center gap-2 px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition shadow-lg shadow-blue-200 cursor-pointer h-[42px]">
+                                <span class="[.htmx-request_&]:hidden">🔍</span>
+                                <span class="hidden [.htmx-request_&]:inline animate-spin">⌛</span>
+                                分析文件
+                            </button>
+                        </div>
+                    </form>
+
+                    <!-- Preview Container -->
+                    <div id="restore-preview" class="mt-4"></div>
+                </div>
+                <div
+                    class="absolute -right-6 -bottom-6 text-9xl text-red-100 opacity-50 group-hover:rotate-12 transition duration-500 select-none">
+                    ♻️
+                </div>
+            </div>
+
+            <!-- Cloudflare R2 Section -->
+            <div class="bg-white/60 p-6 rounded-xl border border-white/70 shadow-sm relative overflow-hidden group">
+                <div class="relative z-10">
+                    <h3 class="text-lg font-semibold mb-2 flex items-center gap-2 text-orange-600">
+                        <span>☁️</span> Cloudflare R2 云备份
+                    </h3>
+
+                    <div x-data="r2BackupData()" x-init="init()" class="space-y-4">
+
+                        <!-- Config Form -->
+                        <div
+                            class="grid grid-cols-1 md:grid-cols-2 gap-4 bg-white/50 p-4 rounded-lg border border-gray-100">
+                            <div>
+                                <label class="block text-xs font-semibold text-gray-500 mb-1">R2 Endpoint
+                                    (端点地址)</label>
+                                <input type="text" x-model="config.endpoint"
+                                    placeholder="https://<account>.r2.cloudflarestorage.com"
+                                    class="w-full text-sm px-3 py-2 bg-white rounded border border-gray-200 focus:border-orange-500 outline-none">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-gray-500 mb-1">Bucket Name
+                                    (存储桶名称)</label>
+                                <input type="text" x-model="config.bucket" placeholder="animate-backup"
+                                    class="w-full text-sm px-3 py-2 bg-white rounded border border-gray-200 focus:border-orange-500 outline-none">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-gray-500 mb-1">Access Key ID</label>
+                                <input type="text" x-model="config.access_key"
+                                    class="w-full text-sm px-3 py-2 bg-white rounded border border-gray-200 focus:border-orange-500 outline-none">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-gray-500 mb-1">Secret Access
+                                    Key</label>
+                                <input type="password" x-model="config.secret_key" placeholder="********"
+                                    class="w-full text-sm px-3 py-2 bg-white rounded border border-gray-200 focus:border-orange-500 outline-none">
+                            </div>
+                            <div class="md:col-span-2 text-right space-x-2 flex items-center justify-end gap-2">
+                                <span x-show="testMessage" x-text="testMessage"
+                                    :class="testError ? 'text-red-500' : 'text-green-500'"
+                                    class="text-xs font-semibold transition-opacity duration-500"></span>
+                                <button @click="testConnection" :disabled="loading"
+                                    :class="loading ? 'bg-blue-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-500'"
+                                    class="text-xs text-white px-3 py-1.5 rounded transition flex items-center gap-1">
+                                    <span x-show="loading && testMessage === '测试中...'"
+                                        class="animate-spin h-3 w-3 border-2 border-white rounded-full border-t-transparent"></span>
+                                    <span x-text="loading && testMessage === '测试中...' ? '测试中...' : '测试连接'"></span>
+                                </button>
+                                <button @click="saveConfig"
+                                    class="text-xs bg-gray-800 text-white px-3 py-1.5 rounded hover:bg-gray-700 transition">保存配置</button>
+                            </div>
+                        </div>
+
+                        <!-- Actions -->
+                        <div class="flex items-center justify-between border-b border-gray-200 pb-2">
+                            <h4 class="text-sm font-semibold text-gray-700">云端备份列表</h4>
+                            <div class="flex items-center gap-2">
+                                <span x-show="uploadMessage" x-text="uploadMessage"
+                                    :class="uploadError ? 'text-red-500' : 'text-green-500'"
+                                    class="text-xs font-semibold transition-opacity duration-500"></span>
+                                <button @click="upload" :disabled="loading"
+                                    :class="loading ? 'bg-orange-400 cursor-not-allowed' : 'bg-orange-500 hover:bg-orange-600'"
+                                    class="text-sm flex items-center gap-1 text-white px-4 py-1.5 rounded-lg transition shadow-lg shadow-orange-200">
+                                    <span x-show="loading && uploadMessage === '上传中...'"
+                                        class="animate-spin h-3 w-3 border-2 border-white rounded-full border-t-transparent inline-block"></span>
+                                    <span x-show="!(loading && uploadMessage === '上传中...')">☁️</span>
+                                    立即上传
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Backup List -->
+                        <div
+                            class="bg-white/50 rounded-lg border border-gray-100 min-h-[100px] max-h-[300px] overflow-y-auto custom-scrollbar p-2">
+                            <template x-if="loading">
+                                <div class="flex items-center justify-center h-20 text-gray-400 text-sm">加载中...
+                                </div>
+                            </template>
+                            <template x-if="!loading && backups.length === 0">
+                                <div class="flex items-center justify-center h-20 text-gray-400 text-sm">暂无备份</div>
+                            </template>
+
+                            <div class="space-y-2">
+                                <template x-for="file in backups" :key="file.key">
+                                    <div
+                                        class="flex items-center justify-between bg-white p-3 rounded border border-gray-100 hover:border-orange-200 transition">
+                                        <div class="flex items-center gap-3">
+                                            <div class="text-xl">📦</div>
+                                            <div>
+                                                <div class="text-sm font-medium text-gray-800"
+                                                    x-text="file.key.replace('animate_backup_', '').replace('.db', '')">
+                                                </div>
+                                                <div class="text-xs text-gray-400 mt-0.5">
+                                                    <span x-text="file.last_modified"></span> • <span
+                                                        x-text="(file.size / 1024 / 1024).toFixed(2) + ' MB'"></span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="flex items-center gap-2">
+                                            <button @click="confirmRestore(file.key)"
+                                                class="text-xs bg-blue-50 text-blue-600 px-3 py-1.5 rounded hover:bg-blue-100 transition border border-blue-200">
+                                                预览 / 还原
+                                            </button>
+                                            <button @click="confirmDelete(file.key)"
+                                                class="text-xs bg-red-50 text-red-600 px-2 py-1.5 rounded hover:bg-red-100 transition border border-red-200"
+                                                title="删除">
+                                                🗑️
+                                            </button>
+                                        </div>
+                                    </div>
+                                </template>
+                            </div>
+                        </div>
+
+                        <!-- Delete Confirm Modal (Simplified, only for Delete) -->
+                        <div x-show="showConfirm" style="display: none;"
+                            class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
+                            x-transition.opacity>
+                            <div class="bg-white rounded-lg shadow-xl max-w-md w-full p-6 space-y-4"
+                                @click.outside="showConfirm = false">
+                                <h3 class="text-lg font-bold text-gray-800" x-text="confirmTitle"></h3>
+                                <p class="text-sm text-gray-600" x-text="confirmMessage"></p>
+
+                                <!-- Loading Spinner inside Modal -->
+                                <div x-show="modalLoading" class="flex justify-center py-2">
+                                    <span
+                                        class="animate-spin h-6 w-6 border-2 border-orange-500 rounded-full border-t-transparent"></span>
+                                </div>
+
+                                <div x-show="!modalLoading" class="flex justify-end gap-3 pt-2">
+                                    <button @click="showConfirm = false"
+                                        class="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded transition">取消</button>
+                                    <button @click="executeConfirmAction"
+                                        class="bg-red-500 hover:bg-red-600 px-4 py-2 text-sm text-white rounded transition shadow-md"
+                                        x-text="confirmButtonText"></button>
+                                </div>
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+                <div
+                    class="absolute -right-8 -bottom-8 text-9xl text-orange-100 opacity-50 group-hover:scale-105 transition duration-500 select-none">
+                    ☁️
                 </div>
             </div>
         </div>
+    </div>
 
-        <!-- Network Tab -->
-        <div x-show="activeTab === 'network'" x-transition x-cloak class="space-y-6">
-            <div class="glass-panel p-8">
-                <h3 class="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2">
-                    <span class="w-2 h-6 bg-indigo-400 rounded-full"></span>
-                    代理配置
-                </h3>
-                <div class="space-y-6">
-                    <div class="space-y-1.5">
-                        <label class="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">HTTP
-                            代理地址</label>
-                        <input type="text" name="proxy_url" value='{{ index .Config "proxy_url" }}'
-                            class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 focus:bg-white focus:border-indigo-300 focus:ring-4 focus:ring-indigo-500/10 outline-none transition-all font-medium"
-                            placeholder="http://127.0.0.1:7890">
-                    </div>
-                    <div class="flex flex-wrap gap-4">
-                        <label
-                            class="flex items-center gap-3 bg-white/60 px-4 py-2 rounded-xl border border-white/60 cursor-pointer shadow-sm hover:shadow-md transition-all">
-                            <input type="checkbox" name="proxy_bangumi_enabled" value="true"
-                                class="w-4 h-4 accent-indigo-500" {{ if eq (index .Config "proxy_bangumi_enabled"
-                                ) "true" }}checked{{ end }}>
-                            <span class="text-sm font-bold text-gray-700">Bangumi 使用代理</span>
-                        </label>
-                        <label
-                            class="flex items-center gap-3 bg-white/60 px-4 py-2 rounded-xl border border-white/60 cursor-pointer shadow-sm hover:shadow-md transition-all">
-                            <input type="checkbox" name="proxy_tmdb_enabled" value="true"
-                                class="w-4 h-4 accent-indigo-500" {{ if eq (index .Config "proxy_tmdb_enabled" ) "true"
-                                }}checked{{ end }}>
-                            <span class="text-sm font-bold text-gray-700">TMDB 使用代理</span>
-                        </label>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Security Tab -->
-        <div x-show="activeTab === 'security'" x-transition x-cloak class="space-y-6">
-            <div class="glass-panel p-8" x-data="{
+    <!-- Security Tab -->
+    <div x-show="activeTab === 'security'" x-transition:enter="transition ease-out duration-300"
+        x-transition:enter-start="opacity-0 translate-y-4" x-transition:enter-end="opacity-100 translate-y-0"
+        class="space-y-6">
+        <div class="glass-panel p-8" x-data="{
                         oldPwd: '', newPwd: '', confirmPwd: '', loading: false,
                         async submit() {
                             if (this.newPwd !== this.confirmPwd) {
@@ -413,38 +991,28 @@
                             finally { this.loading = false; }
                         }
                     }">
-                <h3 class="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2">
-                    <span class="w-2 h-6 bg-gray-800 rounded-full"></span>
-                    更换密码
-                </h3>
-                <div class="max-w-md space-y-4">
-                    <input type="password" x-model="oldPwd" placeholder="当前密码"
-                        class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 outline-none font-medium">
-                    <input type="password" x-model="newPwd" placeholder="新密码"
-                        class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 outline-none font-medium">
-                    <input type="password" x-model="confirmPwd" placeholder="确认新密码"
-                        class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 outline-none font-medium">
-                    <button type="button" @click="submit" :disabled="loading"
-                        class="w-full bg-gray-800 text-white py-3 rounded-2xl font-bold hover:bg-black transition-all shadow-xl active:scale-95 disabled:opacity-50">
-                        <span x-show="!loading">更新安全凭证</span>
-                        <span x-show="loading">优化中...</span>
-                    </button>
-                </div>
+            <h3 class="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2">
+                <span class="w-2 h-6 bg-gray-800 rounded-full"></span>
+                更换密码
+            </h3>
+            <div class="max-w-md space-y-4">
+                <input type="password" x-model="oldPwd" placeholder="当前密码"
+                    class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 outline-none font-medium">
+                <input type="password" x-model="newPwd" placeholder="新密码"
+                    class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 outline-none font-medium">
+                <input type="password" x-model="confirmPwd" placeholder="确认新密码"
+                    class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 outline-none font-medium">
+                <button type="button" @click="submit" :disabled="loading"
+                    class="w-full bg-gray-800 text-white py-3 rounded-2xl font-bold hover:bg-black transition-all shadow-xl active:scale-95 disabled:opacity-50">
+                    <span x-show="!loading">更新安全凭证</span>
+                    <span x-show="loading">优化中...</span>
+                </button>
             </div>
         </div>
+    </div>
 
-        <!-- Global Save FAB -->
-        <div class="fixed bottom-10 right-10 z-[40]">
-            <button type="submit" id="save-settings-btn"
-                class="bg-primary text-white p-6 rounded-full hover:bg-accent transition-all shadow-[0_15px_30px_-5px_rgba(255,182,193,0.5)] active:scale-90 flex items-center gap-3 group relative overflow-hidden"
-                hx-indicator="#save-settings-btn">
-                <span class="text-2xl [.htmx-request_&]:hidden">💾</span>
-                <span class="hidden [.htmx-request_&]:inline animate-spin text-2xl">⌛</span>
-                <span
-                    class="max-w-0 overflow-hidden group-hover:max-w-xs transition-all duration-500 font-black uppercase tracking-widest text-sm whitespace-nowrap">保存并同步所有配置</span>
-            </button>
-        </div>
-    </form>
+    <!-- Global Save FAB -->
+
 
     <div id="save-result" class="hidden"></div>
 

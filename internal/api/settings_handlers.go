@@ -80,48 +80,111 @@ func SettingsHandler(c *gin.Context) {
 		}
 	}
 
+	// Fetch Backup Stats for the new Backup tab
+	stats := getDBStats(db.DB, db.CurrentDBPath)
+
 	c.HTML(http.StatusOK, "settings.html", gin.H{
 		"SkipLayout":       skip,
 		"Config":           configMap,
 		"JellyfinServerID": jellyfinServerId,
+		"Stats":            stats,
 	})
 }
 
 func UpdateSettingsHandler(c *gin.Context) {
 	// 1. Save All Configs
-	keys := []string{
-		model.ConfigKeyQBUrl,
-		model.ConfigKeyQBUsername,
-		model.ConfigKeyQBPassword,
-		model.ConfigKeyBaseDir,
-		model.ConfigKeyBangumiRefreshToken,
-		model.ConfigKeyBangumiAccessToken, // Added missing key
-		model.ConfigKeyTMDBToken,
-		model.ConfigKeyAniListToken,
-		model.ConfigKeyProxyURL,
-		model.ConfigKeyProxyBangumi,
-		model.ConfigKeyProxyTMDB,
-		model.ConfigKeyProxyAniList,
-		model.ConfigKeyJellyfinUrl,
-		// model.ConfigKeyJellyfinApiKey, // Don't save empty API key if not provided, we handle it specially
-		model.ConfigKeyJellyfinUsername, // New
-		model.ConfigKeyJellyfinPassword, // New
-		model.ConfigKeyProxyJellyfin,
-		model.ConfigKeyPikPakUsername,
-		model.ConfigKeyPikPakPassword,
-		model.ConfigKeyPikPakRefreshToken,
+	// 1. Determine Scope
+	scope, _ := c.GetPostForm("settings_scope")
+
+	// Define all possible keys and their scopes
+	// This map is optional if we purely rely on keysToProcess, but helpful for validation
+
+	keysToProcess := []string{}
+	checkboxesToProcess := []string{}
+
+	switch scope {
+	case "download":
+		keysToProcess = []string{
+			model.ConfigKeyQBUrl,
+			model.ConfigKeyQBUsername,
+			model.ConfigKeyQBPassword,
+			model.ConfigKeyBaseDir,
+		}
+	case "data-sources":
+		keysToProcess = []string{
+			model.ConfigKeyBangumiRefreshToken,
+			model.ConfigKeyBangumiAccessToken,
+			model.ConfigKeyBangumiAppID,     // Added
+			model.ConfigKeyBangumiAppSecret, // Added
+			model.ConfigKeyTMDBToken,
+			model.ConfigKeyAniListToken,
+		}
+	case "network":
+		keysToProcess = []string{
+			model.ConfigKeyProxyURL,
+		}
+		checkboxesToProcess = []string{
+			model.ConfigKeyProxyBangumi,
+			model.ConfigKeyProxyTMDB,
+			model.ConfigKeyProxyAniList,
+			model.ConfigKeyProxyJellyfin,
+		}
+	case "media":
+		keysToProcess = []string{
+			model.ConfigKeyJellyfinUrl,
+			model.ConfigKeyJellyfinUsername,
+			model.ConfigKeyJellyfinPassword,
+		}
+		checkboxesToProcess = []string{
+			// model.ConfigKeyProxyJellyfin is in network tab now
+		}
+	case "pikpak":
+		keysToProcess = []string{
+			model.ConfigKeyPikPakUsername,
+			model.ConfigKeyPikPakPassword,
+			model.ConfigKeyPikPakRefreshToken,
+		}
+	default:
+		// Fallback: Legacy Global Save (Process ALL)
+		keysToProcess = []string{
+			model.ConfigKeyQBUrl,
+			model.ConfigKeyQBUsername,
+			model.ConfigKeyQBPassword,
+			model.ConfigKeyBaseDir,
+			model.ConfigKeyBangumiRefreshToken,
+			model.ConfigKeyBangumiAccessToken,
+			model.ConfigKeyTMDBToken,
+			model.ConfigKeyAniListToken,
+			model.ConfigKeyProxyURL,
+			model.ConfigKeyProxyBangumi,
+			model.ConfigKeyProxyTMDB,
+			model.ConfigKeyProxyAniList,
+			model.ConfigKeyJellyfinUrl,
+			model.ConfigKeyJellyfinUsername,
+			model.ConfigKeyJellyfinPassword,
+			model.ConfigKeyProxyJellyfin,
+			model.ConfigKeyPikPakUsername,
+			model.ConfigKeyPikPakPassword,
+			model.ConfigKeyPikPakRefreshToken,
+		}
+		checkboxesToProcess = []string{
+			model.ConfigKeyProxyBangumi,
+			model.ConfigKeyProxyTMDB,
+			model.ConfigKeyProxyAniList,
+			model.ConfigKeyProxyJellyfin,
+		}
 	}
 
-	for _, key := range keys {
+	// 1.1 Process Standard Keys
+	for _, key := range keysToProcess {
 		val, exists := c.GetPostForm(key)
 		if !exists {
-			continue
+			continue // Should not happen if form is correct, but safe to skip
 		}
 
-		// Manual Upsert
+		// Update DB
 		var count int64
 		db.DB.Model(&model.GlobalConfig{}).Where("key = ?", key).Count(&count)
-
 		if count == 0 {
 			db.DB.Create(&model.GlobalConfig{Key: key, Value: val})
 		} else {
@@ -129,27 +192,26 @@ func UpdateSettingsHandler(c *gin.Context) {
 		}
 	}
 
-	// Special handling for legacy/manual API Key input: Only save if user explicitly provided it and it's not empty
-	if manualKey, exists := c.GetPostForm(model.ConfigKeyJellyfinApiKey); exists && manualKey != "" {
-		var count int64
-		db.DB.Model(&model.GlobalConfig{}).Where("key = ?", model.ConfigKeyJellyfinApiKey).Count(&count)
-		if count == 0 {
-			db.DB.Create(&model.GlobalConfig{Key: model.ConfigKeyJellyfinApiKey, Value: manualKey})
-		} else {
-			db.DB.Model(&model.GlobalConfig{}).Where("key = ?", model.ConfigKeyJellyfinApiKey).Update("value", manualKey)
-		}
-	}
-
-	// 1.5 Handle Checkboxes (Unchecked ones won't be in form)
-	checkboxes := []string{
-		model.ConfigKeyProxyBangumi,
-		model.ConfigKeyProxyTMDB,
-		model.ConfigKeyProxyAniList,
-		model.ConfigKeyProxyJellyfin,
-	}
-	for _, key := range checkboxes {
+	// 1.2 Process Checkboxes (Scope-aware)
+	// Only set to "false" if the checkbox is EXPECTED in this scope but missing in form
+	for _, key := range checkboxesToProcess {
 		if _, exists := c.GetPostForm(key); !exists {
+			// It was in the scope but not in the post body -> User unchecked it
 			db.DB.Model(&model.GlobalConfig{}).Where("key = ?", key).Update("value", "false")
+		} else {
+			// It exists -> User checked it (value="true")
+			// The loop above (keysToProcess) handles string values, but checkboxes need specific handling if they are mixed?
+			// Actually, standard HTML forms send value="true" if checked, and nothing if unchecked.
+			// So for checked items, we need to save "true".
+
+			// Let's rely on standard logic:
+			var count int64
+			db.DB.Model(&model.GlobalConfig{}).Where("key = ?", key).Count(&count)
+			if count == 0 {
+				db.DB.Create(&model.GlobalConfig{Key: key, Value: "true"})
+			} else {
+				db.DB.Model(&model.GlobalConfig{}).Where("key = ?", key).Update("value", "true")
+			}
 		}
 	}
 
@@ -246,16 +308,25 @@ func UpdateSettingsHandler(c *gin.Context) {
 	// 7. Trigger Jellyfin Refresh OOB
 	jellyfinStatusOOB := RenderJellyfinStatusOOB()
 
-	c.Header("Content-Type", "text/html")
-	// Main response for #save-result + OOB blocks
-	c.String(http.StatusOK, fmt.Sprintf(`
+	// 8. Return Success Message + OOB Status Updates
+	successMsg := fmt.Sprintf(`
 		<div class="text-emerald-600 font-bold flex items-center gap-2 animate-pulse">✅ 所有配置已保存</div>
 		%s
 		%s
 		%s
 		%s
 		%s
-	`, qbStatusHtml, bangumiStatusOOB, tmdbStatusOOB, anilistStatusOOB, jellyfinStatusOOB))
+	`, qbStatusHtml, bangumiStatusOOB, tmdbStatusOOB, anilistStatusOOB, jellyfinStatusOOB)
+
+	// If saving data sources, refresh their statuses immediately
+	if scope == "data-sources" {
+		successMsg += RenderBangumiStatusOOB()
+		successMsg += RenderTMDBStatusOOB()
+		successMsg += RenderAniListStatusOOB()
+	}
+
+	c.Header("Content-Type", "text/html")
+	c.String(http.StatusOK, successMsg)
 }
 
 // QBSaveAndTestHandler saves QB settings and then tests connection
