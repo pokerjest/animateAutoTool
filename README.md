@@ -66,9 +66,34 @@ Animate Auto Tool 是一个基于 Go 1.24 开发的自动化动漫下载工具�
 - **Go 环境**: Go 1.24 或更高版本 (`go version` 检查)
 - **下载器**: qBittorrent 4.0+ (需开启 Web UI)
 
-### 2. 安装与启动
+### 2. 发行版使用指南 (推荐)
 
-我们提供了便捷的脚本来处理环境初始化和启动。
+如果您直接下载了我们的预编译包（Recommended），请按照以下步骤操作：
+
+#### Windows 用户
+1. 解压下载的 `.zip` 压缩包。
+2. 进入解压后的文件夹。
+3. 找到 `config.yaml.example`，将其重命名为 `config.yaml`。
+4. 使用记事本编辑 `config.yaml`，填入您的 qBittorrent 信息。
+5. 双击 **`start.bat`** 即可启动服务（后台运行）。
+   - 如需停止，请双击 `stop.bat`。
+   - 如需前台调试，请双击 `run.bat`。
+
+#### macOS / Linux 用户
+1. 解压下载的 `.tar.gz` 压缩包。
+2. 在终端进入解压后的文件夹。
+3. 重命名配置文件：`mv config.yaml.example config.yaml`
+4. 编辑配置：`nano config.yaml` (填入 qBittorrent 信息)
+5. 运行启动脚本：
+   ```bash
+   ./start.sh
+   ```
+   - 停止服务：`./stop.sh`
+   - 重启服务：`./restart.sh`
+
+### 3. 从源码编译安装
+
+如果您希望从源码编译（开发者模式）：
 
 ```bash
 # 克隆仓库
