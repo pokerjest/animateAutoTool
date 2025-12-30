@@ -130,7 +130,7 @@ const (
 	ConfigKeyPikPakUsername      = "pikpak_username"
 	ConfigKeyPikPakPassword      = "pikpak_password"
 	ConfigKeyPikPakRefreshToken  = "pikpak_refresh_token" //nolint:gosec
-	ConfigKeyPikPakCaptchaToken  = "pikpak_captcha_token"
+	ConfigKeyPikPakCaptchaToken  = "pikpak_captcha_token" //nolint:gosec
 
 	// Cloudflare R2
 	// Cloudflare R2

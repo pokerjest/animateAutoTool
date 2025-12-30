@@ -99,7 +99,10 @@ func UpdateSettingsHandler(c *gin.Context) {
 	// Define all possible keys and their scopes
 	// This map is optional if we purely rely on keysToProcess, but helpful for validation
 
-	keysToProcess := []string{}
+	// Define all possible keys and their scopes
+	// This map is optional if we purely rely on keysToProcess, but helpful for validation
+
+	var keysToProcess []string
 	checkboxesToProcess := []string{}
 
 	switch scope {
