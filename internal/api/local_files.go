@@ -84,55 +84,62 @@ func GetLocalAnimeFilesHandler(c *gin.Context) {
 	// 1. Try fetching from LocalEpisodes (DB)
 	var episodes []model.LocalEpisode
 	if err := db.DB.Where("local_anime_id = ?", id).Order("season_num, episode_num").Find(&episodes).Error; err == nil && len(episodes) > 0 {
-
-		// Preload anime for metadata fallback
-		var anime model.LocalAnime
-		if err := db.DB.Preload("Metadata").First(&anime, id).Error; err != nil {
-			log.Printf("ERROR: Found episodes but failed to load parent anime %s: %v", id, err)
-			c.JSON(http.StatusNotFound, gin.H{"error": "Parent anime not found"})
-			return
-		}
-
-		// Fetch Jellyfin Status (Best Effort)
-		jfMap, jellyfinUrl := fetchJellyfinProgress(&anime)
-
-		// --- Source Progress Logic Overlay ---
-		sourceParam := c.Query("source") // Optional: source being previewed in modal
-		effectiveSource := ""
-		if anime.Metadata != nil && anime.Metadata.DataSource != "" {
-			effectiveSource = anime.Metadata.DataSource
-		}
-		if sourceParam != "" {
-			effectiveSource = sourceParam // Override with preview source
-		}
-
-		log.Printf("DEBUG: GetLocalAnimeFilesHandler for AnimeID=%d | sourceParam='%s' | effectiveSource='%s' | hasMetadata=%v",
-			anime.ID, sourceParam, effectiveSource, anime.Metadata != nil)
-
-		bangumiWatchedCount, bangumiCollectionStatus := fetchBangumiProgress(&anime, effectiveSource)
-		anilistWatchedCount := fetchAniListProgress(&anime, effectiveSource)
-
-		display := buildEpisodeList(episodes, &anime, jfMap, jellyfinUrl, bangumiWatchedCount, anilistWatchedCount)
-
-		// Build collection status
-		collStatus := &CollectionStatus{
-			BangumiCollected:    bangumiWatchedCount >= 0, // >=0 means we got a valid response
-			AniListCollected:    anilistWatchedCount >= 0,
-			BangumiWatchedCount: max(0, bangumiWatchedCount),
-			AniListWatchedCount: max(0, anilistWatchedCount),
-			BangumiStatus:       bangumiCollectionStatus,
-			AniListStatus:       "", // TODO: Add AniList status when implementing
-		}
-
-		// Return enhanced response
-		c.JSON(http.StatusOK, EpisodeListResponse{
-			Episodes:         display,
-			CollectionStatus: collStatus,
-		})
+		handleDBEpisodeList(c, id, episodes)
 		return
 	}
 
-	// 2. Fallback to file system (No IDs, not playable via ID-based API)
+	// 2. Fallback to file system
+	handleFileSystemFileList(c, id)
+}
+
+func handleDBEpisodeList(c *gin.Context, id string, episodes []model.LocalEpisode) {
+	// Preload anime for metadata fallback
+	var anime model.LocalAnime
+	if err := db.DB.Preload("Metadata").First(&anime, id).Error; err != nil {
+		log.Printf("ERROR: Found episodes but failed to load parent anime %s: %v", id, err)
+		c.JSON(http.StatusNotFound, gin.H{"error": "Parent anime not found"})
+		return
+	}
+
+	// Fetch Jellyfin Status (Best Effort)
+	jfMap, jellyfinUrl := fetchJellyfinProgress(&anime)
+
+	// --- Source Progress Logic Overlay ---
+	sourceParam := c.Query("source") // Optional: source being previewed in modal
+	effectiveSource := ""
+	if anime.Metadata != nil && anime.Metadata.DataSource != "" {
+		effectiveSource = anime.Metadata.DataSource
+	}
+	if sourceParam != "" {
+		effectiveSource = sourceParam // Override with preview source
+	}
+
+	log.Printf("DEBUG: GetLocalAnimeFilesHandler for AnimeID=%d | sourceParam='%s' | effectiveSource='%s' | hasMetadata=%v",
+		anime.ID, sourceParam, effectiveSource, anime.Metadata != nil)
+
+	bangumiWatchedCount, bangumiCollectionStatus := fetchBangumiProgress(&anime, effectiveSource)
+	anilistWatchedCount := fetchAniListProgress(&anime, effectiveSource)
+
+	display := buildEpisodeList(episodes, &anime, jfMap, jellyfinUrl, bangumiWatchedCount, anilistWatchedCount)
+
+	// Build collection status
+	collStatus := &CollectionStatus{
+		BangumiCollected:    bangumiWatchedCount >= 0, // >=0 means we got a valid response
+		AniListCollected:    anilistWatchedCount >= 0,
+		BangumiWatchedCount: max(0, bangumiWatchedCount),
+		AniListWatchedCount: max(0, anilistWatchedCount),
+		BangumiStatus:       bangumiCollectionStatus,
+		AniListStatus:       "", // TODO: Add AniList status when implementing
+	}
+
+	// Return enhanced response
+	c.JSON(http.StatusOK, EpisodeListResponse{
+		Episodes:         display,
+		CollectionStatus: collStatus,
+	})
+}
+
+func handleFileSystemFileList(c *gin.Context, id string) {
 	var anime model.LocalAnime
 	if err := db.DB.First(&anime, id).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "未找到番剧记录"})
