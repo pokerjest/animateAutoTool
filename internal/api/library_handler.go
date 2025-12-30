@@ -364,7 +364,7 @@ func GetBangumiSubjectHandler(c *gin.Context) {
 	db.DB.Where("key = ?", model.ConfigKeyProxyURL).First(&proxyUrl)
 	db.DB.Where("key = ?", model.ConfigKeyProxyBangumi).First(&proxyEnabled)
 
-	if proxyEnabled.Value == "true" && proxyUrl.Value != "" {
+	if proxyEnabled.Value == ValueTrue && proxyUrl.Value != "" {
 		client.SetProxy(proxyUrl.Value)
 	}
 
@@ -448,7 +448,7 @@ func ProxyTMDBImageHandler(c *gin.Context) {
 	var proxyEnabled model.GlobalConfig
 	var proxyURL string
 	db.DB.Where("key = ?", model.ConfigKeyProxyTMDB).First(&proxyEnabled)
-	if proxyEnabled.Value == "true" {
+	if proxyEnabled.Value == ValueTrue {
 		var pUrl model.GlobalConfig
 		db.DB.Where("key = ?", model.ConfigKeyProxyURL).First(&pUrl)
 		proxyURL = pUrl.Value

@@ -15,7 +15,7 @@ import (
 
 func (m *Manager) startAlist() error {
 	exeName := "alist"
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == OSWindows {
 		exeName += ".exe"
 	}
 	binPath := filepath.Join(m.BinDir, exeName)
@@ -58,7 +58,7 @@ func (m *Manager) startAlist() error {
 
 func (m *Manager) startQB() error {
 	exeName := "qbittorrent.exe"
-	if runtime.GOOS != "windows" {
+	if runtime.GOOS != OSWindows {
 		exeName = "qbittorrent-nox"
 	}
 	binPath := filepath.Join(m.BinDir, exeName)
@@ -135,7 +135,7 @@ WebUI\Password_PBKDF2="@ByteArray(ARQ77eY1NUZaQsuDHbIMCA==:0WMRkYTUWVT9wVvdDtHAj
 
 func (m *Manager) startJellyfin() error {
 	exeName := "jellyfin.exe"
-	if runtime.GOOS != "windows" {
+	if runtime.GOOS != OSWindows {
 		exeName = "jellyfin"
 	}
 	binDir := filepath.Join(m.BinDir, "jellyfin")
@@ -166,7 +166,7 @@ func (m *Manager) startJellyfin() error {
 
 	// FFmpeg path
 	ffmpegName := "ffmpeg.exe"
-	if runtime.GOOS != "windows" {
+	if runtime.GOOS != OSWindows {
 		ffmpegName = "ffmpeg"
 	}
 	ffmpegPath := filepath.Join(m.BinDir, "ffmpeg", ffmpegName)

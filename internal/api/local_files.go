@@ -221,26 +221,26 @@ func SwitchLocalAnimeSourceHandler(c *gin.Context) {
 
 	m := anime.Metadata
 	switch source {
-	case "tmdb":
+	case SourceTMDB:
 		if m.TMDBID != 0 {
 			m.Title = m.TMDBTitle
 			m.Image = m.TMDBImage
 			m.Summary = m.TMDBSummary
-			m.DataSource = "tmdb"
+			m.DataSource = SourceTMDB
 		}
-	case "bangumi":
+	case SourceBangumi:
 		if m.BangumiID != 0 {
 			m.Title = m.BangumiTitle
 			m.Image = m.BangumiImage
 			m.Summary = m.BangumiSummary
-			m.DataSource = "bangumi"
+			m.DataSource = SourceBangumi
 		}
-	case "anilist":
+	case SourceAniList:
 		if m.AniListID != 0 {
 			m.Title = m.AniListTitle
 			m.Image = m.AniListImage
 			m.Summary = m.AniListSummary
-			m.DataSource = "anilist"
+			m.DataSource = SourceAniList
 		}
 	}
 

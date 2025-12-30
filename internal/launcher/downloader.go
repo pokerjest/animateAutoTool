@@ -261,8 +261,12 @@ func (m *Manager) EnsureJellyfin() error {
 		os.RemoveAll(tmpExtract)
 
 		if runtime.GOOS != OSWindows {
-			os.Chmod(filepath.Join(ffmpegDir, "ffmpeg"), 0755)
-			os.Chmod(filepath.Join(ffmpegDir, "ffprobe"), 0755)
+			if err := os.Chmod(filepath.Join(ffmpegDir, "ffmpeg"), 0755); err != nil {
+				return err
+			}
+			if err := os.Chmod(filepath.Join(ffmpegDir, "ffprobe"), 0755); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -507,7 +511,9 @@ func untar(src, dest string) error {
 			if err != nil {
 				return err
 			}
-			if _, err := io.Copy(out, tr); err != nil {
+			// G110: Decompression bomb mitigation
+			const maxFileSize = 10 * 1024 * 1024 * 1024 // 10GB
+			if _, err := io.Copy(out, io.LimitReader(tr, maxFileSize)); err != nil {
 				out.Close()
 				return err
 			}
