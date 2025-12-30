@@ -2,146 +2,171 @@
 # scripts/manage.sh
 
 # Configuration
-SERVER_PORT=8306
-BIN_DIR="./bin"
 APP_NAME="animate-server"
+BIN_DIR="./bin"
 BIN_PATH="$BIN_DIR/$APP_NAME"
+PID_FILE="$BIN_DIR/server.pid"
 LOG_FILE="logs/server.log"
 SRC_PATH="cmd/server/main.go"
+SERVER_PORT=8306
 
 # Colors
 GREEN='\033[0;32m'
 RED='\033[0;31m'
 YELLOW='\033[0;33m'
-NC='\033[0m'
+NC='\033[0m' # No Color
 
 mkdir -p $BIN_DIR
 mkdir -p logs
 
-function get_pid() {
-    # Find PID by port using lsof (more reliable on Mac/Linux for port usage)
+function get_pid_by_port() {
     lsof -ti :$SERVER_PORT
 }
 
-function check_pid_running() {
-    if [ -z "$1" ]; then return 1; fi
-    kill -0 $1 2>/dev/null
-    return $?
-}
-
-function stop_server() {
-    echo -e "${YELLOW}Stopping server on port $SERVER_PORT...${NC}"
-    PID=$(get_pid)
-    
-    if [ -n "$PID" ]; then
-        echo "Found running process PID: $PID. Sending SIGTERM..."
-        kill $PID
-        
-        # Wait loop (max 5 seconds)
-        for i in {1..10}; do
-            if ! check_pid_running $PID; then
-                echo -e "${GREEN}Server stopped successfully.${NC}"
-                return
-            fi
-            sleep 0.5
-        done
-        
-        # Force kill if still running
-        echo -e "${RED}Server did not stop gracefully. Sending SIGKILL...${NC}"
-        kill -9 $PID
-        sleep 1
-        
-        # Final Verification
-        if check_pid_running $PID; then
-             echo -e "${RED}Failed to kill process $PID. Please check manually.${NC}"
-             exit 1
-        fi
-        echo -e "${GREEN}Server stopped (forced).${NC}"
-    else
-        echo "No process found listening on port $SERVER_PORT."
+function get_pid_from_file() {
+    if [ -f "$PID_FILE" ]; then
+        cat "$PID_FILE"
     fi
 }
 
-function build_server() {
-    echo -e "${GREEN}Building $APP_NAME...${NC}"
-    
-    # Check Go
+function check_deps() {
     if ! command -v go &> /dev/null; then
         echo -e "${RED}Error: 'go' is not installed.${NC}"
         exit 1
     fi
+}
 
+function build() {
+    check_deps
+    echo -e "${GREEN}Building $APP_NAME...${NC}"
+    
+    # Check if we should tidy first (optional, but good for stability)
     go mod tidy
-    if go build -ldflags="-s -w" -o $BIN_PATH $SRC_PATH; then
+    
+    # Added CGO_ENABLED=0 based on control.sh logic for better portability
+    CGO_ENABLED=1 go build -ldflags="-s -w" -o $BIN_PATH $SRC_PATH
+    
+    if [ $? -eq 0 ]; then
         echo -e "${GREEN}Build successful.${NC}"
         return 0
     else
         echo -e "${RED}Build failed!${NC}"
-        return 1
-    fi
-}
-
-function start_server() {
-    # Ensure port is free
-    PID=$(get_pid)
-    if [ -n "$PID" ]; then
-        echo -e "${RED}Port $SERVER_PORT is still in use by PID $PID. Attempting to stop again...${NC}"
-        stop_server
-    fi
-    
-    echo -e "${GREEN}Starting $APP_NAME...${NC}"
-    nohup $BIN_PATH >> $LOG_FILE 2>&1 &
-    NEW_PID=$!
-    
-    # Wait a moment to check if it crashed immediately
-    sleep 1
-    if kill -0 $NEW_PID 2>/dev/null; then
-        echo -e "${GREEN}Server started with PID $NEW_PID. Listening on port $SERVER_PORT.${NC}"
-        echo -e "Logs: ${YELLOW}tail -f $LOG_FILE${NC}"
-    else
-        echo -e "${RED}Server failed to start immediately. Check logs:${NC}"
-        cat $LOG_FILE | tail -n 10
         exit 1
     fi
 }
 
-function run_server() {
-    # Foreground run
-    if [ -n "$(get_pid)" ]; then
-         stop_server
+function stop() {
+    echo -e "${YELLOW}Stopping server...${NC}"
+    
+    # Method 1: PID File
+    PID=$(get_pid_from_file)
+    if [ -n "$PID" ]; then
+        if kill -0 "$PID" 2>/dev/null; then
+             echo "Killing process $PID (from PID file)..."
+             kill "$PID"
+        else
+             echo "Process in PID file not running."
+        fi
+        rm "$PID_FILE"
+    fi
+    
+    # Method 2: Port
+    PID_PORT=$(get_pid_by_port)
+    if [ -n "$PID_PORT" ]; then
+        echo "Found process $PID_PORT listening on port $SERVER_PORT. Killing..."
+        kill "$PID_PORT"
+    fi
+    
+    # Wait loop
+    for i in {1..10}; do
+        if [ -z "$(get_pid_by_port)" ]; then
+            echo -e "${GREEN}Server stopped.${NC}"
+            return
+        fi
+        sleep 0.5
+    done
+    
+    # Force kill
+    PID_FINAL=$(get_pid_by_port)
+    if [ -n "$PID_FINAL" ]; then
+        echo -e "${RED}Force killing PID $PID_FINAL...${NC}"
+        kill -9 "$PID_FINAL"
+    fi
+}
+
+function start() {
+    # Ensure stopped
+    if [ -n "$(get_pid_by_port)" ]; then
+        echo -e "${YELLOW}Server seems to be running. Stopping first...${NC}"
+        stop
+    fi
+
+    echo -e "${GREEN}Starting $APP_NAME...${NC}"
+    nohup $BIN_PATH >> $LOG_FILE 2>&1 &
+    NEW_PID=$!
+    echo $NEW_PID > $PID_FILE
+    
+    sleep 1
+    if kill -0 $NEW_PID 2>/dev/null; then
+        echo -e "${GREEN}Server started with PID $NEW_PID.${NC}"
+        echo -e "Logs: ${YELLOW}$LOG_FILE${NC}"
+    else
+        echo -e "${RED}Server failed to start. Check logs.${NC}"
+        tail -n 10 $LOG_FILE
+        exit 1
+    fi
+}
+
+function status() {
+    PID=$(get_pid_from_file)
+    PID_PORT=$(get_pid_by_port)
+    
+    if [ -n "$PID_PORT" ]; then
+        echo -e "${GREEN}$APP_NAME is running (PID: $PID_PORT).${NC}"
+    else
+        echo -e "${YELLOW}$APP_NAME is stopped.${NC}"
+    fi
+}
+
+function run() {
+    # Foreground mode
+    if [ -n "$(get_pid_by_port)" ]; then
+        stop
     fi
     echo -e "${GREEN}Starting $APP_NAME in foreground...${NC}"
     $BIN_PATH
 }
 
-# Main Logic
+# Main Dispatch
 CMD=$1
 case $CMD in
+    build)
+        build
+        ;;
     start)
-        build_server && stop_server && start_server
+        build
+        start
         ;;
     stop)
-        stop_server
+        stop
         ;;
     restart)
-        build_server && stop_server && start_server
+        build
+        stop
+        start
         ;;
     run)
-        build_server && stop_server && run_server
-        ;;
-    build)
-        build_server
+        build
+        run
         ;;
     status)
-        PID=$(get_pid)
-        if [ -n "$PID" ]; then
-             echo -e "${GREEN}$APP_NAME is running (PID $PID) on port $SERVER_PORT${NC}"
-        else
-             echo -e "${YELLOW}$APP_NAME is stopped${NC}"
-        fi
+        status
+        ;;
+    log)
+        tail -f $LOG_FILE
         ;;
     *)
-        echo "Usage: $0 {start|stop|restart|run|build|status}"
+        echo "Usage: $0 {start|stop|restart|build|run|status|log}"
         exit 1
         ;;
 esac

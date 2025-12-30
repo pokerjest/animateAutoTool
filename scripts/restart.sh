@@ -1,10 +1,6 @@
 #!/bin/bash
-# One-click compile and restart script
+# scripts/restart.sh
+
 cd "$(dirname "$0")/.."
-chmod +x scripts/control.sh
-echo "=========================================="
-echo "      Animate Auto Tool - Restart"
-echo "=========================================="
-echo ""
-echo "Stopping and Rebuilding..."
-./scripts/control.sh restart
+chmod +x scripts/manage.sh
+./scripts/manage.sh restart

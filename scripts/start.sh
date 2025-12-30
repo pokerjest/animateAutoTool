@@ -1,4 +1,6 @@
 #!/bin/bash
+# scripts/start.sh
+
 cd "$(dirname "$0")/.."
-chmod +x scripts/control.sh
-./scripts/control.sh start
+chmod +x scripts/manage.sh
+./scripts/manage.sh start
