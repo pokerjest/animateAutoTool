@@ -130,7 +130,7 @@ WebUI\Password_PBKDF2="@ByteArray(ARQ77eY1NUZaQsuDHbIMCA==:0WMRkYTUWVT9wVvdDtHAj
 `
 	// Password is 'adminadmin' (PBKDF2 hash)
 
-	return os.WriteFile(confFile, []byte(configContent), 0644)
+	return os.WriteFile(confFile, []byte(configContent), 0644) //nolint:gosec
 }
 
 func (m *Manager) startJellyfin() error {

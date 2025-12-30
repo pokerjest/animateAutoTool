@@ -127,7 +127,7 @@ const (
 	ConfigKeyAListToken          = "alist_token"
 	ConfigKeyPikPakUsername      = "pikpak_username"
 	ConfigKeyPikPakPassword      = "pikpak_password"
-	ConfigKeyPikPakRefreshToken  = "pikpak_refresh_token"
+	ConfigKeyPikPakRefreshToken  = "pikpak_refresh_token" //nolint:gosec
 
 	// Cloudflare R2
 	// Cloudflare R2

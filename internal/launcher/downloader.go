@@ -93,7 +93,9 @@ func (m *Manager) ensureAlist() error {
 	}
 
 	// chmod +x
-	os.Chmod(targetPath, 0755)
+	if err := os.Chmod(targetPath, 0755); err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -140,11 +142,15 @@ func (m *Manager) ensureQB() error {
 		for _, name := range candidates {
 			path := filepath.Join(m.BinDir, name)
 			if _, err := os.Stat(path); err == nil {
-				os.Rename(path, targetPath)
+				if err := os.Rename(path, targetPath); err != nil {
+					return err
+				}
 				break
 			}
 		}
-		os.Chmod(targetPath, 0755)
+		if err := os.Chmod(targetPath, 0755); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -156,7 +162,7 @@ func (m *Manager) EnsureJellyfin() error {
 
 	// 1. Jellyfin Server
 	jfExe := "jellyfin.exe"
-	if runtime.GOOS != "windows" {
+	if runtime.GOOS != OSWindows {
 		jfExe = "jellyfin"
 	}
 
@@ -198,11 +204,15 @@ func (m *Manager) EnsureJellyfin() error {
 			srcDir = filepath.Join(tmpExtract, entries[0].Name())
 		}
 
-		os.Rename(srcDir, jellyfinDir)
+		if err := os.Rename(srcDir, jellyfinDir); err != nil {
+			return err
+		}
 		os.RemoveAll(tmpExtract)
 
-		if runtime.GOOS != "windows" {
-			os.Chmod(filepath.Join(jellyfinDir, jfExe), 0755)
+		if runtime.GOOS != OSWindows {
+			if err := os.Chmod(filepath.Join(jellyfinDir, jfExe), 0755); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -245,10 +255,12 @@ func (m *Manager) EnsureJellyfin() error {
 		if len(entries) == 1 && entries[0].IsDir() {
 			srcDir = filepath.Join(tmpExtract, entries[0].Name())
 		}
-		os.Rename(srcDir, ffmpegDir)
+		if err := os.Rename(srcDir, ffmpegDir); err != nil {
+			return err
+		}
 		os.RemoveAll(tmpExtract)
 
-		if runtime.GOOS != "windows" {
+		if runtime.GOOS != OSWindows {
 			os.Chmod(filepath.Join(ffmpegDir, "ffmpeg"), 0755)
 			os.Chmod(filepath.Join(ffmpegDir, "ffprobe"), 0755)
 		}
@@ -402,7 +414,9 @@ func unzip(src, dest string) error {
 		}
 
 		if f.FileInfo().IsDir() {
-			os.MkdirAll(fpath, os.ModePerm)
+			if err := os.MkdirAll(fpath, os.ModePerm); err != nil {
+				return err
+			}
 			continue
 		}
 
@@ -457,7 +471,9 @@ func untar(src, dest string) error {
 	} else {
 		// Not gzip? maybe just tar or tar.xz
 		// Reset file
-		file.Seek(0, 0)
+		if _, err := file.Seek(0, 0); err != nil {
+			return err
+		}
 		if strings.HasSuffix(src, ".tar.xz") {
 			// Quick hack: use system tar if available, since pure go xz is not in stdlib
 			// This is "cheating" but effective for zero-dependency portability
@@ -502,7 +518,9 @@ func untar(src, dest string) error {
 }
 
 func untarSystem(src, dest string) error {
-	os.MkdirAll(dest, 0755)
+	if err := os.MkdirAll(dest, 0755); err != nil {
+		return err
+	}
 	cmd := exec.Command("tar", "-xf", src, "-C", dest)
 	// tar usually handles auto detection of compression (z, J, etc) on modern versions
 	return cmd.Run()

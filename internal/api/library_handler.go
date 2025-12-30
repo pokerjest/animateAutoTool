@@ -171,7 +171,7 @@ func FixMatchHandler(c *gin.Context) {
 
 	// Default to bangumi if source is empty (backward compatibility)
 	if req.Source == "" {
-		req.Source = "bangumi"
+		req.Source = SourceBangumi
 	}
 
 	metaSvc := service.NewMetadataService()
@@ -207,7 +207,7 @@ func SearchMetadataHandler(c *gin.Context) {
 	}
 
 	if source == "" {
-		source = "bangumi"
+		source = SourceBangumi
 	}
 
 	fetchProxy := func() (string, bool) {
@@ -228,7 +228,7 @@ func SearchMetadataHandler(c *gin.Context) {
 		var proxyEnabled model.GlobalConfig
 		var proxyURL string
 		db.DB.Where("key = ?", model.ConfigKeyProxyTMDB).First(&proxyEnabled)
-		if proxyEnabled.Value == "true" {
+		if proxyEnabled.Value == ValueTrue {
 			if purl, ok := fetchProxy(); ok {
 				proxyURL = purl
 			}
@@ -267,7 +267,7 @@ func SearchMetadataHandler(c *gin.Context) {
 		var proxyEnabled model.GlobalConfig
 		var proxyURL string
 		db.DB.Where("key = ?", model.ConfigKeyProxyAniList).First(&proxyEnabled)
-		if proxyEnabled.Value == "true" {
+		if proxyEnabled.Value == ValueTrue {
 			if purl, ok := fetchProxy(); ok {
 				proxyURL = purl
 			}
@@ -305,7 +305,7 @@ func SearchMetadataHandler(c *gin.Context) {
 		client := bangumi.NewClient("", "", "")
 		var proxyEnabled model.GlobalConfig
 		db.DB.Where("key = ?", model.ConfigKeyProxyBangumi).First(&proxyEnabled)
-		if proxyEnabled.Value == "true" {
+		if proxyEnabled.Value == ValueTrue {
 			if purl, ok := fetchProxy(); ok {
 				client.SetProxy(purl)
 			}
@@ -390,11 +390,11 @@ func GetPosterHandler(c *gin.Context) {
 
 	var data []byte
 	switch source {
-	case "bangumi":
+	case SourceBangumi:
 		data = m.BangumiImageRaw
-	case "tmdb":
+	case SourceTMDB:
 		data = m.TMDBImageRaw
-	case "anilist":
+	case SourceAniList:
 		data = m.AniListImageRaw
 	default:
 		// Default to current active source or first available

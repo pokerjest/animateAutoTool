@@ -328,7 +328,7 @@ func ReportProgressHandler(c *gin.Context) {
 		// Frontend should debounce this.
 		if err := client.UpdateProgress(itemId, body.Ticks); err != nil {
 			// Verbose logging might be too much here, maybe only on debug?
-			// log.Printf("Jellyfin UpdateProgress failed: %v", err)
+			log.Printf("Jellyfin UpdateProgress failed: %v", err)
 		}
 	}
 

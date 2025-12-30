@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -19,7 +20,7 @@ func TestMain(m *testing.M) {
 	// Init Config
 	if err := config.LoadConfig(""); err != nil {
 		// Just log, might be fine if defaults are used
-		// fmt.Printf("Config load warning: %v\n", err)
+		fmt.Printf("Config load warning: %v\n", err)
 	}
 
 	// Setup: Use in-memory DB for tests
@@ -32,7 +33,7 @@ func TestMain(m *testing.M) {
 
 	// Teardown
 	if err := db.CloseDB(); err != nil {
-		// fmt.Printf("CloseDB error: %v\n", err)
+		fmt.Printf("CloseDB error: %v\n", err)
 	}
 	os.Exit(code)
 }
