@@ -146,6 +146,9 @@
                             this.progress.current = data.current;
                             this.progress.total = data.total;
                             this.progress.currentTitle = data.title;
+                        } else if (data.type === 'complete') {
+                            this.progress.isRunning = false;
+                            this.showToast(data.message || '元数据刷新完成', 'success');
                         } else if (data.type === 'new_anime') {
                             this.showToast(`发现新番剧: ${data.title}`, 'info');
                         }
@@ -228,6 +231,9 @@
         <div class="w-64 glass-panel h-full p-6 flex flex-col shrink-0">
             <h1 class="text-2xl font-bold text-accent mb-8 flex items-center gap-2">
                 <span>AnimateTool</span>
+                <!-- Persistent Small Spinner -->
+                <div x-show="progress.isRunning" x-transition.opacity
+                    class="w-4 h-4 border-2 border-accent border-t-transparent rounded-full animate-spin ml-2"></div>
             </h1>
 
             <nav class="flex flex-col gap-2 flex-1">
@@ -263,7 +269,7 @@
             </nav>
 
             <div class="text-xs text-gray-500 text-center mt-4">
-                v0.2.0 Beta
+                v0.3.0 Beta
             </div>
         </div>
 

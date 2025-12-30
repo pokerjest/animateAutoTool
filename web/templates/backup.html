@@ -1,241 +1,6 @@
 {{ if not .SkipLayout }}{{ template "header.html" . }}{{ end }}
 
-<div class="space-y-6">
-    <h2 class="text-2xl font-bold text-gray-700">数据备份与还原</h2>
-
-    <div class="space-y-6 text-gray-800">
-        <!-- Backup Section -->
-        <div class="bg-white/60 p-6 rounded-xl border border-white/70 shadow-sm relative overflow-hidden group">
-            <div class="relative z-10">
-                <h3 class="text-lg font-semibold mb-2 flex items-center gap-2">
-                    <span>📦</span> 备份数据
-                </h3>
-                <div class="mb-4 text-sm text-gray-600 space-y-1 bg-white/50 p-3 rounded-lg border border-gray-100">
-                    <div class="flex justify-between"><span>订阅总数:</span> <span class="font-bold">{{
-                            .Stats.SubscriptionCount }}</span></div>
-                    <div class="flex justify-between"><span>历史记录:</span> <span class="font-bold">{{
-                            .Stats.DownloadLogCount }}</span></div>
-                    <div class="flex justify-between"><span>用户账号:</span> <span class="font-bold">{{
-                            .Stats.UserCount }}</span></div>
-                    <!-- Local Anime not backed up anymore, but this view shows Current DB stats. Keep it? -->
-                    <!-- Wait, if we export filtered, this stat might be misleading if user thinks it IS backed up. -->
-                    <!-- But this card shows "Current DB Stats". Export button creates backup. -->
-                    <div class="flex justify-between text-gray-400"><span>本地番剧:</span> <span class="font-bold">{{
-                            .Stats.LocalAnimeCount }} (仅本地)</span></div>
-                    <div class="flex justify-between"><span>数据库大小:</span> <span class="font-bold">{{ .Stats.DatabaseSize
-                            }}</span></div>
-                    <div class="flex justify-between"><span>最后修改:</span> <span class="font-mono text-xs">{{
-                            .Stats.LastModified }}</span></div>
-
-                    {{ if .Stats.SubscriptionTitles }}
-                    <div class="mt-2 pt-2 border-t border-gray-200">
-                        <div class="text-xs text-gray-500 mb-1">包含的订阅:</div>
-                        <div class="max-h-[100px] overflow-y-auto space-y-1 pr-1 custom-scrollbar">
-                            {{ range .Stats.SubscriptionTitles }}
-                            <div class="text-xs bg-white px-2 py-1 rounded border border-gray-100 truncate">{{ . }}
-                            </div>
-                            {{ end }}
-                        </div>
-                    </div>
-                    {{ end }}
-                </div>
-                <p class="text-sm text-gray-600 mb-4">
-                    下载经过筛选的数据库文件 (仅包含订阅、日志和设置，不含本地番剧索引)。
-                </p>
-                <a href="/api/backup/export" target="_blank"
-                    class="inline-flex items-center gap-2 px-6 py-2 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition shadow-lg shadow-emerald-200">
-                    <span>⬇️</span> 下载备份
-                </a>
-            </div>
-            <div
-                class="absolute -right-10 -bottom-10 text-9xl text-emerald-100 opacity-50 group-hover:scale-110 transition duration-500 select-none">
-                💾
-            </div>
-        </div>
-
-        <!-- Restore Section -->
-        <div class="bg-white/60 p-6 rounded-xl border border-white/70 shadow-sm relative overflow-hidden group">
-            <div class="relative z-10">
-                <h3 class="text-lg font-semibold mb-2 flex items-center gap-2 text-red-600">
-                    <span>⚠️</span> 还原数据
-                </h3>
-                <p class="text-sm text-gray-600 mb-4">
-                    上传备份文件进行分析，预览数据后再确认还原。
-                </p>
-
-                <form hx-post="/api/backup/analyze" hx-encoding="multipart/form-data" hx-target="#restore-preview"
-                    hx-indicator="#analyze-btn" class="flex items-end gap-4 mb-4">
-                    <div class="flex-1">
-                        <label class="block text-sm font-medium text-gray-700 mb-1">选择备份文件 (.db)</label>
-                        <input type="file" name="backup_file" accept=".db" required
-                            class="w-full px-4 py-2 bg-white/50 rounded-lg border border-gray-300 focus:ring-2 focus:ring-red-500 focus:border-red-500 outline-none file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-red-50 file:text-red-700 hover:file:bg-red-100">
-                    </div>
-                    <div>
-                        <button type="submit" id="analyze-btn"
-                            class="inline-flex items-center gap-2 px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition shadow-lg shadow-blue-200 cursor-pointer h-[42px]">
-                            <span class="[.htmx-request_&]:hidden">🔍</span>
-                            <span class="hidden [.htmx-request_&]:inline animate-spin">⌛</span>
-                            分析文件
-                        </button>
-                    </div>
-                </form>
-
-                <!-- Preview Container -->
-                <div id="restore-preview" class="mt-4"></div>
-            </div>
-            <div
-                class="absolute -right-6 -bottom-6 text-9xl text-red-100 opacity-50 group-hover:rotate-12 transition duration-500 select-none">
-                ♻️
-            </div>
-        </div>
-
-        <!-- Cloudflare R2 Section -->
-        <div class="bg-white/60 p-6 rounded-xl border border-white/70 shadow-sm relative overflow-hidden group">
-            <div class="relative z-10">
-                <h3 class="text-lg font-semibold mb-2 flex items-center gap-2 text-orange-600">
-                    <span>☁️</span> Cloudflare R2 云备份
-                </h3>
-
-                <div x-data="r2BackupData()" class="space-y-4">
-
-                    <!-- Config Form -->
-                    <div
-                        class="grid grid-cols-1 md:grid-cols-2 gap-4 bg-white/50 p-4 rounded-lg border border-gray-100">
-                        <div>
-                            <label class="block text-xs font-semibold text-gray-500 mb-1">R2 Endpoint (端点地址)</label>
-                            <input type="text" x-model="config.endpoint"
-                                placeholder="https://<account>.r2.cloudflarestorage.com"
-                                class="w-full text-sm px-3 py-2 bg-white rounded border border-gray-200 focus:border-orange-500 outline-none">
-                        </div>
-                        <div>
-                            <label class="block text-xs font-semibold text-gray-500 mb-1">Bucket Name (存储桶名称)</label>
-                            <input type="text" x-model="config.bucket" placeholder="animate-backup"
-                                class="w-full text-sm px-3 py-2 bg-white rounded border border-gray-200 focus:border-orange-500 outline-none">
-                        </div>
-                        <div>
-                            <label class="block text-xs font-semibold text-gray-500 mb-1">Access Key ID</label>
-                            <input type="text" x-model="config.access_key"
-                                class="w-full text-sm px-3 py-2 bg-white rounded border border-gray-200 focus:border-orange-500 outline-none">
-                        </div>
-                        <div>
-                            <label class="block text-xs font-semibold text-gray-500 mb-1">Secret Access Key</label>
-                            <input type="password" x-model="config.secret_key" placeholder="********"
-                                class="w-full text-sm px-3 py-2 bg-white rounded border border-gray-200 focus:border-orange-500 outline-none">
-                        </div>
-                        <div class="md:col-span-2 text-right space-x-2 flex items-center justify-end gap-2">
-                            <span x-show="testMessage" x-text="testMessage"
-                                :class="testError ? 'text-red-500' : 'text-green-500'"
-                                class="text-xs font-semibold transition-opacity duration-500"></span>
-                            <button @click="testConnection" :disabled="loading"
-                                :class="loading ? 'bg-blue-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-500'"
-                                class="text-xs text-white px-3 py-1.5 rounded transition flex items-center gap-1">
-                                <span x-show="loading && testMessage === '测试中...'"
-                                    class="animate-spin h-3 w-3 border-2 border-white rounded-full border-t-transparent"></span>
-                                <span x-text="loading && testMessage === '测试中...' ? '测试中...' : '测试连接'"></span>
-                            </button>
-                            <button @click="saveConfig"
-                                class="text-xs bg-gray-800 text-white px-3 py-1.5 rounded hover:bg-gray-700 transition">保存配置</button>
-                        </div>
-                    </div>
-
-                    <!-- Actions -->
-                    <div class="flex items-center justify-between border-b border-gray-200 pb-2">
-                        <h4 class="text-sm font-semibold text-gray-700">云端备份列表</h4>
-                        <div class="flex items-center gap-2">
-                            <span x-show="uploadMessage" x-text="uploadMessage"
-                                :class="uploadError ? 'text-red-500' : 'text-green-500'"
-                                class="text-xs font-semibold transition-opacity duration-500"></span>
-                            <button @click="upload" :disabled="loading"
-                                :class="loading ? 'bg-orange-400 cursor-not-allowed' : 'bg-orange-500 hover:bg-orange-600'"
-                                class="text-sm flex items-center gap-1 text-white px-4 py-1.5 rounded-lg transition shadow-lg shadow-orange-200">
-                                <span x-show="loading && uploadMessage === '上传中...'"
-                                    class="animate-spin h-3 w-3 border-2 border-white rounded-full border-t-transparent inline-block"></span>
-                                <span x-show="!(loading && uploadMessage === '上传中...')">☁️</span>
-                                立即上传
-                            </button>
-                        </div>
-                    </div>
-
-                    <!-- Backup List -->
-                    <div
-                        class="bg-white/50 rounded-lg border border-gray-100 min-h-[100px] max-h-[300px] overflow-y-auto custom-scrollbar p-2">
-                        <template x-if="loading">
-                            <div class="flex items-center justify-center h-20 text-gray-400 text-sm">加载中...</div>
-                        </template>
-                        <template x-if="!loading && backups.length === 0">
-                            <div class="flex items-center justify-center h-20 text-gray-400 text-sm">暂无备份</div>
-                        </template>
-
-                        <div class="space-y-2">
-                            <template x-for="file in backups" :key="file.key">
-                                <div
-                                    class="flex items-center justify-between bg-white p-3 rounded border border-gray-100 hover:border-orange-200 transition">
-                                    <div class="flex items-center gap-3">
-                                        <div class="text-xl">📦</div>
-                                        <div>
-                                            <div class="text-sm font-medium text-gray-800"
-                                                x-text="file.key.replace('animate_backup_', '').replace('.db', '')">
-                                            </div>
-                                            <div class="text-xs text-gray-400 mt-0.5">
-                                                <span x-text="file.last_modified"></span> • <span
-                                                    x-text="(file.size / 1024 / 1024).toFixed(2) + ' MB'"></span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div class="flex items-center gap-2">
-                                        <button @click="confirmRestore(file.key)"
-                                            class="text-xs bg-blue-50 text-blue-600 px-3 py-1.5 rounded hover:bg-blue-100 transition border border-blue-200">
-                                            预览 / 还原
-                                        </button>
-                                        <button @click="confirmDelete(file.key)"
-                                            class="text-xs bg-red-50 text-red-600 px-2 py-1.5 rounded hover:bg-red-100 transition border border-red-200"
-                                            title="删除">
-                                            🗑️
-                                        </button>
-                                    </div>
-                                </div>
-                            </template>
-                        </div>
-                    </div>
-
-                    <!-- Delete Confirm Modal (Simplified, only for Delete) -->
-                    <div x-show="showConfirm" style="display: none;"
-                        class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
-                        x-transition.opacity>
-                        <div class="bg-white rounded-lg shadow-xl max-w-md w-full p-6 space-y-4"
-                            @click.outside="showConfirm = false">
-                            <h3 class="text-lg font-bold text-gray-800" x-text="confirmTitle"></h3>
-                            <p class="text-sm text-gray-600" x-text="confirmMessage"></p>
-
-                            <!-- Loading Spinner inside Modal -->
-                            <div x-show="modalLoading" class="flex justify-center py-2">
-                                <span
-                                    class="animate-spin h-6 w-6 border-2 border-orange-500 rounded-full border-t-transparent"></span>
-                            </div>
-
-                            <div x-show="!modalLoading" class="flex justify-end gap-3 pt-2">
-                                <button @click="showConfirm = false"
-                                    class="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded transition">取消</button>
-                                <button @click="executeConfirmAction"
-                                    class="bg-red-500 hover:bg-red-600 px-4 py-2 text-sm text-white rounded transition shadow-md"
-                                    x-text="confirmButtonText"></button>
-                            </div>
-                        </div>
-                    </div>
-
-                </div>
-            </div>
-            <div
-                class="absolute -right-8 -bottom-8 text-9xl text-orange-100 opacity-50 group-hover:scale-105 transition duration-500 select-none">
-                ☁️
-            </div>
-        </div>
-
-    </div>
-</div>
-
 <script>
-    // Defined as a global function to ensure availability during HTMX swaps
     // Defined as a global function to ensure availability during HTMX swaps
     window.r2BackupData = function () {
         return {
@@ -486,6 +251,241 @@
         };
     }
 </script>
+
+<div class="space-y-6 animate-fade-in-up">
+    <h2 class="text-2xl font-bold text-gray-700">数据备份与还原</h2>
+
+    <div class="space-y-6 text-gray-800">
+        <!-- Backup Section -->
+        <div class="bg-white/60 p-6 rounded-xl border border-white/70 shadow-sm relative overflow-hidden group">
+            <div class="relative z-10">
+                <h3 class="text-lg font-semibold mb-2 flex items-center gap-2">
+                    <span>📦</span> 备份数据
+                </h3>
+                <div class="mb-4 text-sm text-gray-600 space-y-1 bg-white/50 p-3 rounded-lg border border-gray-100">
+                    <div class="flex justify-between"><span>订阅总数:</span> <span class="font-bold">{{
+                            .Stats.SubscriptionCount }}</span></div>
+                    <div class="flex justify-between"><span>历史记录:</span> <span class="font-bold">{{
+                            .Stats.DownloadLogCount }}</span></div>
+                    <div class="flex justify-between"><span>用户账号:</span> <span class="font-bold">{{
+                            .Stats.UserCount }}</span></div>
+                    <!-- Local Anime not backed up anymore, but this view shows Current DB stats. Keep it? -->
+                    <!-- Wait, if we export filtered, this stat might be misleading if user thinks it IS backed up. -->
+                    <!-- But this card shows "Current DB Stats". Export button creates backup. -->
+                    <div class="flex justify-between text-gray-400"><span>本地番剧:</span> <span class="font-bold">{{
+                            .Stats.LocalAnimeCount }} (仅本地)</span></div>
+                    <div class="flex justify-between"><span>数据库大小:</span> <span class="font-bold">{{ .Stats.DatabaseSize
+                            }}</span></div>
+                    <div class="flex justify-between"><span>最后修改:</span> <span class="font-mono text-xs">{{
+                            .Stats.LastModified }}</span></div>
+
+                    {{ if .Stats.SubscriptionTitles }}
+                    <div class="mt-2 pt-2 border-t border-gray-200">
+                        <div class="text-xs text-gray-500 mb-1">包含的订阅:</div>
+                        <div class="max-h-[100px] overflow-y-auto space-y-1 pr-1 custom-scrollbar">
+                            {{ range .Stats.SubscriptionTitles }}
+                            <div class="text-xs bg-white px-2 py-1 rounded border border-gray-100 truncate">{{ . }}
+                            </div>
+                            {{ end }}
+                        </div>
+                    </div>
+                    {{ end }}
+                </div>
+                <p class="text-sm text-gray-600 mb-4">
+                    下载经过筛选的数据库文件 (仅包含订阅、日志和设置，不含本地番剧索引)。
+                </p>
+                <a href="/api/backup/export" target="_blank"
+                    class="inline-flex items-center gap-2 px-6 py-2 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition shadow-lg shadow-emerald-200">
+                    <span>⬇️</span> 下载备份
+                </a>
+            </div>
+            <div
+                class="absolute -right-10 -bottom-10 text-9xl text-emerald-100 opacity-50 group-hover:scale-110 transition duration-500 select-none">
+                💾
+            </div>
+        </div>
+
+        <!-- Restore Section -->
+        <div class="bg-white/60 p-6 rounded-xl border border-white/70 shadow-sm relative overflow-hidden group">
+            <div class="relative z-10">
+                <h3 class="text-lg font-semibold mb-2 flex items-center gap-2 text-red-600">
+                    <span>⚠️</span> 还原数据
+                </h3>
+                <p class="text-sm text-gray-600 mb-4">
+                    上传备份文件进行分析，预览数据后再确认还原。
+                </p>
+
+                <form hx-post="/api/backup/analyze" hx-encoding="multipart/form-data" hx-target="#restore-preview"
+                    hx-indicator="#analyze-btn" class="flex items-end gap-4 mb-4">
+                    <div class="flex-1">
+                        <label class="block text-sm font-medium text-gray-700 mb-1">选择备份文件 (.db)</label>
+                        <input type="file" name="backup_file" accept=".db" required
+                            class="w-full px-4 py-2 bg-white/50 rounded-lg border border-gray-300 focus:ring-2 focus:ring-red-500 focus:border-red-500 outline-none file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-red-50 file:text-red-700 hover:file:bg-red-100">
+                    </div>
+                    <div>
+                        <button type="submit" id="analyze-btn"
+                            class="inline-flex items-center gap-2 px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition shadow-lg shadow-blue-200 cursor-pointer h-[42px]">
+                            <span class="[.htmx-request_&]:hidden">🔍</span>
+                            <span class="hidden [.htmx-request_&]:inline animate-spin">⌛</span>
+                            分析文件
+                        </button>
+                    </div>
+                </form>
+
+                <!-- Preview Container -->
+                <div id="restore-preview" class="mt-4"></div>
+            </div>
+            <div
+                class="absolute -right-6 -bottom-6 text-9xl text-red-100 opacity-50 group-hover:rotate-12 transition duration-500 select-none">
+                ♻️
+            </div>
+        </div>
+
+        <!-- Cloudflare R2 Section -->
+        <div class="bg-white/60 p-6 rounded-xl border border-white/70 shadow-sm relative overflow-hidden group">
+            <div class="relative z-10">
+                <h3 class="text-lg font-semibold mb-2 flex items-center gap-2 text-orange-600">
+                    <span>☁️</span> Cloudflare R2 云备份
+                </h3>
+
+                <div x-data="r2BackupData()" x-init="init()" class="space-y-4">
+
+                    <!-- Config Form -->
+                    <div
+                        class="grid grid-cols-1 md:grid-cols-2 gap-4 bg-white/50 p-4 rounded-lg border border-gray-100">
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-500 mb-1">R2 Endpoint (端点地址)</label>
+                            <input type="text" x-model="config.endpoint"
+                                placeholder="https://<account>.r2.cloudflarestorage.com"
+                                class="w-full text-sm px-3 py-2 bg-white rounded border border-gray-200 focus:border-orange-500 outline-none">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-500 mb-1">Bucket Name (存储桶名称)</label>
+                            <input type="text" x-model="config.bucket" placeholder="animate-backup"
+                                class="w-full text-sm px-3 py-2 bg-white rounded border border-gray-200 focus:border-orange-500 outline-none">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-500 mb-1">Access Key ID</label>
+                            <input type="text" x-model="config.access_key"
+                                class="w-full text-sm px-3 py-2 bg-white rounded border border-gray-200 focus:border-orange-500 outline-none">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-500 mb-1">Secret Access Key</label>
+                            <input type="password" x-model="config.secret_key" placeholder="********"
+                                class="w-full text-sm px-3 py-2 bg-white rounded border border-gray-200 focus:border-orange-500 outline-none">
+                        </div>
+                        <div class="md:col-span-2 text-right space-x-2 flex items-center justify-end gap-2">
+                            <span x-show="testMessage" x-text="testMessage"
+                                :class="testError ? 'text-red-500' : 'text-green-500'"
+                                class="text-xs font-semibold transition-opacity duration-500"></span>
+                            <button @click="testConnection" :disabled="loading"
+                                :class="loading ? 'bg-blue-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-500'"
+                                class="text-xs text-white px-3 py-1.5 rounded transition flex items-center gap-1">
+                                <span x-show="loading && testMessage === '测试中...'"
+                                    class="animate-spin h-3 w-3 border-2 border-white rounded-full border-t-transparent"></span>
+                                <span x-text="loading && testMessage === '测试中...' ? '测试中...' : '测试连接'"></span>
+                            </button>
+                            <button @click="saveConfig"
+                                class="text-xs bg-gray-800 text-white px-3 py-1.5 rounded hover:bg-gray-700 transition">保存配置</button>
+                        </div>
+                    </div>
+
+                    <!-- Actions -->
+                    <div class="flex items-center justify-between border-b border-gray-200 pb-2">
+                        <h4 class="text-sm font-semibold text-gray-700">云端备份列表</h4>
+                        <div class="flex items-center gap-2">
+                            <span x-show="uploadMessage" x-text="uploadMessage"
+                                :class="uploadError ? 'text-red-500' : 'text-green-500'"
+                                class="text-xs font-semibold transition-opacity duration-500"></span>
+                            <button @click="upload" :disabled="loading"
+                                :class="loading ? 'bg-orange-400 cursor-not-allowed' : 'bg-orange-500 hover:bg-orange-600'"
+                                class="text-sm flex items-center gap-1 text-white px-4 py-1.5 rounded-lg transition shadow-lg shadow-orange-200">
+                                <span x-show="loading && uploadMessage === '上传中...'"
+                                    class="animate-spin h-3 w-3 border-2 border-white rounded-full border-t-transparent inline-block"></span>
+                                <span x-show="!(loading && uploadMessage === '上传中...')">☁️</span>
+                                立即上传
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Backup List -->
+                    <div
+                        class="bg-white/50 rounded-lg border border-gray-100 min-h-[100px] max-h-[300px] overflow-y-auto custom-scrollbar p-2">
+                        <template x-if="loading">
+                            <div class="flex items-center justify-center h-20 text-gray-400 text-sm">加载中...</div>
+                        </template>
+                        <template x-if="!loading && backups.length === 0">
+                            <div class="flex items-center justify-center h-20 text-gray-400 text-sm">暂无备份</div>
+                        </template>
+
+                        <div class="space-y-2">
+                            <template x-for="file in backups" :key="file.key">
+                                <div
+                                    class="flex items-center justify-between bg-white p-3 rounded border border-gray-100 hover:border-orange-200 transition">
+                                    <div class="flex items-center gap-3">
+                                        <div class="text-xl">📦</div>
+                                        <div>
+                                            <div class="text-sm font-medium text-gray-800"
+                                                x-text="file.key.replace('animate_backup_', '').replace('.db', '')">
+                                            </div>
+                                            <div class="text-xs text-gray-400 mt-0.5">
+                                                <span x-text="file.last_modified"></span> • <span
+                                                    x-text="(file.size / 1024 / 1024).toFixed(2) + ' MB'"></span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="flex items-center gap-2">
+                                        <button @click="confirmRestore(file.key)"
+                                            class="text-xs bg-blue-50 text-blue-600 px-3 py-1.5 rounded hover:bg-blue-100 transition border border-blue-200">
+                                            预览 / 还原
+                                        </button>
+                                        <button @click="confirmDelete(file.key)"
+                                            class="text-xs bg-red-50 text-red-600 px-2 py-1.5 rounded hover:bg-red-100 transition border border-red-200"
+                                            title="删除">
+                                            🗑️
+                                        </button>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+
+                    <!-- Delete Confirm Modal (Simplified, only for Delete) -->
+                    <div x-show="showConfirm" style="display: none;"
+                        class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
+                        x-transition.opacity>
+                        <div class="bg-white rounded-lg shadow-xl max-w-md w-full p-6 space-y-4"
+                            @click.outside="showConfirm = false">
+                            <h3 class="text-lg font-bold text-gray-800" x-text="confirmTitle"></h3>
+                            <p class="text-sm text-gray-600" x-text="confirmMessage"></p>
+
+                            <!-- Loading Spinner inside Modal -->
+                            <div x-show="modalLoading" class="flex justify-center py-2">
+                                <span
+                                    class="animate-spin h-6 w-6 border-2 border-orange-500 rounded-full border-t-transparent"></span>
+                            </div>
+
+                            <div x-show="!modalLoading" class="flex justify-end gap-3 pt-2">
+                                <button @click="showConfirm = false"
+                                    class="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded transition">取消</button>
+                                <button @click="executeConfirmAction"
+                                    class="bg-red-500 hover:bg-red-600 px-4 py-2 text-sm text-white rounded transition shadow-md"
+                                    x-text="confirmButtonText"></button>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+            <div
+                class="absolute -right-8 -bottom-8 text-9xl text-orange-100 opacity-50 group-hover:scale-105 transition duration-500 select-none">
+                ☁️
+            </div>
+        </div>
+
+    </div>
+</div>
+
 
 
 

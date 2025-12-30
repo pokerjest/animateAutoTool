@@ -6,6 +6,10 @@
 
     init() {
         console.log('Calendar initialized. Today:', this.currentTab);
+        // Ensure currentTab is a number for strict comparison
+        if (typeof this.currentTab === 'string') {
+            this.currentTab = parseInt(this.currentTab);
+        }
     },
 
     showDetailModal: false,
@@ -178,6 +182,8 @@
                             class="text-xs font-medium text-gray-400 bg-gray-100 px-2 py-1 rounded-full border border-gray-200">New
                             Era</span>
                     </h1>
+                    <!-- Debug info (visible only in dev) -->
+                    <div class="hidden" x-text="'Debug: currentTab=' + currentTab"></div>
                 </div>
 
                 <!-- Desktop/Tablet Tabs -->
@@ -221,6 +227,13 @@
                         <p class="font-bold">获取数据失败</p>
                         <p class="text-sm opacity-80">{{ .Error }}</p>
                     </div>
+                </div>
+                {{ else if not .Calendar }}
+                <div
+                    class="mx-auto max-w-2xl bg-amber-50 border border-amber-200 text-amber-700 p-8 rounded-2xl text-center">
+                    <p class="text-4xl mb-4">📅</p>
+                    <p class="font-bold text-xl">暂无放送数据</p>
+                    <p class="text-sm opacity-80 mt-2">未能从 Bangumi 获取到本周的放送日历，请稍后再试。</p>
                 </div>
                 {{ else }}
 
@@ -620,60 +633,62 @@
                 </div>
             </div>
         </div>
+    </div>
 
-        <style>
-            .scrollbar-hide::-webkit-scrollbar {
-                display: none;
+    <style>
+        .scrollbar-hide::-webkit-scrollbar {
+            display: none;
+        }
+
+        .scrollbar-hide {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+
+        .perspective-1000 {
+            perspective: 1000px;
+        }
+
+        .animate-bounce-in {
+            animation: bounceIn 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+        }
+
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background-color: #e5e7eb;
+            border-radius: 20px;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background-color: #d1d5db;
+        }
+
+        @keyframes bounceIn {
+            0% {
+                transform: scale(0.9) opacity(0);
             }
 
-            .scrollbar-hide {
-                -ms-overflow-style: none;
-                scrollbar-width: none;
+            100% {
+                transform: scale(1) opacity(1);
             }
+        }
 
-            .perspective-1000 {
-                perspective: 1000px;
-            }
+        [x-cloak] {
+            display: none !important;
+        }
+    </style>
 
-            .animate-bounce-in {
-                animation: bounceIn 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55);
-            }
+    {{ if not .SkipLayout }}{{ template "footer.html" . }}{{ end }}
+</div>
 
-            .custom-scrollbar::-webkit-scrollbar {
-                width: 6px;
-            }
+{{ if not .Error }}
 
-            .custom-scrollbar::-webkit-scrollbar-track {
-                background: transparent;
-            }
-
-            .custom-scrollbar::-webkit-scrollbar-thumb {
-                background-color: #e5e7eb;
-                border-radius: 20px;
-            }
-
-            .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-                background-color: #d1d5db;
-            }
-
-            @keyframes bounceIn {
-                0% {
-                    transform: scale(0.9) opacity(0);
-                }
-
-                100% {
-                    transform: scale(1) opacity(1);
-                }
-            }
-
-            [x-cloak] {
-                display: none !important;
-            }
-        </style>
-
-        {{ if not .SkipLayout }}{{ template "footer.html" . }}{{ end }}
-
-        {{ if not .Error }}
-
-        {{ end }}
-        {{ end }}
+{{ end }}
+{{ end }}

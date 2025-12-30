@@ -27,15 +27,7 @@ func GetCalendarHandler(c *gin.Context) {
 		})
 		return
 	}
-	log.Printf("DEBUG: Got %d days of calendar data", len(calendar))
-	for i, d := range calendar {
-		log.Printf("DEBUG: Day %d: ID=%d, Name=%s, Items=%d", i, d.Weekday.ID, d.Weekday.CN, len(d.Items))
-	}
-
 	// Determine today's weekday for highlighting (1=Mon, 7=Sun)
-	// Bangumi returns 1=Mon...7=Sun.
-	// Go's time.Weekday() returns 0=Sun, 1=Mon...
-	// We need to map Go's 0 to 7.
 	today := int(time.Now().Weekday())
 	if today == 0 {
 		today = 7
@@ -43,6 +35,15 @@ func GetCalendarHandler(c *gin.Context) {
 
 	// Check for HTMX request
 	isHTMX := c.GetHeader("HX-Request") == ValueTrue
+	log.Printf("DEBUG: Calendar: Today=%d, isHTMX=%v", today, isHTMX)
+
+	if len(calendar) == 0 {
+		log.Printf("WARNING: Calendar data is empty!")
+	} else {
+		for i, d := range calendar {
+			log.Printf("DEBUG: Day %d: ID=%d, Name=%s, Items=%d", i, d.Weekday.ID, d.Weekday.CN, len(d.Items))
+		}
+	}
 
 	// Fetch active subscriptions to check status
 	type SubInfo struct {

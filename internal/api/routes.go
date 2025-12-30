@@ -63,6 +63,10 @@ func InitRoutes(r *gin.Engine) {
 	r.POST("/api/login", LoginPostHandler)
 	r.GET("/logout", LogoutHandler)
 
+	// Public API Routes (Bypass Auth for Images/SSE)
+	r.GET("/api/tmdb/image", ProxyTMDBImageHandler)
+	r.GET("/api/events", SSEHandler)
+
 	// Protected Routes Group
 	authorized := r.Group("/")
 	authorized.Use(AuthMiddleware())
@@ -118,6 +122,7 @@ func InitRoutes(r *gin.Engine) {
 			apiGroup.GET("/settings/tmdb-status", GetTMDBStatusHandler)
 			apiGroup.GET("/settings/anilist-status", GetAniListStatusHandler)
 			apiGroup.GET("/settings/jellyfin-status", GetJellyfinStatusHandler)
+			apiGroup.POST("/settings/jellyfin-login", JellyfinLoginHandler) // New Route
 			apiGroup.POST("/settings/pikpak-sync", PikPakSyncHandler)
 			apiGroup.GET("/settings/pikpak-status", GetPikPakStatusHandler)
 			apiGroup.POST("/settings/test-connection", TestConnectionHandler)
@@ -178,7 +183,6 @@ func InitRoutes(r *gin.Engine) {
 			apiGroup.GET("/dashboard/qb-status", DashboardQBStatusHandler)
 
 			// SSE
-			apiGroup.GET("/events", SSEHandler)
 		}
 	}
 }

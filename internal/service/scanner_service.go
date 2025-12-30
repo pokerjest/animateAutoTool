@@ -1,6 +1,7 @@
 package service
 
 import (
+	"fmt"
 	"io/fs"
 	"log"
 	"os"
@@ -77,8 +78,8 @@ func (s *ScannerService) ScanDirectory(dir *model.LocalAnimeDirectory) (*ScanRes
 		}
 
 		animePath := filepath.Join(dir.Path, entry.Name())
-		// Count videos
-		fileCount, totalSize := s.countVideos(animePath)
+		// Count videos and Sync Episodes
+		fileCount, totalSize := s.syncEpisodes(dir.ID, animePath)
 
 		if fileCount > 0 {
 			// Check DB
@@ -91,6 +92,8 @@ func (s *ScannerService) ScanDirectory(dir *model.LocalAnimeDirectory) (*ScanRes
 					db.DB.Save(&anime)
 					res.Updated++
 				}
+				// Trigger Episode Sync for existing anime as well
+				s.syncEpisodes(dir.ID, animePath)
 			} else {
 				// Insert
 				anime = model.LocalAnime{
@@ -102,6 +105,9 @@ func (s *ScannerService) ScanDirectory(dir *model.LocalAnimeDirectory) (*ScanRes
 				}
 				db.DB.Create(&anime)
 				res.Added++
+
+				// Double check episodes are linked to new anime ID
+				s.syncEpisodesForAnime(&anime)
 
 				// Publish New Anime Event (can trigger Metadata Fetch)
 				event.GlobalBus.Publish(event.EventMetadataUpdated, map[string]interface{}{
@@ -174,21 +180,78 @@ func (s *ScannerService) RemoveDirectory(id uint) error {
 	})
 }
 
-func (s *ScannerService) countVideos(root string) (int, int64) {
+func (s *ScannerService) syncEpisodes(dirID uint, animePath string) (int, int64) {
+	var anime model.LocalAnime
+	db.DB.Where("path = ?", animePath).First(&anime)
+	// If anime not found, we still return counts but episodes won't be linked yet.
+	// We call syncEpisodesForAnime after creation.
+	return s.syncEpisodesForAnime(&anime)
+}
+
+func (s *ScannerService) syncEpisodesForAnime(anime *model.LocalAnime) (int, int64) {
+	if anime == nil || anime.Path == "" {
+		return 0, 0
+	}
+
 	count := 0
 	var size int64
-	filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+	var foundPaths []string
+
+	filepath.WalkDir(anime.Path, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			return nil // ignore error
+			return nil
 		}
 		if !d.IsDir() {
-			if parser.IsVideoFile(path) {
+			if IsVideoFile(path) {
 				count++
 				info, _ := d.Info()
 				size += info.Size()
+				foundPaths = append(foundPaths, path)
+
+				if anime.ID != 0 {
+					// Sync to DB
+					var ep model.LocalEpisode
+					err := db.DB.Where("path = ?", path).First(&ep).Error
+					if err != nil {
+						// Create
+						parsed := parser.ParseFilename(path)
+						ep = model.LocalEpisode{
+							LocalAnimeID: anime.ID,
+							Title:        parsed.Extension, // Fallback
+							EpisodeNum:   parsed.Episode,
+							SeasonNum:    parsed.Season,
+							Path:         path,
+							FileSize:     info.Size(),
+							Container:    parsed.Extension,
+							ParsedTitle:  parsed.Title,
+							ParsedSeason: fmt.Sprintf("S%02d", parsed.Season),
+						}
+						db.DB.Create(&ep)
+					} else {
+						// Update if needed (idempotent)
+						if ep.LocalAnimeID != anime.ID {
+							ep.LocalAnimeID = anime.ID
+							db.DB.Save(&ep)
+						}
+					}
+				}
 			}
 		}
 		return nil
 	})
+
+	// Cleanup episodes no longer on disk
+	if anime.ID != 0 {
+		if len(foundPaths) > 0 {
+			db.DB.Where("local_anime_id = ? AND path NOT IN ?", anime.ID, foundPaths).Delete(&model.LocalEpisode{})
+		} else {
+			db.DB.Where("local_anime_id = ?", anime.ID).Delete(&model.LocalEpisode{})
+		}
+	}
+
 	return count, size
+}
+
+func IsVideoFile(path string) bool {
+	return parser.IsVideoFile(path)
 }

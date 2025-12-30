@@ -3,6 +3,7 @@ package tmdb
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/go-resty/resty/v2"
@@ -24,7 +25,9 @@ func NewClient(token string, proxyURL string) *Client {
 	if proxyURL != "" {
 		c.SetProxy(proxyURL)
 	}
-	c.SetHeader("Authorization", "Bearer "+token)
+	if token != "" {
+		c.SetHeader("Authorization", "Bearer "+token)
+	}
 	c.SetHeader("Content-Type", "application/json")
 
 	return &Client{
@@ -149,6 +152,10 @@ func (c *Client) GetSeasonDetails(tvID int, seasonNumber int) (*SeasonDetails, e
 		return nil, err
 	}
 
+	for i := range season.Episodes {
+		season.Episodes[i].StillPath = c.fixImage(season.Episodes[i].StillPath)
+	}
+
 	return &season, nil
 }
 
@@ -157,4 +164,14 @@ func (c *Client) fixImage(path string) string {
 		return ""
 	}
 	return ImageBaseURL + path
+}
+
+// ProxyImage fetches an image from TMDB and returns the response
+func (c *Client) ProxyImage(path string) (*resty.Response, error) {
+	// If path contains the base URL, strip it or just use the suffix
+	cleanPath := strings.TrimPrefix(path, ImageBaseURL)
+	cleanPath = strings.TrimPrefix(cleanPath, "/")
+
+	return c.client.R().
+		Get("https://image.tmdb.org/t/p/original/" + cleanPath)
 }

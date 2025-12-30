@@ -107,7 +107,7 @@ func getStorageIdByMountPath(token, mountPath string) (int, error) {
 	return 0, nil
 }
 
-func AddPikPakStorage(username, password, refreshToken string) error {
+func AddPikPakStorage(username, password, refreshToken, captchaToken string) error {
 	token := getToken()
 
 	// 1. Check if exists
@@ -124,7 +124,8 @@ func AddPikPakStorage(username, password, refreshToken string) error {
 		"refresh_token":  refreshToken,
 		"root_folder_id": "",
 		// "platform": "web" tells Alist to use the web API flow
-		"platform": "web",
+		"platform":      "web",
+		"captcha_token": captchaToken,
 	}
 	additionJson, _ := json.Marshal(addition)
 

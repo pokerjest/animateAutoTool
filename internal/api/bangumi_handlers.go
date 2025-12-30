@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pokerjest/animateAutoTool/internal/bangumi"
@@ -175,8 +176,11 @@ func RenderBangumiStatusOOB() string {
 }
 
 func BangumiProfileHandler(c *gin.Context) {
+	time.Sleep(500 * time.Millisecond) // UX Delay
 	c.Header("Content-Type", "text/html")
-	c.String(http.StatusOK, renderBangumiContent())
+	html := renderBangumiContent()
+	// Force Simple Return
+	c.String(http.StatusOK, html)
 }
 
 func BangumiLogoutHandler(c *gin.Context) {

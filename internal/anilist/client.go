@@ -48,11 +48,17 @@ type CoverImage struct {
 }
 
 type Media struct {
-	ID           int        `json:"id"`
-	Title        MediaTitle `json:"title"`
-	CoverImage   CoverImage `json:"coverImage"`
-	Description  string     `json:"description"`
-	AverageScore int        `json:"averageScore"`
+	ID             int             `json:"id"`
+	Title          MediaTitle      `json:"title"`
+	CoverImage     CoverImage      `json:"coverImage"`
+	Description    string          `json:"description"`
+	AverageScore   int             `json:"averageScore"`
+	MediaListEntry *MediaListEntry `json:"mediaListEntry"`
+}
+
+type MediaListEntry struct {
+	Progress int    `json:"progress"`
+	Status   string `json:"status"`
 }
 
 type PageData struct {
@@ -181,4 +187,46 @@ func (c *Client) GetAnimeDetails(id int) (*Media, error) {
 	}
 
 	return &result.Data.Media, nil
+}
+
+// GetMediaListEntry fetches the user's progress for a specific media
+func (c *Client) GetMediaListEntry(mediaID int) (*MediaListEntry, error) {
+	graphqlQuery := `
+	query ($id: Int) {
+	  Media(id: $id) {
+	    mediaListEntry {
+	      progress
+	      status
+	    }
+	  }
+	}
+	`
+	payload := map[string]interface{}{
+		"query": graphqlQuery,
+		"variables": map[string]interface{}{
+			"id": mediaID,
+		},
+	}
+
+	resp, err := c.client.R().
+		SetBody(payload).
+		Post(GraphQLEndpoint)
+
+	if err != nil {
+		return nil, err
+	}
+	if resp.IsError() {
+		return nil, fmt.Errorf("AniList API Error: %s", resp.Status())
+	}
+
+	var result MediaResponse
+	if err := json.Unmarshal(resp.Body(), &result); err != nil {
+		return nil, err
+	}
+
+	if len(result.Errors) > 0 {
+		return nil, fmt.Errorf("AniList GraphQL Error: %s", result.Errors[0].Message)
+	}
+
+	return result.Data.Media.MediaListEntry, nil
 }

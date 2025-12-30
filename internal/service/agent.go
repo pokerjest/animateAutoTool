@@ -63,6 +63,13 @@ func (s *AgentService) RunAgentForLibrary() {
 			} else {
 				if anime.Metadata.BangumiID == 0 && anime.Metadata.TMDBID == 0 {
 					needsNetwork = true
+				} else if anime.Metadata.TMDBID != 0 {
+					// Check if any episode is missing metadata (handle NULL or empty)
+					var count int64
+					db.DB.Model(&model.LocalEpisode{}).Where("local_anime_id = ? AND (image IS NULL OR image = '')", anime.ID).Count(&count)
+					if count > 0 {
+						needsNetwork = true
+					}
 				}
 			}
 

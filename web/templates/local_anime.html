@@ -38,6 +38,14 @@
     player: null,
     playerTitle: '',
     episodeList: [],
+    collectionStatus: {
+        bangumi_collected: false,
+        anilist_collected: false,
+        bangumi_watched_count: 0,
+        anilist_watched_count: 0,
+        bangumi_status: 0,
+        anilist_status: ''
+    },
     loadingEpisodes: false,
     
     updatingCollection: false,
@@ -309,7 +317,17 @@
         try {
             const res = await fetch('/api/local-anime/' + this.currentLocalId + '/files');
             if (res.ok) {
-                this.episodeList = await res.json();
+                const data = await res.json();
+                this.episodeList = data.episodes || [];
+                this.collectionStatus = data.collection_status || {
+                    bangumi_collected: false,
+                    anilist_collected: false,
+                    bangumi_watched_count: 0,
+                    anilist_watched_count: 0,
+                    bangumi_status: 0,
+                    anilist_status: ''
+                };
+                this.inputProgress = this.collectionStatus.bangumi_watched_count || 0;
             }
         } catch(e) {
             console.error(e);
@@ -881,7 +899,7 @@ openDetails($event.detail);
                                         修正匹配
                                     </button>
                                     <span class="text-[10px] font-normal normal-case"
-                                        x-text="modalRaw?.bangumiId ? ('ID: ' + modalRaw.bangumiId) : '未关联'"></span>
+                                        x-text="modalRaw?.metadata?.bangumi_id ? ('ID: ' + modalRaw.metadata.bangumi_id) : '未关联'"></span>
                                 </div>
                             </h4>
 
@@ -946,75 +964,158 @@ openDetails($event.detail);
                                 </div>
                             </div>
 
-                            <template x-if="modalRaw?.bangumiId">
-                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                    <!-- Collection Buttons -->
-                                    <div class="flex gap-2 p-1 bg-gray-100 rounded-xl">
-                                        <button type="button" :disabled="updatingCollection"
+                            <!-- Quick Collection Banner (only when NOT collected on Bangumi) -->
+                            <template
+                                x-if="modalRaw?.metadata?.bangumi_id && activeSource === 'bangumi' && !collectionStatus.bangumi_collected">
+                                <div
+                                    class="mb-4 p-4 bg-amber-50 border border-amber-200 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-4 shadow-sm">
+                                    <div class="flex items-center gap-3 text-amber-700">
+                                        <div class="text-2xl">✨</div>
+                                        <div>
+                                            <div class="font-bold text-sm">此番剧尚未在 Bangumi 收藏</div>
+                                            <div class="text-xs opacity-80">点击下方按钮快速添加到收藏并同步进度</div>
+                                        </div>
+                                    </div>
+                                    <div class="flex gap-2 w-full sm:w-auto">
+                                        <button
                                             @click="
                                             updatingCollection = true;
-                                            fetch('/api/bangumi/subject/' + modalRaw.bangumiId + '/collection', { 
+                                            fetch('/api/bangumi/subject/' + modalRaw.metadata.bangumi_id + '/collection', { 
                                                 method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({status: 3}) 
-                                            }).then(r=>r.json()).then(d=>{showToast(d.message||'在看')}).finally(()=>updatingCollection=false)"
-                                            class="flex-1 py-2 rounded-lg text-sm font-bold transition-all hover:bg-white hover:shadow-sm text-pink-500 disabled:opacity-50 flex items-center justify-center gap-1">
-                                            <span x-show="updatingCollection" class="animate-spin text-xs">⏳</span>
-                                            <span>📺 在看</span>
+                                            }).then(r=>r.json()).then(d=>{showToast(d.message||'已添加到在看'); fetchEpisodes();}).finally(()=>updatingCollection=false)"
+                                            class="flex-1 sm:flex-none px-4 py-2 bg-pink-500 hover:bg-pink-600 text-white text-xs font-bold rounded-xl transition shadow-lg shadow-pink-200 flex items-center justify-center gap-1">
+                                            <span x-show="updatingCollection" class="animate-spin text-[10px]">⏳</span>
+                                            <span>📺 标记在看</span>
                                         </button>
-                                        <button type="button" :disabled="updatingComplete" @click="
+                                        <button @click="
                                             updatingComplete = true;
-                                            fetch('/api/bangumi/subject/' + modalRaw.bangumiId + '/collection', { 
+                                            fetch('/api/bangumi/subject/' + modalRaw.metadata.bangumi_id + '/collection', { 
                                                 method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({status: 2}) 
                                             })
                                             .then(r=>r.json())
-                                            .then(() => fetch('/api/bangumi/subject/' + modalRaw.bangumiId + '/progress', { 
-                                                    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({episode_count: detailsData?.eps||24}) 
+                                            .then(() => fetch('/api/bangumi/subject/' + modalRaw.metadata.bangumi_id + '/progress', { 
+                                                method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({episode_count: detailsData?.eps||12}) 
                                             }))
-                                            .then(()=>showToast('已标记看过'))
+                                            .then(()=>{showToast('已标记看过'); fetchEpisodes();})
                                             .finally(()=>updatingComplete=false)"
-                                            class="flex-1 py-2 rounded-lg text-sm font-bold transition-all hover:bg-white hover:shadow-sm text-green-500 disabled:opacity-50 flex items-center justify-center gap-1">
-                                            <span x-show="updatingComplete" class="animate-spin text-xs">⏳</span>
-                                            <span>✅ 看过</span>
-                                        </button>
-                                    </div>
-
-                                    <!-- Progress Input -->
-                                    <div
-                                        class="flex items-center gap-2 p-1 bg-gray-50 rounded-xl border border-gray-100 px-2">
-                                        <input type="number" x-model="inputProgress" placeholder="0"
-                                            class="w-12 bg-transparent text-center font-bold text-gray-700 focus:outline-none border-b border-transparent focus:border-indigo-500 transition-colors">
-                                        <span class="text-gray-300">/</span>
-                                        <span class="text-gray-400 text-sm font-bold"
-                                            x-text="detailsData?.eps || '?'"></span>
-
-                                        <button
-                                            @click="
-                                        updatingProgress = true;
-                                        fetch('/api/bangumi/subject/' + modalRaw.bangumiId + '/progress', { 
-                                            method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({episode_count: parseInt(inputProgress)}) 
-                                        }).then(r=>r.json()).then(d=>showToast(d.message)).finally(()=>updatingProgress=false)"
-                                            class="ml-auto px-3 py-1.5 rounded-lg bg-gray-800 text-white text-xs font-bold hover:bg-gray-700 transition shadow-lg shadow-gray-200 flex items-center gap-1">
-                                            <span x-show="updatingProgress" class="animate-spin">⏳</span>
-                                            同步
+                                            class="flex-1 sm:flex-none px-4 py-2 bg-green-500 hover:bg-green-600 text-white text-xs font-bold rounded-xl transition shadow-lg shadow-green-200 flex items-center justify-center gap-1">
+                                            <span x-show="updatingComplete" class="animate-spin text-[10px]">⏳</span>
+                                            <span>✅ 标记看过</span>
                                         </button>
                                     </div>
                                 </div>
                             </template>
 
-                            <template x-if="!modalRaw?.bangumiId">
+                            <!-- Existing Collection Controls (when already collected) -->
+                            <template
+                                x-if="modalRaw?.metadata?.bangumi_id && (!collectionStatus || collectionStatus.bangumi_collected)">
+                                <div class="space-y-4">
+                                    <!-- Status Indicator -->
+                                    <div class="flex items-center gap-2 px-4 py-2 rounded-xl" :class="{
+                                            'bg-pink-50 border border-pink-200': collectionStatus.bangumi_status === 3,
+                                            'bg-green-50 border border-green-200': collectionStatus.bangumi_status === 2,
+                                            'bg-gray-50 border border-gray-200': collectionStatus.bangumi_status !== 2 && collectionStatus.bangumi_status !== 3
+                                        }">
+                                        <span class="text-2xl">
+                                            <template x-if="collectionStatus.bangumi_status === 3">📺</template>
+                                            <template x-if="collectionStatus.bangumi_status === 2">✅</template>
+                                            <template x-if="collectionStatus.bangumi_status === 1">⭐</template>
+                                        </span>
+                                        <div class="flex-1">
+                                            <div class="font-bold text-sm" :class="{
+                                                    'text-pink-700': collectionStatus.bangumi_status === 3,
+                                                    'text-green-700': collectionStatus.bangumi_status === 2,
+                                                    'text-gray-700': collectionStatus.bangumi_status !== 2 && collectionStatus.bangumi_status !== 3
+                                                }">
+                                                <template x-if="collectionStatus.bangumi_status === 3">正在观看</template>
+                                                <template x-if="collectionStatus.bangumi_status === 2">已看完</template>
+                                                <template x-if="collectionStatus.bangumi_status === 1">想看</template>
+                                                <template
+                                                    x-if="!collectionStatus.bangumi_status || collectionStatus.bangumi_status === 0">已收藏</template>
+                                            </div>
+                                            <div class="text-xs text-gray-500">
+                                                已观看 <span class="font-bold"
+                                                    x-text="collectionStatus.bangumi_watched_count"></span> 集
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                        <!-- Collection Buttons -->
+                                        <div class="flex gap-2 p-1 bg-gray-100 rounded-xl">
+                                            <template x-if="collectionStatus.bangumi_status !== 3">
+                                                <button type="button" :disabled="updatingCollection"
+                                                    @click="
+                                                    updatingCollection = true;
+                                                    fetch('/api/bangumi/subject/' + modalRaw.metadata.bangumi_id + '/collection', { 
+                                                        method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({status: 3}) 
+                                                    }).then(r=>r.json()).then(d=>{showToast(d.message||'在看'); fetchEpisodes();}).finally(()=>updatingCollection=false)"
+                                                    class="flex-1 py-2 rounded-lg text-sm font-bold transition-all hover:bg-white hover:shadow-sm text-pink-500 disabled:opacity-50 flex items-center justify-center gap-1">
+                                                    <span x-show="updatingCollection"
+                                                        class="animate-spin text-xs">⏳</span>
+                                                    <span>📺 在看</span>
+                                                </button>
+                                            </template>
+                                            <template x-if="collectionStatus.bangumi_status !== 2">
+                                                <button type="button" :disabled="updatingComplete" @click="
+                                                    updatingComplete = true;
+                                                    fetch('/api/bangumi/subject/' + modalRaw.metadata.bangumi_id + '/collection', { 
+                                                        method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({status: 2}) 
+                                                    })
+                                                    .then(r=>r.json())
+                                                    .then(() => fetch('/api/bangumi/subject/' + modalRaw.metadata.bangumi_id + '/progress', { 
+                                                            method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({episode_count: detailsData?.eps||12}) 
+                                                    }))
+                                                    .then(()=>{showToast('已标记看过'); fetchEpisodes();})
+                                                    .finally(()=>updatingComplete=false)"
+                                                    class="flex-1 py-2 rounded-lg text-sm font-bold transition-all hover:bg-white hover:shadow-sm text-green-500 disabled:opacity-50 flex items-center justify-center gap-1">
+                                                    <span x-show="updatingComplete"
+                                                        class="animate-spin text-xs">⏳</span>
+                                                    <span>✅ 看过</span>
+                                                </button>
+                                            </template>
+                                        </div>
+
+                                        <!-- Progress Input -->
+                                        <div
+                                            class="flex items-center gap-2 p-1 bg-gray-50 rounded-xl border border-gray-100 px-2">
+                                            <input type="number" x-model="inputProgress" placeholder="0"
+                                                class="w-12 bg-transparent text-center font-bold text-gray-700 focus:outline-none border-b border-transparent focus:border-indigo-500 transition-colors">
+                                            <span class="text-gray-300">/</span>
+                                            <span class="text-gray-400 text-sm font-bold"
+                                                x-text="detailsData?.eps || '?'"></span>
+
+                                            <button
+                                                @click="
+                                            updatingProgress = true;
+                                            fetch('/api/bangumi/subject/' + modalRaw.metadata.bangumi_id + '/progress', { 
+                                                method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({episode_count: parseInt(inputProgress)}) 
+                                            }).then(r=>r.json()).then(d=>{showToast(d.message); fetchEpisodes();}).finally(()=>updatingProgress=false)"
+                                                class="ml-auto px-3 py-1.5 rounded-lg bg-gray-800 text-white text-xs font-bold hover:bg-gray-700 transition shadow-lg shadow-gray-200 flex items-center gap-1">
+                                                <span x-show="updatingProgress" class="animate-spin">⏳</span>
+                                                同步
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </template>
+
+                            <template x-if="!modalRaw?.metadata?.bangumi_id">
                                 <div class="bg-gray-50 p-4 rounded-xl text-center text-gray-400 text-sm">
                                     ⚠️ 此番剧未关联 Bangumi ID，无法同步进度。
                                 </div>
                             </template>
 
                             <!-- BGM Link -->
-                            <template x-if="modalRaw?.bangumiId">
+                            <template x-if="modalRaw?.metadata?.bangumi_id">
                                 <div class="mt-4 text-center">
-                                    <a :href="'https://bgm.tv/subject/' + modalRaw.bangumiId" target="_blank"
+                                    <a :href="'https://bgm.tv/subject/' + modalRaw.metadata.bangumi_id" target="_blank"
                                         class="inline-flex items-center gap-1 text-xs font-bold text-gray-300 hover:text-pink-400 transition-colors">
                                         🔗 前往 Bangumi 番剧主页
                                     </a>
                                 </div>
                             </template>
+
 
                             <!-- Jellyfin Link -->
                             <template x-if="modalRaw?.jellyfin_series_id && jellyfinUrl">
@@ -1166,146 +1267,145 @@ openDetails($event.detail);
 
 
         </div>
-</div>
-</div>
-</template>
+    </template>
 
-<!-- Rename Modal -->
-<template x-teleport="#modal-layer">
-    <div x-show="showRenameModal" style="display: none;"
-        class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60 backdrop-blur-sm p-4"
-        x-transition.opacity>
-        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col"
-            @click.away="showRenameModal = false">
-            <!-- Header -->
-            <div class="p-4 border-b flex justify-between items-center bg-gray-50">
-                <h3 class="text-lg font-bold text-gray-800 flex items-center gap-2">
-                    <span>✏️</span> 批量重命名 - <span x-text="renameState.title"
-                        class="text-primary truncate max-w-md block"></span>
-                </h3>
-                <button @click="showRenameModal = false" class="text-gray-400 hover:text-gray-600">✕</button>
-            </div>
+    <!-- Rename Modal -->
+    <template x-teleport="#modal-layer">
+        <div x-show="showRenameModal" style="display: none;"
+            class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60 backdrop-blur-sm p-4"
+            x-transition.opacity>
+            <div class="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col"
+                @click.away="showRenameModal = false">
+                <!-- Header -->
+                <div class="p-4 border-b flex justify-between items-center bg-gray-50">
+                    <h3 class="text-lg font-bold text-gray-800 flex items-center gap-2">
+                        <span>✏️</span> 批量重命名 - <span x-text="renameState.title"
+                            class="text-primary truncate max-w-md block"></span>
+                    </h3>
+                    <button @click="showRenameModal = false" class="text-gray-400 hover:text-gray-600">✕</button>
+                </div>
 
-            <!-- Content -->
-            <div class="p-6 overflow-y-auto custom-scrollbar flex-1">
-                <!-- Rules -->
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                    <div class="col-span-2">
-                        <label
-                            class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">命名规则模板</label>
-                        <input type="text" x-model="renameState.pattern" @input.debounce.500ms="previewRename()"
-                            class="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-primary focus:border-transparent outline-none font-mono text-sm"
-                            placeholder="{Title} - S{Season}E{Ep}">
-
-                        <!-- Variable Shortcuts -->
-                        <div class="mt-2 flex flex-wrap gap-1">
-                            <template
-                                x-for="tag in ['{Title}', '{TitleCN}', '{TitleJP}', '{TitleEN}', '{Season}', '{Ep}', '{Year}', '{SubGroup}', '{Resolution}', '{VideoCodec}', '{BitDepth}', '{Ext}']">
-                                <button @click="renameState.pattern += tag; previewRename()"
-                                    class="text-[10px] bg-gray-100 hover:bg-gray-200 text-gray-600 px-1.5 py-0.5 rounded transition-colors"
-                                    x-text="tag"></button>
-                            </template>
-                        </div>
-                        <p class="text-[10px] text-gray-400 mt-1">💡 点击上方标签可直接插入。支持使用 <code
-                                class="bg-gray-50 px-0.5 rounded">/</code> 自动整理文件夹。</p>
-                    </div>
-                    <div>
-                        <label class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">季度
-                            (Sxx)</label>
-                        <div class="flex gap-2">
-                            <input type="text" x-model="renameState.season" @input.debounce.500ms="previewRename()"
+                <!-- Content -->
+                <div class="p-6 overflow-y-auto custom-scrollbar flex-1">
+                    <!-- Rules -->
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                        <div class="col-span-2">
+                            <label
+                                class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">命名规则模板</label>
+                            <input type="text" x-model="renameState.pattern" @input.debounce.500ms="previewRename()"
                                 class="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-primary focus:border-transparent outline-none font-mono text-sm"
-                                placeholder="01">
+                                placeholder="{Title} - S{Season}E{Ep}">
+
+                            <!-- Variable Shortcuts -->
+                            <div class="mt-2 flex flex-wrap gap-1">
+                                <template
+                                    x-for="tag in ['{Title}', '{TitleCN}', '{TitleJP}', '{TitleEN}', '{Season}', '{Ep}', '{Year}', '{SubGroup}', '{Resolution}', '{VideoCodec}', '{BitDepth}', '{Ext}']">
+                                    <button @click="renameState.pattern += tag; previewRename()"
+                                        class="text-[10px] bg-gray-100 hover:bg-gray-200 text-gray-600 px-1.5 py-0.5 rounded transition-colors"
+                                        x-text="tag"></button>
+                                </template>
+                            </div>
+                            <p class="text-[10px] text-gray-400 mt-1">💡 点击上方标签可直接插入。支持使用 <code
+                                    class="bg-gray-50 px-0.5 rounded">/</code> 自动整理文件夹。</p>
                         </div>
-                        <div class="mt-2">
-                            <button
-                                @click="renameState.pattern = '{TitleCN} ({Year}) / Season {Season} / {TitleCN} - S{Season}E{Ep}.{Ext}'; previewRename()"
-                                class="w-full py-1.5 px-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-[10px] font-bold rounded border border-indigo-200 transition-colors">
-                                🌟 预设: Jellyfin/Plex 标准
-                            </button>
+                        <div>
+                            <label class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">季度
+                                (Sxx)</label>
+                            <div class="flex gap-2">
+                                <input type="text" x-model="renameState.season" @input.debounce.500ms="previewRename()"
+                                    class="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-primary focus:border-transparent outline-none font-mono text-sm"
+                                    placeholder="01">
+                            </div>
+                            <div class="mt-2">
+                                <button
+                                    @click="renameState.pattern = '{TitleCN} ({Year}) / Season {Season} / {TitleCN} - S{Season}E{Ep}.{Ext}'; previewRename()"
+                                    class="w-full py-1.5 px-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-[10px] font-bold rounded border border-indigo-200 transition-colors">
+                                    🌟 预设: Jellyfin/Plex 标准
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Preview Table -->
+                    <div class="bg-gray-50 rounded-xl border border-gray-100 overflow-hidden">
+                        <div
+                            class="p-3 bg-gray-100/50 border-b border-gray-200 text-xs font-bold text-gray-500 flex justify-between items-center">
+                            <span>预览结果</span>
+                            <span x-show="renameState.loading" class="flex items-center gap-1 text-primary">
+                                <span class="animate-spin">⏳</span> 生成预览中...
+                            </span>
+                        </div>
+                        <div class="max-h-[300px] overflow-y-auto">
+                            <table class="w-full text-sm text-left">
+                                <thead class="text-xs text-gray-500 bg-gray-50 sticky top-0">
+                                    <tr>
+                                        <th class="px-4 py-2 font-medium w-32">所属番剧</th>
+                                        <th class="px-4 py-2 font-medium w-1/3">原文件名</th>
+                                        <th class="px-4 py-2 font-medium w-1/3">新文件名</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-gray-100">
+                                    <template x-for="(item, idx) in renameState.preview" :key="idx">
+                                        <tr class="hover:bg-white transition-colors">
+                                            <td class="px-4 py-2 font-medium text-indigo-600" :title="item.anime_name"
+                                                x-text="item.anime_name"></td>
+                                            <td class="px-4 py-2 font-mono text-gray-600 break-all"
+                                                :title="item.original" x-text="item.original"></td>
+                                            <td class="px-4 py-2 font-mono break-all"
+                                                :class="item.original === item.new ? 'text-gray-400 italic' : 'text-green-600 font-medium'"
+                                                :title="item.new" x-text="item.new"></td>
+                                        </tr>
+                                    </template>
+                                    <template x-if="!renameState.preview || renameState.preview.length === 0">
+                                        <tr>
+                                            <td colspan="3" class="px-4 py-8 text-center text-gray-400 italic">
+                                                暂无预览，请检查规则或等待加载...
+                                            </td>
+                                        </tr>
+                                    </template>
+                                </tbody>
+                            </table>
                         </div>
                     </div>
                 </div>
 
-                <!-- Preview Table -->
-                <div class="bg-gray-50 rounded-xl border border-gray-100 overflow-hidden">
-                    <div
-                        class="p-3 bg-gray-100/50 border-b border-gray-200 text-xs font-bold text-gray-500 flex justify-between items-center">
-                        <span>预览结果</span>
-                        <span x-show="renameState.loading" class="flex items-center gap-1 text-primary">
-                            <span class="animate-spin">⏳</span> 生成预览中...
-                        </span>
-                    </div>
-                    <div class="max-h-[300px] overflow-y-auto">
-                        <table class="w-full text-sm text-left">
-                            <thead class="text-xs text-gray-500 bg-gray-50 sticky top-0">
-                                <tr>
-                                    <th class="px-4 py-2 font-medium w-32">所属番剧</th>
-                                    <th class="px-4 py-2 font-medium w-1/3">原文件名</th>
-                                    <th class="px-4 py-2 font-medium w-1/3">新文件名</th>
-                                </tr>
-                            </thead>
-                            <tbody class="divide-y divide-gray-100">
-                                <template x-for="(item, idx) in renameState.preview" :key="idx">
-                                    <tr class="hover:bg-white transition-colors">
-                                        <td class="px-4 py-2 font-medium text-indigo-600" :title="item.anime_name"
-                                            x-text="item.anime_name"></td>
-                                        <td class="px-4 py-2 font-mono text-gray-600 break-all" :title="item.original"
-                                            x-text="item.original"></td>
-                                        <td class="px-4 py-2 font-mono break-all"
-                                            :class="item.original === item.new ? 'text-gray-400 italic' : 'text-green-600 font-medium'"
-                                            :title="item.new" x-text="item.new"></td>
-                                    </tr>
-                                </template>
-                                <template x-if="!renameState.preview || renameState.preview.length === 0">
-                                    <tr>
-                                        <td colspan="3" class="px-4 py-8 text-center text-gray-400 italic">
-                                            暂无预览，请检查规则或等待加载...
-                                        </td>
-                                    </tr>
-                                </template>
-                            </tbody>
-                        </table>
-                    </div>
+                <!-- Footer -->
+                <div class="p-4 border-t bg-gray-50 flex justify-end gap-3">
+                    <button @click="showRenameModal = false"
+                        class="px-4 py-2 rounded-lg border border-gray-200 text-gray-600 hover:bg-white transition">取消</button>
+                    <button @click="applyRename()" :disabled="renameState.loading || !renameState.preview"
+                        class="px-6 py-2 rounded-lg bg-primary text-white font-bold hover:bg-accent transition shadow-lg shadow-pink-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2">
+                        <span x-show="renameState.loading" class="animate-spin">⏳</span>
+                        <span>确认重命名</span>
+                    </button>
                 </div>
             </div>
+        </div>
+    </template>
 
-            <!-- Footer -->
-            <div class="p-4 border-t bg-gray-50 flex justify-end gap-3">
-                <button @click="showRenameModal = false"
-                    class="px-4 py-2 rounded-lg border border-gray-200 text-gray-600 hover:bg-white transition">取消</button>
-                <button @click="applyRename()" :disabled="renameState.loading || !renameState.preview"
-                    class="px-6 py-2 rounded-lg bg-primary text-white font-bold hover:bg-accent transition shadow-lg shadow-pink-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2">
-                    <span x-show="renameState.loading" class="animate-spin">⏳</span>
-                    <span>确认重命名</span>
+    <!-- Player Modal -->
+    <template x-teleport="#modal-layer">
+        <div x-show="showPlayer" style="display: none;" class="fixed inset-0 z-[60] bg-black flex flex-col"
+            x-transition.opacity>
+
+            <!-- Player Header -->
+            <div
+                class="absolute top-0 left-0 right-0 z-10 p-4 bg-gradient-to-b from-black/80 to-transparent flex justify-between items-center pointer-events-none">
+                <h3 class="text-white font-medium text-lg drop-shadow-md truncate max-w-2xl px-4" x-text="playerTitle">
+                </h3>
+                <button @click="closePlayer()"
+                    class="pointer-events-auto bg-white/10 hover:bg-white/20 text-white rounded-full p-2 backdrop-blur-md transition">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12">
+                        </path>
+                    </svg>
                 </button>
             </div>
+
+            <!-- Player Container -->
+            <div id="artplayer" class="w-full h-full bg-black"></div>
         </div>
-    </div>
-</template>
-
-<!-- Player Modal -->
-<template x-teleport="#modal-layer">
-    <div x-show="showPlayer" style="display: none;" class="fixed inset-0 z-[60] bg-black flex flex-col"
-        x-transition.opacity>
-
-        <!-- Player Header -->
-        <div
-            class="absolute top-0 left-0 right-0 z-10 p-4 bg-gradient-to-b from-black/80 to-transparent flex justify-between items-center pointer-events-none">
-            <h3 class="text-white font-medium text-lg drop-shadow-md truncate max-w-2xl px-4" x-text="playerTitle"></h3>
-            <button @click="closePlayer()"
-                class="pointer-events-auto bg-white/10 hover:bg-white/20 text-white rounded-full p-2 backdrop-blur-md transition">
-                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12">
-                    </path>
-                </svg>
-            </button>
-        </div>
-
-        <!-- Player Container -->
-        <div id="artplayer" class="w-full h-full bg-black"></div>
-    </div>
-</template>
+    </template>
 
 </div>
 </div>

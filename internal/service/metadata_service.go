@@ -83,8 +83,9 @@ func (s *MetadataService) EnrichAnime(anime *model.LocalAnime) error {
 
 	db.DB.Save(anime)
 
-	// 4. Align Episodes (Phase 4)
+	// 4. Align Episodes and Sync Metadata (Phase 4)
 	if anime.Metadata.TMDBID != 0 {
+		s.SyncEpisodesWithTMDB(anime)
 		s.AlignEpisodesWithTMDB(anime)
 	}
 
@@ -140,18 +141,125 @@ func (s *MetadataService) AlignEpisodesWithTMDB(anime *model.LocalAnime) {
 
 	for i := range episodes {
 		ep := &episodes[i]
+
+		// Decide if we should try aligning this episode
+		// 1. It's marked as Season 1 (common for absolute numbering)
+		// 2. Its episode number is higher than what TMDB says for its current season (likely absolute)
+		// 3. Or its current season number doesn't exist on TMDB
+		shouldAlign := false
 		if ep.SeasonNum <= 1 {
+			shouldAlign = true
+		} else {
+			// Check if season exists and has enough episodes
+			exists := false
+			maxEp := 0
+			for _, s := range show.Seasons {
+				if s.SeasonNumber == ep.SeasonNum {
+					exists = true
+					maxEp = s.EpisodeCount
+					break
+				}
+			}
+			if !exists || ep.EpisodeNum > maxEp {
+				shouldAlign = true
+			}
+		}
+
+		if shouldAlign {
 			targetAbs := ep.EpisodeNum
+			// If it's already in a high season but we think it's absolute,
+			// we need the REAL absolute number.
+			// But usually files like "S3E40" have 40 as the absolute number already.
+			// If it was "S3E03" but absolute ep is 40, our parser would have set Ep=3, S=3.
+			// In that case, we can't easily recover the absolute number without more heuristics.
+			// However, most "missing cover" cases are from absolute numbering files (01-24.mkv).
+
 			for _, r := range ranges {
 				if targetAbs >= r.Start && targetAbs <= r.End {
-					if r.SeasonNum != ep.SeasonNum {
+					if r.SeasonNum != ep.SeasonNum || (r.SeasonNum == ep.SeasonNum && ep.EpisodeNum != (targetAbs-r.Start+1)) {
 						newEpNum := targetAbs - r.Start + 1
-						log.Printf("Align: %s - Ep %d -> S%dE%d", anime.Title, targetAbs, r.SeasonNum, newEpNum)
+						log.Printf("Align: %s - S%dE%d -> S%dE%d (Abs %d)", anime.Title, ep.SeasonNum, ep.EpisodeNum, r.SeasonNum, newEpNum, targetAbs)
 						ep.SeasonNum = r.SeasonNum
 						ep.EpisodeNum = newEpNum
 						db.DB.Save(ep)
 					}
 					break
+				}
+			}
+		}
+	}
+
+	// Re-sync metadata after alignment
+	s.SyncEpisodesWithTMDB(anime)
+}
+
+// SyncEpisodesWithTMDB fetches episode details (images/summaries) from TMDB
+func (s *MetadataService) SyncEpisodesWithTMDB(anime *model.LocalAnime) {
+	if anime.ID == 0 || anime.Metadata == nil || anime.Metadata.TMDBID == 0 {
+		return
+	}
+
+	log.Printf("MetadataService: Syncing episodes with TMDB for %s (TMDB ID: %d)", anime.Title, anime.Metadata.TMDBID)
+
+	_, tmdbClient, _ := s.initClients()
+	if tmdbClient == nil {
+		log.Printf("MetadataService: Failed to init TMDB client for %s", anime.Title)
+		return
+	}
+
+	// Group episodes by season to minimize API calls
+	var localEps []model.LocalEpisode
+	db.DB.Where("local_anime_id = ?", anime.ID).Find(&localEps)
+	if len(localEps) == 0 {
+		log.Printf("MetadataService: No local episodes found for %s", anime.Title)
+		return
+	}
+
+	seasons := make(map[int]bool)
+	for _, ep := range localEps {
+		seasons[ep.SeasonNum] = true
+	}
+
+	log.Printf("MetadataService: Found %d local episodes in seasons %v for %s", len(localEps), seasons, anime.Title)
+
+	for sNum := range seasons {
+		log.Printf("MetadataService: Fetching TMDB Season %d for %s", sNum, anime.Title)
+		season, err := performWithRetry(func() (*tmdb.SeasonDetails, error) {
+			return tmdbClient.GetSeasonDetails(anime.Metadata.TMDBID, sNum)
+		})
+		if err != nil || season == nil {
+			log.Printf("MetadataService: Failed to fetch TMDB Season %d for %s: %v", sNum, anime.Title, err)
+			continue
+		}
+
+		// Map TMDB episodes for quick lookup
+		tmdbMap := make(map[int]tmdb.Episode)
+		for _, ep := range season.Episodes {
+			tmdbMap[ep.EpisodeNumber] = ep
+		}
+
+		log.Printf("MetadataService: TMDB Season %d has %d episodes for %s", sNum, len(season.Episodes), anime.Title)
+
+		// Update local episodes
+		for i := range localEps {
+			lep := &localEps[i]
+			if lep.SeasonNum == sNum {
+				if tep, ok := tmdbMap[lep.EpisodeNum]; ok {
+					updated := false
+					if lep.Image != tep.StillPath {
+						lep.Image = tep.StillPath
+						updated = true
+					}
+					if lep.Summary != tep.Overview {
+						lep.Summary = tep.Overview
+						updated = true
+					}
+					if updated {
+						log.Printf("MetadataService: Updating Ep %d with image from TMDB for %s", lep.EpisodeNum, anime.Title)
+						db.DB.Save(lep)
+					}
+				} else {
+					log.Printf("MetadataService: No TMDB match for S%dE%d for %s", sNum, lep.EpisodeNum, anime.Title)
 				}
 			}
 		}
@@ -660,6 +768,7 @@ func (s *MetadataService) MatchSeries(animeID uint, source string, sourceID int)
 
 	// Trigger Align and NFO
 	if m.TMDBID != 0 {
+		s.SyncEpisodesWithTMDB(&anime)
 		s.AlignEpisodesWithTMDB(&anime)
 	}
 	nfoGen := NewNFOGeneratorService()
@@ -751,6 +860,12 @@ func (s *MetadataService) RefreshAllMetadata(force bool) int {
 	GlobalRefreshStatus.IsRunning = false
 	GlobalRefreshStatus.LastResult = fmt.Sprintf("已更新 %d 条", updatedCount)
 	statusMu.Unlock()
+
+	// Publish Final Event
+	event.GlobalBus.Publish(event.EventMetadataUpdated, map[string]interface{}{
+		"type":    "complete",
+		"message": GlobalRefreshStatus.LastResult,
+	})
 
 	return updatedCount
 }

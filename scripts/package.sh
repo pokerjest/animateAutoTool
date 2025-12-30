@@ -2,7 +2,7 @@
 
 # Configuration
 APP_NAME="animate-server"
-VERSION=${1:-"v0.2.0-beta"}  # Accepts version as argument, default to v0.2.0-beta
+VERSION=${1:-"v0.3.0-beta"}  # Accepts version as argument, default to v0.3.0-beta
 DIST_DIR="./dist"
 SRC_PATH="cmd/server/main.go"
 

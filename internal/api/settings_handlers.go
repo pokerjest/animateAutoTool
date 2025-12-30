@@ -103,10 +103,10 @@ func UpdateSettingsHandler(c *gin.Context) {
 		model.ConfigKeyProxyAniList,
 		model.ConfigKeyJellyfinUrl,
 		model.ConfigKeyJellyfinApiKey,
-		model.ConfigKeyJellyfinApiKey,
 		model.ConfigKeyProxyJellyfin,
 		model.ConfigKeyPikPakUsername,
 		model.ConfigKeyPikPakPassword,
+		model.ConfigKeyPikPakRefreshToken,
 	}
 
 	for _, key := range keys {
@@ -245,13 +245,32 @@ func PikPakSyncHandler(c *gin.Context) {
 	username := c.PostForm("pikpak_username")
 	password := c.PostForm("pikpak_password")
 	refreshToken := c.PostForm("pikpak_refresh_token")
+	captchaToken := c.PostForm("pikpak_captcha_token")
 
 	if username == "" || password == "" {
 		c.String(http.StatusOK, `<span class="text-red-500">❌ 请先填写 PikPak 用户名和密码</span>`)
 		return
 	}
 
-	err := alist.AddPikPakStorage(username, password, refreshToken)
+	// 1. SAVE to DB first (So it persists on refresh)
+	pikpakKeys := map[string]string{
+		model.ConfigKeyPikPakUsername:     username,
+		model.ConfigKeyPikPakPassword:     password,
+		model.ConfigKeyPikPakRefreshToken: refreshToken,
+	}
+
+	for key, val := range pikpakKeys {
+		var count int64
+		db.DB.Model(&model.GlobalConfig{}).Where("key = ?", key).Count(&count)
+		if count == 0 {
+			db.DB.Create(&model.GlobalConfig{Key: key, Value: val})
+		} else {
+			db.DB.Model(&model.GlobalConfig{}).Where("key = ?", key).Update("value", val)
+		}
+	}
+
+	// 2. Sync to Alist
+	err := alist.AddPikPakStorage(username, password, refreshToken, captchaToken)
 	if err != nil {
 		log.Printf("Failed to sync PikPak to AList: %v", err)
 
@@ -281,25 +300,24 @@ func PikPakSyncHandler(c *gin.Context) {
 }
 
 func GetPikPakStatusHandler(c *gin.Context) {
+	time.Sleep(500 * time.Millisecond) // Artificial delay for UX
 	status, err := alist.GetPikPakStatus()
+	html := ""
 
 	// Simulate Jellyfin rendering style
 	if err != nil {
-		c.String(http.StatusOK, fmt.Sprintf(`<div class="text-red-600 bg-red-50 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 border border-red-200">❌ Error: %s</div>`, err.Error()))
-		return
-	}
-
-	if status == "work" || status == "WORK" {
-		c.String(http.StatusOK, `<div class="text-emerald-600 bg-emerald-50 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 border border-emerald-200">✅ 运行正常</div>`)
-		return
+		html = fmt.Sprintf(`<div class="text-red-600 bg-red-50 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 border border-red-200">❌ Error: %s</div>`, err.Error())
+	} else if status == "work" || status == "WORK" {
+		html = `<div class="text-emerald-600 bg-emerald-50 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 border border-emerald-200">✅ 运行正常</div>`
 	} else if status == "未配置" {
-		// Initial state or not configured
-		c.String(http.StatusOK, `<div class="text-sm text-gray-500 flex items-center gap-2"><span>🔴 未配置</span><span class="text-xs text-gray-400">(请填写账号密码并点击保存连接)</span></div>`)
-		return
+		html = `<div class="text-sm text-gray-500 flex items-center gap-2"><span>🔴 未配置</span><span class="text-xs text-gray-400">(请填写账号密码并点击保存连接)</span></div>`
+	} else {
+		// Other non-work status
+		html = fmt.Sprintf(`<div class="text-red-600 bg-red-50 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 border border-red-200">❌ 状态: %s</div>`, status)
 	}
 
-	// Other non-work status
-	c.String(http.StatusOK, fmt.Sprintf(`<div class="text-red-600 bg-red-50 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 border border-red-200">❌ 状态: %s</div>`, status))
+	// Return plain content
+	c.String(http.StatusOK, html)
 }
 
 // BangumiSaveHandler saves Bangumi settings and returns success
@@ -361,6 +379,7 @@ func TestConnectionHandler(c *gin.Context) {
 
 // GetQBStatusHandler tests connection using stored config with caching
 func GetQBStatusHandler(c *gin.Context) {
+	time.Sleep(500 * time.Millisecond) // Artificial delay for UX
 	var configs []model.GlobalConfig
 	db.DB.Where("key IN ?", []string{model.ConfigKeyQBUrl, model.ConfigKeyQBUsername, model.ConfigKeyQBPassword}).Find(&configs)
 
@@ -395,6 +414,7 @@ func GetQBStatusHandler(c *gin.Context) {
 	}
 
 	client := downloader.NewQBittorrentClient(url)
+	html := ""
 	if err := client.Login(username, password); err != nil {
 		// Cache Failure
 		statusCache.Store("qb", cachedStatus{
@@ -403,7 +423,8 @@ func GetQBStatusHandler(c *gin.Context) {
 			ConfigHash: hash,
 			Expiry:     time.Now().Add(1 * time.Minute), // Short cache for errors
 		})
-		c.String(http.StatusOK, fmt.Sprintf(`<div class="text-red-600 bg-red-50 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 border border-red-200">❌ QB 连接失败: %v</div>`, err))
+		html = fmt.Sprintf(`<div class="text-red-600 bg-red-50 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 border border-red-200">❌ QB 连接失败: %v</div>`, err)
+		c.String(http.StatusOK, html)
 		return
 	}
 
@@ -415,7 +436,7 @@ func GetQBStatusHandler(c *gin.Context) {
 			ConfigHash: hash,
 			Expiry:     time.Now().Add(5 * time.Minute),
 		})
-		c.String(http.StatusOK, fmt.Sprintf(`<div class="text-emerald-600 bg-emerald-50 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 border border-emerald-200">✅ QB 已连接 (版本: %s)</div>`, ver))
+		html = fmt.Sprintf(`<div class="text-emerald-600 bg-emerald-50 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 border border-emerald-200">✅ QB 已连接 (版本: %s)</div>`, ver)
 	} else {
 		// Status Unknown?
 		statusCache.Store("qb", cachedStatus{
@@ -424,14 +445,24 @@ func GetQBStatusHandler(c *gin.Context) {
 			ConfigHash: hash,
 			Expiry:     time.Now().Add(1 * time.Minute),
 		})
-		c.String(http.StatusOK, `<div class="text-amber-600 bg-amber-50 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 border border-amber-200">⚠️ QB 登录成功但版本未知</div>`)
+		html = `<div class="text-amber-600 bg-amber-50 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 border border-amber-200">⚠️ QB 登录成功但版本未知</div>`
 	}
+
+	c.String(http.StatusOK, html)
 }
 
 func GetTMDBStatusHandler(c *gin.Context) {
+	time.Sleep(500 * time.Millisecond) // Artificial delay for UX
 	style := c.Query("style")
 	c.Header("Content-Type", "text/html")
-	c.String(http.StatusOK, RenderTMDBStatus(style))
+	html := RenderTMDBStatus(style)
+	// Strip wrapper if it exists (Cleanup old logic)
+	if strings.Contains(html, `<div id="tmdb-status">`) {
+		html = strings.Replace(html, `<div id="tmdb-status">`, "", 1)
+		html = strings.TrimSuffix(html, "</div>")
+	}
+	// Return plain content
+	c.String(http.StatusOK, html)
 }
 
 // RenderTMDBStatusOOB returns the OOB swap HTML for TMDB status (Settings page)
@@ -562,9 +593,17 @@ func CheckTMDBConnection() (bool, string) {
 
 // Logic for AniList Status
 func GetAniListStatusHandler(c *gin.Context) {
+	time.Sleep(500 * time.Millisecond) // Artificial delay for UX
 	style := c.Query("style")
 	c.Header("Content-Type", "text/html")
-	c.String(http.StatusOK, RenderAniListStatus(style))
+	html := RenderAniListStatus(style)
+	// Strip wrapper if it exists
+	if strings.Contains(html, `<div id="anilist-status">`) {
+		html = strings.Replace(html, `<div id="anilist-status">`, "", 1)
+		html = strings.TrimSuffix(html, "</div>")
+	}
+	// Return plain content
+	c.String(http.StatusOK, html)
 }
 
 func RenderAniListStatusOOB() string {
@@ -721,9 +760,17 @@ func CheckAniListConnection() (bool, string, string) {
 
 // Logic for Jellyfin Status
 func GetJellyfinStatusHandler(c *gin.Context) {
+	time.Sleep(500 * time.Millisecond) // Artificial delay for UX
 	style := c.Query("style")
 	c.Header("Content-Type", "text/html")
-	c.String(http.StatusOK, RenderJellyfinStatus(style))
+	html := RenderJellyfinStatus(style)
+	// Strip wrapper if it exists
+	if strings.Contains(html, `<div id="jellyfin-status">`) {
+		html = strings.Replace(html, `<div id="jellyfin-status">`, "", 1)
+		html = strings.TrimSuffix(html, "</div>")
+	}
+	// Return plain content
+	c.String(http.StatusOK, html)
 }
 
 func RenderJellyfinStatusOOB() string {
@@ -848,4 +895,31 @@ func CheckJellyfinConnection() (bool, string) {
 	})
 
 	return false, errMsg
+}
+
+// JellyfinLoginHandler attempts to log in to Jellyfin and returns the API Key
+func JellyfinLoginHandler(c *gin.Context) {
+	url := c.PostForm("jellyfin_url")
+	username := c.PostForm("jellyfin_username")
+	password := c.PostForm("jellyfin_password")
+
+	if url == "" || username == "" {
+		c.String(http.StatusOK, `<div id="jellyfin-login-status" class="text-red-500 text-sm mt-2">❌ 需要填写 URL 和 用户名</div>`)
+		return
+	}
+
+	client := jellyfin.NewClient(url, "")
+	resp, err := client.Authenticate(username, password)
+	if err != nil {
+		c.String(http.StatusOK, fmt.Sprintf(`<div id="jellyfin-login-status" class="text-red-500 text-sm mt-2">❌ 登录失败: %s</div>`, err.Error()))
+		return
+	}
+
+	successMsg := `<div id="jellyfin-login-status" class="text-emerald-600 font-bold text-sm mt-2 flex items-center gap-2">✅ 获取成功! <span class="text-xs font-normal text-gray-500">(Token已自动填入)</span></div>`
+	// Ensure this ID matches settings.html. I will verify settings.html next.
+	updateInput := fmt.Sprintf(`<input id="jellyfin_api_key_input" name="jellyfin_api_key" value="%s" type="text"
+                                    class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 focus:bg-white focus:border-orange-300 focus:ring-4 focus:ring-orange-500/10 outline-none transition-all font-medium font-mono text-sm shadow-inner group-hover:border-orange-200"
+                                    placeholder="输入 API Key 或使用下方登录获取" hx-swap-oob="true">`, resp.AccessToken)
+
+	c.String(http.StatusOK, successMsg+updateInput)
 }

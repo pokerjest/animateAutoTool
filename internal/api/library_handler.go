@@ -431,3 +431,40 @@ func GetPosterHandler(c *gin.Context) {
 
 	c.Data(http.StatusOK, contentType, data)
 }
+
+// ProxyTMDBImageHandler proxies TMDB images through the server
+func ProxyTMDBImageHandler(c *gin.Context) {
+	path := c.Query("path")
+	if path == "" {
+		c.Status(http.StatusBadRequest)
+		return
+	}
+
+	// Fetch token from DB
+	var token model.GlobalConfig
+	db.DB.Where("key = ?", model.ConfigKeyTMDBToken).First(&token)
+
+	// Fetch proxy setting
+	var proxyEnabled model.GlobalConfig
+	var proxyURL string
+	db.DB.Where("key = ?", model.ConfigKeyProxyTMDB).First(&proxyEnabled)
+	if proxyEnabled.Value == "true" {
+		var pUrl model.GlobalConfig
+		db.DB.Where("key = ?", model.ConfigKeyProxyURL).First(&pUrl)
+		proxyURL = pUrl.Value
+	}
+
+	tmdbClient := tmdb.NewClient(token.Value, proxyURL)
+	resp, err := tmdbClient.ProxyImage(path)
+	if err != nil {
+		c.Status(http.StatusInternalServerError)
+		return
+	}
+
+	if resp.IsError() {
+		c.Status(resp.StatusCode())
+		return
+	}
+
+	c.Data(http.StatusOK, resp.Header().Get("Content-Type"), resp.Body())
+}

@@ -473,6 +473,35 @@ func (c *Client) GetUserCollection(accessToken string, username string, collecti
 	return result.Data, nil
 }
 
+// GetSubjectCollection fetch a single subject collection status for user
+func (c *Client) GetSubjectCollection(accessToken string, username string, subjectID int) (*UserCollectionItem, error) {
+	// GET https://api.bgm.tv/v0/users/{username}/collections/{subject_id}
+	u := fmt.Sprintf("https://api.bgm.tv/v0/users/%s/collections/%d", username, subjectID)
+
+	resp, err := c.client.R().
+		SetHeader("Authorization", "Bearer "+accessToken).
+		SetHeader("User-Agent", "pokerjest/animateAutoTool/1.0 (https://github.com/pokerjest/animateAutoTool)").
+		Get(u)
+
+	if err != nil {
+		return nil, err
+	}
+	if resp.IsError() {
+		// If 404, it means not in collection, which is not an error but a state
+		if resp.StatusCode() == 404 {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("fetch subject collection failed: %s", string(resp.Body()))
+	}
+
+	var item UserCollectionItem
+	if err := json.Unmarshal(resp.Body(), &item); err != nil {
+		return nil, err
+	}
+
+	return &item, nil
+}
+
 // CalendarItem represents a daily schedule item
 type CalendarItem struct {
 	Weekday struct {
@@ -541,3 +570,4 @@ func (c *Client) GetCalendar() ([]CalendarItem, error) {
 
 	return calendar, nil
 }
+

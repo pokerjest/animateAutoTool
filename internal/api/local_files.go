@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -12,11 +13,14 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/pokerjest/animateAutoTool/internal/anilist"
+	"github.com/pokerjest/animateAutoTool/internal/bangumi"
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/jellyfin"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/parser"
 
+	"github.com/pokerjest/animateAutoTool/internal/event"
 	"github.com/pokerjest/animateAutoTool/internal/service"
 )
 
@@ -59,6 +63,22 @@ type EpisodeDisplay struct {
 	Rating    float64 `json:"rating"`
 	AirDate   string  `json:"air_date"`
 	Duration  string  `json:"duration"`
+}
+
+// CollectionStatus 收藏状态信息
+type CollectionStatus struct {
+	BangumiCollected    bool   `json:"bangumi_collected"`
+	AniListCollected    bool   `json:"anilist_collected"`
+	BangumiWatchedCount int    `json:"bangumi_watched_count"`
+	AniListWatchedCount int    `json:"anilist_watched_count"`
+	BangumiStatus       int    `json:"bangumi_status"` // 1=想看, 2=看过, 3=在看, 4=搁置, 5=抛弃
+	AniListStatus       string `json:"anilist_status"` // CURRENT, COMPLETED, etc.
+}
+
+// EpisodeListResponse 增强的剧集列表响应
+type EpisodeListResponse struct {
+	Episodes         []EpisodeDisplay  `json:"episodes"`
+	CollectionStatus *CollectionStatus `json:"collection_status,omitempty"`
 }
 
 // GetLocalAnimeFilesHandler 获取指定本地番剧的文件列表
@@ -115,20 +135,38 @@ func GetLocalAnimeFilesHandler(c *gin.Context) {
 
 			var seriesId = anime.JellyfinSeriesID
 
+			// Determine which ID to use based on preferences or availability
+			// If DataSource is explicit, prioritize it
+			dataSource := "jellyfin"
+			if anime.Metadata != nil && anime.Metadata.DataSource != "" {
+				dataSource = anime.Metadata.DataSource
+			}
+			log.Printf("DEBUG: AnimeID=%d Title='%s' DataSource='%s'", anime.ID, anime.Title, dataSource)
+
 			if seriesId == "" && anime.Metadata != nil {
-				// Priority: Bangumi ID -> TMDB ID
-				if anime.Metadata.BangumiID != 0 {
-					sid, err := client.GetItemByProviderID("bangumi", strconv.Itoa(anime.Metadata.BangumiID))
+				// Priority: Based on DataSource or fallback
+				targetProvider := "bangumi"
+				targetID := strconv.Itoa(anime.Metadata.BangumiID)
+
+				if dataSource == "tmdb" && anime.Metadata.TMDBID != 0 {
+					targetProvider = "tmdb"
+					targetID = strconv.Itoa(anime.Metadata.TMDBID)
+				}
+
+				if targetID != "0" {
+					sid, err := client.GetItemByProviderID(targetProvider, targetID)
 					if err == nil {
 						seriesId = sid
-					} else {
-						// Try lowercase "Bangumi" or other common plugins
-						sid, err = client.GetItemByProviderID("Bangumi", strconv.Itoa(anime.Metadata.BangumiID))
+					} else if targetProvider == "bangumi" {
+						// Try lowercase "Bangumi"
+						sid, err = client.GetItemByProviderID("Bangumi", targetID)
 						if err == nil {
 							seriesId = sid
 						}
 					}
 				}
+
+				// If strictly failed, try fallback
 				if seriesId == "" && anime.Metadata.TMDBID != 0 {
 					sid, err := client.GetItemByProviderID("tmdb", strconv.Itoa(anime.Metadata.TMDBID))
 					if err == nil {
@@ -174,6 +212,100 @@ func GetLocalAnimeFilesHandler(c *gin.Context) {
 			}
 		}()
 
+		// --- Bangumi Logic Overlay ---
+		// If DataSource is Bangumi OR user is previewing Bangumi in modal, fetch user progress
+		sourceParam := c.Query("source") // Optional: source being previewed in modal
+		effectiveSource := ""
+		if anime.Metadata != nil && anime.Metadata.DataSource != "" {
+			effectiveSource = anime.Metadata.DataSource
+		}
+		if sourceParam != "" {
+			effectiveSource = sourceParam // Override with preview source
+		}
+
+		log.Printf("DEBUG: GetLocalAnimeFilesHandler for AnimeID=%d | sourceParam='%s' | effectiveSource='%s' | hasMetadata=%v",
+			anime.ID, sourceParam, effectiveSource, anime.Metadata != nil)
+
+		bangumiWatchedCount := -1
+		bangumiCollectionStatus := 0 // 0=not collected, 1=想看, 2=看过, 3=在看, 4=搁置, 5=抛弃
+		if anime.Metadata != nil && effectiveSource == "bangumi" && anime.Metadata.BangumiID != 0 {
+			log.Printf("DEBUG: Attempting to fetch Bangumi progress for BangumiID=%d", anime.Metadata.BangumiID)
+			var bgmTokenCfg model.GlobalConfig
+			db.DB.Where("key = ?", model.ConfigKeyBangumiAccessToken).First(&bgmTokenCfg)
+
+			// We need AppID/Secret to init client, but mostly just for token refresh.
+			// Here we just use empty AppID for direct calls if token is valid.
+			// Actually NewClient expects them. Let's fetch them.
+			var appID, appSecret model.GlobalConfig
+			db.DB.Where("key = ?", model.ConfigKeyBangumiAppID).First(&appID)
+			db.DB.Where("key = ?", model.ConfigKeyBangumiAppSecret).First(&appSecret)
+
+			if bgmTokenCfg.Value != "" {
+				bgmClient := bangumi.NewClient(appID.Value, appSecret.Value, "")
+				// Use "me" or fetch user ID?
+				// GetSubjectCollection(token, "me", subjectID)
+				col, err := bgmClient.GetSubjectCollection(bgmTokenCfg.Value, "me", anime.Metadata.BangumiID)
+				if err != nil {
+					log.Printf("DEBUG: ❌ Failed to fetch Bangumi collection for ID %d: %v", anime.Metadata.BangumiID, err)
+				} else if col == nil {
+					// 404 response - user hasn't added this to collection yet
+					bangumiWatchedCount = -1
+					bangumiCollectionStatus = 0
+					log.Printf("DEBUG: ℹ️  Bangumi ID %d not in user collection", anime.Metadata.BangumiID)
+				} else {
+					// Success - user has this in collection
+					bangumiWatchedCount = col.EpStatus
+					bangumiCollectionStatus = col.Type // Capture collection status
+					log.Printf("DEBUG: ✅ Fetched Bangumi Progress for ID %d: %d eps watched, status=%d", anime.Metadata.BangumiID, bangumiWatchedCount, bangumiCollectionStatus)
+					// Update Cached Progress
+					if anime.Metadata.BangumiWatchedEps != col.EpStatus {
+						anime.Metadata.BangumiWatchedEps = col.EpStatus
+						db.DB.Save(anime.Metadata)
+					}
+				}
+			} else {
+				log.Printf("DEBUG: ⚠️  Missing Bangumi Token to fetch progress")
+			}
+		} else {
+			if anime.Metadata == nil {
+				log.Printf("DEBUG: Skipping Bangumi fetch: no metadata")
+			} else if effectiveSource != "bangumi" {
+				log.Printf("DEBUG: Skipping Bangumi fetch: effectiveSource is '%s', not 'bangumi'", effectiveSource)
+			} else if anime.Metadata.BangumiID == 0 {
+				log.Printf("DEBUG: Skipping Bangumi fetch: BangumiID is 0")
+			}
+		}
+
+		// --- AniList Logic Overlay ---
+		anilistWatchedCount := -1
+		if anime.Metadata != nil && effectiveSource == "anilist" && anime.Metadata.AniListID != 0 {
+			log.Printf("DEBUG: Attempting to fetch AniList progress for AniListID=%d", anime.Metadata.AniListID)
+			var alTokenCfg model.GlobalConfig
+			db.DB.Where("key = ?", model.ConfigKeyAniListToken).First(&alTokenCfg)
+
+			if alTokenCfg.Value != "" {
+				alClient := anilist.NewClient(alTokenCfg.Value, "")
+				// Proxy support needs to be fetched from config if desired, but sticking to simple for now
+				entry, err := alClient.GetMediaListEntry(anime.Metadata.AniListID)
+				if err != nil {
+					log.Printf("DEBUG: ❌ Failed to fetch AniList entry for ID %d: %v", anime.Metadata.AniListID, err)
+				} else if entry == nil {
+					// Not in user's list yet
+					anilistWatchedCount = 0
+					log.Printf("DEBUG: ℹ️  AniList ID %d not in user list (0 eps watched)", anime.Metadata.AniListID)
+				} else {
+					// Success - user has this in their list
+					anilistWatchedCount = entry.Progress
+					log.Printf("DEBUG: ✅ Fetched AniList Progress for ID %d: %d eps watched", anime.Metadata.AniListID, anilistWatchedCount)
+					// Update Cached Progress
+					if anime.Metadata.AniListWatchedEps != entry.Progress {
+						anime.Metadata.AniListWatchedEps = entry.Progress
+						db.DB.Save(anime.Metadata)
+					}
+				}
+			}
+		}
+
 		for _, ep := range episodes {
 			key := fmt.Sprintf("S%dE%d", ep.SeasonNum, ep.EpisodeNum)
 			jfData := jfMap[key]
@@ -185,16 +317,48 @@ func GetLocalAnimeFilesHandler(c *gin.Context) {
 			}
 
 			thumb := ""
-			if ep.JellyfinItemID != "" && jellyfinUrl != "" {
-				// Request slightly larger image for detailed view
+			// 1. Priority: TMDB Episode Image (Official Stills)
+			if ep.Image != "" {
+				thumb = ep.Image
+			}
+
+			// 2. Secondary: Jellyfin Episode Thumbnail
+			if thumb == "" && ep.JellyfinItemID != "" && jellyfinUrl != "" {
 				thumb = fmt.Sprintf("%s/Items/%s/Images/Primary?fillHeight=270&fillWidth=480&quality=90", jellyfinUrl, ep.JellyfinItemID)
 			}
 
-			// Fallback to Series Poster if Jellyfin thumb is missing
+			// 3. Fallback: Series Poster
 			if thumb == "" {
 				thumb = anime.Image
 				if thumb == "" && anime.Metadata != nil {
 					thumb = anime.Metadata.Image
+				}
+			}
+
+			// Final Step: Ensure TMDB URLs are proxied
+			if strings.HasPrefix(thumb, "https://image.tmdb.org/") {
+				thumb = "/api/tmdb/image?path=" + url.QueryEscape(thumb)
+			}
+
+			// Use TMDB Summary if Jellyfin is missing
+			overview := jfData.Overview
+			if overview == "" {
+				overview = ep.Summary
+			}
+
+			// Determine Watched Status
+			isWatched := jfData.Watched
+			if bangumiWatchedCount >= 0 {
+				if ep.EpisodeNum <= bangumiWatchedCount {
+					isWatched = true
+				} else {
+					isWatched = false
+				}
+			} else if anilistWatchedCount >= 0 {
+				if ep.EpisodeNum <= anilistWatchedCount {
+					isWatched = true
+				} else {
+					isWatched = false
 				}
 			}
 
@@ -206,15 +370,32 @@ func GetLocalAnimeFilesHandler(c *gin.Context) {
 				Episode:   ep.EpisodeNum,
 				Season:    ep.SeasonNum,
 				Playable:  true,
-				Watched:   jfData.Watched,
+				Watched:   isWatched,
 				Thumbnail: thumb,
-				Overview:  jfData.Overview,
+				Overview:  overview,
 				Rating:    jfData.Rating,
 				AirDate:   jfData.AirDate,
 				Duration:  jfData.Duration,
 			})
 		}
-		c.JSON(http.StatusOK, display)
+
+		// Build collection status
+		// Note: watchedCount of 0 withmeans collected but no episodes watched
+		// watchedCount of -1 means not collected (initial value)
+		collStatus := &CollectionStatus{
+			BangumiCollected:    bangumiWatchedCount >= 0, // >=0 means we got a valid response
+			AniListCollected:    anilistWatchedCount >= 0,
+			BangumiWatchedCount: max(0, bangumiWatchedCount), // Don't expose -1 to frontend
+			AniListWatchedCount: max(0, anilistWatchedCount),
+			BangumiStatus:       bangumiCollectionStatus,
+			AniListStatus:       "", // TODO: Add AniList status when implementing
+		}
+
+		// Return enhanced response
+		c.JSON(http.StatusOK, EpisodeListResponse{
+			Episodes:         display,
+			CollectionStatus: collStatus,
+		})
 		return
 	}
 
@@ -258,7 +439,22 @@ func RefreshLocalAnimeMetadataHandler(c *gin.Context) {
 	metaSvc := service.NewMetadataService()
 	// Preload metadata to ensure we have it
 	db.DB.Preload("Metadata").First(&anime, id)
+
+	// Emit Start Event
+	event.GlobalBus.Publish(event.EventMetadataUpdated, map[string]interface{}{
+		"type":    "progress",
+		"current": 1,
+		"total":   1,
+		"title":   anime.Title,
+	})
+
 	metaSvc.EnrichAnime(&anime)
+
+	// Emit Complete Event
+	event.GlobalBus.Publish(event.EventMetadataUpdated, map[string]interface{}{
+		"type":    "complete",
+		"message": "刷新完成",
+	})
 
 	if err := db.DB.Save(&anime).Error; err != nil {
 		c.String(http.StatusInternalServerError, "Failed to save: "+err.Error())
@@ -275,6 +471,7 @@ func RefreshLocalAnimeMetadataHandler(c *gin.Context) {
 func SwitchLocalAnimeSourceHandler(c *gin.Context) {
 	id := c.Param("id")
 	source := c.Query("source")
+	log.Printf("DEBUG: Switch Source Request for ID %s to '%s'", id, source)
 
 	var anime model.LocalAnime
 	if err := db.DB.Preload("Metadata").First(&anime, id).Error; err != nil {
@@ -294,18 +491,21 @@ func SwitchLocalAnimeSourceHandler(c *gin.Context) {
 			m.Title = m.TMDBTitle
 			m.Image = m.TMDBImage
 			m.Summary = m.TMDBSummary
+			m.DataSource = "tmdb"
 		}
 	case "bangumi":
 		if m.BangumiID != 0 {
 			m.Title = m.BangumiTitle
 			m.Image = m.BangumiImage
 			m.Summary = m.BangumiSummary
+			m.DataSource = "bangumi"
 		}
 	case "anilist":
 		if m.AniListID != 0 {
 			m.Title = m.AniListTitle
 			m.Image = m.AniListImage
 			m.Summary = m.AniListSummary
+			m.DataSource = "anilist"
 		}
 	}
 

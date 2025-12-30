@@ -20,6 +20,7 @@ type Subscription struct {
 	Offset          int    `json:"offset"`                                   // 偏移
 	LastEp          int    `json:"last_ep"`                                  // 最后集数
 	IsActive        bool   `json:"is_active"`                                // 激活状态
+	Summary         string `json:"summary"`                                  // 简介
 	DownloadedCount int64  `json:"downloaded_count" gorm:"-"`                // 实际已下载的集数 (动态计算)
 
 	// Refactored Metadata
@@ -72,6 +73,13 @@ type AnimeMetadata struct {
 	AniListSummary  string  `json:"anilist_summary"`
 	AniListRating   float64 `json:"anilist_rating"`
 	AniListImageRaw []byte  `json:"-" gorm:"type:blob"`
+
+	// User Preference
+	DataSource string `json:"data_source" gorm:"default:'jellyfin'"` // "bangumi", "tmdb", "anilist", "jellyfin"
+
+	// Cached Progress
+	BangumiWatchedEps int `json:"bangumi_watched_eps"`
+	AniListWatchedEps int `json:"anilist_watched_eps"`
 }
 
 // DownloadLog 记录下载历史，避免重复下载
@@ -119,6 +127,7 @@ const (
 	ConfigKeyAListToken          = "alist_token"
 	ConfigKeyPikPakUsername      = "pikpak_username"
 	ConfigKeyPikPakPassword      = "pikpak_password"
+	ConfigKeyPikPakRefreshToken  = "pikpak_refresh_token"
 
 	// Cloudflare R2
 	// Cloudflare R2
@@ -167,6 +176,8 @@ type LocalEpisode struct {
 	Path         string `json:"path" gorm:"uniqueIndex"`     // 绝对路径
 	Container    string `json:"container"`                   // 容器格式 (mkv, mp4)
 	FileSize     int64  `json:"file_size"`                   // 文件大小
+	Image        string `json:"image"`                       // 集数预览图 (TMDB Still Path)
+	Summary      string `json:"summary"`                     // 集数简介
 
 	JellyfinItemID string `json:"jellyfin_item_id" gorm:"index"` // Cached Jellyfin Episode ID
 
