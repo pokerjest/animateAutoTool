@@ -16,14 +16,14 @@ import (
 type AgentService struct {
 	NetworkWorkerCount int
 	NetworkRateLimit   time.Duration
-	localSvc           *LocalAnimeService
+	metaSvc            *MetadataService
 }
 
 func NewAgentService() *AgentService {
 	return &AgentService{
 		NetworkWorkerCount: 2, // Low concurrency for network
 		NetworkRateLimit:   500 * time.Millisecond,
-		localSvc:           NewLocalAnimeService(),
+		metaSvc:            NewMetadataService(),
 	}
 }
 
@@ -104,7 +104,7 @@ func (s *AgentService) scanLocalAssets(anime *model.LocalAnime) {
 			}
 
 			db.DB.Save(anime.Metadata)
-			s.localSvc.SyncMetadataToModels(anime.Metadata)
+			s.metaSvc.SyncMetadataToModels(anime.Metadata)
 		}
 	}
 
@@ -137,7 +137,7 @@ func (s *AgentService) scanLocalAssets(anime *model.LocalAnime) {
 					anime.Metadata.Image = fmt.Sprintf("/api/posters/%d", anime.Metadata.ID)
 
 					db.DB.Save(anime.Metadata)
-					s.localSvc.SyncMetadataToModels(anime.Metadata)
+					s.metaSvc.SyncMetadataToModels(anime.Metadata)
 					log.Printf("Agent: Consumed local poster for %s", anime.Title)
 				}
 				break // Found best match
@@ -158,7 +158,7 @@ func (s *AgentService) networkWorker(queue <-chan uint) {
 
 		// Re-use existing Enrich Logic
 		log.Printf("Agent: Network enriching %s", anime.Title)
-		s.localSvc.EnrichAnimeMetadata(&anime)
+		s.metaSvc.EnrichAnime(&anime)
 
 		// Save result handled inside EnrichAnimeMetadata
 	}

@@ -49,8 +49,8 @@ func FixMatchHandler(c *gin.Context) {
 		req.Source = "bangumi"
 	}
 
-	svc := service.NewLocalAnimeService()
-	if err := svc.MatchSeries(req.AnimeID, req.Source, req.SourceID); err != nil {
+	metaSvc := service.NewMetadataService()
+	if err := metaSvc.MatchSeries(req.AnimeID, req.Source, req.SourceID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -458,8 +458,8 @@ func createSubscriptionInternal(sub *model.Subscription) error {
 	}
 
 	// Enrich Metadata (Bangumi & TMDB)
-	svc := service.NewLocalAnimeService()
-	svc.EnrichSubscriptionMetadata(sub)
+	metaSvc := service.NewMetadataService()
+	metaSvc.EnrichMetadata(sub.Metadata, sub.Title)
 
 	sub.IsActive = true
 
@@ -739,8 +739,8 @@ func RefreshSubscriptionMetadataHandler(c *gin.Context) {
 	}
 
 	// Enrich Metadata using shared service
-	svc := service.NewLocalAnimeService()
-	svc.EnrichSubscriptionMetadata(&sub)
+	metaSvc := service.NewMetadataService()
+	metaSvc.EnrichMetadata(sub.Metadata, sub.Title)
 
 	if err := db.DB.Save(&sub).Error; err != nil {
 		c.String(http.StatusInternalServerError, "Failed to save: "+err.Error())
@@ -802,8 +802,8 @@ func SwitchSubscriptionSourceHandler(c *gin.Context) {
 	}
 
 	// Trigger global sync (updates the subscription itself + any local folders)
-	svc := service.NewLocalAnimeService()
-	svc.SyncMetadataToModels(m)
+	metaSvc := service.NewMetadataService()
+	metaSvc.SyncMetadataToModels(m)
 
 	c.HTML(http.StatusOK, "subscription_card.html", sub)
 }
@@ -1326,10 +1326,10 @@ func RefreshSubscriptionsHandler(c *gin.Context) {
 	}
 
 	updatedCount := 0
-	svc := service.NewLocalAnimeService()
+	metaSvc := service.NewMetadataService()
 
 	for i := range subs {
-		svc.EnrichSubscriptionMetadata(&subs[i])
+		metaSvc.EnrichMetadata(subs[i].Metadata, subs[i].Title)
 		if err := db.DB.Save(&subs[i]).Error; err == nil {
 			updatedCount++
 		}

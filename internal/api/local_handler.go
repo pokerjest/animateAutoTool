@@ -86,8 +86,8 @@ func AddLocalDirectoryHandler(c *gin.Context) {
 		return
 	}
 
-	svc := service.NewLocalAnimeService()
-	if err := svc.AddDirectory(path); err != nil {
+	scannerSvc := service.NewScannerService()
+	if err := scannerSvc.AddDirectory(path); err != nil {
 		c.String(http.StatusInternalServerError, fmt.Sprintf("添加失败: %v", err))
 		return
 	}
@@ -130,8 +130,8 @@ func DeleteLocalDirectoryHandler(c *gin.Context) {
 		return
 	}
 
-	svc := service.NewLocalAnimeService()
-	if err := svc.RemoveDirectory(uint(id)); err != nil {
+	scannerSvc := service.NewScannerService()
+	if err := scannerSvc.RemoveDirectory(uint(id)); err != nil {
 		c.String(http.StatusInternalServerError, "删除失败")
 		return
 	}
@@ -159,9 +159,9 @@ func ScanLocalDirectoryHandler(c *gin.Context) {
 
 // RegenerateNFOHandler 手动触发 NFO 重建
 func RegenerateNFOHandler(c *gin.Context) {
-	svc := service.NewLocalAnimeService()
+	metaSvc := service.NewMetadataService()
 	go func() {
-		count, err := svc.RegenerateAllNFOs()
+		count, err := metaSvc.RegenerateAllNFOs()
 		if err != nil {
 			log.Printf("ERROR: NFO Regeneration failed: %v", err)
 		} else {

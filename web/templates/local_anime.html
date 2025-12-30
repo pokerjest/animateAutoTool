@@ -470,35 +470,9 @@ p = p.replace('{Ext}', 'mp4');
 if (!p.endsWith('.mp4')) p += '.mp4';
 return p;
     },
-    sseSource: null,
-    connectSSE() {
-        if (this.sseSource) return;
-        this.sseSource = new EventSource('/api/events');
-        
-        this.sseSource.addEventListener('scan_progress', (e) => {
-            const data = JSON.parse(e.data);
-            if (data.type === 'start') {
-                this.scanning = true;
-                this.showToast(`🚀 开始扫描: ${data.dir}`);
-            }
-        });
-        
-        this.sseSource.addEventListener('scan_complete', (e) => {
-            const res = JSON.parse(e.data);
-            this.scanning = false;
-            this.showToast(`✅ 扫描完成! 新增: ${res.Added}, 更新: ${res.Updated}`);
-            setTimeout(() => window.location.reload(), 1500);
-        });
-
-        this.sseSource.addEventListener('metadata_updated', (e) => {
-            const data = JSON.parse(e.data);
-            if (data.type === 'new_anime') {
-                this.showToast(`✨ 发现新番剧: ${data.title}`);
-            }
-        });
     }
-}" x-init="
-    connectSSE();
+}
+" x-init="
 $watch('activeSource', () => scrollToTop());
 $watch('loadingDetails', (val) => { if (!val) scrollToTop() });
 $watch('showDetailsModal', value => document.body.style.overflow = value ? 'hidden' : '');

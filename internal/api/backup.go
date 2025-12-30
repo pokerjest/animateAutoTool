@@ -174,8 +174,8 @@ func ExecuteRestoreHandler(c *gin.Context) {
 	if options.RegenerateNFO {
 		go func() {
 			log.Println("Restore: Triggering NFO regeneration...")
-			localSvc := service.NewLocalAnimeService()
-			count, err := localSvc.RegenerateAllNFOs()
+			metaSvc := service.NewMetadataService()
+			count, err := metaSvc.RegenerateAllNFOs()
 			if err != nil {
 				log.Printf("Restore: NFO regeneration failed: %v", err)
 			} else {

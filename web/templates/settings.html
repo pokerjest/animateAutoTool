@@ -1,542 +1,366 @@
 {{ if not .SkipLayout }}{{ template "header.html" . }}{{ end }}
 
-<div class="space-y-6">
-    <h2 class="text-2xl font-bold text-gray-700">系统设置</h2>
+<div class="space-y-6" x-data="{ 
+    activeTab: 'download',
+    tabs: [
+        { id: 'download', name: '下载管理', icon: '📥' },
+        { id: 'metadata', name: '元数据', icon: '🏷️' },
+        { id: 'media', name: '媒体/同步', icon: '🎬' },
+        { id: 'network', name: '网络代理', icon: '🌐' },
+        { id: 'security', name: '账户安全', icon: '🔐' }
+    ]
+}">
+    <div class="flex items-end justify-between border-b border-gray-200/50 pb-4">
+        <h2 class="text-3xl font-black text-gray-800 tracking-tight">系统设置</h2>
+        <div class="flex gap-2 bg-gray-100/50 p-1 rounded-xl">
+            <template x-for="tab in tabs" :key="tab.id">
+                <button @click="activeTab = tab.id"
+                    :class="activeTab === tab.id ? 'bg-white text-primary shadow-sm ring-1 ring-black/5' : 'text-gray-500 hover:text-gray-700'"
+                    class="px-4 py-2 rounded-lg text-sm font-bold transition-all flex items-center gap-2">
+                    <span x-text="tab.icon"></span>
+                    <span x-text="tab.name"></span>
+                </button>
+            </template>
+        </div>
+    </div>
 
-    <form hx-post="/api/settings" hx-target="#save-result" hx-swap="innerHTML" novalidate>
-        <div class="space-y-6">
-            <!-- qBittorrent Settings -->
-            <div class="bg-white/60 p-6 rounded-xl border border-white/70 shadow-sm">
-                <div class="mb-4">
-                    <h3 class="text-lg font-semibold text-gray-800 border-b border-gray-200 pb-2 mb-4">qBittorrent 设置
-                    </h3>
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">Web UI 地址</label>
-                            <input type="text" name="qb_url" value='{{ index .Config "qb_url" }}'
-                                class="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-primary focus:border-transparent outline-none"
-                                placeholder="http://localhost:8080 (请包含 http://)">
-                        </div>
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">下载保存目录</label>
-                            <input type="text" name="base_download_dir" value='{{ index .Config "base_download_dir" }}'
-                                class="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-primary focus:border-transparent outline-none"
-                                placeholder="/downloads/anime">
-                        </div>
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">用户名</label>
-                            <input type="text" name="qb_username" value='{{ index .Config "qb_username" }}'
-                                class="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-primary focus:border-transparent outline-none">
-                        </div>
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">密码</label>
-                            <div class="relative">
-                                <input type="password" id="qb_password_input" name="qb_password"
-                                    value='{{ index .Config "qb_password" }}'
-                                    class="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-primary focus:border-transparent outline-none pr-10">
-                                <button type="button" onclick="togglePassword()"
-                                    class="absolute inset-y-0 right-0 px-3 flex items-center text-gray-400 hover:text-gray-600 cursor-pointer focus:outline-none"
-                                    title="显示/隐藏密码">
-                                    <span id="pwd-toggle-icon">👁️</span>
-                                </button>
-                            </div>
-                        </div>
+    <form hx-post="/api/settings" hx-target="#save-result" hx-swap="innerHTML" class="relative">
+        <!-- Download Tab -->
+        <div x-show="activeTab === 'download'" x-transition class="space-y-6">
+            <div class="glass-panel p-8">
+                <h3 class="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2">
+                    <span class="w-2 h-6 bg-primary rounded-full"></span>
+                    qBittorrent 设置
+                </h3>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div class="space-y-1.5">
+                        <label class="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">Web UI 地址</label>
+                        <input type="text" name="qb_url" value='{{ index .Config "qb_url" }}'
+                            class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 focus:bg-white focus:border-primary focus:ring-4 focus:ring-primary/10 outline-none transition-all font-medium"
+                            placeholder="http://localhost:8080">
                     </div>
-                </div>
-
-                <!-- QB Connection Status -->
-                <div id="qb-status" class="min-h-[40px]" hx-get="/api/settings/qb-status" hx-trigger="load"
-                    hx-target="this" hx-swap="innerHTML">
-                    <!-- Default state empty or loading handled by OOB -->
-                    <div class="htmx-indicator flex items-center gap-2 text-gray-400">
-                        <span class="animate-spin">⌛</span>
-                        <span>检查连接状态...</span>
+                    <div class="space-y-1.5">
+                        <label class="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">下载保存目录</label>
+                        <input type="text" name="base_download_dir" value='{{ index .Config "base_download_dir" }}'
+                            class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 focus:bg-white focus:border-primary focus:ring-4 focus:ring-primary/10 outline-none transition-all font-medium"
+                            placeholder="/downloads/anime">
                     </div>
-                </div>
-            </div>
-
-            <!-- Network Proxy Settings -->
-            <div class="bg-white/60 p-6 rounded-xl border border-white/70 shadow-sm">
-                <div class="mb-4">
-                    <h3 class="text-lg font-semibold text-gray-800 border-b border-gray-200 pb-2 mb-4">网络代理设置</h3>
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div class="col-span-2 md:col-span-1">
-                            <label class="block text-sm font-medium text-gray-700 mb-1">HTTP 代理地址</label>
-                            <input type="text" name="proxy_url" value='{{ index .Config "proxy_url" }}'
-                                class="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-primary focus:border-transparent outline-none"
-                                placeholder="http://127.0.0.1:7890">
-                            <p class="text-xs text-gray-500 mt-1">
-                                为 Bangumi 和 TMDB 请求配置代理。留空则不使用代理。
-                            </p>
-                        </div>
-                        <div class="col-span-2 flex flex-col gap-3 justify-center">
-                            <label class="flex items-center gap-2 cursor-pointer">
-                                <input type="checkbox" name="proxy_bangumi_enabled" value="true"
-                                    class="w-4 h-4 text-primary border-gray-300 rounded focus:ring-primary" {{ if eq
-                                    (index .Config "proxy_bangumi_enabled" ) "true" }}checked{{ end }}>
-                                <span class="text-sm text-gray-700">Bangumi 使用代理</span>
-                            </label>
-                            <label class="flex items-center gap-2 cursor-pointer">
-                                <input type="checkbox" name="proxy_tmdb_enabled" value="true"
-                                    class="w-4 h-4 text-primary border-gray-300 rounded focus:ring-primary" {{ if eq
-                                    (index .Config "proxy_tmdb_enabled" ) "true" }}checked{{ end }}>
-                                <span class="text-sm text-gray-700">TMDB 使用代理</span>
-                            </label>
-                            <label class="flex items-center gap-2 cursor-pointer">
-                                <input type="checkbox" name="proxy_anilist_enabled" value="true"
-                                    class="w-4 h-4 text-primary border-gray-300 rounded focus:ring-primary" {{ if eq
-                                    (index .Config "proxy_anilist_enabled" ) "true" }}checked{{ end }}>
-                                <span class="text-sm text-gray-700">AniList 使用代理</span>
-                            </label>
-                        </div>
+                    <div class="space-y-1.5">
+                        <label class="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">用户名</label>
+                        <input type="text" name="qb_username" value='{{ index .Config "qb_username" }}'
+                            class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 focus:bg-white focus:border-primary focus:ring-4 focus:ring-primary/10 outline-none transition-all font-medium">
                     </div>
-                </div>
-            </div>
-
-            <!-- Bangumi Integration -->
-            <div class="bg-white/60 p-6 rounded-xl border border-white/70 shadow-sm">
-                <div class="mb-8">
-                    <div class="flex items-center gap-2 border-b border-gray-200 pb-2 mb-4">
-                        <h3 class="text-lg font-semibold text-gray-800">Bangumi 集成</h3>
-                    </div>
-
-                    <div class="space-y-6">
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">Personal Access Token</label>
-                            <div class="relative">
-                                <input type="password" id="bangumi_token_input" name="bangumi_access_token"
-                                    value='{{ index .Config "bangumi_access_token" }}'
-                                    class="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-primary focus:border-transparent outline-none pr-10"
-                                    placeholder="请在 Bangumi 开发者设置中生成 Access Token">
-                                <button type="button" onclick="toggleTokenVisibility()"
-                                    class="absolute inset-y-0 right-0 px-3 flex items-center text-gray-400 hover:text-gray-600 cursor-pointer focus:outline-none"
-                                    title="显示/隐藏 Token">
-                                    <span id="token-toggle-icon">👁️</span>
-                                </button>
-                            </div>
-                            <p class="text-xs text-gray-500 mt-1">
-                                请前往 <a href="https://bgm.tv/dev/app" target="_blank"
-                                    class="text-pink-500 hover:underline">Bangumi
-                                    开发者中心</a> 创建应用并生成 Access Token。
-                            </p>
-                        </div>
-
-                        <!-- Connection Status -->
-                        <div id="bangumi-status" hx-get="/api/bangumi/profile"
-                            hx-trigger="load, refresh-bangumi from:body" hx-target="this" hx-swap="innerHTML"
-                            class="min-h-[80px]">
-                            <!-- Default state if not connected (loading handled by htmx) -->
-                            <div class="htmx-indicator flex items-center gap-2 text-gray-500">
-                                <span class="animate-spin">⌛</span>
-                                <span>检查连接状态...</span>
-                            </div>
-                            <div class="text-sm text-gray-500 flex items-center gap-2">
-                                <span>🔴 未连接</span>
-                                <span class="text-xs text-gray-400">(请先输入 Access Token 并保存)</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- TMDB Integration -->
-            <div class="bg-white/60 p-6 rounded-xl border border-white/70 shadow-sm">
-                <div class="mb-4">
-                    <div class="flex items-center gap-2 border-b border-gray-200 pb-2 mb-4">
-                        <h3 class="text-lg font-semibold text-gray-800">The Movie Database (TMDB)</h3>
-                    </div>
-
-                    <div class="space-y-4">
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">API Read Access Token (v4
-                                Auth)</label>
-                            <div class="relative">
-                                <input type="password" id="tmdb_token_input" name="tmdb_token"
-                                    value='{{ index .Config "tmdb_token" }}'
-                                    class="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-primary focus:border-transparent outline-none pr-10"
-                                    placeholder="eyJhbGciOiJIUzI1Ni...">
-                                <button type="button" onclick="toggleTMDBTokenVisibility()"
-                                    class="absolute inset-y-0 right-0 px-3 flex items-center text-gray-400 hover:text-gray-600 cursor-pointer focus:outline-none"
-                                    title="显示/隐藏 Token">
-                                    <span id="tmdb-token-toggle-icon">👁️</span>
-                                </button>
-                            </div>
-                            <p class="text-xs text-gray-500 mt-1">
-                                请前往 <a href="https://www.themoviedb.org/settings/api" target="_blank"
-                                    class="text-blue-500 hover:underline">TMDB API Settings</a> 生成 "API Read Access
-                                Token"。
-                            </p>
-                        </div>
-
-                        <!-- Connection Status -->
-                        <div id="tmdb-status" hx-get="/api/settings/tmdb-status" hx-trigger="load" hx-target="this"
-                            hx-swap="innerHTML" class="min-h-[40px]">
-                            <div class="htmx-indicator flex items-center gap-2 text-gray-500">
-                                <span class="animate-spin">⌛</span>
-                                <span>检查连接状态...</span>
-                            </div>
-                            <div class="text-sm text-gray-500 flex items-center gap-2">
-                                <span>🔴 未连接</span>
-                                <span class="text-xs text-gray-400">(请先输入 Token 并保存)</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- AniList Integration -->
-            <div class="bg-white/60 p-6 rounded-xl border border-white/70 shadow-sm">
-                <div class="mb-4">
-                    <div class="flex items-center gap-2 border-b border-gray-200 pb-2 mb-4">
-                        <h3 class="text-lg font-semibold text-gray-800">AniList 集成</h3>
-                    </div>
-
-                    <div class="space-y-4">
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">Authorization</label>
-
-                            <!-- Client ID Input -->
-                            <div class="mb-4">
-                                <label class="block text-xs text-gray-500 mb-1">步骤 1: 输入 Apps 的 Client ID (不是 Secret)
-                                </label>
-                                <div class="flex gap-2">
-                                    <input type="text" id="anilist_client_id"
-                                        class="flex-1 px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-primary focus:border-transparent outline-none"
-                                        placeholder="例如: 12345">
-                                    <a href="#" onclick="openAniListAuth()" id="anilist-auth-btn"
-                                        class="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600 transition flex items-center gap-2 text-sm whitespace-nowrap">
-                                        🔗 获取 Token
-                                    </a>
-                                </div>
-                            </div>
-
-                            <!-- Token Input -->
-                            <label class="block text-xs text-gray-500 mb-1">步骤 2: 粘贴获取到的 Access Token</label>
-                            <div class="relative">
-                                <input type="password" id="anilist_token_input" name="anilist_token"
-                                    value='{{ index .Config "anilist_token" }}'
-                                    class="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-primary focus:border-transparent outline-none pr-10"
-                                    placeholder="eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9...">
-                                <button type="button" onclick="toggleAniListTokenVisibility()"
-                                    class="absolute inset-y-0 right-0 px-3 flex items-center text-gray-400 hover:text-gray-600 cursor-pointer focus:outline-none"
-                                    title="显示/隐藏 Token">
-                                    <span id="anilist-token-toggle-icon">👁️</span>
-                                </button>
-                            </div>
-                            <p class="text-xs text-gray-500 mt-2">
-                                Tips: 如果您只有 Client Secret，请忽略它。我们需要的是通过 Client ID 授权后获得的 Access Token (以 ey 开头)。
-                                <br>
-                                <a href="https://anilist.co/settings/developer" target="_blank"
-                                    class="text-blue-500 hover:underline">管理我的 Apps</a>
-                            </p>
-                        </div>
-
-                        <!-- Connection Status -->
-                        <div id="anilist-status" hx-get="/api/settings/anilist-status" hx-trigger="load"
-                            hx-target="this" hx-swap="innerHTML" class="min-h-[40px]">
-                            <div class="htmx-indicator flex items-center gap-2 text-gray-500">
-                                <span class="animate-spin">⌛</span>
-                                <span>检查连接状态...</span>
-                            </div>
-                            <div class="text-sm text-gray-500 flex items-center gap-2">
-                                <span>🔴 未连接</span>
-                                <span class="text-xs text-gray-400">(请先输入 Token 并保存)</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Jellyfin Integration -->
-            <div class="bg-white/60 p-6 rounded-xl border border-white/70 shadow-sm">
-                <div class="mb-4">
-                    <div class="flex items-center gap-2 border-b border-gray-200 pb-2 mb-4">
-                        <h3 class="text-lg font-semibold text-gray-800">Jellyfin 集成</h3>
-                        <button type="button" onclick="openJellyfin()"
-                            class="ml-auto text-sm text-blue-600 hover:text-blue-800 hover:underline flex items-center gap-1">
-                            <span>🔗 管理后台</span>
-                        </button>
-                    </div>
-
-                    <div class="space-y-4">
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">Server URL</label>
-                                <input type="text" id="jellyfin_url_input" name="jellyfin_url"
-                                    value='{{ index .Config "jellyfin_url" }}'
-                                    class="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-primary focus:border-transparent outline-none"
-                                    placeholder="http://localhost:8096">
-                            </div>
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">API Key</label>
-                                <div class="relative">
-                                    <input type="password" id="jellyfin_api_key_input" name="jellyfin_api_key"
-                                        value='{{ index .Config "jellyfin_api_key" }}'
-                                        class="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-primary focus:border-transparent outline-none pr-10"
-                                        placeholder="请在 Jellyfin 控制台生成 API 密钥">
-                                    <button type="button" onclick="toggleJellyfinTokenVisibility()"
-                                        class="absolute inset-y-0 right-0 px-3 flex items-center text-gray-400 hover:text-gray-600 cursor-pointer focus:outline-none"
-                                        title="显示/隐藏 API Key">
-                                        <span id="jellyfin-token-toggle-icon">👁️</span>
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="flex items-center gap-4">
-                            <label class="flex items-center gap-2 cursor-pointer">
-                                <input type="checkbox" name="proxy_jellyfin_enabled" value="true"
-                                    class="w-4 h-4 text-primary border-gray-300 rounded focus:ring-primary" {{ if eq
-                                    (index .Config "proxy_jellyfin_enabled" ) "true" }}checked{{ end }}>
-                                <span class="text-sm text-gray-700">Jellyfin 使用代理</span>
-                            </label>
-                        </div>
-
-                        <!-- Connection Status -->
-                        <div id="jellyfin-status" hx-get="/api/settings/jellyfin-status" hx-trigger="load"
-                            hx-target="this" hx-swap="innerHTML" class="min-h-[40px]">
-                            <div class="htmx-indicator flex items-center gap-2 text-gray-500">
-                                <span class="animate-spin">⌛</span>
-                                <span>检查连接状态...</span>
-                            </div>
-                            <div class="text-sm text-gray-500 flex items-center gap-2">
-                                <span>🔴 未连接</span>
-                                <span class="text-xs text-gray-400">(请先输入 URL 和 API Key 并保存)</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- PikPak Integration -->
-            <div class="bg-white/60 p-6 rounded-xl border border-white/70 shadow-sm mt-6">
-                <div class="mb-4">
-                    <div class="flex items-center gap-2 border-b border-gray-200 pb-2 mb-4">
-                        <h3 class="text-lg font-semibold text-gray-800">PikPak 集成 (To AList)</h3>
-                    </div>
-
-                    <div class="space-y-4">
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">Username</label>
-                                <input type="text" name="pikpak_username" value='{{ index .Config "pikpak_username" }}'
-                                    class="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-primary focus:border-transparent outline-none"
-                                    placeholder="PikPak 用户名">
-                            </div>
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">Password</label>
-                                <div class="relative">
-                                    <input type="password" id="pikpak_password_input" name="pikpak_password"
-                                        value='{{ index .Config "pikpak_password" }}'
-                                        class="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-primary focus:border-transparent outline-none pr-10"
-                                        placeholder="PikPak 密码">
-                                    <button type="button" onclick="togglePikPakPasswordVisibility()"
-                                        class="absolute inset-y-0 right-0 px-3 flex items-center text-gray-400 hover:text-gray-600 cursor-pointer focus:outline-none"
-                                        title="显示/隐藏 密码">
-                                        <span id="pikpak-pwd-toggle-icon">👁️</span>
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="mt-4">
-                            <label class="block text-sm font-medium text-gray-700 mb-1">Refresh Token (推荐:
-                                解决验证码错误)</label>
-                            <div class="relative">
-                                <input type="password" id="pikpak_refresh_token_input" name="pikpak_refresh_token"
-                                    value=""
-                                    class="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-primary focus:border-transparent outline-none pr-10"
-                                    placeholder="若遇到 4001/Captcha 错误，请粘贴 Refresh Token 以直连">
-                                <button type="button"
-                                    onclick="var i=document.getElementById('pikpak_refresh_token_input'); i.type = i.type==='password'?'text':'password';"
-                                    class="absolute inset-y-0 right-0 px-3 flex items-center text-gray-400 hover:text-gray-600 cursor-pointer focus:outline-none"
-                                    title="显示/隐藏 Token">
-                                    <span>👁️</span>
-                                </button>
-                            </div>
-                            <div class="text-xs text-slate-500 mt-1">
-                                当密码登录报 "4001: captcha_required" 错时，请从浏览器 (F12 > Application > Storage) 获取
-                                `refresh_token` 并填入此处。
-                            </div>
-                        </div>
-
-                        <div class="flex items-start justify-between gap-4 mt-6">
-                            <!-- Connection Status -->
-                            <div id="pikpak-status" hx-get="/api/settings/pikpak-status"
-                                hx-trigger="load, pikpak-synced from:body" hx-target="this" hx-swap="innerHTML"
-                                class="flex-grow min-h-[40px]">
-                                <div class="htmx-indicator flex items-center gap-2 text-gray-500">
-                                    <span class="animate-spin">⌛</span>
-                                    <span>检查连接状态...</span>
-                                </div>
-                                <div class="text-sm text-gray-500 flex items-center gap-2">
-                                    <span>⚪ 等待检查...</span>
-                                </div>
-                            </div>
-
-                            <button type="button" hx-post="/api/settings/pikpak-sync" hx-target="#pikpak-sync-status"
-                                class="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition flex items-center gap-2 text-sm font-medium shadow-sm shadow-indigo-200 whitespace-nowrap"
-                                hx-indicator="#pikpak-indicator">
-                                <span class="hidden [.htmx-request_&]:inline animate-spin">⌛</span>
-                                <span>💾 保存并连接 PikPak</span>
+                    <div class="space-y-1.5">
+                        <label class="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">密码</label>
+                        <div class="relative" x-data="{ show: false }">
+                            <input :type="show ? 'text' : 'password'" name="qb_password"
+                                value='{{ index .Config "qb_password" }}'
+                                class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 focus:bg-white focus:border-primary focus:ring-4 focus:ring-primary/10 outline-none transition-all font-medium pr-12">
+                            <button type="button" @click="show = !show"
+                                class="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                                <span x-text="show ? '🙈' : '👁️'"></span>
                             </button>
                         </div>
+                    </div>
+                </div>
 
-                        <div class="flex justify-end items-center gap-2 mt-2">
-                            <div id="pikpak-indicator" class="htmx-indicator text-xs text-gray-500">正在连接 AList...</div>
-                            <div id="pikpak-sync-status" class="text-xs"></div>
+                <div id="qb-status" class="mt-6 p-4 rounded-xl bg-gray-50/50 border border-gray-100 min-h-[50px]"
+                    hx-get="/api/settings/qb-status" hx-trigger="load" hx-target="this">
+                    <span class="text-sm text-gray-400 flex items-center gap-2">
+                        <span class="animate-spin text-xs">⌛</span> 核心检查中...
+                    </span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Metadata Tab -->
+        <div x-show="activeTab === 'metadata'" x-transition x-cloak class="space-y-6">
+            <div class="glass-panel p-8">
+                <h3 class="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2">
+                    <span class="w-2 h-6 bg-pink-400 rounded-full"></span>
+                    Bangumi 集成
+                </h3>
+                <div class="space-y-4">
+                    <div class="space-y-1.5" x-data="{ show: false }">
+                        <label class="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">Access
+                            Token</label>
+                        <div class="relative">
+                            <input :type="show ? 'text' : 'password'" name="bangumi_access_token"
+                                value='{{ index .Config "bangumi_access_token" }}'
+                                class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 focus:bg-white focus:border-pink-300 focus:ring-4 focus:ring-pink-500/10 outline-none transition-all font-medium pr-12"
+                                placeholder="Personal Access Token">
+                            <button type="button" @click="show = !show"
+                                class="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                                <span x-text="show ? '🙈' : '👁️'"></span>
+                            </button>
                         </div>
                     </div>
+                    <div id="bangumi-status" hx-get="/api/bangumi/profile" hx-trigger="load"
+                        class="p-4 rounded-xl bg-pink-50/30 border border-pink-100/50 min-h-[60px]"></div>
                 </div>
             </div>
 
-            <!-- Security Settings: Change Password -->
-            <div class="bg-white/60 p-6 rounded-xl border border-white/70 shadow-sm mt-6">
-                <div class="mb-4">
-                    <div class="flex items-center gap-2 border-b border-gray-200 pb-2 mb-4">
-                        <h3 class="text-lg font-semibold text-gray-800">安全设置</h3>
+            <div class="glass-panel p-8">
+                <h3 class="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2">
+                    <span class="w-2 h-6 bg-blue-400 rounded-full"></span>
+                    The Movie Database (TMDB)
+                </h3>
+                <div class="space-y-4">
+                    <div class="space-y-1.5" x-data="{ show: false }">
+                        <label class="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">API Key (v4
+                            Token)</label>
+                        <div class="relative">
+                            <input :type="show ? 'text' : 'password'" name="tmdb_token"
+                                value='{{ index .Config "tmdb_token" }}'
+                                class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 focus:bg-white focus:border-blue-300 focus:ring-4 focus:ring-blue-500/10 outline-none transition-all font-medium pr-12">
+                            <button type="button" @click="show = !show"
+                                class="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                                <span x-text="show ? '🙈' : '👁️'"></span>
+                            </button>
+                        </div>
+                    </div>
+                    <div id="tmdb-status" hx-get="/api/settings/tmdb-status" hx-trigger="load"
+                        class="p-4 rounded-xl bg-blue-50/30 border border-blue-100/50 min-h-[50px]"></div>
+                </div>
+            </div>
+
+            <div class="glass-panel p-8">
+                <h3 class="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2">
+                    <span class="w-2 h-6 bg-cyan-400 rounded-full"></span>
+                    AniList 集成
+                </h3>
+                <div class="space-y-6">
+                    <div class="space-y-4">
+                        <div class="space-y-1.5">
+                            <label class="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">步骤 1: Client
+                                ID</label>
+                            <div class="flex gap-3">
+                                <input type="text" id="anilist_client_id"
+                                    class="flex-1 px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 focus:bg-white focus:border-cyan-300 focus:ring-4 focus:ring-cyan-500/10 outline-none transition-all font-medium"
+                                    placeholder="例如: 12345">
+                                <button type="button" onclick="openAniListAuth()"
+                                    class="bg-cyan-500 text-white px-6 py-3 rounded-2xl font-bold hover:bg-cyan-600 transition-all shadow-lg active:scale-95 whitespace-nowrap">
+                                    🔗 获取 Token
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="space-y-1.5" x-data="{ show: false }">
+                            <label class="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">步骤 2: Access
+                                Token</label>
+                            <div class="relative">
+                                <input :type="show ? 'text' : 'password'" id="anilist_token_input" name="anilist_token"
+                                    value='{{ index .Config "anilist_token" }}'
+                                    class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 focus:bg-white focus:border-cyan-300 focus:ring-4 focus:ring-cyan-500/10 outline-none transition-all font-medium pr-12"
+                                    placeholder="粘贴获取到的 Token">
+                                <button type="button" @click="show = !show"
+                                    class="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                                    <span x-text="show ? '🙈' : '👁️'"></span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="anilist-status" hx-get="/api/settings/anilist-status" hx-trigger="load"
+                        class="p-4 rounded-xl bg-cyan-50/30 border border-cyan-100/50 min-h-[50px]"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Media Tab -->
+        <div x-show="activeTab === 'media'" x-transition x-cloak class="space-y-6">
+            <div class="glass-panel p-8">
+                <div class="flex items-center justify-between mb-6">
+                    <h3 class="text-xl font-bold text-gray-800 flex items-center gap-2">
+                        <span class="w-2 h-6 bg-orange-400 rounded-full"></span>
+                        Jellyfin 管理
+                    </h3>
+                    <button type="button" onclick="openJellyfin()"
+                        class="text-sm font-bold text-orange-600 hover:text-orange-700 hover:underline flex items-center gap-1.5">
+                        <span>🔗 打开控制台</span>
+                    </button>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div class="space-y-1.5">
+                        <label class="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">服务器 URL</label>
+                        <input type="text" id="jellyfin_url_input" name="jellyfin_url"
+                            value='{{ index .Config "jellyfin_url" }}'
+                            class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 focus:bg-white focus:border-orange-300 focus:ring-4 focus:ring-orange-500/10 outline-none transition-all font-medium">
+                    </div>
+                    <div class="space-y-1.5" x-data="{ show: false }">
+                        <label class="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">API 密钥</label>
+                        <div class="relative">
+                            <input :type="show ? 'text' : 'password'" name="jellyfin_api_key"
+                                value='{{ index .Config "jellyfin_api_key" }}'
+                                class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 focus:bg-white focus:border-orange-300 focus:ring-4 focus:ring-orange-500/10 outline-none transition-all font-medium pr-12">
+                            <button type="button" @click="show = !show"
+                                class="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                                <span x-text="show ? '🙈' : '👁️'"></span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <div id="jellyfin-status" hx-get="/api/settings/jellyfin-status" hx-trigger="load"
+                    class="mt-6 p-4 rounded-xl bg-orange-50/30 border border-orange-100/50 min-h-[50px]"></div>
+            </div>
+
+            <div class="glass-panel p-8">
+                <h3 class="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2">
+                    <span class="w-2 h-6 bg-purple-400 rounded-full"></span>
+                    PikPak 集成 (Via AList)
+                </h3>
+                <div class="space-y-6">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div class="space-y-1.5">
+                            <label class="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">用户名</label>
+                            <input type="text" name="pikpak_username" value='{{ index .Config "pikpak_username" }}'
+                                class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 focus:bg-white focus:border-purple-300 focus:ring-4 focus:ring-purple-500/10 outline-none transition-all font-medium"
+                                placeholder="PikPak 用户名">
+                        </div>
+                        <div class="space-y-1.5" x-data="{ show: false }">
+                            <label class="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">密码</label>
+                            <div class="relative">
+                                <input :type="show ? 'text' : 'password'" name="pikpak_password"
+                                    value='{{ index .Config "pikpak_password" }}'
+                                    class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 focus:bg-white focus:border-purple-300 focus:ring-4 focus:ring-purple-500/10 outline-none transition-all font-medium pr-12"
+                                    placeholder="PikPak 密码">
+                                <button type="button" @click="show = !show"
+                                    class="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                                    <span x-text="show ? '🙈' : '👁️'"></span>
+                                </button>
+                            </div>
+                        </div>
                     </div>
 
-                    <div x-data="{
-                        oldPassword: '',
-                        newPassword: '',
-                        confirmPassword: '',
-                        loading: false,
-                        message: '',
-                        isError: false,
-                        changePassword() {
-                            if (this.newPassword !== this.confirmPassword) {
-                                this.message = '两次输入的新密码不一致';
-                                this.isError = true;
-                                return;
-                            }
-                            this.loading = true;
-                            this.message = '';
-                            fetch('/api/change-password', {
-                                method: 'POST',
-                                headers: {'Content-Type': 'application/json'},
-                                body: JSON.stringify({
-                                    old_password: this.oldPassword,
-                                    new_password: this.newPassword
-                                })
-                            })
-                            .then(async r => {
-                                const data = await r.json();
-                                if (r.ok) {
-                                    this.message = '密码修改成功';
-                                    this.isError = false;
-                                    this.oldPassword = '';
-                                    this.newPassword = '';
-                                    this.confirmPassword = '';
-                                } else {
-                                    this.message = data.error || '修改失败';
-                                    this.isError = true;
-                                }
-                            })
-                            .catch(() => {
-                                this.message = '网络请求失败';
-                                this.isError = true;
-                            })
-                            .finally(() => this.loading = false);
-                        }
-                    }" class="space-y-4 max-w-md">
-
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">旧密码</label>
-                            <input type="password" x-model="oldPassword"
-                                class="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-primary focus:border-transparent outline-none">
+                    <div class="space-y-1.5" x-data="{ show: false }">
+                        <label class="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">Refresh Token
+                            (推荐)</label>
+                        <div class="relative">
+                            <input :type="show ? 'text' : 'password'" id="pikpak_refresh_token_input"
+                                name="pikpak_refresh_token"
+                                class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 focus:bg-white focus:border-purple-300 focus:ring-4 focus:ring-purple-500/10 outline-none transition-all font-medium pr-12"
+                                placeholder="遇到 Captcha 错误时填写">
+                            <button type="button" @click="show = !show"
+                                class="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                                <span x-text="show ? '🙈' : '👁️'"></span>
+                            </button>
                         </div>
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">新密码</label>
-                            <input type="password" x-model="newPassword"
-                                class="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-primary focus:border-transparent outline-none">
-                        </div>
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">确认新密码</label>
-                            <input type="password" x-model="confirmPassword"
-                                class="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-primary focus:border-transparent outline-none">
-                        </div>
+                    </div>
 
-                        <div x-show="message" x-text="message" :class="isError ? 'text-red-500' : 'text-green-500'"
-                            class="text-sm font-bold"></div>
-
-                        <button type="button" @click="changePassword()"
-                            :disabled="loading || !oldPassword || !newPassword"
-                            class="bg-gray-800 text-white px-4 py-2 rounded-lg hover:bg-gray-900 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2">
-                            <span x-show="loading" class="animate-spin text-white">⌛</span>
-                            <span>修改密码</span>
+                    <div
+                        class="flex items-center justify-between gap-4 p-4 rounded-xl bg-purple-50/30 border border-purple-100/50">
+                        <div id="pikpak-status" hx-get="/api/settings/pikpak-status"
+                            hx-trigger="load, pikpak-synced from:body" class="text-sm font-medium text-purple-700">
+                            等待检查...
+                        </div>
+                        <button type="button" hx-post="/api/settings/pikpak-sync" hx-target="#pikpak-sync-status"
+                            class="bg-purple-600 text-white px-6 py-2.5 rounded-xl font-bold hover:bg-purple-700 transition-all shadow-md active:scale-95 flex items-center gap-2">
+                            <span class="htmx-indicator animate-spin text-xs">⌛</span>
+                            <span>💾 保存并同步</span>
                         </button>
+                    </div>
+                    <div id="pikpak-sync-status" class="text-xs font-bold text-purple-400 text-right mt-1"></div>
+                </div>
+            </div>
+        </div>
 
+        <!-- Network Tab -->
+        <div x-show="activeTab === 'network'" x-transition x-cloak class="space-y-6">
+            <div class="glass-panel p-8">
+                <h3 class="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2">
+                    <span class="w-2 h-6 bg-indigo-400 rounded-full"></span>
+                    代理配置
+                </h3>
+                <div class="space-y-6">
+                    <div class="space-y-1.5">
+                        <label class="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">HTTP 代理地址</label>
+                        <input type="text" name="proxy_url" value='{{ index .Config "proxy_url" }}'
+                            class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 focus:bg-white focus:border-indigo-300 focus:ring-4 focus:ring-indigo-500/10 outline-none transition-all font-medium"
+                            placeholder="http://127.0.0.1:7890">
+                    </div>
+                    <div class="flex flex-wrap gap-4">
+                        <label
+                            class="flex items-center gap-3 bg-white/60 px-4 py-2 rounded-xl border border-white/60 cursor-pointer shadow-sm hover:shadow-md transition-all">
+                            <input type="checkbox" name="proxy_bangumi_enabled" value="true"
+                                class="w-4 h-4 accent-indigo-500" {{ if eq (index .Config "proxy_bangumi_enabled"
+                                ) "true" }}checked{{ end }}>
+                            <span class="text-sm font-bold text-gray-700">Bangumi 使用代理</span>
+                        </label>
+                        <label
+                            class="flex items-center gap-3 bg-white/60 px-4 py-2 rounded-xl border border-white/60 cursor-pointer shadow-sm hover:shadow-md transition-all">
+                            <input type="checkbox" name="proxy_tmdb_enabled" value="true"
+                                class="w-4 h-4 accent-indigo-500" {{ if eq (index .Config "proxy_tmdb_enabled" ) "true"
+                                }}checked{{ end }}>
+                            <span class="text-sm font-bold text-gray-700">TMDB 使用代理</span>
+                        </label>
                     </div>
                 </div>
             </div>
+        </div>
 
-            <!-- Save Actions -->
-            <div
-                class="bg-white/60 p-6 rounded-xl border border-white/70 shadow-sm mt-6 flex justify-between items-center">
-                <div id="save-result" class="text-sm transition-all duration-300"></div>
-
-                <button type="submit" id="save-settings-btn"
-                    class="bg-primary text-white px-8 py-2.5 rounded-lg hover:bg-accent transition shadow-lg shadow-pink-200 disabled:opacity-50 disabled:cursor-not-allowed flex justify-center items-center gap-2 text-lg font-semibold"
-                    hx-indicator="#save-settings-btn">
-                    <span class="hidden [.htmx-request_&]:inline animate-spin">⌛</span>
-                    <span class="[.htmx-request_&]:hidden">💾 保存所有配置</span>
-                    <span class="hidden [.htmx-request_&]:inline">正在保存...</span>
-                </button>
+        <!-- Security Tab -->
+        <div x-show="activeTab === 'security'" x-transition x-cloak class="space-y-6">
+            <div class="glass-panel p-8" x-data="{
+                oldPwd: '', newPwd: '', confirmPwd: '', loading: false,
+                async submit() {
+                    if (this.newPwd !== this.confirmPwd) {
+                        window.dispatchEvent(new CustomEvent('toast', { detail: { msg: '新密码不一致', type: 'error' } }));
+                        return;
+                    }
+                    this.loading = true;
+                    try {
+                        const res = await fetch('/api/change-password', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({ old_password: this.oldPwd, new_password: this.newPwd })
+                        });
+                        const data = await res.json();
+                        if (res.ok) {
+                            window.dispatchEvent(new CustomEvent('toast', { detail: { msg: '密码已更新', type: 'success' } }));
+                            this.oldPwd = ''; this.newPwd = ''; this.confirmPwd = '';
+                        } else {
+                            window.dispatchEvent(new CustomEvent('toast', { detail: { msg: data.error || '更新失败', type: 'error' } }));
+                        }
+                    } catch (e) { console.error(e); }
+                    finally { this.loading = false; }
+                }
+            }">
+                <h3 class="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2">
+                    <span class="w-2 h-6 bg-gray-800 rounded-full"></span>
+                    更换密码
+                </h3>
+                <div class="max-w-md space-y-4">
+                    <input type="password" x-model="oldPwd" placeholder="当前密码"
+                        class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 outline-none font-medium">
+                    <input type="password" x-model="newPwd" placeholder="新密码"
+                        class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 outline-none font-medium">
+                    <input type="password" x-model="confirmPwd" placeholder="确认新密码"
+                        class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 outline-none font-medium">
+                    <button type="button" @click="submit" :disabled="loading"
+                        class="w-full bg-gray-800 text-white py-3 rounded-2xl font-bold hover:bg-black transition-all shadow-xl active:scale-95 disabled:opacity-50">
+                        <span x-show="!loading">更新安全凭证</span>
+                        <span x-show="loading">优化中...</span>
+                    </button>
+                </div>
             </div>
+        </div>
 
+        <!-- Global Save FAB -->
+        <div class="fixed bottom-10 right-10 z-[40]">
+            <button type="submit" id="save-settings-btn"
+                class="bg-primary text-white p-6 rounded-full hover:bg-accent transition-all shadow-[0_15px_30px_-5px_rgba(255,182,193,0.5)] active:scale-90 flex items-center gap-3 group relative overflow-hidden"
+                hx-indicator="#save-settings-btn">
+                <span class="text-2xl [.htmx-request_&]:hidden">💾</span>
+                <span class="hidden [.htmx-request_&]:inline animate-spin text-2xl">⌛</span>
+                <span
+                    class="max-w-0 overflow-hidden group-hover:max-w-xs transition-all duration-500 font-black uppercase tracking-widest text-sm whitespace-nowrap">保存并同步所有配置</span>
+            </button>
+        </div>
     </form>
+
+    <div id="save-result" class="hidden"></div>
 
     <script>
         const jellyfinServerId = '{{.JellyfinServerID}}';
-
-        function togglePassword() {
-            const input = document.getElementById('qb_password_input');
-            const icon = document.getElementById('pwd-toggle-icon');
-            if (input.type === 'password') {
-                input.type = 'text';
-                icon.innerText = '🙈';
-            } else {
-                input.type = 'password';
-                icon.innerText = '👁️';
-            }
-        }
-
-        function toggleTokenVisibility() {
-            const input = document.getElementById('bangumi_token_input');
-            const icon = document.getElementById('token-toggle-icon');
-            if (input.type === 'password') {
-                input.type = 'text';
-                icon.innerText = '🙈';
-            } else {
-                input.type = 'password';
-                icon.innerText = '👁️';
-            }
-        }
-
-        function toggleTMDBTokenVisibility() {
-            const input = document.getElementById('tmdb_token_input');
-            const icon = document.getElementById('tmdb-token-toggle-icon');
-            if (input.type === 'password') {
-                input.type = 'text';
-                icon.innerText = '🙈';
-            } else {
-                input.type = 'password';
-                icon.innerText = '👁️';
-            }
-        }
-
-        function toggleAniListTokenVisibility() {
-            const input = document.getElementById('anilist_token_input');
-            const icon = document.getElementById('anilist-token-toggle-icon');
-            if (input.type === 'password') {
-                input.type = 'text';
-                icon.innerText = '🙈';
-            } else {
-                input.type = 'password';
-                icon.innerText = '👁️';
-            }
-        }
 
         function openAniListAuth() {
             const clientId = document.getElementById('anilist_client_id').value;
@@ -554,49 +378,21 @@
                 console.error('请先输入 Jellyfin URL');
                 return;
             }
-
-            // Normalize URL
             url = url.replace(/\/$/, '');
             let targetUrl = url;
             if (jellyfinServerId) {
                 targetUrl = url + "/web/index.html?serverId=" + jellyfinServerId;
             }
-
-            // Direct open without confirmation
             window.open(targetUrl, '_blank');
-
-            // Try to copy to clipboard (optional help)
-            navigator.clipboard.writeText("admin").catch(err => {
-                console.error("Failed to copy password:", err);
-            });
-        }
-
-        function toggleJellyfinTokenVisibility() {
-            const input = document.getElementById('jellyfin_api_key_input');
-            const icon = document.getElementById('jellyfin-token-toggle-icon');
-            if (input.type === 'password') {
-                input.type = 'text';
-                icon.innerText = '🙈';
-            } else {
-                input.type = 'password';
-                icon.innerText = '👁️';
-            }
-        }
-
-
-
-        function togglePikPakPasswordVisibility() {
-            const input = document.getElementById('pikpak_password_input');
-            const icon = document.getElementById('pikpak-pwd-toggle-icon');
-            if (input.type === 'password') {
-                input.type = 'text';
-                icon.innerText = '🙈';
-            } else {
-                input.type = 'password';
-                icon.innerText = '👁️';
-            }
         }
     </script>
 </div>
+
+<style>
+    [x-cloak] {
+        display: none !important;
+    }
+</style>
+{{ if not .SkipLayout }}{{ template "footer.html" . }}{{ end }}
 
 {{ if not .SkipLayout }}{{ template "footer.html" . }}{{ end }}

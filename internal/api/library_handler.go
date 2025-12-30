@@ -29,6 +29,11 @@ func GetLibraryHandler(c *gin.Context) {
 		dbCtx = dbCtx.Where("title LIKE ? OR title_cn LIKE ? OR title_en LIKE ? OR title_jp LIKE ?", likeQuery, likeQuery, likeQuery, likeQuery)
 	}
 
+	year := c.Query("year")
+	if year != "" && year != "all" {
+		dbCtx = dbCtx.Where("air_date LIKE ?", year+"%")
+	}
+
 	// Order by updated_at desc usually makes sense to see new stuff
 	if err := dbCtx.Order("updated_at desc").Find(&metadata).Error; err != nil {
 		c.String(http.StatusInternalServerError, "Database Error")
@@ -59,32 +64,44 @@ func GetLibraryHandler(c *gin.Context) {
 	seenBangumiIDs := make(map[int]bool)
 	seenTitles := make(map[string]bool)
 
+	statusFilter := c.Query("status")
+
 	for _, m := range metadata {
 		// Deduplication Strategy:
-		// 1. Filter by BangumiID if it exists and has been seen.
 		if m.BangumiID > 0 {
 			if seenBangumiIDs[m.BangumiID] {
 				continue
 			}
 			seenBangumiIDs[m.BangumiID] = true
 		}
-
-		// 2. Filter by Title if it has been seen.
 		if seenTitles[m.Title] {
 			continue
 		}
 		seenTitles[m.Title] = true
 
+		isSub := subMap[m.ID]
+		isLocal := localMap[m.ID]
+
+		// Apply Status Filter
+		if statusFilter == "subscribed" && !isSub {
+			continue
+		}
+		if statusFilter == "local" && !isLocal {
+			continue
+		}
+
 		items = append(items, LibraryItem{
 			AnimeMetadata: m,
-			IsSubscribed:  subMap[m.ID],
-			IsLocal:       localMap[m.ID],
+			IsSubscribed:  isSub,
+			IsLocal:       isLocal,
 		})
 	}
 
 	c.HTML(http.StatusOK, "library.html", gin.H{
 		"Metadata":   items,
 		"SearchTerm": query,
+		"Year":       year,
+		"Status":     c.Query("status"),
 		"SkipLayout": isHTMX(c),
 	})
 }
@@ -92,14 +109,14 @@ func GetLibraryHandler(c *gin.Context) {
 // RefreshLibraryMetadataHandler triggers a background global refresh
 func RefreshLibraryMetadataHandler(c *gin.Context) {
 	force := c.Query("force") == ValueTrue
-	svc := service.NewLocalAnimeService()
+	metaSvc := service.NewMetadataService()
 	if service.GlobalRefreshStatus.IsRunning {
 		c.JSON(http.StatusOK, gin.H{"message": "已经在刷新中", "status": "running"})
 		return
 	}
 
 	// Run in background
-	go svc.RefreshAllMetadata(force)
+	go metaSvc.RefreshAllMetadata(force)
 
 	msg := "已开始后台增量刷新元数据"
 	if force {
@@ -122,8 +139,8 @@ func RefreshItemMetadataHandler(c *gin.Context) {
 	}
 	id := uint(idUint64)
 
-	svc := service.NewLocalAnimeService()
-	if err := svc.RefreshSingleMetadata(id); err != nil {
+	metaSvc := service.NewMetadataService()
+	if err := metaSvc.RefreshSingleMetadata(id); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"message": "刷新失败: " + err.Error()})
 		return
 	}

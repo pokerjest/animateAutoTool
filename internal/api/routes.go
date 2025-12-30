@@ -16,9 +16,11 @@ import (
 
 func InitRoutes(r *gin.Engine) {
 	// Perform startup cleanup
-	svc := service.NewLocalAnimeService()
-	svc.CleanupGarbage()
-	svc.StartMetadataMigration() // Start background image caching
+	scannerSvc := service.NewScannerService()
+	scannerSvc.CleanupGarbage()
+
+	metaSvc := service.NewMetadataService()
+	metaSvc.StartMetadataMigration() // Start background image caching
 
 	// Start Event Workers
 	worker.StartMetadataWorker()

@@ -255,10 +255,10 @@ func RefreshLocalAnimeMetadataHandler(c *gin.Context) {
 	}
 
 	// Use Service logic
-	svc := service.NewLocalAnimeService()
+	metaSvc := service.NewMetadataService()
 	// Preload metadata to ensure we have it
 	db.DB.Preload("Metadata").First(&anime, id)
-	svc.EnrichAnimeMetadata(&anime)
+	metaSvc.EnrichAnime(&anime)
 
 	if err := db.DB.Save(&anime).Error; err != nil {
 		c.String(http.StatusInternalServerError, "Failed to save: "+err.Error())
@@ -315,8 +315,8 @@ func SwitchLocalAnimeSourceHandler(c *gin.Context) {
 	}
 
 	// Trigger global sync (this will update 'anime' results too)
-	svc := service.NewLocalAnimeService()
-	svc.SyncMetadataToModels(m)
+	metaSvc := service.NewMetadataService()
+	metaSvc.SyncMetadataToModels(m)
 
 	c.HTML(http.StatusOK, "local_anime_card.html", anime)
 }

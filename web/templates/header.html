@@ -104,11 +104,118 @@
                 window.location.href = '/login';
             }
         });
+
+        // Initialize Alpine components
+        document.addEventListener('alpine:init', () => {
+            Alpine.data('globalManager', () => ({
+                progress: {
+                    isRunning: false,
+                    title: '任务处理中',
+                    current: 0,
+                    total: 100,
+                    currentTitle: ''
+                },
+                connect() {
+                    console.log('Global Manager Connecting to SSE...');
+                    const source = new EventSource('/api/events');
+
+                    source.addEventListener('EventScanProgress', (e) => {
+                        const data = JSON.parse(e.data);
+                        this.progress.isRunning = true;
+                        this.progress.title = '正在扫描目录';
+                        if (data.type === 'progress') {
+                            this.progress.current = data.current;
+                            this.progress.total = data.total;
+                            this.progress.currentTitle = data.dir;
+                        }
+                    });
+
+                    source.addEventListener('EventScanComplete', (e) => {
+                        this.progress.isRunning = false;
+                        this.showToast('扫描完成', 'success');
+                    });
+
+                    source.addEventListener('EventMetadataUpdated', (e) => {
+                        const data = JSON.parse(e.data);
+                        if (data.type === 'progress') {
+                            this.progress.isRunning = true;
+                            this.progress.title = '正在获取元数据';
+                            this.progress.current = data.current;
+                            this.progress.total = data.total;
+                            this.progress.currentTitle = data.title;
+                        } else if (data.type === 'new_anime') {
+                            this.showToast(`发现新番剧: ${data.title}`, 'info');
+                        }
+                    });
+
+                    // Global Toast Listener
+                    window.addEventListener('toast', (e) => {
+                        this.showToast(e.detail.msg, e.detail.type);
+                    });
+                },
+                showToast(msg, type = 'info') {
+                    const container = document.getElementById('toast-container');
+                    if (!container) return;
+
+                    const colors = {
+                        success: 'border-green-400 bg-green-50 text-green-800',
+                        info: 'border-blue-400 bg-blue-50 text-blue-800',
+                        error: 'border-red-400 bg-red-50 text-red-800'
+                    };
+
+                    const toast = document.createElement('div');
+                    toast.className = `p-3 rounded-lg border-l-4 shadow-md pointer-events-auto transition-all duration-300 transform translate-x-10 opacity-0 ${colors[type] || colors.info}`;
+                    toast.innerHTML = `<div class="text-sm font-medium">${msg}</div>`;
+
+                    container.appendChild(toast);
+
+                    // Animate in
+                    setTimeout(() => {
+                        toast.classList.remove('translate-x-10', 'opacity-0');
+                    }, 10);
+
+                    // Animate out and remove
+                    setTimeout(() => {
+                        toast.classList.add('opacity-0', 'translate-x-10');
+                        setTimeout(() => toast.remove(), 300);
+                    }, 4000);
+                }
+            }));
+        });
     </script>
 </head>
 
 <body class="min-h-screen text-gray-800"
-    style="background: url('https://w.wallhaven.cc/full/wy/wallhaven-wyw6px.png') no-repeat center center fixed; background-size: cover;">
+    style="background: url('/static/img/bg.png') no-repeat center center fixed; background-size: cover;">
+
+    <!-- Global Manager (Progress + Toasts) -->
+    <div x-data="globalManager" x-init="connect()"
+        class="fixed top-6 right-6 z-[100] flex flex-col gap-3 w-80 pointer-events-none">
+
+        <!-- Progress Bar Card -->
+        <template x-if="progress.isRunning">
+            <div class="glass-panel p-4 shadow-2xl border-t-4 border-accent pointer-events-auto transform transition-all duration-500 translate-y-0"
+                x-transition:enter="transition ease-out duration-300" x-transition:enter-start="opacity-0 translate-y-4"
+                x-transition:enter-end="opacity-100 translate-y-0">
+                <div class="flex justify-between items-center mb-2">
+                    <span class="text-xs font-bold text-gray-500 uppercase tracking-wider"
+                        x-text="progress.title"></span>
+                    <span class="text-xs font-bold text-accent"
+                        x-text="Math.round((progress.current / progress.total) * 100) + '%'"></span>
+                </div>
+                <div class="w-full bg-gray-200 rounded-full h-2.5 overflow-hidden">
+                    <div class="bg-gradient-to-r from-primary to-accent h-full transition-all duration-500 ease-out relative"
+                        :style="`width: ${(progress.current / progress.total) * 100}%` ">
+                        <div class="absolute inset-0 bg-white/20 animate-[shimmer_2s_infinite]"></div>
+                    </div>
+                </div>
+                <div class="mt-2 text-[10px] text-gray-400 truncate" x-text="progress.currentTitle || '正在初始化...'"></div>
+            </div>
+        </template>
+
+        <!-- Toasts Container -->
+        <div id="toast-container" class="flex flex-col gap-2"></div>
+    </div>
 
     <!-- Global Modal Layer -->
     <div id="modal-layer" class="relative z-[100]"></div>
