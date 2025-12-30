@@ -25,7 +25,7 @@ type LocalAnimeData struct {
 
 // LocalAnimePageHandler 渲染本地番剧管理页面
 func LocalAnimePageHandler(c *gin.Context) {
-	skip := isHTMX(c)
+	skip := IsHTMX(c)
 
 	var dirs []model.LocalAnimeDirectory
 	db.DB.Find(&dirs)

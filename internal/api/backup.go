@@ -67,7 +67,7 @@ func getDBStats(targetDB *gorm.DB, dbPath string) BackupStats {
 }
 
 func BackupPageHandler(c *gin.Context) {
-	skip := isHTMX(c)
+	skip := IsHTMX(c)
 
 	stats := getDBStats(db.DB, db.CurrentDBPath)
 
