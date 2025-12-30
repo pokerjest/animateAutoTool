@@ -119,7 +119,7 @@ func (s *NFOGeneratorService) SaveLocalImages(anime *model.LocalAnime) error {
 		if _, err := os.Stat(path); err == nil {
 			return // Exists
 		}
-		if err := os.WriteFile(path, data, 0644); err != nil {
+		if err := os.WriteFile(path, data, 0644); err != nil { //nolint:gosec
 			log.Printf("NFO: Failed to write image %s: %v", path, err)
 		} else {
 			log.Printf("NFO: Saved local image %s", path)
@@ -155,7 +155,7 @@ func (s *NFOGeneratorService) saveXML(path string, v interface{}) error {
 	header := []byte(xml.Header)
 	output = append(header, output...)
 
-	if err := os.WriteFile(path, output, 0644); err != nil {
+	if err := os.WriteFile(path, output, 0644); err != nil { //nolint:gosec
 		log.Printf("NFO: Failed to write %s: %v", path, err)
 		return err
 	}

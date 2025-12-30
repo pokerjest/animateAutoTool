@@ -38,7 +38,9 @@ func (s *ScannerService) ScanAll() error {
 	}
 
 	for _, d := range dirs {
-		s.ScanDirectory(&d)
+		if _, err := s.ScanDirectory(&d); err != nil {
+			log.Printf("ScannerService: Failed to scan directory %s: %v", d.Path, err)
+		}
 	}
 	return nil
 }
@@ -197,7 +199,7 @@ func (s *ScannerService) syncEpisodesForAnime(anime *model.LocalAnime) (int, int
 	var size int64
 	var foundPaths []string
 
-	filepath.WalkDir(anime.Path, func(path string, d fs.DirEntry, err error) error {
+	if err := filepath.WalkDir(anime.Path, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}
@@ -238,7 +240,9 @@ func (s *ScannerService) syncEpisodesForAnime(anime *model.LocalAnime) (int, int
 			}
 		}
 		return nil
-	})
+	}); err != nil {
+		log.Printf("Scanner: WalkDir failed for %s: %v", anime.Path, err)
+	}
 
 	// Cleanup episodes no longer on disk
 	if anime.ID != 0 {

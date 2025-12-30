@@ -570,4 +570,3 @@ func (c *Client) GetCalendar() ([]CalendarItem, error) {
 
 	return calendar, nil
 }
-

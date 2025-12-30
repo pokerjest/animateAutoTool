@@ -21,19 +21,21 @@ type Response struct {
 
 var cachedToken string
 
+const DefaultAListURL = "http://127.0.0.1:5244"
+
 func getBaseUrl() string {
 	var cfg model.GlobalConfig
 	// We assume DB is initialized when this is called.
 	// launcher handles binaries before DB init, but API calls happen after DB init.
 	if db.DB == nil {
-		return "http://127.0.0.1:5244"
+		return DefaultAListURL
 	}
 
 	if err := db.DB.Where("key = ?", model.ConfigKeyAListUrl).First(&cfg).Error; err != nil {
-		return "http://127.0.0.1:5244"
+		return DefaultAListURL
 	}
 	if cfg.Value == "" {
-		return "http://127.0.0.1:5244"
+		return DefaultAListURL
 	}
 	// Also if cfg.Value is "http://localhost:5244", we might want to replace it?
 	// But let's assume user config is respected if set.

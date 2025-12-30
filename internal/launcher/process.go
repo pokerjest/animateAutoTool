@@ -20,9 +20,9 @@ func (m *Manager) startAlist() error {
 	}
 	binPath := filepath.Join(m.BinDir, exeName)
 	dataDir := filepath.Join(m.DataDir, "alist")
-
-	// Create data dir
-	os.MkdirAll(dataDir, 0755)
+	if err := os.MkdirAll(dataDir, 0755); err != nil {
+		return fmt.Errorf("failed to create alist dir: %w", err)
+	}
 
 	// 1. Force set admin password to 'admin' (or random) for zero-setup
 	// We use 'admin' for simplicity in this local tool context, user can change later
@@ -47,7 +47,9 @@ func (m *Manager) startAlist() error {
 	m.wg.Add(1)
 	go func() {
 		defer m.wg.Done()
-		cmd.Wait()
+		if err := cmd.Wait(); err != nil {
+			fmt.Printf("Alist process exited with error: %v\n", err)
+		}
 	}()
 
 	fmt.Println("Alist started (Port 5244)")
@@ -69,7 +71,9 @@ func (m *Manager) startQB() error {
 
 	// Use isolated profile directory
 	profileDir := filepath.Join(m.DataDir, "qbittorrent")
-	os.MkdirAll(profileDir, 0755)
+	if err := os.MkdirAll(profileDir, 0755); err != nil {
+		return fmt.Errorf("failed to create qb dir: %w", err)
+	}
 
 	// QBittorrent portable arguments?
 	// The portable version usually uses "profile" folder in current dir if not specified.
@@ -79,7 +83,9 @@ func (m *Manager) startQB() error {
 	// We might need to pre-write a qBittorrent.conf!
 
 	// Create default config if not exists to enable WebUI
-	m.ensureQBConfig(profileDir)
+	if err := m.ensureQBConfig(profileDir); err != nil {
+		return err
+	}
 
 	cmd := exec.CommandContext(m.Ctx, binPath, "--profile="+filepath.Clean(profileDir))
 	// For Linux/Mac nox, usually it stays in foreground unless -d is passed.
@@ -92,23 +98,27 @@ func (m *Manager) startQB() error {
 	m.wg.Add(1)
 	go func() {
 		defer m.wg.Done()
-		cmd.Wait()
+		if err := cmd.Wait(); err != nil {
+			fmt.Printf("qBittorrent process exited with error: %v\n", err)
+		}
 	}()
 
 	fmt.Println("qBittorrent started (Port 8080)")
 	return nil
 }
 
-func (m *Manager) ensureQBConfig(profilePath string) {
+func (m *Manager) ensureQBConfig(profilePath string) error {
 	// Path: profilePath/qBittorrent/config/qBittorrent.conf
 	confDir := filepath.Join(profilePath, "qBittorrent", "config")
 	confFile := filepath.Join(confDir, "qBittorrent.conf")
 
 	if _, err := os.Stat(confFile); err == nil {
-		return
+		return nil
 	}
 
-	os.MkdirAll(confDir, 0755)
+	if err := os.MkdirAll(confDir, 0755); err != nil {
+		return err
+	}
 
 	// Minimal config to enable WebUI on 8080, admin/adminadmin
 	// QB 4.x+ uses INI format
@@ -120,7 +130,7 @@ WebUI\Password_PBKDF2="@ByteArray(ARQ77eY1NUZaQsuDHbIMCA==:0WMRkYTUWVT9wVvdDtHAj
 `
 	// Password is 'adminadmin' (PBKDF2 hash)
 
-	os.WriteFile(confFile, []byte(configContent), 0644)
+	return os.WriteFile(confFile, []byte(configContent), 0644)
 }
 
 func (m *Manager) startJellyfin() error {
@@ -141,10 +151,18 @@ func (m *Manager) startJellyfin() error {
 	logDir := filepath.Join(m.DataDir, "jellyfin", "log")
 	cacheDir := filepath.Join(m.DataDir, "jellyfin", "cache")
 
-	os.MkdirAll(dataDir, 0755)
-	os.MkdirAll(configDir, 0755)
-	os.MkdirAll(logDir, 0755)
-	os.MkdirAll(cacheDir, 0755)
+	if err := os.MkdirAll(dataDir, 0755); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(logDir, 0755); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(cacheDir, 0755); err != nil {
+		return err
+	}
 
 	// FFmpeg path
 	ffmpegName := "ffmpeg.exe"
@@ -191,7 +209,9 @@ func (m *Manager) startJellyfin() error {
 	m.wg.Add(1)
 	go func() {
 		defer m.wg.Done()
-		cmd.Wait()
+		if err := cmd.Wait(); err != nil {
+			fmt.Printf("Jellyfin process exited with error: %v\n", err)
+		}
 	}()
 
 	fmt.Println("Jellyfin started (Port 8096)")

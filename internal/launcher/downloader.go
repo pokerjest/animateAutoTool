@@ -4,7 +4,6 @@ import (
 	"archive/tar"
 	"archive/zip"
 	"compress/gzip"
-	"crypto/tls"
 	"fmt"
 	"io"
 	"net/http"
@@ -42,11 +41,21 @@ const (
 	FFmpegUrlLinuxArm64 = "https://repo.jellyfin.org/files/ffmpeg/linux/latest-7.x/arm64/jellyfin-ffmpeg_7.1.3-1_portable_linuxarm64-gpl.tar.xz"
 	FFmpegUrlMacAmd64   = "https://repo.jellyfin.org/files/ffmpeg/macos/latest-7.x/x86_64/jellyfin-ffmpeg_7.1.3-1_portable_mac64-gpl.tar.xz"
 	FFmpegUrlMacArm64   = "https://repo.jellyfin.org/files/ffmpeg/macos/latest-7.x/arm64/jellyfin-ffmpeg_7.1.3-1_portable_macarm64-gpl.tar.xz"
+
+	OSWindows = "windows"
+	OSLinux   = "linux"
+	OSDarwin  = "darwin"
+	ArchAmd64 = "amd64"
+	ArchArm64 = "arm64"
+
+	ExtZip   = ".zip"
+	ExtTarGz = ".tar.gz"
+	ExtTarXz = ".tar.xz"
 )
 
 func (m *Manager) ensureAlist() error {
 	exeName := "alist"
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == OSWindows {
 		exeName += ".exe"
 	}
 	targetPath := filepath.Join(m.BinDir, exeName)
@@ -62,9 +71,9 @@ func (m *Manager) ensureAlist() error {
 		return err
 	}
 
-	ext := ".zip"
+	ext := ExtZip
 	if isTarGz {
-		ext = ".tar.gz"
+		ext = ExtTarGz
 	}
 	tmpFile := filepath.Join(m.BinDir, "alist"+ext)
 
@@ -91,7 +100,7 @@ func (m *Manager) ensureAlist() error {
 
 func (m *Manager) ensureQB() error {
 	exeName := "qbittorrent.exe"
-	if runtime.GOOS != "windows" {
+	if runtime.GOOS != OSWindows {
 		exeName = "qbittorrent-nox"
 	}
 
@@ -125,7 +134,7 @@ func (m *Manager) ensureQB() error {
 	}
 
 	// Post-processing for Linux: Rename binary
-	if runtime.GOOS == "linux" {
+	if runtime.GOOS == OSLinux {
 		// Find potential binary names
 		candidates := []string{"qbittorrent-enhanced-nox", "qbittorrent-nox"}
 		for _, name := range candidates {
@@ -158,11 +167,11 @@ func (m *Manager) EnsureJellyfin() error {
 			return err
 		}
 
-		ext := ".zip"
-		if strings.HasSuffix(url, ".tar.gz") {
-			ext = ".tar.gz"
-		} else if strings.HasSuffix(url, ".tar.xz") {
-			ext = ".tar.xz"
+		ext := ExtZip
+		if strings.HasSuffix(url, ExtTarGz) {
+			ext = ExtTarGz
+		} else if strings.HasSuffix(url, ExtTarXz) {
+			ext = ExtTarXz
 		}
 		tmpFile := filepath.Join(m.BinDir, "jellyfin_dl"+ext)
 		if err := downloadFile(url, tmpFile); err != nil {
@@ -205,11 +214,11 @@ func (m *Manager) EnsureJellyfin() error {
 			return err
 		}
 
-		ext := ".zip"
-		if strings.HasSuffix(url, ".tar.gz") {
-			ext = ".tar.gz"
-		} else if strings.HasSuffix(url, ".tar.xz") {
-			ext = ".tar.xz"
+		ext := ExtZip
+		if strings.HasSuffix(url, ExtTarGz) {
+			ext = ExtTarGz
+		} else if strings.HasSuffix(url, ExtTarXz) {
+			ext = ExtTarXz
 		}
 
 		tmpFile := filepath.Join(m.BinDir, "ffmpeg_dl"+ext)
@@ -253,15 +262,15 @@ func getAlistUrl() (string, bool, error) {
 	arch := runtime.GOARCH
 
 	switch os {
-	case "windows":
+	case OSWindows:
 		return AlistUrlWindows, false, nil
-	case "linux":
-		if arch == "arm64" {
+	case OSLinux:
+		if arch == ArchArm64 {
 			return AlistUrlLinuxArm, true, nil
 		}
 		return AlistUrlLinux, true, nil
-	case "darwin":
-		if arch == "arm64" {
+	case OSDarwin:
+		if arch == ArchArm64 {
 			return AlistUrlDarwinArm, true, nil
 		}
 		return AlistUrlDarwin, true, nil
@@ -275,15 +284,15 @@ func getQBUrl() (string, error) {
 	arch := runtime.GOARCH
 
 	switch os {
-	case "windows":
+	case OSWindows:
 		// Portable zip not consistently available for newer versions.
 		return "", fmt.Errorf("manual_install_required: please install qBittorrent manually (e.g. from PortableApps or official installer)")
-	case "linux":
-		if arch == "arm64" {
+	case OSLinux:
+		if arch == ArchArm64 {
 			return QBUrlLinuxArm64, nil
 		}
 		return QBUrlLinuxAmd64, nil
-	case "darwin":
+	case OSDarwin:
 		return "", fmt.Errorf("manual_install_required: auto-download for macOS qbittorrent not supported yet. Please install it to /Applications/qbittorrent.app")
 	default:
 		return "", fmt.Errorf("unsupported OS: %s", os)
@@ -292,11 +301,11 @@ func getQBUrl() (string, error) {
 
 func getJellyfinUrl() (string, error) {
 	switch runtime.GOOS {
-	case "windows":
+	case OSWindows:
 		return JellyfinUrlWindows, nil
-	case "linux":
+	case OSLinux:
 		return JellyfinUrlLinux, nil
-	case "darwin":
+	case OSDarwin:
 		return JellyfinUrlMac, nil
 	default:
 		return "", fmt.Errorf("unsupported OS")
@@ -308,17 +317,17 @@ func getFFmpegUrl() (string, error) {
 	arch := runtime.GOARCH
 
 	switch os {
-	case "windows":
+	case OSWindows:
 		return FFmpegUrlWindows, nil
-	case "linux":
-		if arch == "amd64" {
+	case OSLinux:
+		if arch == ArchAmd64 {
 			return FFmpegUrlLinuxAmd64, nil
-		} else if arch == "arm64" {
+		} else if arch == ArchArm64 {
 			return FFmpegUrlLinuxArm64, nil
 		}
 		return "", fmt.Errorf("unsupported architecture for Linux: %s", arch)
-	case "darwin":
-		if arch == "arm64" {
+	case OSDarwin:
+		if arch == ArchArm64 {
 			return FFmpegUrlMacArm64, nil
 		}
 		return FFmpegUrlMacAmd64, nil
@@ -354,11 +363,8 @@ func downloadFileOnce(url string, filepath string) error {
 	}
 	defer out.Close()
 
-	// Use custom client to skip verify for mirror
-	tr := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-	}
-	client := &http.Client{Transport: tr}
+	// Use standard client
+	client := &http.Client{}
 
 	resp, err := client.Get(url)
 	if err != nil {
@@ -415,7 +421,16 @@ func unzip(src, dest string) error {
 			return err
 		}
 
-		_, err = io.Copy(outFile, rc)
+		// G110: Decompression bomb mitigation
+		// Limit max file size to 10GB
+		const maxFileSize = 10 * 1024 * 1024 * 1024
+		if f.FileInfo().Size() > maxFileSize {
+			outFile.Close()
+			rc.Close()
+			return fmt.Errorf("file %s too large (potential zip bomb)", f.Name)
+		}
+
+		_, err = io.Copy(outFile, io.LimitReader(rc, maxFileSize))
 
 		outFile.Close()
 		rc.Close()

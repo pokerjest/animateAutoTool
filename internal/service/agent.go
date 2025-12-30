@@ -165,7 +165,9 @@ func (s *AgentService) networkWorker(queue <-chan uint) {
 
 		// Re-use existing Enrich Logic
 		log.Printf("Agent: Network enriching %s", anime.Title)
-		s.metaSvc.EnrichAnime(&anime)
+		if err := s.metaSvc.EnrichAnime(&anime); err != nil {
+			log.Printf("Agent: Failed to enrich anime %s: %v", anime.Title, err)
+		}
 
 		// Save result handled inside EnrichAnimeMetadata
 	}

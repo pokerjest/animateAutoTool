@@ -17,7 +17,10 @@ import (
 
 func TestMain(m *testing.M) {
 	// Init Config
-	config.LoadConfig("")
+	if err := config.LoadConfig(""); err != nil {
+		// Just log, might be fine if defaults are used
+		// fmt.Printf("Config load warning: %v\n", err)
+	}
 
 	// Setup: Use in-memory DB for tests
 	// We need to ensure we don't accidentally write to real DB
@@ -28,7 +31,9 @@ func TestMain(m *testing.M) {
 	code := m.Run()
 
 	// Teardown
-	db.CloseDB()
+	if err := db.CloseDB(); err != nil {
+		// fmt.Printf("CloseDB error: %v\n", err)
+	}
 	os.Exit(code)
 }
 
@@ -53,7 +58,9 @@ func setupRouter() *gin.Engine {
 	// So `web/templates` won't be found.
 	// We should chdir to root in TestMain?
 	if _, err := os.Stat("../../web/templates"); err == nil {
-		os.Chdir("../..")
+		if err := os.Chdir("../.."); err != nil {
+			panic(err)
+		}
 	}
 
 	InitRoutes(r)

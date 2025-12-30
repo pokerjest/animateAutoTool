@@ -69,7 +69,7 @@ func (c *Client) do(method, path string, body interface{}) ([]byte, error) {
 	req.Header.Set("Content-Type", "application/json")
 
 	// Auth Headers
-	authHeader := fmt.Sprintf(`MediaBrowser Client="AnimateAutoTool", Device="Server", DeviceId="animate-auto-tool", Version="1.0.0"`)
+	authHeader := `MediaBrowser Client="AnimateAutoTool", Device="Server", DeviceId="animate-auto-tool", Version="1.0.0"`
 	if c.Token != "" {
 		authHeader += fmt.Sprintf(`, Token="%s"`, c.Token)
 	}

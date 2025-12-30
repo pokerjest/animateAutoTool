@@ -290,7 +290,9 @@ func ReportProgressHandler(c *gin.Context) {
 	// 4. Act on Event
 	switch body.Event {
 	case "ended":
-		client.MarkPlayed(itemId)
+		if err := client.MarkPlayed(itemId); err != nil {
+			log.Printf("Jellyfin MarkPlayed failed: %v", err)
+		}
 
 		// Sync to Bangumi (Async)
 		if anime.Metadata.BangumiID != 0 {
@@ -305,7 +307,7 @@ func ReportProgressHandler(c *gin.Context) {
 					db.DB.Model(&model.GlobalConfig{}).Where("key = ?", model.ConfigKeyProxyURL).Select("value").Scan(&proxyUrl)
 					db.DB.Model(&model.GlobalConfig{}).Where("key = ?", model.ConfigKeyProxyBangumi).Select("value").Scan(&proxyEnabled)
 
-					if proxyEnabled == "true" && proxyUrl != "" {
+					if proxyEnabled == ValueTrue && proxyUrl != "" {
 						bgmClient.SetProxy(proxyUrl)
 					}
 
@@ -318,11 +320,16 @@ func ReportProgressHandler(c *gin.Context) {
 			}(anime.Metadata.BangumiID, ep.EpisodeNum)
 		}
 	case "pause", "destroy":
-		client.UpdateProgress(itemId, body.Ticks)
+		if err := client.UpdateProgress(itemId, body.Ticks); err != nil {
+			log.Printf("Jellyfin UpdateProgress failed: %v", err)
+		}
 	case "timeupdate":
 		// Only update every X seconds/calls?
 		// Frontend should debounce this.
-		client.UpdateProgress(itemId, body.Ticks)
+		if err := client.UpdateProgress(itemId, body.Ticks); err != nil {
+			// Verbose logging might be too much here, maybe only on debug?
+			// log.Printf("Jellyfin UpdateProgress failed: %v", err)
+		}
 	}
 
 	c.Status(http.StatusOK)

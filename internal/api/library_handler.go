@@ -217,7 +217,7 @@ func SearchMetadataHandler(c *gin.Context) {
 	}
 
 	switch source {
-	case "tmdb":
+	case SourceTMDB:
 		var token model.GlobalConfig
 		if err := db.DB.Where("key = ?", model.ConfigKeyTMDBToken).First(&token).Error; err != nil || token.Value == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "TMDB Token not configured"})
@@ -257,7 +257,7 @@ func SearchMetadataHandler(c *gin.Context) {
 		}
 		c.JSON(http.StatusOK, genericResults)
 
-	case "anilist":
+	case SourceAniList:
 		var token model.GlobalConfig
 		if err := db.DB.Where("key = ?", model.ConfigKeyAniListToken).First(&token).Error; err != nil || token.Value == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "AniList Token not configured"})
