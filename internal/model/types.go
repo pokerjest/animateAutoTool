@@ -121,6 +121,8 @@ const (
 	ConfigKeyAniListToken        = "anilist_token"
 	ConfigKeyProxyAniList        = "proxy_anilist_enabled"
 	ConfigKeyJellyfinUrl         = "jellyfin_url"
+	ConfigKeyJellyfinUsername    = "jellyfin_username"
+	ConfigKeyJellyfinPassword    = "jellyfin_password"
 	ConfigKeyJellyfinApiKey      = "jellyfin_api_key" //nolint:gosec
 	ConfigKeyProxyJellyfin       = "proxy_jellyfin_enabled"
 	ConfigKeyAListUrl            = "alist_url"
@@ -128,6 +130,7 @@ const (
 	ConfigKeyPikPakUsername      = "pikpak_username"
 	ConfigKeyPikPakPassword      = "pikpak_password"
 	ConfigKeyPikPakRefreshToken  = "pikpak_refresh_token" //nolint:gosec
+	ConfigKeyPikPakCaptchaToken  = "pikpak_captcha_token"
 
 	// Cloudflare R2
 	// Cloudflare R2

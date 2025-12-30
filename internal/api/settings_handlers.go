@@ -95,6 +95,7 @@ func UpdateSettingsHandler(c *gin.Context) {
 		model.ConfigKeyQBPassword,
 		model.ConfigKeyBaseDir,
 		model.ConfigKeyBangumiRefreshToken,
+		model.ConfigKeyBangumiAccessToken, // Added missing key
 		model.ConfigKeyTMDBToken,
 		model.ConfigKeyAniListToken,
 		model.ConfigKeyProxyURL,
@@ -102,7 +103,9 @@ func UpdateSettingsHandler(c *gin.Context) {
 		model.ConfigKeyProxyTMDB,
 		model.ConfigKeyProxyAniList,
 		model.ConfigKeyJellyfinUrl,
-		model.ConfigKeyJellyfinApiKey,
+		// model.ConfigKeyJellyfinApiKey, // Don't save empty API key if not provided, we handle it specially
+		model.ConfigKeyJellyfinUsername, // New
+		model.ConfigKeyJellyfinPassword, // New
 		model.ConfigKeyProxyJellyfin,
 		model.ConfigKeyPikPakUsername,
 		model.ConfigKeyPikPakPassword,
@@ -126,6 +129,17 @@ func UpdateSettingsHandler(c *gin.Context) {
 		}
 	}
 
+	// Special handling for legacy/manual API Key input: Only save if user explicitly provided it and it's not empty
+	if manualKey, exists := c.GetPostForm(model.ConfigKeyJellyfinApiKey); exists && manualKey != "" {
+		var count int64
+		db.DB.Model(&model.GlobalConfig{}).Where("key = ?", model.ConfigKeyJellyfinApiKey).Count(&count)
+		if count == 0 {
+			db.DB.Create(&model.GlobalConfig{Key: model.ConfigKeyJellyfinApiKey, Value: manualKey})
+		} else {
+			db.DB.Model(&model.GlobalConfig{}).Where("key = ?", model.ConfigKeyJellyfinApiKey).Update("value", manualKey)
+		}
+	}
+
 	// 1.5 Handle Checkboxes (Unchecked ones won't be in form)
 	checkboxes := []string{
 		model.ConfigKeyProxyBangumi,
@@ -137,6 +151,63 @@ func UpdateSettingsHandler(c *gin.Context) {
 		if _, exists := c.GetPostForm(key); !exists {
 			db.DB.Model(&model.GlobalConfig{}).Where("key = ?", key).Update("value", "false")
 		}
+	}
+
+	// 1.6 JELLYFIN AUTO-AUTH LOGIC
+	jfUrl := c.PostForm(model.ConfigKeyJellyfinUrl)
+	jfUser := c.PostForm(model.ConfigKeyJellyfinUsername)
+	jfPass := c.PostForm(model.ConfigKeyJellyfinPassword)
+
+	go func(u, user, pass string) {
+		if u != "" {
+			// Check if we have a valid key already?
+			// Policy: If user provided credentials => Try to Refresh/Get Key.
+			// Re-authenticating is cheap enough.
+
+			// Fallback to defaults
+			if user == "" && pass == "" {
+				user = "admin"
+				pass = "admin" // Default
+			}
+
+			// Try to authenticate
+			client := jellyfin.NewClient(u, "")
+			authResp, err := client.Authenticate(user, pass)
+			if err == nil && authResp.AccessToken != "" {
+				// Success! Save Key.
+				log.Printf("Jellyfin Auto-Auth Successful for user: %s", user)
+
+				var count int64
+				db.DB.Model(&model.GlobalConfig{}).Where("key = ?", model.ConfigKeyJellyfinApiKey).Count(&count)
+				if count == 0 {
+					db.DB.Create(&model.GlobalConfig{Key: model.ConfigKeyJellyfinApiKey, Value: authResp.AccessToken})
+				} else {
+					db.DB.Model(&model.GlobalConfig{}).Where("key = ?", model.ConfigKeyJellyfinApiKey).Update("value", authResp.AccessToken)
+				}
+
+				// Invalidate Cache
+				statusCache.Delete("jellyfin")
+			} else {
+				log.Printf("Jellyfin Auto-Auth Failed: %v", err)
+				// Don't clear existing key, maybe it's valid?
+			}
+		}
+	}(jfUrl, jfUser, jfPass)
+
+	// 1.7 PIKPAK AUTO-SYNC LOGIC
+	ppUser := c.PostForm(model.ConfigKeyPikPakUsername)
+	ppPass := c.PostForm(model.ConfigKeyPikPakPassword)
+	ppRefreshToken := c.PostForm(model.ConfigKeyPikPakRefreshToken)
+	ppCaptchaToken := c.PostForm(model.ConfigKeyPikPakCaptchaToken)
+
+	if ppUser != "" && ppPass != "" {
+		go func(u, p, r, c string) {
+			if err := alist.AddPikPakStorage(u, p, r, c); err != nil {
+				log.Printf("Failed to sync PikPak storage in background: %v", err)
+			} else {
+				log.Printf("PikPak storage synced successfully in background for user: %s", u)
+			}
+		}(ppUser, ppPass, ppRefreshToken, ppCaptchaToken)
 	}
 
 	// 2. Add artificial delay for smooth UI transition

@@ -204,51 +204,39 @@
                             value='{{ index .Config "jellyfin_url" }}'
                             class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 focus:bg-white focus:border-orange-300 focus:ring-4 focus:ring-orange-500/10 outline-none transition-all font-medium">
                     </div>
-                    <div class="space-y-1.5" x-data="{ show: false }">
-                        <label class="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">API
-                            密钥</label>
-                        <div class="relative">
-                            <input :type="show ? 'text' : 'password'" id="jellyfin_api_key_input"
-                                name="jellyfin_api_key" value='{{ index .Config "jellyfin_api_key" }}'
-                                class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 focus:bg-white focus:border-orange-300 focus:ring-4 focus:ring-orange-500/10 outline-none transition-all font-medium pr-12">
-                            <button type="button" @click="show = !show"
-                                class="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
-                                <span x-text="show ? '🙈' : '👁️'"></span>
-                            </button>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div class="space-y-1.5">
+                            <label class="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">用户名</label>
+                            <input type="text" name="jellyfin_username" value='{{ index .Config "jellyfin_username" }}'
+                                class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 focus:bg-white focus:border-orange-300 focus:ring-4 focus:ring-orange-500/10 outline-none transition-all font-medium"
+                                placeholder="默认为 admin">
+                        </div>
+                        <div class="space-y-1.5" x-data="{ show: false }">
+                            <label class="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">密码</label>
+                            <div class="relative">
+                                <input :type="show ? 'text' : 'password'" name="jellyfin_password"
+                                    value='{{ index .Config "jellyfin_password" }}'
+                                    class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 focus:bg-white focus:border-orange-300 focus:ring-4 focus:ring-orange-500/10 outline-none transition-all font-medium pr-12"
+                                    placeholder="默认为 admin">
+                                <button type="button" @click="show = !show"
+                                    class="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                                    <span x-text="show ? '🙈' : '👁️'"></span>
+                                </button>
+                            </div>
                         </div>
                     </div>
 
-                    <!-- Auto Fetch Token -->
-                    <details class="group bg-orange-50/50 rounded-xl border border-orange-100 overflow-hidden">
-                        <summary
-                            class="flex items-center gap-2 p-3 cursor-pointer select-none font-medium text-orange-700 hover:bg-orange-50 transition-colors">
-                            <span>🔑 自动获取 API Key (推荐)</span>
-                            <span class="transition-transform group-open:rotate-180 ml-auto">▼</span>
-                        </summary>
-                        <div class="p-4 pt-0 space-y-4 border-t border-orange-100/50 mt-2">
-                            <div class="grid grid-cols-2 gap-4">
-                                <div class="space-y-1">
-                                    <label class="text-xs font-bold text-gray-400 uppercase">用户名</label>
-                                    <input type="text" name="jellyfin_username"
-                                        class="w-full px-3 py-2 rounded-lg bg-white border border-gray-200 text-sm focus:border-orange-300 outline-none"
-                                        placeholder="Jellyfin 用户名">
-                                </div>
-                                <div class="space-y-1">
-                                    <label class="text-xs font-bold text-gray-400 uppercase">密码</label>
-                                    <input type="password" name="jellyfin_password"
-                                        class="w-full px-3 py-2 rounded-lg bg-white border border-gray-200 text-sm focus:border-orange-300 outline-none"
-                                        placeholder="Jellyfin 密码">
-                                </div>
-                            </div>
-                            <button type="button" hx-post="/api/settings/jellyfin-login"
-                                hx-target="#jellyfin-login-status"
-                                hx-include="[name='jellyfin_url'], [name='jellyfin_username'], [name='jellyfin_password']"
-                                class="w-full py-2 bg-orange-500 hover:bg-orange-600 text-white rounded-lg font-bold text-sm shadow-sm transition-colors flex items-center justify-center gap-2">
-                                <span class="htmx-indicator animate-spin">⌛</span> 登录并获取 Key
-                            </button>
-                            <div id="jellyfin-login-status"></div>
+                    <div class="space-y-1.5 opacity-75">
+                        <label
+                            class="text-xs font-bold text-gray-400 uppercase tracking-wider ml-1 flex items-center gap-2">
+                            <span>API 密钥 (自动生成)</span>
+                        </label>
+                        <div class="relative">
+                            <input type="text" name="jellyfin_api_key" value='{{ index .Config "jellyfin_api_key" }}'
+                                readonly
+                                class="w-full px-5 py-2 rounded-xl bg-gray-50 border border-gray-200 text-gray-500 text-sm font-mono focus:outline-none cursor-not-allowed">
                         </div>
-                    </details>
+                    </div>
                 </div>
                 <div class="relative">
                     <div id="jellyfin-status" hx-get="/api/settings/jellyfin-status" hx-trigger="revealed"
