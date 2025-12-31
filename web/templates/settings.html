@@ -139,10 +139,14 @@
 
                         <div class="flex items-center gap-4">
                             <div id="bangumi-status" hx-get="/api/bangumi/profile"
-                                hx-trigger="revealed, tab-metadata from:body, load delay:500ms"
-                                class="flex-grow p-4 rounded-xl bg-pink-50/30 border border-pink-100/50 min-h-[50px] relative group">
-                                <span class="text-xs text-gray-400">等待加载 Bangumi 状态...</span>
+                                hx-trigger="intersect once, tab-metadata from:body" hx-target="#bangumi-status"
+                                hx-swap="innerHTML"
+                                class="flex-grow p-4 rounded-xl bg-pink-50/30 border border-pink-100/50 min-h-[50px] relative group px-4">
+                                <span class="text-xs text-gray-400 flex items-center gap-2">
+                                    <span class="animate-spin">⌛</span> 等待加载 Bangumi 状态...
+                                </span>
                                 <button type="button" hx-get="/api/bangumi/profile" hx-target="#bangumi-status"
+                                    hx-swap="innerHTML"
                                     class="absolute right-2 top-2 p-1.5 text-pink-300 hover:text-pink-500 hover:bg-white rounded-lg opacity-0 group-hover:opacity-100 transition-all"
                                     title="刷新状态">
                                     🔄
@@ -181,10 +185,14 @@
                             </div>
                         </div>
                         <div id="tmdb-status" hx-get="/api/settings/tmdb-status"
-                            hx-trigger="revealed, tab-metadata from:body, load delay:500ms"
+                            hx-trigger="intersect once, tab-metadata from:body" hx-target="#tmdb-status"
+                            hx-swap="innerHTML"
                             class="p-4 rounded-xl bg-blue-50/30 border border-blue-100/50 min-h-[50px] relative group">
-                            <span class="text-xs text-gray-400">等待加载 TMDB 状态...</span>
+                            <span class="text-xs text-gray-400 flex items-center gap-2">
+                                <span class="animate-spin">⌛</span> 等待加载 TMDB 状态...
+                            </span>
                             <button type="button" hx-get="/api/settings/tmdb-status" hx-target="#tmdb-status"
+                                hx-swap="innerHTML"
                                 class="absolute right-2 top-2 p-1.5 text-blue-300 hover:text-blue-500 hover:bg-white rounded-lg opacity-0 group-hover:opacity-100 transition-all"
                                 title="刷新状态">
                                 🔄
@@ -217,10 +225,14 @@
                             </div>
                         </div>
                         <div id="anilist-status" hx-get="/api/settings/anilist-status"
-                            hx-trigger="revealed, tab-metadata from:body, load delay:500ms"
+                            hx-trigger="intersect once, tab-metadata from:body" hx-target="#anilist-status"
+                            hx-swap="innerHTML"
                             class="p-4 rounded-xl bg-cyan-50/30 border border-cyan-100/50 min-h-[50px] relative group">
-                            <span class="text-xs text-gray-400">等待加载 AniList 状态...</span>
+                            <span class="text-xs text-gray-400 flex items-center gap-2">
+                                <span class="animate-spin">⌛</span> 等待加载 AniList 状态...
+                            </span>
                             <button type="button" hx-get="/api/settings/anilist-status" hx-target="#anilist-status"
+                                hx-swap="innerHTML"
                                 class="absolute right-2 top-2 p-1.5 text-cyan-300 hover:text-cyan-500 hover:bg-white rounded-lg opacity-0 group-hover:opacity-100 transition-all"
                                 title="刷新状态">
                                 🔄
