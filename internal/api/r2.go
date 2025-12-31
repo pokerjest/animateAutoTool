@@ -295,9 +295,15 @@ type R2BackupFile struct {
 	LastModified string `json:"last_modified"`
 }
 
+// ... existing globals ...
+var r2FetchLock sync.Mutex
+
+// ...
+
 func ListR2BackupsHandler(c *gin.Context) {
 	forceRefresh := c.Query("force") == "true"
 
+	// 1. Fast Path: Check cache
 	r2BackupCacheLock.RLock()
 	if !forceRefresh && time.Since(r2BackupCacheTime) < 5*time.Minute {
 		debugLog("DEBUG: ListR2BackupsHandler - Returning Cached Result (%d files)", len(r2BackupCache))
@@ -307,17 +313,33 @@ func ListR2BackupsHandler(c *gin.Context) {
 	}
 	r2BackupCacheLock.RUnlock()
 
+	// 2. Slow Path: Acquire fetch lock to prevent stampede
+	r2FetchLock.Lock()
+	defer r2FetchLock.Unlock()
+
+	// 3. Double-Check: Maybe someone else refreshed it while we were waiting?
+	r2BackupCacheLock.RLock()
+	if !forceRefresh && time.Since(r2BackupCacheTime) < 5*time.Minute {
+		debugLog("DEBUG: ListR2BackupsHandler - Returning Cached Result after wait (%d files)", len(r2BackupCache))
+		c.JSON(http.StatusOK, gin.H{"backups": r2BackupCache})
+		r2BackupCacheLock.RUnlock()
+		return
+	}
+	r2BackupCacheLock.RUnlock()
+
 	debugLog("DEBUG: ListR2BackupsHandler - Fetching from R2 (Force: %v)", forceRefresh)
 
-	client, bucket, err := getR2Client(c.Request.Context())
+	// Use a strict timeout for the R2 operation
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
+	defer cancel()
+
+	client, bucket, err := getR2Client(ctx)
 	if err != nil {
-		// Return empty list if config invalid, or error?
-		// Better to return error so UI can show it.
-		c.JSON(http.StatusOK, gin.H{"backups": []R2BackupFile{}, "error": err.Error()})
+		c.JSON(http.StatusOK, gin.H{"backups": []R2BackupFile{}, "error": "R2 Config Error: " + err.Error()})
 		return
 	}
 
-	output, err := client.ListObjectsV2(c.Request.Context(), &s3.ListObjectsV2Input{
+	output, err := client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
 		Bucket: aws.String(bucket),
 		Prefix: aws.String("animate_backup_"), // optional filter
 	})

@@ -296,17 +296,20 @@ func ImportBackupHandler(c *gin.Context) {
 func createBackupFile(destPath string) error {
 	debugLog("DEBUG: Creating backup at %s using Source DB: %s", destPath, db.CurrentDBPath)
 
-	// For SQLite, the most reliable backup method is simply copying the file
-	// This preserves ALL data including blobs, constraints, indexes, etc.
-	input, err := os.ReadFile(db.CurrentDBPath)
-	if err != nil {
-		debugLog("DEBUG: Failed to read source DB: %v", err)
-		return fmt.Errorf("failed to read source database: %v", err)
+	// Use VACUUM INTO for safe online backup (Requires SQLite 3.27+)
+	// This creates a consistent snapshot even if writes are happening.
+
+	// VACUUM INTO requires the target file to NOT exist.
+	if err := os.Remove(destPath); err != nil && !os.IsNotExist(err) {
+		debugLog("DEBUG: Failed to clear previous backup file: %v", err)
+		return fmt.Errorf("failed to clear target file: %v", err)
 	}
 
-	if err := os.WriteFile(destPath, input, 0600); err != nil {
-		debugLog("DEBUG: Failed to write backup file: %v", err)
-		return fmt.Errorf("failed to write backup: %v", err)
+	// db.DB is the GORM instance. Get the underlying sql.DB to exec raw command?
+	// Or use GORM's Exec.
+	if err := db.DB.Exec("VACUUM INTO ?", destPath).Error; err != nil {
+		debugLog("DEBUG: VACUUM INTO failed: %v", err)
+		return fmt.Errorf("backup failed (VACUUM INTO): %v", err)
 	}
 
 	// Verify file size
