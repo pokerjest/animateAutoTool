@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/jellyfin"
@@ -31,6 +32,16 @@ func (m *Manager) startAlist() error {
 	if output, err := cmdSetPass.CombinedOutput(); err != nil {
 		fmt.Printf("Alist set pass warning: %v, output: %s\n", err, string(output))
 		// might fail if not initialized? usually works.
+	}
+
+	// 1.5. Patch config.json to ensure sqlite3 is used (fix for some environments)
+	configFile := filepath.Join(dataDir, "config.json")
+	if content, err := os.ReadFile(configFile); err == nil {
+		newContent := strings.Replace(string(content), `"type": "sqlite"`, `"type": "sqlite3"`, 1)
+		if newContent != string(content) {
+			_ = os.WriteFile(configFile, []byte(newContent), 0644)
+			fmt.Println("Patched alist config to use sqlite3")
+		}
 	}
 
 	// 2. Start Server
