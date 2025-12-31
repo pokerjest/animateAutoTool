@@ -136,6 +136,7 @@
                     source.addEventListener('EventScanComplete', (e) => {
                         this.progress.isRunning = false;
                         this.showToast('扫描完成', 'success');
+                        window.dispatchEvent(new CustomEvent('scan-complete'));
                     });
 
                     source.addEventListener('EventMetadataUpdated', (e) => {

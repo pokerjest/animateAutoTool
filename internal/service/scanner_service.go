@@ -72,14 +72,20 @@ func (s *ScannerService) ScanDirectory(dir *model.LocalAnimeDirectory) (*ScanRes
 			"total":   total,
 			"dir":     dir.Path,
 		})
+		animePath := filepath.Join(dir.Path, entry.Name())
+
 		if !entry.IsDir() {
-			continue
+			// Check if it's a video file being ignored
+			if IsVideoFile(entry.Name()) {
+				log.Printf("Scanner: Found video file in root: %s (will treat as standalone)", entry.Name())
+			} else {
+				continue
+			}
 		}
+
 		if strings.HasPrefix(entry.Name(), ".") {
 			continue
 		}
-
-		animePath := filepath.Join(dir.Path, entry.Name())
 		// Count videos and Sync Episodes
 		fileCount, totalSize := s.syncEpisodes(dir.ID, animePath)
 
@@ -98,9 +104,17 @@ func (s *ScannerService) ScanDirectory(dir *model.LocalAnimeDirectory) (*ScanRes
 				s.syncEpisodes(dir.ID, animePath)
 			} else {
 				// Insert
+				title := entry.Name()
+				if !entry.IsDir() {
+					parsed := parser.ParseFilename(entry.Name())
+					if parsed.Title != "" {
+						title = parsed.Title
+					}
+				}
+
 				anime = model.LocalAnime{
 					DirectoryID: dir.ID,
-					Title:       entry.Name(),
+					Title:       title,
 					Path:        animePath,
 					FileCount:   fileCount,
 					TotalSize:   totalSize,
@@ -184,7 +198,10 @@ func (s *ScannerService) RemoveDirectory(id uint) error {
 
 func (s *ScannerService) syncEpisodes(dirID uint, animePath string) (int, int64) {
 	var anime model.LocalAnime
-	db.DB.Where("path = ?", animePath).First(&anime)
+	if err := db.DB.Where("path = ?", animePath).First(&anime).Error; err != nil {
+		// Not found in DB, use temp object for counting
+		anime = model.LocalAnime{Path: animePath}
+	}
 	// If anime not found, we still return counts but episodes won't be linked yet.
 	// We call syncEpisodesForAnime after creation.
 	return s.syncEpisodesForAnime(&anime)

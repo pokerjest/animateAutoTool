@@ -565,6 +565,8 @@ openDetailsById($event.detail);
 " @show-anime-details.window="
 $event.stopPropagation();
 openDetails($event.detail);
+" @scan-complete.window="
+window.location.reload();
 ">
     <!-- Header Section -->
     <div class="flex justify-between items-center">
