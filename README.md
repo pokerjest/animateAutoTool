@@ -64,6 +64,7 @@ Animate Auto Tool 是一个基于 Go 1.24 开发的自动化动漫下载工具�
 
 - **操作系统**: macOS / Linux / Windows (WSL)
 - **Go 环境**: Go 1.24 或更高版本 (`go version` 检查)
+- **Linux 依赖**: `sudo apt-get install libgtk-3-dev libappindicator3-dev` (用于系统托盘)
 - **下载器**: qBittorrent 4.0+ (需开启 Web UI)
 
 ### 2. 发行版使用指南 (推荐)

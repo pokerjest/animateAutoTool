@@ -34,7 +34,7 @@ goto help
     if !ERRORLEVEL! neq 0 exit /b 1
     
     echo Building %APP_NAME%...
-    set CGO_ENABLED=0
+    set CGO_ENABLED=1
     go build -ldflags="-s -w" -o "%BIN_PATH%" "%SRC_PATH%"
     if !ERRORLEVEL! neq 0 (
         echo Build failed!
