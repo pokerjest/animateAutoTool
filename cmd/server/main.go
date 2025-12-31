@@ -53,6 +53,9 @@ func main() {
 	// 初始化路由
 	api.InitRoutes(r)
 
+	// Pre-fetch R2 Cache
+	api.InitR2Cache()
+
 	// Start Scheduler
 	sch := scheduler.NewManager()
 	sch.Start()

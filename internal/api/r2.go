@@ -38,6 +38,13 @@ type DownloadProgress struct {
 
 var progressMap sync.Map
 
+// Cache for R2 Backups
+var (
+	r2BackupCache     []R2BackupFile
+	r2BackupCacheTime time.Time
+	r2BackupCacheLock sync.RWMutex
+)
+
 // CountingReader tracks read progress
 type CountingReader struct {
 	Reader     io.Reader
@@ -121,6 +128,9 @@ func GetR2ConfigHandler(c *gin.Context) {
 	db.DB.Model(&model.GlobalConfig{}).Where("key = ?", model.ConfigKeyR2AccessKey).Select("value").Scan(&accessKey)
 	db.DB.Model(&model.GlobalConfig{}).Where("key = ?", model.ConfigKeyR2SecretKey).Select("value").Scan(&secretKey)
 	db.DB.Model(&model.GlobalConfig{}).Where("key = ?", model.ConfigKeyR2Bucket).Select("value").Scan(&bucket)
+
+	debugLog("DEBUG: GetR2ConfigHandler - Loaded: Endpoint=%s, AccessKey=%s, HasSecret=%v, Bucket=%s",
+		endpoint, accessKey, secretKey != "", bucket)
 
 	// Mask secret key if it exists
 	if secretKey != "" {
@@ -221,7 +231,62 @@ func UploadToR2Handler(c *gin.Context) {
 	}
 
 	debugLog("DEBUG: Upload successful")
+	// Invalidate Cache
+	r2BackupCacheLock.Lock()
+	r2BackupCache = nil
+	r2BackupCacheTime = time.Time{}
+	r2BackupCacheLock.Unlock()
+
 	c.JSON(http.StatusOK, gin.H{"status": "uploaded", "key": key})
+}
+
+// InitR2Cache starts a background goroutine to pre-fetch R2 backup list.
+func InitR2Cache() {
+	go func() {
+		// Wait for DB or Network stability if needed, but usually safe to start immediately
+		// since getR2Client handles its own localized config reading.
+		// Reduce sleep to 100ms for faster startup availability
+		time.Sleep(100 * time.Millisecond)
+		debugLog("DEBUG: InitR2Cache - Starting pre-fetch...")
+
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		client, bucket, err := getR2Client(ctx)
+		if err != nil {
+			debugLog("DEBUG: InitR2Cache - Config Error: %v", err)
+			return
+		}
+
+		output, err := client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+			Bucket: aws.String(bucket),
+			Prefix: aws.String("animate_backup_"),
+		})
+		if err != nil {
+			debugLog("DEBUG: InitR2Cache - List Error: %v", err)
+			return
+		}
+
+		var backups []R2BackupFile
+		for _, obj := range output.Contents {
+			backups = append(backups, R2BackupFile{
+				Key:          *obj.Key,
+				Size:         *obj.Size,
+				LastModified: obj.LastModified.Format("2006-01-02 15:04:05"),
+			})
+		}
+
+		sort.Slice(backups, func(i, j int) bool {
+			return backups[i].LastModified > backups[j].LastModified
+		})
+
+		r2BackupCacheLock.Lock()
+		r2BackupCache = backups
+		r2BackupCacheTime = time.Now()
+		r2BackupCacheLock.Unlock()
+
+		debugLog("DEBUG: InitR2Cache - Pre-fetch complete. Cached %d files.", len(backups))
+	}()
 }
 
 type R2BackupFile struct {
@@ -231,6 +296,19 @@ type R2BackupFile struct {
 }
 
 func ListR2BackupsHandler(c *gin.Context) {
+	forceRefresh := c.Query("force") == "true"
+
+	r2BackupCacheLock.RLock()
+	if !forceRefresh && time.Since(r2BackupCacheTime) < 5*time.Minute {
+		debugLog("DEBUG: ListR2BackupsHandler - Returning Cached Result (%d files)", len(r2BackupCache))
+		c.JSON(http.StatusOK, gin.H{"backups": r2BackupCache})
+		r2BackupCacheLock.RUnlock()
+		return
+	}
+	r2BackupCacheLock.RUnlock()
+
+	debugLog("DEBUG: ListR2BackupsHandler - Fetching from R2 (Force: %v)", forceRefresh)
+
 	client, bucket, err := getR2Client(c.Request.Context())
 	if err != nil {
 		// Return empty list if config invalid, or error?
@@ -261,6 +339,12 @@ func ListR2BackupsHandler(c *gin.Context) {
 	sort.Slice(backups, func(i, j int) bool {
 		return backups[i].LastModified > backups[j].LastModified
 	})
+
+	// Update Cache
+	r2BackupCacheLock.Lock()
+	r2BackupCache = backups
+	r2BackupCacheTime = time.Now()
+	r2BackupCacheLock.Unlock()
 
 	c.JSON(http.StatusOK, gin.H{"backups": backups})
 }
@@ -459,6 +543,12 @@ func DeleteR2BackupHandler(c *gin.Context) {
 	}
 
 	debugLog("DEBUG: Delete successful")
+	// Invalidate Cache
+	r2BackupCacheLock.Lock()
+	r2BackupCache = nil
+	r2BackupCacheTime = time.Time{}
+	r2BackupCacheLock.Unlock()
+
 	c.JSON(http.StatusOK, gin.H{"status": "deleted"})
 }
 

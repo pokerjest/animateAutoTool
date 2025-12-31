@@ -628,7 +628,11 @@
                     },
 
                     loadBackups() {
-                        this.loading = true;
+                        // Only show global loading if we have no data
+                        if (this.backups.length === 0) {
+                            this.loading = true;
+                        }
+
                         fetch('/api/backup/r2/list')
                             .then(r => r.json())
                             .then(data => {
@@ -867,7 +871,7 @@
                         <span>☁️</span> Cloudflare R2 云备份
                     </h3>
 
-                    <div x-data="r2Backup" class="space-y-4">
+                    <div x-data="r2Backup" @tab-backup.window="loadBackups()" class="space-y-4">
 
                         <!-- Config Form -->
                         <div
