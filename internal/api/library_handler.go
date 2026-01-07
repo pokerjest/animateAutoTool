@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -487,4 +488,39 @@ func ProxyTMDBImageHandler(c *gin.Context) {
 	}
 
 	c.Data(http.StatusOK, resp.Header().Get("Content-Type"), resp.Body())
+}
+
+// GetRandomBackgroundHandler returns a URL to a random anime cover image
+func GetRandomBackgroundHandler(c *gin.Context) {
+	// Query for a random metadata record that has some image data
+	// Note: RANDOM() is SQLite specific, usually ORDER BY RANDOM()
+	// GORM raw sql is easiest here or Find with Random order
+
+	var m model.AnimeMetadata
+	// Prioritize items with Bangumi/TMDB images which are likely high quality
+	// Use ORDER BY RANDOM() LIMIT 1
+	// Check for non-empty blobs.
+	result := db.DB.Where("length(bangumi_image_raw) > 0 OR length(tmdb_image_raw) > 0 OR length(anilist_image_raw) > 0").
+		Order("RANDOM()").
+		First(&m)
+
+	if result.Error != nil {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "No covers found"})
+		return
+	}
+
+	// Determine best source
+	source := SourceBangumi
+	if len(m.BangumiImageRaw) > 0 {
+		source = SourceBangumi
+	} else if len(m.TMDBImageRaw) > 0 {
+		source = SourceTMDB
+	} else if len(m.AniListImageRaw) > 0 {
+		source = SourceAniList
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"url":     fmt.Sprintf("/api/posters/%d?source=%s", m.ID, source),
+	})
 }

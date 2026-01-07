@@ -118,6 +118,25 @@
                     total: 100,
                     currentTitle: ''
                 },
+                init() {
+                    this.loadBackground();
+                    this.connect();
+                },
+                loadBackground() {
+                    // Default Background
+                    const defaultBg = "url('/static/img/bg.png')";
+
+                    fetch('/api/ui/background/random')
+                        .then(res => res.json())
+                        .then(data => {
+                            if (data.success && data.url) {
+                                document.body.style.backgroundImage = `url('${data.url}')`;
+                            } else {
+                                // Keep default defined in CSS/Style
+                            }
+                        })
+                        .catch(err => console.log('Failed to load dynamic background:', err));
+                },
                 connect() {
                     console.log('Global Manager Connecting to SSE...');
                     const source = new EventSource('/api/events');
@@ -192,7 +211,7 @@
     </script>
 </head>
 
-<body class="min-h-screen text-gray-800" x-data="globalManager" x-init="connect()"
+<body class="min-h-screen text-gray-800" x-data="globalManager"
     style="background: url('/static/img/bg.png') no-repeat center center fixed; background-size: cover;">
 
     <!-- Global Manager (Progress + Toasts) -->
