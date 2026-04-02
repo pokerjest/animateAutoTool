@@ -63,6 +63,9 @@ animateTool
 # Local build and test artifacts
 *.go.[0-9]*
 .gocache/
+.gomodcache/
+.lintcache/
+.tools/
 .appdata_test*/
 appdata_test*/
 internal/api/data/

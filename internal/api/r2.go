@@ -579,7 +579,8 @@ func DeleteR2BackupHandler(c *gin.Context) {
 func debugLog(format string, v ...interface{}) {
 	logPath := filepath.Join(appconfig.LogsDir(), "server_debug.log")
 	_ = os.MkdirAll(filepath.Dir(logPath), 0755)
-	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	//nolint:gosec // logPath is derived from the application's controlled logs directory.
+	f, err := os.OpenFile(filepath.Clean(logPath), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		fmt.Println("Error opening debug log:", err)
 		return
