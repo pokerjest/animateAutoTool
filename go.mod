@@ -1,6 +1,8 @@
 module github.com/pokerjest/animateAutoTool
 
-go 1.24.11
+go 1.25.0
+
+toolchain go1.25.8
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.41.0
