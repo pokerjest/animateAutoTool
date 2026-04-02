@@ -382,7 +382,7 @@ func getFFmpegUrl() (string, error) {
 	}
 }
 
-func downloadFile(url string, filepath string) error {
+func downloadFile(url string, filePath string) error {
 	var lastErr error
 	for i := 0; i < 3; i++ {
 		if i > 0 {
@@ -391,19 +391,20 @@ func downloadFile(url string, filepath string) error {
 			// time.Sleep(time.Second) // need import time if not present
 		}
 
-		lastErr = downloadFileOnce(url, filepath)
+		lastErr = downloadFileOnce(url, filePath)
 		if lastErr == nil {
 			return nil
 		}
 		fmt.Printf("Download failed: %v\n", lastErr)
 		// Clean up partial file
-		safeio.Remove(filepath)
+		safeio.Remove(filePath)
 	}
 	return fmt.Errorf("failed after 3 retries: %w", lastErr)
 }
 
-func downloadFileOnce(url string, filepath string) error {
-	out, err := os.Create(filepath)
+func downloadFileOnce(url string, filePath string) error {
+	cleanPath := filepath.Clean(filePath)
+	out, err := os.Create(cleanPath) //nolint:gosec // path is an app-managed temporary download target.
 	if err != nil {
 		return err
 	}

@@ -341,7 +341,8 @@ managed_services:
 }
 
 func loadOrCreateFallbackAuthSecret() (secret string, created bool, err error) {
-	if data, readErr := os.ReadFile(authSecretFallbackPath); readErr == nil {
+	cleanSecretPath := filepath.Clean(authSecretFallbackPath)
+	if data, readErr := os.ReadFile(cleanSecretPath); readErr == nil { //nolint:gosec // path is derived from the app-controlled data directory.
 		secret = strings.TrimSpace(string(data))
 		if secret != "" {
 			return secret, false, nil

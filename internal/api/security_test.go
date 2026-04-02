@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/pokerjest/animateAutoTool/internal/safeio"
 )
 
 func TestBuildSafeRenamePathRejectsTraversal(t *testing.T) {
@@ -27,7 +29,7 @@ func TestRestoreArtifactUsesOpaqueToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
 	}
-	defer os.Remove(tmpFile.Name())
+	defer safeio.Remove(tmpFile.Name())
 	_ = tmpFile.Close()
 
 	token := registerRestoreArtifact(tmpFile.Name())

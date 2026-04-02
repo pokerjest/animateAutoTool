@@ -62,7 +62,8 @@ func save(filename string, payload interface{}) error {
 }
 
 func load(filename string, dst interface{}) error {
-	data, err := os.ReadFile(filepath.Join(credentialsDir(), filename))
+	credentialPath := filepath.Clean(filepath.Join(credentialsDir(), filename))
+	data, err := os.ReadFile(credentialPath) //nolint:gosec // filename is fixed by the bootstrap credential helpers.
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return err
