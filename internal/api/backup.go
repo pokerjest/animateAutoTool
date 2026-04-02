@@ -121,25 +121,27 @@ func AnalyzeBackupHandler(c *gin.Context) {
 	sqlDB.Close()
 
 	// Return HTML Fragment
+	restoreToken := registerRestoreArtifact(tempFile.Name())
 	c.HTML(http.StatusOK, "backup_analyze.html", gin.H{
 		"Stats":    stats,
-		"TempFile": tempFile.Name(),
+		"TempFile": restoreToken,
 	})
 }
 
 func ExecuteRestoreHandler(c *gin.Context) {
-	tempPath := c.PostForm("temp_file")
-	if tempPath == "" {
+	restoreToken := c.PostForm("temp_file")
+	if restoreToken == "" {
 		c.String(http.StatusBadRequest, "No restore file specified")
+		return
+	}
+
+	tempPath, err := consumeRestoreArtifact(restoreToken)
+	if err != nil {
+		c.String(http.StatusBadRequest, err.Error())
 		return
 	}
 	defer os.Remove(tempPath) // Cleanup after attempt
 
-	// Verify file exists
-	if _, err := os.Stat(tempPath); os.IsNotExist(err) {
-		c.String(http.StatusBadRequest, "Restore file expired or not found")
-		return
-	}
 	// Also ensure it's a valid SQLite file before passing to service
 	if !isValidSQLite(tempPath) {
 		c.String(http.StatusBadRequest, "Invalid Database File")
@@ -233,63 +235,7 @@ func ExportBackupHandler(c *gin.Context) {
 }
 
 func ImportBackupHandler(c *gin.Context) {
-	file, err := c.FormFile("backup_file")
-	if err != nil {
-		c.String(http.StatusBadRequest, "No file uploaded")
-		return
-	}
-
-	// Save to temp
-	tempFile, err := os.CreateTemp("", "restore_*.db")
-	if err != nil {
-		c.String(http.StatusInternalServerError, "Failed to create temp file")
-		return
-	}
-	defer os.Remove(tempFile.Name())
-
-	src, err := file.Open()
-	if err != nil {
-		c.String(http.StatusInternalServerError, "Failed to open uploaded file")
-		return
-	}
-	defer src.Close()
-
-	if _, err := io.Copy(tempFile, src); err != nil {
-		c.String(http.StatusInternalServerError, "Failed to write temp file")
-		return
-	}
-	tempFile.Close() // Close file handle
-
-	// DANGEROUS ZONE: Close DB and Swap
-	if err := db.CloseDB(); err != nil {
-		c.String(http.StatusInternalServerError, "Failed to close database: "+err.Error())
-		return
-	}
-
-	// Backup current DB just in case?
-	// Skip for now, user wants restore.
-
-	// Overwrite
-	input, err := os.ReadFile(tempFile.Name())
-	if err != nil {
-		// Try to reopen DB if fail
-		db.InitDB(db.CurrentDBPath)
-		c.String(http.StatusInternalServerError, "Failed to read temp file during swap")
-		return
-	}
-
-	if err := os.WriteFile(db.CurrentDBPath, input, 0600); err != nil {
-		// Try to reopen DB if fail
-		db.InitDB(db.CurrentDBPath)
-		c.String(http.StatusInternalServerError, "Failed to write database file: "+err.Error())
-		return
-	}
-
-	// Re-open DB
-	db.InitDB(db.CurrentDBPath)
-	db.InitDB(db.CurrentDBPath)
-	c.Header("HX-Redirect", "/backup") // Refresh page
-	c.String(http.StatusOK, "Restore successful")
+	c.String(http.StatusBadRequest, "Direct restore has been disabled. Please use the analyze/preview flow before restoring.")
 }
 
 // createBackupFile generates a standard backup database at destPath

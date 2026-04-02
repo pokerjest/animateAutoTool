@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"time"
 
 	"github.com/getlantern/systray"
 	"github.com/pokerjest/animateAutoTool/internal/config"
@@ -45,6 +46,14 @@ func onReady(startServerFunc func()) {
 
 	// Start the main server logic in a separate goroutine
 	go startServerFunc()
+	go func() {
+		time.Sleep(1500 * time.Millisecond)
+		port := config.AppConfig.Server.Port
+		if port == 0 {
+			port = 8306
+		}
+		openBrowser(fmt.Sprintf("http://127.0.0.1:%d/login", port))
+	}()
 
 	go func() {
 		for {

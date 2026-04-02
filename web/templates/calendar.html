@@ -25,6 +25,7 @@
 
     loadingEpisodes: false,
     errorMessage: '',
+    copyMessage: '',
 
     openDetail(anime) {
         console.log('Open Detail:', anime);
@@ -36,6 +37,7 @@
         this.selectedSubgroup = 'all';
         this.loadingEpisodes = false;
         this.errorMessage = '';
+        this.copyMessage = '';
         this.mikanId = null;
     },
 
@@ -43,12 +45,13 @@
         this.showDetailModal = false;
     },
 
-    async watchNow() {
+    async loadEpisodes() {
         if(!this.selectedAnime) return;
         this.loadingEpisodes = true;
         this.episodes = [];
         this.filteredEpisodes = [];
         this.errorMessage = '';
+        this.copyMessage = '';
 
         try {
             const resp = await fetch('/api/mikan/episodes?bangumiId=' + this.selectedAnime.id + '&title=' + encodeURIComponent(this.selectedAnime.name));
@@ -106,7 +109,7 @@
         this.showSubscribeModal = true;
 
         if (this.episodes.length === 0) {
-            await this.watchNow();
+            await this.loadEpisodes();
         }
 
         const validID = this.mikanId || this.selectedAnime.id;
@@ -147,23 +150,33 @@
         }
     },
 
-    async playEpisode(magnet) {
+    async copyMagnet(magnet) {
+        if (!magnet) {
+            this.errorMessage = '当前资源没有可用磁链。';
+            return;
+        }
+
         try {
-            const resp = await fetch('/api/play/magnet', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ magnet: magnet })
-            });
-            if (resp.ok) {
-                const data = await resp.json();
-                window.open(data.alistViewUrl, '_blank');
+            if (navigator.clipboard && window.isSecureContext) {
+                await navigator.clipboard.writeText(magnet);
             } else {
-                console.error('添加任务失败');
-                alert('播放失败: 无法添加下载任务');
+                const fallbackInput = document.createElement('textarea');
+                fallbackInput.value = magnet;
+                fallbackInput.setAttribute('readonly', '');
+                fallbackInput.style.position = 'absolute';
+                fallbackInput.style.left = '-9999px';
+                document.body.appendChild(fallbackInput);
+                fallbackInput.focus();
+                fallbackInput.select();
+                document.execCommand('copy');
+                document.body.removeChild(fallbackInput);
             }
+
+            this.errorMessage = '';
+            this.copyMessage = '磁链已复制，你可以手动添加到下载器。';
         } catch (e) {
             console.error(e);
-            alert('请求失败');
+            this.errorMessage = '复制失败，请手动复制磁链。';
         }
     }
 }">
@@ -415,9 +428,9 @@
 
                             <!-- Action Buttons -->
                             <div class="flex gap-4 mb-8">
-                                <button @click="watchNow()"
+                                <button @click="loadEpisodes()"
                                     class="flex-1 bg-gradient-to-r from-pink-500 to-rose-600 text-white py-3 rounded-xl font-bold text-lg shadow-lg hover:shadow-pink-500/30 hover:-translate-y-0.5 active:translate-y-0 transition-all flex items-center justify-center gap-2">
-                                    <span>▶️</span> 立即观看
+                                    <span>📋</span> 查看资源
                                 </button>
                                 <button @click="openSubscribe()"
                                     class="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-800 py-3 rounded-xl font-bold text-lg transition-all flex items-center justify-center gap-2">
@@ -430,7 +443,7 @@
 
                                 <div class="flex items-center justify-between mb-4 border-b border-gray-100 pb-2">
                                     <h3 class="text-xl font-bold text-gray-800 flex items-center gap-2">
-                                        <span>📺</span> 选集播放
+                                        <span>🧲</span> 资源列表
                                     </h3>
 
                                     <!-- Subgroup Filter -->
@@ -461,15 +474,25 @@
                                     <p class="text-sm mt-1" x-text="errorMessage"></p>
                                 </div>
 
+                                <div x-show="!loadingEpisodes && episodes.length > 0"
+                                    class="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                                    秒播功能暂未开放，当前可以复制磁链手动处理，或者直接订阅让系统自动下载。
+                                </div>
+
+                                <div x-show="copyMessage"
+                                    class="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+                                    <p x-text="copyMessage"></p>
+                                </div>
+
                                 <!-- List -->
                                 <div x-show="!loadingEpisodes && filteredEpisodes.length > 0"
                                     class="space-y-2 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
                                     <template x-for="ep in filteredEpisodes" :key="ep.magnet">
                                         <div class="bg-gray-50 hover:bg-pink-50 border border-gray-100 hover:border-pink-200 rounded-xl p-3 cursor-pointer transition flex items-center gap-3 group"
-                                            @click="playEpisode(ep.magnet)">
+                                            @click="copyMagnet(ep.magnet)">
                                             <div
                                                 class="w-10 h-10 rounded-full bg-white flex items-center justify-center text-lg shadow-sm group-hover:scale-110 transition">
-                                                ▶️
+                                                🧲
                                             </div>
                                             <div class="flex-1 min-w-0">
                                                 <h4 class="font-medium text-gray-700 text-sm truncate group-hover:text-pink-600 transition"
@@ -483,7 +506,7 @@
                                             </div>
                                             <div
                                                 class="opacity-0 group-hover:opacity-100 transition px-2 text-pink-500 text-sm font-bold">
-                                                播放
+                                                复制磁链
                                             </div>
                                         </div>
                                     </template>
@@ -692,3 +715,4 @@
 
 {{ end }}
 {{ end }}
+

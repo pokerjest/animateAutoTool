@@ -2,25 +2,48 @@ package jellyfin
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
+	"net/http"
 	"time"
 )
+
+var ErrAlreadyConfigured = errors.New("jellyfin server already configured")
+
+var (
+	serverReadyAttempts      = 30
+	serverReadyPollDelay     = 2 * time.Second
+	authRetryAttempts        = 5
+	authRetryDelay           = 2 * time.Second
+	startupUserRetryAttempts = 5
+	startupUserRetryDelay    = 2 * time.Second
+)
+
+func startupWizardCompleted(info *PublicSystemInfo) bool {
+	return info != nil && info.StartupWizardCompleted != nil && *info.StartupWizardCompleted
+}
+
+func shouldRetryStartupUser(err error) bool {
+	return !HasStatus(err, http.StatusUnauthorized, http.StatusForbidden)
+}
 
 // AttemptZeroConfig tries to perform a zero-config setup if Jellyfin is brand new.
 // It returns the generated API key if successful, empty string if skipped or failed.
 func AttemptZeroConfig(url, username, password string) (string, error) {
 	client := NewClient(url, "")
+	var publicInfo *PublicSystemInfo
 
 	// 1. Wait for Server to be Up
 	log.Println("Jellyfin: Waiting for server to be ready...")
 	up := false
-	for i := 0; i < 30; i++ {
-		if _, err := client.GetPublicInfo(); err == nil {
+	for i := 0; i < serverReadyAttempts; i++ {
+		if info, err := client.GetPublicInfo(); err == nil {
+			publicInfo = info
 			up = true
 			break
 		}
-		time.Sleep(2 * time.Second)
+		time.Sleep(serverReadyPollDelay)
 	}
 	if !up {
 		return "", fmt.Errorf("timeout waiting for jellyfin to start")
@@ -36,12 +59,15 @@ func AttemptZeroConfig(url, username, password string) (string, error) {
 	log.Println("Jellyfin: Checking status...")
 	// Try to authenticate with retries. If it works, we are already set up.
 	// We retry because sometimes the server is "Publicly" up but User Manager is still loading.
-	for i := 0; i < 5; i++ {
+	for i := 0; i < authRetryAttempts; i++ {
 		if authResp, err := client.Authenticate(username, password); err == nil {
 			log.Println("Jellyfin: Already configured (Auth successful). Using session token as API Key.")
 			return authResp.AccessToken, nil
 		}
-		time.Sleep(2 * time.Second)
+		time.Sleep(authRetryDelay)
+	}
+	if startupWizardCompleted(publicInfo) {
+		return "", fmt.Errorf("%w: stored bootstrap credentials were rejected", ErrAlreadyConfigured)
 	}
 
 	// 3. Perform Startup Wizard Steps
@@ -50,13 +76,16 @@ func AttemptZeroConfig(url, username, password string) (string, error) {
 	// Step 1: Update Startup User
 	// Keep trying in case DB migrations aren't done (which causes 500 error "Sequence contains no elements")
 	var err error
-	for i := 0; i < 5; i++ {
+	for i := 0; i < startupUserRetryAttempts; i++ {
 		err = client.UpdateStartupUser(username, password)
 		if err == nil {
 			break
 		}
-		log.Printf("Jellyfin: UpdateStartupUser failed (attempt %d/5): %v. Retrying...", i+1, err)
-		time.Sleep(2 * time.Second)
+		if !shouldRetryStartupUser(err) {
+			return "", fmt.Errorf("%w: startup wizard is unavailable for the current server", ErrAlreadyConfigured)
+		}
+		log.Printf("Jellyfin: UpdateStartupUser failed (attempt %d/%d): %v. Retrying...", i+1, startupUserRetryAttempts, err)
+		time.Sleep(startupUserRetryDelay)
 	}
 
 	if err != nil {

@@ -55,13 +55,14 @@
                         remember_me: this.rememberMe
                      })
                  })
-                 .then(res => {
-                     if (res.ok) {
-                         window.location.href = '/';
-                     } else {
-                         return res.json().then(data => { throw new Error(data.error || '登录失败') });
-                     }
-                 })
+                .then(async res => {
+                    const data = await res.json();
+                    if (res.ok) {
+                        window.location.href = data.redirect || '/';
+                    } else {
+                        throw new Error(data.error || '登录失败');
+                    }
+                })
                  .catch(err => {
                      this.error = err.message;
                      this.loading = false;
@@ -73,6 +74,35 @@
             <h1 class="text-3xl font-bold text-accent mb-2">欢迎回来</h1>
             <p class="text-gray-500 text-sm">Animate Auto Tool</p>
         </div>
+
+        {{if .BootstrapAdmin}}
+        <div class="mb-5 rounded-2xl border border-amber-200 bg-amber-50/90 p-4 text-sm text-amber-900 shadow-sm">
+            <div class="font-bold mb-2">首次启动账号</div>
+            <div class="space-y-1">
+                <div>系统已自动创建管理员，请登录后尽快修改密码。</div>
+                <div>用户名：<span class="font-mono font-semibold">{{.BootstrapAdmin.Username}}</span></div>
+                <div>密码：<span class="font-mono font-semibold break-all">{{.BootstrapAdmin.Password}}</span></div>
+            </div>
+        </div>
+        {{end}}
+
+        {{if .ConfigAutoCreated}}
+        <div class="mb-5 rounded-2xl border border-sky-200 bg-sky-50/90 p-4 text-sm text-sky-900 shadow-sm">
+            <div class="font-bold mb-2">首次启动说明</div>
+            <div class="space-y-1">
+                <div>程序已自动生成默认配置文件。</div>
+                <div class="break-all">配置文件：<span class="font-mono">{{.ConfigPath}}</span></div>
+                <div class="break-all">数据目录：<span class="font-mono">{{.DataDir}}</span></div>
+            </div>
+        </div>
+        {{end}}
+
+        {{if .ManagedDownloadsOff}}
+        <div class="mb-6 rounded-2xl border border-emerald-200 bg-emerald-50/90 p-4 text-sm text-emerald-900 shadow-sm">
+            <div class="font-bold mb-2">默认行为</div>
+            <div>AList / Jellyfin 等可选侧车的缺失自动下载已默认关闭，首次启动不会因为联网失败卡住主界面。</div>
+        </div>
+        {{end}}
 
         <form @submit.prevent="login" class="space-y-6">
             <div>

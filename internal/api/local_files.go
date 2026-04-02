@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -344,9 +345,12 @@ func ApplyDirectoryRenameHandler(c *gin.Context) {
 			}
 
 			oldPath := item.Path
-			// NewPath should be relative to the Anime Root Path, not the file's current directory
-			// This prevents recursive nesting (e.g. Season 1/Season 1/...)
-			newPath := filepath.Join(anime.Path, item.New)
+			newPath, err := buildSafeRenamePath(anime.Path, item.New)
+			if err != nil {
+				log.Printf("Rename skipped for %s: %v", oldPath, err)
+				failCount++
+				continue
+			}
 
 			if oldPath == newPath {
 				continue
@@ -424,6 +428,26 @@ func isVideoExt(ext string) bool {
 		return true
 	}
 	return false
+}
+
+func buildSafeRenamePath(rootPath, relativePath string) (string, error) {
+	cleanRoot := filepath.Clean(rootPath)
+	cleanRelative := filepath.Clean(relativePath)
+
+	if filepath.IsAbs(cleanRelative) {
+		return "", errors.New("absolute target paths are not allowed")
+	}
+
+	targetPath := filepath.Clean(filepath.Join(cleanRoot, cleanRelative))
+	rel, err := filepath.Rel(cleanRoot, targetPath)
+	if err != nil {
+		return "", err
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", errors.New("target path escapes the anime root")
+	}
+
+	return targetPath, nil
 }
 
 func generateRenamePreview(files []FileInfo, anime model.LocalAnime, req RenameRequest) []RenamePreviewItem {
@@ -543,6 +567,12 @@ func generateRenamePreview(files []FileInfo, anime model.LocalAnime, req RenameR
 			if !strings.HasSuffix(newName, "."+ext) {
 				newName += "." + ext
 			}
+		}
+
+		if safePath, err := buildSafeRenamePath(anime.Path, newName); err == nil {
+			newName, _ = filepath.Rel(anime.Path, safePath)
+		} else {
+			newName = f.Name
 		}
 
 		results = append(results, RenamePreviewItem{

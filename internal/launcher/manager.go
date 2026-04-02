@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"sync"
+
+	"github.com/pokerjest/animateAutoTool/internal/config"
 )
 
 type Manager struct {
@@ -17,9 +19,11 @@ type Manager struct {
 
 func NewManager() *Manager {
 	ctx, cancel := context.WithCancel(context.Background())
+	binDir := config.BinDir()
+	dataDir := config.DataDir()
 	return &Manager{
-		BinDir:  "bin",
-		DataDir: "data",
+		BinDir:  binDir,
+		DataDir: dataDir,
 		Ctx:     ctx,
 		Cancel:  cancel,
 	}
@@ -32,7 +36,7 @@ func (m *Manager) EnsureBinaries() error {
 
 	// Check and download Alist
 	if err := m.ensureAlist(); err != nil {
-		return err
+		fmt.Printf("AList setup warning: %v\n", err)
 	}
 
 	// Check and download QBittorrent

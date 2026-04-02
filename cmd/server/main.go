@@ -15,66 +15,54 @@ import (
 )
 
 func main() {
-	// 0. Initialize Sidecar Launcher
-	// We initialize this early to ensure we have the environment even if config fails?
-	// But let's load logic order: Config -> Launcher -> App
-
-	// 1. Load Config
-	if err := config.LoadConfig("."); err != nil {
+	if err := config.LoadConfig(""); err != nil {
 		log.Fatalf("Failed to load config: %v", err)
 	}
 
-	// Run the tray application. This blocks main thread.
-	// The server logic block is passed as a callback to be run in a separate goroutine.
-	tray.Run(func() {
-		// 2. Launcher: Ensure Binaries & Start Services
-		mgr := launcher.NewManager()
+	if config.AppConfig.Server.Headless {
+		log.Println("Tray integration disabled; starting in headless mode.")
+		runServer()
+		return
+	}
 
-		// Ensure Env (downloads if missing)
-		log.Println("Initializing environment (Checking Alist & qBittorrent)...")
-		if err := mgr.EnsureBinaries(); err != nil {
-			log.Fatalf("Failed to initialize environment: %v", err)
-		}
+	tray.Run(runServer)
+}
 
-		// Start Sidecars
-		log.Println("Starting background services...")
-		if err := mgr.StartAll(); err != nil {
-			log.Fatalf("Failed to start services: %v", err)
-		}
-		// Note: defer inside this closure will execute when the closure exits.
-		// The closure exits when the server (r.Run) exits or panics.
-		// However, if the tray calls Quit, the whole app exits.
-		// We can keep defer here for safety if startServerFunc returns.
-		defer mgr.StopAll()
+func runServer() {
+	mgr := launcher.NewManager()
 
-		// 3. Setup Gin Mode
-		gin.SetMode(config.AppConfig.Server.Mode)
+	log.Println("Initializing environment (Checking Alist & qBittorrent)...")
+	if err := mgr.EnsureBinaries(); err != nil {
+		log.Fatalf("Failed to initialize environment: %v", err)
+	}
 
-		// 转换为绝对路径日志一下
-		absPath, _ := filepath.Abs(config.AppConfig.Database.Path)
-		log.Printf("Initializing database at: %s", absPath)
+	log.Println("Starting background services...")
+	if err := mgr.StartAll(); err != nil {
+		log.Fatalf("Failed to start services: %v", err)
+	}
+	defer mgr.StopAll()
 
-		db.InitDB(config.AppConfig.Database.Path)
+	gin.SetMode(config.AppConfig.Server.Mode)
 
-		r := gin.Default()
+	absPath, _ := filepath.Abs(config.AppConfig.Database.Path)
+	log.Printf("Initializing database at: %s", absPath)
 
-		// 初始化路由
-		api.InitRoutes(r)
+	db.InitDB(config.AppConfig.Database.Path)
 
-		// Pre-fetch R2 Cache
-		api.InitR2Cache()
+	r := gin.Default()
+	if err := r.SetTrustedProxies(config.AppConfig.Server.TrustedProxies); err != nil {
+		log.Fatalf("Failed to set trusted proxies: %v", err)
+	}
+	api.InitRoutes(r)
+	api.InitR2Cache()
 
-		// Start Scheduler
-		sch := scheduler.NewManager()
-		sch.Start()
-		defer sch.Stop()
+	sch := scheduler.NewManager()
+	sch.Start()
+	defer sch.Stop()
 
-		// Alist Server is now managed by mgr.StartAll(), so we don't call alist.StartAlistServer()
-
-		port := fmt.Sprintf("%d", config.AppConfig.Server.Port)
-		log.Printf("Server starting on port %s", port)
-		if err := r.Run(":" + port); err != nil {
-			log.Fatal(err)
-		}
-	})
+	port := fmt.Sprintf("%d", config.AppConfig.Server.Port)
+	log.Printf("Server starting on port %s", port)
+	if err := r.Run(":" + port); err != nil {
+		log.Fatal(err)
+	}
 }

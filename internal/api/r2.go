@@ -1,26 +1,25 @@
 package api
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"html/template"
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/config"
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"github.com/google/uuid"
-	_ "github.com/pokerjest/animateAutoTool/internal/config"
+	appconfig "github.com/pokerjest/animateAutoTool/internal/config"
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"gorm.io/gorm"
@@ -101,9 +100,9 @@ func getR2Client(ctx context.Context) (*s3.Client, string, error) {
 		return nil, "", fmt.Errorf("R2 configuration is incomplete")
 	}
 
-	cfg, err := config.LoadDefaultConfig(ctx,
-		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(accessKey, secretKey, "")),
-		config.WithRegion("us-east-1"), // R2 generally requires us-east-1 or auto, but S3 clients often prefer us-east-1
+	cfg, err := awsconfig.LoadDefaultConfig(ctx,
+		awsconfig.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(accessKey, secretKey, "")),
+		awsconfig.WithRegion("us-east-1"), // R2 generally requires us-east-1 or auto, but S3 clients often prefer us-east-1
 	)
 	if err != nil {
 		debugLog("DEBUG: getR2Client LoadDefaultConfig error: %v", err)
@@ -475,27 +474,20 @@ func StageR2BackupHandler(c *gin.Context) {
 		sqlDB.Close()
 
 		// 5. Render HTML
-		// Parse the template manually.
-		tmpl, err := template.ParseFiles("web/templates/backup_analyze.html")
-		if err != nil {
-			os.Remove(tempFile.Name())
-			updateProgress(tID, "error", "Template parse error: "+err.Error(), total, total, "")
-			return
-		}
-
-		var buf bytes.Buffer
-		err = tmpl.ExecuteTemplate(&buf, "backup_analyze.html", map[string]interface{}{
+		restoreToken := registerRestoreArtifact(tempFile.Name())
+		resultHTML, err := renderTemplateToString("backup_analyze.html", map[string]interface{}{
 			"Stats":    stats,
-			"TempFile": tempFile.Name(),
+			"TempFile": restoreToken,
 		})
 		if err != nil {
+			discardRestoreArtifact(restoreToken)
 			os.Remove(tempFile.Name())
-			updateProgress(tID, "error", "Template execute error: "+err.Error(), total, total, "")
+			updateProgress(tID, "error", "Template render error: "+err.Error(), total, total, "")
 			return
 		}
 
 		// 6. Complete
-		updateProgress(tID, "completed", "", total, total, buf.String())
+		updateProgress(tID, "completed", "", total, total, resultHTML)
 
 	}(taskID, key, bucket, client)
 
@@ -575,8 +567,9 @@ func DeleteR2BackupHandler(c *gin.Context) {
 }
 
 func debugLog(format string, v ...interface{}) {
-	_ = os.MkdirAll("logs", 0755)
-	f, err := os.OpenFile("logs/server_debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	logPath := filepath.Join(appconfig.LogsDir(), "server_debug.log")
+	_ = os.MkdirAll(filepath.Dir(logPath), 0755)
+	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		fmt.Println("Error opening debug log:", err)
 		return
@@ -620,9 +613,9 @@ func TestR2ConnectionHandler(c *gin.Context) {
 	}
 
 	// Create temporary client
-	cfg, err := config.LoadDefaultConfig(c.Request.Context(),
-		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(req.AccessKey, secretKey, "")),
-		config.WithRegion("us-east-1"),
+	cfg, err := awsconfig.LoadDefaultConfig(c.Request.Context(),
+		awsconfig.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(req.AccessKey, secretKey, "")),
+		awsconfig.WithRegion("us-east-1"),
 	)
 	if err != nil {
 		debugLog("DEBUG: LoadDefaultConfig error: %v", err)

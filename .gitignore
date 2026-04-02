@@ -59,3 +59,10 @@ mikan_home.html
 /debug_metadata
 
 animateTool
+
+# Local build and test artifacts
+*.go.[0-9]*
+.gocache/
+.appdata_test*/
+appdata_test*/
+internal/api/data/

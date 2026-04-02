@@ -4,9 +4,11 @@ import (
 	"log"
 	"time"
 
+	"github.com/pokerjest/animateAutoTool/internal/config"
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/downloader"
 	"github.com/pokerjest/animateAutoTool/internal/model"
+	"github.com/pokerjest/animateAutoTool/internal/qbutil"
 	"github.com/pokerjest/animateAutoTool/internal/service"
 )
 
@@ -54,31 +56,20 @@ func (m *Manager) CheckUpdates() {
 		return
 	}
 
-	// Fetch QB Config once
-	// We need to fetch it manually here as we are not in a handler context
-	var qbUrl, qbUser, qbPass string
-
-	// Helper fetch (inline for now as we can't easily import private handler helper)
-	// Or we can just use GORM
-	var c1 model.GlobalConfig
-	if err := db.DB.First(&c1, "key = 'qb_url'").Error; err == nil {
-		qbUrl = c1.Value
-	} else {
-		qbUrl = "http://localhost:8080"
+	qbCfg := qbutil.LoadConfig()
+	if qbutil.ManagedBinaryMissing(qbCfg, config.BinDir()) {
+		log.Printf("Scheduler: Skipping update check because qBittorrent is not installed and no external WebUI is configured.")
+		return
 	}
-	var c2 model.GlobalConfig
-	if err := db.DB.First(&c2, "key = 'qb_username'").Error; err == nil {
-		qbUser = c2.Value
-	}
-	var c3 model.GlobalConfig
-	if err := db.DB.First(&c3, "key = 'qb_password'").Error; err == nil {
-		qbPass = c3.Value
+	if qbutil.MissingExternalURL(qbCfg) {
+		log.Printf("Scheduler: Skipping update check because external qBittorrent mode has no WebUI URL configured.")
+		return
 	}
 
 	// Initialize Service Manager
-	qbt := downloader.NewQBittorrentClient(qbUrl)
-	if err := qbt.Login(qbUser, qbPass); err != nil {
-		log.Printf("Scheduler Error: QB Login failed: %v", err)
+	qbt := downloader.NewQBittorrentClient(qbCfg.URL)
+	if err := qbt.Login(qbCfg.Username, qbCfg.Password); err != nil {
+		log.Printf("Scheduler Warning: QB unavailable: %v", err)
 		return // Can't do anything without QB
 	}
 

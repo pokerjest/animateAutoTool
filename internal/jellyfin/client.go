@@ -3,6 +3,7 @@ package jellyfin
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -17,6 +18,28 @@ type Client struct {
 	Token   string
 	UserID  string // Active UserID for context
 	Client  *http.Client
+}
+
+type APIError struct {
+	StatusCode int
+	Body       string
+}
+
+func (e *APIError) Error() string {
+	return fmt.Sprintf("HTTP %d: %s", e.StatusCode, e.Body)
+}
+
+func HasStatus(err error, statuses ...int) bool {
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		return false
+	}
+	for _, status := range statuses {
+		if apiErr.StatusCode == status {
+			return true
+		}
+	}
+	return false
 }
 
 func NewClient(url, apiKey string) *Client {
@@ -91,17 +114,21 @@ func (c *Client) do(method, path string, body interface{}) ([]byte, error) {
 	}
 
 	if resp.StatusCode >= 400 {
-		return data, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(data))
+		return data, &APIError{
+			StatusCode: resp.StatusCode,
+			Body:       string(data),
+		}
 	}
 
 	return data, nil
 }
 
 type PublicSystemInfo struct {
-	LocalAddress string `json:"LocalAddress"`
-	ServerName   string `json:"ServerName"`
-	Version      string `json:"Version"`
-	Id           string `json:"Id"`
+	LocalAddress           string `json:"LocalAddress"`
+	ServerName             string `json:"ServerName"`
+	Version                string `json:"Version"`
+	Id                     string `json:"Id"`
+	StartupWizardCompleted *bool  `json:"StartupWizardCompleted"`
 }
 
 func (c *Client) GetPublicInfo() (*PublicSystemInfo, error) {

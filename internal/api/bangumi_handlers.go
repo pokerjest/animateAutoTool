@@ -80,8 +80,7 @@ func BangumiLoginHandler(c *gin.Context) {
 		return
 	}
 
-	redirectURI := "http://localhost:8080/api/bangumi/callback"
-
+	redirectURI := getBangumiRedirectURI(c)
 	client := bangumi.NewClient(appID, appSecret, redirectURI)
 	applyProxyToBangumiClient(client)
 	url := client.GetAuthorizationURL()
@@ -97,7 +96,7 @@ func BangumiCallbackHandler(c *gin.Context) {
 	}
 
 	appID, appSecret := getBangumiConfig()
-	redirectURI := "http://localhost:8080/api/bangumi/callback"
+	redirectURI := getBangumiRedirectURI(c)
 	client := bangumi.NewClient(appID, appSecret, redirectURI)
 
 	tokenResp, err := client.ExchangeToken(code)
@@ -131,7 +130,7 @@ func renderBangumiContent() string {
 		if refreshToken != "" {
 			appID, appSecret := getBangumiConfig()
 			if appID != "" && appSecret != "" {
-				client := bangumi.NewClient(appID, appSecret, "http://localhost:8080/api/bangumi/callback")
+				client := bangumi.NewClient(appID, appSecret, getBangumiRedirectURI(nil))
 				applyProxyToBangumiClient(client)
 				if tokenResp, errRefresh := client.RefreshToken(refreshToken); errRefresh == nil {
 					saveBangumiTokens(tokenResp.AccessToken, tokenResp.RefreshToken)

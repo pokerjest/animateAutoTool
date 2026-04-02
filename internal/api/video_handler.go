@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"path/filepath"
@@ -122,6 +123,13 @@ func PlayMagnetHandler(c *gin.Context) {
 
 	err := alist.AddOfflineDownload(req.Magnet, targetPath)
 	if err != nil {
+		if errors.Is(err, alist.ErrOfflineDownloadNotImplemented) {
+			c.JSON(http.StatusNotImplemented, gin.H{
+				"error": "PikPak/AList 秒播链路还未完成，当前版本请先使用常规订阅或手动下载流程。",
+			})
+			return
+		}
+
 		// Verify if error is "task already exists" - if so, we can proceed
 		if !strings.Contains(err.Error(), "already exists") && !strings.Contains(err.Error(), "duplicate") {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to add offline task: " + err.Error()})

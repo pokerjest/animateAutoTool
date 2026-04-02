@@ -109,6 +109,7 @@ const (
 	ConfigKeyQBUrl               = "qb_url"
 	ConfigKeyQBUsername          = "qb_username"
 	ConfigKeyQBPassword          = "qb_password"
+	ConfigKeyQBMode              = "qb_mode"
 	ConfigKeyBaseDir             = "base_download_dir"
 	ConfigKeyBangumiAppID        = "bangumi_app_id"
 	ConfigKeyBangumiAppSecret    = "bangumi_app_secret" //nolint:gosec

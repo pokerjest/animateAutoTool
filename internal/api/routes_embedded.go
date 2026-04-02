@@ -1,9 +1,7 @@
 package api
 
 import (
-	"encoding/json"
 	"fmt"
-	"html/template"
 	"time"
 
 	"github.com/gin-contrib/sessions"
@@ -12,70 +10,51 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/config"
 	"github.com/pokerjest/animateAutoTool/internal/service"
 	"github.com/pokerjest/animateAutoTool/internal/worker"
+	webassets "github.com/pokerjest/animateAutoTool/web"
 )
 
-func initRoutesLegacy(r *gin.Engine) {
-	// Perform startup cleanup
+func InitRoutes(r *gin.Engine) {
 	scannerSvc := service.NewScannerService()
 	scannerSvc.CleanupGarbage()
 
 	metaSvc := service.NewMetadataService()
-	metaSvc.StartMetadataMigration() // Start background image caching
+	metaSvc.StartMetadataMigration()
 
-	// Start Event Workers
 	worker.StartMetadataWorker()
 
-	// Create default user if needed
 	authSvc := service.NewAuthService()
 	authSvc.EnsureDefaultUser()
 
-	// Initialize Session Store
 	store := cookie.NewStore([]byte(config.AppConfig.Auth.SecretKey))
 	store.Options(sessionCookieOptions(nil, 0))
 	r.Use(sessions.Sessions("animate_session", store))
 
-	// 注册模板函数
-	r.SetFuncMap(template.FuncMap{
-		"div": func(a, b float64) float64 {
-			return a / b
-		},
-		"toGB": func(size int64) string {
-			gb := float64(size) / 1024 / 1024 / 1024
-			return fmt.Sprintf("%.2f GB", gb)
-		},
-		"json": func(v interface{}) template.JS {
-			a, _ := json.Marshal(v)
-			return template.JS(a) //nolint:gosec // json.Marshal escapes HTML
-		},
-		"toJson": func(v interface{}) string {
-			a, _ := json.Marshal(v)
-			return string(a)
-		},
-	})
+	tmpl, err := webassets.ParseTemplates(templateFuncMap())
+	if err != nil {
+		panic(fmt.Errorf("failed to load embedded templates: %w", err))
+	}
+	r.SetHTMLTemplate(tmpl)
 
-	// 加载模板，注意路径问题，在此我们假设运行在项目根目录
-	// 匹配 web/templates 下的所有 html
-	// 注意：嵌套 define 需要全部加载
-	r.LoadHTMLGlob("web/templates/*.html")
-	r.Static("/static", "web/static")
+	staticFS, err := webassets.StaticFS()
+	if err != nil {
+		panic(fmt.Errorf("failed to load embedded static assets: %w", err))
+	}
+	r.StaticFS("/static", staticFS)
 
-	// Public Routes
 	r.GET("/login", LoginPageHandler)
 	r.POST("/api/login", LoginPostHandler)
 	r.GET("/logout", LogoutHandler)
 
-	// Public API Routes (Bypass Auth for Images only)
 	r.GET("/api/tmdb/image", ProxyTMDBImageHandler)
 
-	// Protected Routes Group
 	authorized := r.Group("/")
 	authorized.Use(AuthMiddleware())
 	{
 		authorized.POST("/api/change-password", ChangePasswordHandler)
 		authorized.GET("/", DashboardHandler)
+		authorized.GET("/setup", SetupPageHandler)
 		authorized.GET("/subscriptions", SubscriptionsHandler)
 		authorized.GET("/settings", SettingsHandler)
-		// Library
 		authorized.GET("/library", GetLibraryHandler)
 		authorized.POST("/library/refresh", RefreshLibraryMetadataHandler)
 		authorized.GET("/local-anime", LocalAnimePageHandler)
@@ -84,17 +63,15 @@ func initRoutesLegacy(r *gin.Engine) {
 		authorized.GET("/player", GetPlayerHandler)
 		authorized.GET("/api/events", SSEHandler)
 
-		// API
 		apiGroup := authorized.Group("/api")
 		{
 			apiGroup.POST("/sync", func(c *gin.Context) {
-				// Trigger Sync (TODO: Implement actual sync logic if needed, currently just UI feedback)
-				// User requested 1s delay for transition
 				time.Sleep(1 * time.Second)
 				c.JSON(200, gin.H{"status": "ok"})
 			})
 
-			// Subscriptions
+			apiGroup.GET("/setup/readiness", SetupReadinessHandler)
+			apiGroup.POST("/setup/bootstrap", CompleteBootstrapSetupHandler)
 			apiGroup.POST("/subscriptions", CreateSubscriptionHandler)
 			apiGroup.POST("/subscriptions/batch", CreateBatchSubscriptionHandler)
 			apiGroup.POST("/subscriptions/batch-preview", BatchPreviewHandler)
@@ -108,66 +85,56 @@ func initRoutesLegacy(r *gin.Engine) {
 			apiGroup.GET("/search/subgroups", GetSubgroupsHandler)
 			apiGroup.GET("/preview", PreviewRSSHandler)
 			apiGroup.GET("/mikan/dashboard", GetMikanDashboardHandler)
-			apiGroup.GET("/mikan/episodes", GetMikanEpisodesHandler) // New route
+			apiGroup.GET("/mikan/episodes", GetMikanEpisodesHandler)
 
-			apiGroup.POST("/play/magnet", PlayMagnetHandler) // New route
+			apiGroup.POST("/play/magnet", PlayMagnetHandler)
 
-			// Player
 			apiGroup.POST("/subscriptions/refresh", RefreshSubscriptionsHandler)
 
-			// Settings
-			apiGroup.POST("/settings", UpdateSettingsHandler) // Keep for backward compat if needed, or remove?
+			apiGroup.POST("/settings", UpdateSettingsHandler)
 			apiGroup.POST("/settings/qb-save-test", QBSaveAndTestHandler)
 			apiGroup.POST("/settings/bangumi-save", BangumiSaveHandler)
 			apiGroup.GET("/settings/qb-status", GetQBStatusHandler)
 			apiGroup.GET("/settings/tmdb-status", GetTMDBStatusHandler)
 			apiGroup.GET("/settings/anilist-status", GetAniListStatusHandler)
 			apiGroup.GET("/settings/jellyfin-status", GetJellyfinStatusHandler)
-			apiGroup.POST("/settings/jellyfin-login", JellyfinLoginHandler) // New Route
+			apiGroup.POST("/settings/jellyfin-login", JellyfinLoginHandler)
 			apiGroup.POST("/settings/pikpak-sync", PikPakSyncHandler)
 			apiGroup.GET("/settings/pikpak-status", GetPikPakStatusHandler)
 			apiGroup.POST("/settings/test-connection", TestConnectionHandler)
 
-			// Local Anime
 			apiGroup.POST("/local-directories", AddLocalDirectoryHandler)
 			apiGroup.DELETE("/local-directories/:id", DeleteLocalDirectoryHandler)
 			apiGroup.POST("/local-directories/scan", ScanLocalDirectoryHandler)
-			apiGroup.GET("/local-anime/:id/files", GetLocalAnimeFilesHandler) // Keep for debugging if needed
+			apiGroup.GET("/local-anime/:id/files", GetLocalAnimeFilesHandler)
 			apiGroup.POST("/local-directories/:id/rename-preview", PreviewDirectoryRenameHandler)
 			apiGroup.POST("/local-directories/:id/rename", ApplyDirectoryRenameHandler)
 			apiGroup.GET("/local-anime/:id/refresh-metadata", RefreshLocalAnimeMetadataHandler)
 			apiGroup.POST("/library/fix_match", FixMatchHandler)
 			apiGroup.GET("/metadata/search", SearchMetadataHandler)
 			apiGroup.POST("/local-anime/:id/switch-source", SwitchLocalAnimeSourceHandler)
-			// NFO
 			apiGroup.POST("/library/nfo/regenerate", RegenerateNFOHandler)
 
-			// Jellyfin Proxy (Public for Player Access)
 			apiGroup.GET("/jellyfin/stream/:id", ProxyVideoHandler)
 
-			// Jellyfin Player
 			apiGroup.GET("/jellyfin/play/:id", GetPlayInfoHandler)
 			apiGroup.POST("/jellyfin/progress", ReportProgressHandler)
 
-			// Backup
 			apiGroup.GET("/backup/export", ExportBackupHandler)
-			apiGroup.POST("/backup/import", ImportBackupHandler) // Keep for legacy or direct upload
+			apiGroup.POST("/backup/import", ImportBackupHandler)
 			apiGroup.POST("/backup/analyze", AnalyzeBackupHandler)
 			apiGroup.POST("/backup/execute", ExecuteRestoreHandler)
 
-			// R2 Backup
 			apiGroup.GET("/backup/r2/config", GetR2ConfigHandler)
 			apiGroup.POST("/backup/r2/config", UpdateR2ConfigHandler)
 			apiGroup.POST("/backup/r2/upload", UploadToR2Handler)
 			apiGroup.GET("/backup/r2/list", ListR2BackupsHandler)
-
-			apiGroup.POST("/backup/r2/stage", StageR2BackupHandler) // New Preview Endpoint
+			apiGroup.POST("/backup/r2/stage", StageR2BackupHandler)
 			apiGroup.POST("/backup/r2/restore", RestoreFromR2Handler)
 			apiGroup.POST("/backup/r2/delete", DeleteR2BackupHandler)
 			apiGroup.POST("/backup/r2/test", TestR2ConnectionHandler)
 			apiGroup.GET("/backup/r2/progress/:taskId", GetR2ProgressHandler)
 
-			// Bangumi Integration
 			apiGroup.GET("/bangumi/login", BangumiLoginHandler)
 			apiGroup.GET("/posters/:id", GetPosterHandler)
 			apiGroup.GET("/bangumi/callback", BangumiCallbackHandler)
@@ -180,11 +147,8 @@ func initRoutesLegacy(r *gin.Engine) {
 			apiGroup.POST("/library/metadata/:id/refresh", RefreshItemMetadataHandler)
 			apiGroup.GET("/ui/background/random", GetRandomBackgroundHandler)
 
-			// Dashboard Async Data
 			apiGroup.GET("/dashboard/bangumi-data", DashboardBangumiDataHandler)
 			apiGroup.GET("/dashboard/qb-status", DashboardQBStatusHandler)
-
-			// SSE
 		}
 	}
 }

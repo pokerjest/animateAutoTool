@@ -15,14 +15,15 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/pokerjest/animateAutoTool/internal/alist"
+	"github.com/pokerjest/animateAutoTool/internal/config"
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/downloader"
 	"github.com/pokerjest/animateAutoTool/internal/jellyfin"
 	"github.com/pokerjest/animateAutoTool/internal/model"
+	"github.com/pokerjest/animateAutoTool/internal/qbutil"
 )
 
 const (
-	DefaultServerURL     = "http://localhost:8080"
 	StatusNotConnected   = "未连接"
 	StatusConnected      = "已连接"
 	StatusConnectedHTML  = `<span class="text-emerald-600 font-bold flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-emerald-500"></span> ` + StatusConnected + `</span>`
@@ -54,6 +55,87 @@ func getCacheHash(parts ...string) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
+func persistGlobalConfig(key, val string) {
+	var count int64
+	db.DB.Model(&model.GlobalConfig{}).Where("key = ?", key).Count(&count)
+	if count == 0 {
+		db.DB.Create(&model.GlobalConfig{Key: key, Value: val})
+		return
+	}
+
+	db.DB.Model(&model.GlobalConfig{}).Where("key = ?", key).Update("value", val)
+}
+
+func normalizedQBValues(mode, url, username, password string) map[string]string {
+	mode = qbutil.NormalizeMode(mode)
+	url = strings.TrimSpace(url)
+	username = strings.TrimSpace(username)
+	password = strings.TrimSpace(password)
+
+	if mode == qbutil.ModeManaged {
+		mode = qbutil.ModeManaged
+		url = ""
+		username = ""
+		password = ""
+	}
+
+	return map[string]string{
+		model.ConfigKeyQBMode:     mode,
+		model.ConfigKeyQBUrl:      url,
+		model.ConfigKeyQBUsername: username,
+		model.ConfigKeyQBPassword: password,
+	}
+}
+
+func normalizedQBFormValues(c *gin.Context) map[string]string {
+	return normalizedQBValues(
+		c.PostForm(model.ConfigKeyQBMode),
+		c.PostForm(model.ConfigKeyQBUrl),
+		c.PostForm(model.ConfigKeyQBUsername),
+		c.PostForm(model.ConfigKeyQBPassword),
+	)
+}
+
+func qbConfigFromForm(c *gin.Context) qbutil.Config {
+	values := normalizedQBFormValues(c)
+	cfg := qbutil.Config{
+		Mode:     values[model.ConfigKeyQBMode],
+		URL:      values[model.ConfigKeyQBUrl],
+		Username: values[model.ConfigKeyQBUsername],
+		Password: values[model.ConfigKeyQBPassword],
+	}
+
+	if qbutil.UsesManagedInstance(cfg) {
+		cfg.Mode = qbutil.ModeManaged
+		cfg.URL = qbutil.DefaultURL
+		cfg.Username = ""
+		cfg.Password = ""
+	}
+
+	return cfg
+}
+
+func renderQBStatusMessage(cfg qbutil.Config) string {
+	if qbutil.ManagedBinaryMissing(cfg, config.BinDir()) {
+		return `<div class="text-amber-600 bg-amber-50 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 border border-amber-200">Managed qBittorrent is selected, but the local binary is not installed.</div>`
+	}
+
+	if qbutil.MissingExternalURL(cfg) {
+		return `<div class="text-amber-600 bg-amber-50 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 border border-amber-200">External qBittorrent mode is enabled, but the WebUI URL is still empty.</div>`
+	}
+
+	client := downloader.NewQBittorrentClient(cfg.URL)
+	if err := client.Login(cfg.Username, cfg.Password); err != nil {
+		return fmt.Sprintf(`<div class="text-red-600 bg-red-50 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 border border-red-200">QB connection failed: %v</div>`, err)
+	}
+
+	if ver, err := client.GetVersion(); err == nil {
+		return fmt.Sprintf(`<div class="text-emerald-600 bg-emerald-50 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 border border-emerald-200">QB connected (version: %s)</div>`, ver)
+	}
+
+	return `<div class="text-amber-600 bg-amber-50 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 border border-amber-200">QB login succeeded but version lookup failed</div>`
+}
+
 func SettingsHandler(c *gin.Context) {
 	skip := IsHTMX(c)
 
@@ -65,6 +147,14 @@ func SettingsHandler(c *gin.Context) {
 	configMap := make(map[string]string)
 	for _, cfg := range configs {
 		configMap[cfg.Key] = cfg.Value
+	}
+
+	qbCfg := qbutil.LoadConfig()
+	configMap[model.ConfigKeyQBMode] = qbCfg.Mode
+	if qbutil.UsesManagedInstance(qbCfg) {
+		configMap[model.ConfigKeyQBUrl] = ""
+		configMap[model.ConfigKeyQBUsername] = ""
+		configMap[model.ConfigKeyQBPassword] = ""
 	}
 
 	// Fetch Jellyfin Server ID for qualified links
@@ -108,6 +198,7 @@ func UpdateSettingsHandler(c *gin.Context) {
 	switch scope {
 	case "download":
 		keysToProcess = []string{
+			model.ConfigKeyQBMode,
 			model.ConfigKeyQBUrl,
 			model.ConfigKeyQBUsername,
 			model.ConfigKeyQBPassword,
@@ -150,6 +241,7 @@ func UpdateSettingsHandler(c *gin.Context) {
 	default:
 		// Fallback: Legacy Global Save (Process ALL)
 		keysToProcess = []string{
+			model.ConfigKeyQBMode,
 			model.ConfigKeyQBUrl,
 			model.ConfigKeyQBUsername,
 			model.ConfigKeyQBPassword,
@@ -178,21 +270,26 @@ func UpdateSettingsHandler(c *gin.Context) {
 		}
 	}
 
+	qbOverrides := map[string]string{}
+	if scope == "download" {
+		qbOverrides = normalizedQBFormValues(c)
+	} else if _, hasQBMode := c.GetPostForm(model.ConfigKeyQBMode); hasQBMode {
+		qbOverrides = normalizedQBFormValues(c)
+	}
+
 	// 1.1 Process Standard Keys
 	for _, key := range keysToProcess {
+		if val, ok := qbOverrides[key]; ok {
+			persistGlobalConfig(key, val)
+			continue
+		}
+
 		val, exists := c.GetPostForm(key)
 		if !exists {
 			continue // Should not happen if form is correct, but safe to skip
 		}
 
-		// Update DB
-		var count int64
-		db.DB.Model(&model.GlobalConfig{}).Where("key = ?", key).Count(&count)
-		if count == 0 {
-			db.DB.Create(&model.GlobalConfig{Key: key, Value: val})
-		} else {
-			db.DB.Model(&model.GlobalConfig{}).Where("key = ?", key).Update("value", val)
-		}
+		persistGlobalConfig(key, val)
 	}
 
 	// 1.2 Process Checkboxes (Scope-aware)
@@ -208,13 +305,7 @@ func UpdateSettingsHandler(c *gin.Context) {
 			// So for checked items, we need to save "true".
 
 			// Let's rely on standard logic:
-			var count int64
-			db.DB.Model(&model.GlobalConfig{}).Where("key = ?", key).Count(&count)
-			if count == 0 {
-				db.DB.Create(&model.GlobalConfig{Key: key, Value: "true"})
-			} else {
-				db.DB.Model(&model.GlobalConfig{}).Where("key = ?", key).Update("value", "true")
-			}
+			persistGlobalConfig(key, "true")
 		}
 	}
 
@@ -229,10 +320,8 @@ func UpdateSettingsHandler(c *gin.Context) {
 			// Policy: If user provided credentials => Try to Refresh/Get Key.
 			// Re-authenticating is cheap enough.
 
-			// Fallback to defaults
-			if user == "" && pass == "" {
-				user = "admin"
-				pass = "admin" // Default
+			if user == "" || pass == "" {
+				return
 			}
 
 			// Try to authenticate
@@ -278,27 +367,9 @@ func UpdateSettingsHandler(c *gin.Context) {
 	// 2. Add artificial delay for smooth UI transition
 	time.Sleep(500 * time.Millisecond)
 
-	// 3. Test QB Connection
-	url := c.PostForm("qb_url")
-	username := c.PostForm("qb_username")
-	password := c.PostForm("qb_password")
-
-	qbStatusHtml := ""
-	if url != "" {
-		client := downloader.NewQBittorrentClient(url)
-		if err := client.Login(username, password); err != nil {
-			qbStatusHtml = fmt.Sprintf(`<div id="qb-status" hx-swap-oob="innerHTML"><div class="text-red-600 bg-red-50 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 border border-red-200">❌ QB 连接失败: %v</div></div>`, err)
-		} else {
-			if ver, err := client.GetVersion(); err == nil {
-				qbStatusHtml = fmt.Sprintf(`<div id="qb-status" hx-swap-oob="innerHTML"><div class="text-emerald-600 bg-emerald-50 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 border border-emerald-200">✅ QB 已连接 (版本: %s)</div></div>`, ver)
-			} else {
-				qbStatusHtml = `<div id="qb-status" hx-swap-oob="innerHTML"><div class="text-amber-600 bg-amber-50 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 border border-amber-200">⚠️ QB 登录成功但版本未知</div></div>`
-			}
-		}
-	} else {
-		qbStatusHtml = `<div id="qb-status" hx-swap-oob="innerHTML"><div class="text-sm text-gray-400 flex items-center gap-2"><span>⚪ 未配置 QB URL</span></div></div>`
-	}
-
+	// 3. Refresh QB status using normalized mode-aware config
+	statusCache.Delete("qb")
+	qbStatusHtml := fmt.Sprintf(`<div id="qb-status" hx-swap-oob="innerHTML">%s</div>`, renderQBStatusMessage(qbConfigFromForm(c)))
 	// 4. Trigger Bangumi Refresh OOB
 	bangumiStatusOOB := `<div hx-swap-oob="true" id="bangumi-refresh-trigger" hx-get="/api/bangumi/profile" hx-target="#bangumi-status" hx-trigger="load" class="hidden"></div>`
 
@@ -334,55 +405,15 @@ func UpdateSettingsHandler(c *gin.Context) {
 
 // QBSaveAndTestHandler saves QB settings and then tests connection
 func QBSaveAndTestHandler(c *gin.Context) {
-	// 1. Save Config
-	qbKeys := []string{
-		model.ConfigKeyQBUrl,
-		model.ConfigKeyQBUsername,
-		model.ConfigKeyQBPassword,
-		model.ConfigKeyBaseDir,
-	}
-	// Reusing logic from UpdateSettings, simplified
-	for _, key := range qbKeys {
-		val, exists := c.GetPostForm(key)
-		if !exists {
-			continue
-		}
+	qbValues := normalizedQBFormValues(c)
+	persistGlobalConfig(model.ConfigKeyQBMode, qbValues[model.ConfigKeyQBMode])
+	persistGlobalConfig(model.ConfigKeyQBUrl, qbValues[model.ConfigKeyQBUrl])
+	persistGlobalConfig(model.ConfigKeyQBUsername, qbValues[model.ConfigKeyQBUsername])
+	persistGlobalConfig(model.ConfigKeyQBPassword, qbValues[model.ConfigKeyQBPassword])
+	persistGlobalConfig(model.ConfigKeyBaseDir, strings.TrimSpace(c.PostForm(model.ConfigKeyBaseDir)))
 
-		var count int64
-		db.DB.Model(&model.GlobalConfig{}).Where("key = ?", key).Count(&count)
-		if count == 0 {
-			db.DB.Create(&model.GlobalConfig{Key: key, Value: val})
-		} else {
-			db.DB.Model(&model.GlobalConfig{}).Where("key = ?", key).Update("value", val)
-		}
-	}
-
-	// 2. Test Connection
-	url := c.PostForm("qb_url")
-	username := c.PostForm("qb_username")
-	password := c.PostForm("qb_password")
-
-	if url == "" {
-		c.String(http.StatusOK, `<div class="text-amber-500 font-medium flex items-center gap-2">⚠️ 保存成功，但 URL 为空，无法测试连接</div>`)
-		return
-	}
-
-	client := downloader.NewQBittorrentClient(url)
-	if err := client.Login(username, password); err != nil {
-		log.Printf("DEBUG: Login failed: %v", err)
-		c.String(http.StatusOK, `<div class="text-red-600 bg-red-50 px-3 py-1.5 rounded-lg text-sm font-medium flex items-center gap-2 border border-red-200 shadow-sm animate-pulse">💾 保存成功 | ❌ 连接失败: `+err.Error()+`</div>`)
-		return
-	}
-
-	version, err := client.GetVersion()
-	statusMsg := ""
-	if err != nil {
-		statusMsg = fmt.Sprintf("⚠️ 保存成功 | 登录成功但获取版本失败: %v", err)
-	} else {
-		statusMsg = fmt.Sprintf("✅ 保存成功 | 🔌 连接正常 (%s)", version)
-	}
-
-	c.String(http.StatusOK, fmt.Sprintf(`<div class="text-emerald-600 bg-emerald-50 px-3 py-1.5 rounded-lg text-sm font-medium flex items-center gap-2 border border-emerald-200 shadow-sm transition-all duration-300 transform scale-100">%s</div>`, statusMsg))
+	statusCache.Delete("qb")
+	c.String(http.StatusOK, `<div class="space-y-2"><div class="text-emerald-600 bg-emerald-50 px-3 py-1.5 rounded-lg text-sm font-medium border border-emerald-200 shadow-sm">QB settings saved.</div>`+renderQBStatusMessage(qbConfigFromForm(c))+`</div>`)
 }
 
 // PikPakSyncHandler synchronizes PikPak settings to AList
@@ -495,107 +526,64 @@ func BangumiSaveHandler(c *gin.Context) {
 }
 
 func TestConnectionHandler(c *gin.Context) {
-	url := c.PostForm("qb_url")
-	username := c.PostForm("qb_username")
-	password := c.PostForm("qb_password")
-
-	if url == "" {
-		c.String(http.StatusBadRequest, `<span class="text-red-500 font-bold">❌ URL 不能为空</span>`)
-		return
-	}
-
-	client := downloader.NewQBittorrentClient(url)
+	cfg := qbConfigFromForm(c)
 	c.Header("Content-Type", "text/html")
-	if err := client.Login(username, password); err != nil {
-		log.Printf("DEBUG: Login failed: %v", err)
-		c.String(http.StatusOK, `<div class="text-red-600 bg-red-50 px-3 py-1.5 rounded-lg text-sm font-medium flex items-center gap-2 border border-red-200 shadow-sm animate-pulse">❌ 连接失败: `+err.Error()+`</div>`)
+
+	if qbutil.ManagedBinaryMissing(cfg, config.BinDir()) {
+		c.String(http.StatusOK, `<div class="text-amber-600 bg-amber-50 px-3 py-1.5 rounded-lg text-sm font-medium flex items-center gap-2 border border-amber-200 shadow-sm">Managed qBittorrent is selected, but the local binary is not installed.</div>`)
+		return
+	}
+	if qbutil.MissingExternalURL(cfg) {
+		c.String(http.StatusBadRequest, `<div class="text-red-600 bg-red-50 px-3 py-1.5 rounded-lg text-sm font-medium flex items-center gap-2 border border-red-200 shadow-sm">External qBittorrent mode requires a WebUI URL.</div>`)
 		return
 	}
 
-	version, err := client.GetVersion()
-	if err != nil {
-		log.Printf("DEBUG: GetVersion failed: %v", err)
-		c.String(http.StatusOK, `<div class="text-amber-600 bg-amber-50 px-3 py-1.5 rounded-lg text-sm font-medium flex items-center gap-2 border border-amber-200 shadow-sm">⚠️ 登录成功但获取版本失败: `+err.Error()+`</div>`)
-		return
-	}
-
-	c.String(http.StatusOK, `<div class="text-emerald-600 bg-emerald-50 px-3 py-1.5 rounded-lg text-sm font-medium flex items-center gap-2 border border-emerald-200 shadow-sm transition-all duration-300 transform scale-100">✅ 连接成功! (`+version+`)</div>`)
+	c.String(http.StatusOK, renderQBStatusMessage(cfg))
 }
 
 // GetQBStatusHandler tests connection using stored config with caching
 func GetQBStatusHandler(c *gin.Context) {
-	time.Sleep(500 * time.Millisecond) // Artificial delay for UX
-	var configs []model.GlobalConfig
-	db.DB.Where("key IN ?", []string{model.ConfigKeyQBUrl, model.ConfigKeyQBUsername, model.ConfigKeyQBPassword}).Find(&configs)
+	time.Sleep(500 * time.Millisecond)
+	qbCfg := qbutil.LoadConfig()
 
-	configMap := make(map[string]string)
-	for _, cfg := range configs {
-		configMap[cfg.Key] = cfg.Value
+	if qbutil.ManagedBinaryMissing(qbCfg, config.BinDir()) {
+		c.String(http.StatusOK, `<div class="text-amber-600 bg-amber-50 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 border border-amber-200">Managed qBittorrent is selected, but the local binary is not installed.</div>`)
+		return
 	}
-
-	url := configMap[model.ConfigKeyQBUrl]
-	username := configMap[model.ConfigKeyQBUsername]
-	password := configMap[model.ConfigKeyQBPassword]
-
-	if url == "" {
-		c.String(http.StatusOK, `<div class="text-sm text-gray-400 flex items-center gap-2"><span>⚪ 未配置 QB URL</span></div>`)
+	if qbutil.MissingExternalURL(qbCfg) {
+		c.String(http.StatusOK, `<div class="text-amber-600 bg-amber-50 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 border border-amber-200">External qBittorrent mode is enabled, but the WebUI URL is still empty.</div>`)
 		return
 	}
 
-	// Calculate Hash
-	hash := getCacheHash(url, username, password)
-
-	// Check Cache
+	hash := getCacheHash(qbCfg.Mode, qbCfg.URL, qbCfg.Username, qbCfg.Password)
 	if val, ok := statusCache.Load("qb"); ok {
 		stat := val.(cachedStatus)
 		if stat.ConfigHash == hash && time.Now().Before(stat.Expiry) {
 			if stat.Success {
-				c.String(http.StatusOK, fmt.Sprintf(`<div class="text-emerald-600 bg-emerald-50 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 border border-emerald-200">✅ QB 已连接 (缓存) %s</div>`, stat.Msg))
+				c.String(http.StatusOK, fmt.Sprintf(`<div class="text-emerald-600 bg-emerald-50 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 border border-emerald-200">QB connected (cached) %s</div>`, stat.Msg))
 			} else {
-				c.String(http.StatusOK, fmt.Sprintf(`<div class="text-red-600 bg-red-50 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 border border-red-200">❌ QB 连接失败 (缓存): %s</div>`, stat.Msg))
+				c.String(http.StatusOK, fmt.Sprintf(`<div class="text-red-600 bg-red-50 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 border border-red-200">QB connection failed (cached): %s</div>`, stat.Msg))
 			}
 			return
 		}
 	}
 
-	client := downloader.NewQBittorrentClient(url)
-	html := ""
-	if err := client.Login(username, password); err != nil {
-		// Cache Failure
-		statusCache.Store("qb", cachedStatus{
-			Success:    false,
-			Msg:        err.Error(),
-			ConfigHash: hash,
-			Expiry:     time.Now().Add(1 * time.Minute), // Short cache for errors
-		})
-		html = fmt.Sprintf(`<div class="text-red-600 bg-red-50 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 border border-red-200">❌ QB 连接失败: %v</div>`, err)
-		c.String(http.StatusOK, html)
+	client := downloader.NewQBittorrentClient(qbCfg.URL)
+	if err := client.Login(qbCfg.Username, qbCfg.Password); err != nil {
+		statusCache.Store("qb", cachedStatus{Success: false, Msg: err.Error(), ConfigHash: hash, Expiry: time.Now().Add(1 * time.Minute)})
+		c.String(http.StatusOK, fmt.Sprintf(`<div class="text-red-600 bg-red-50 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 border border-red-200">QB connection failed: %v</div>`, err))
 		return
 	}
 
 	if ver, err := client.GetVersion(); err == nil {
-		// Cache Success
-		statusCache.Store("qb", cachedStatus{
-			Success:    true,
-			Msg:        fmt.Sprintf("(版本: %s)", ver),
-			ConfigHash: hash,
-			Expiry:     time.Now().Add(5 * time.Minute),
-		})
-		html = fmt.Sprintf(`<div class="text-emerald-600 bg-emerald-50 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 border border-emerald-200">✅ QB 已连接 (版本: %s)</div>`, ver)
-	} else {
-		// Status Unknown?
-		statusCache.Store("qb", cachedStatus{
-			Success:    false, // Treat as warning/fail for cache?
-			Msg:        "Version unknown",
-			ConfigHash: hash,
-			Expiry:     time.Now().Add(1 * time.Minute),
-		})
-		html = `<div class="text-amber-600 bg-amber-50 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 border border-amber-200">⚠️ QB 登录成功但版本未知</div>`
+		statusCache.Store("qb", cachedStatus{Success: true, Msg: fmt.Sprintf("(version: %s)", ver), ConfigHash: hash, Expiry: time.Now().Add(5 * time.Minute)})
+		c.String(http.StatusOK, fmt.Sprintf(`<div class="text-emerald-600 bg-emerald-50 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 border border-emerald-200">QB connected (version: %s)</div>`, ver))
+		return
 	}
 
-	c.String(http.StatusOK, html)
+	statusCache.Store("qb", cachedStatus{Success: false, Msg: "Version unknown", ConfigHash: hash, Expiry: time.Now().Add(1 * time.Minute)})
+	c.String(http.StatusOK, `<div class="text-amber-600 bg-amber-50 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 border border-amber-200">QB login succeeded but version lookup failed</div>`)
 }
-
 func GetTMDBStatusHandler(c *gin.Context) {
 	time.Sleep(500 * time.Millisecond) // Artificial delay for UX
 	style := c.Query("style")

@@ -11,10 +11,12 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/pokerjest/animateAutoTool/internal/bangumi"
+	"github.com/pokerjest/animateAutoTool/internal/config"
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/downloader"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/parser"
+	"github.com/pokerjest/animateAutoTool/internal/qbutil"
 	"github.com/pokerjest/animateAutoTool/internal/service"
 	"gorm.io/gorm"
 )
@@ -123,9 +125,18 @@ func createSubscriptionInternal(sub *model.Subscription) error {
 	// Trigger run asynchronously
 	go func() {
 		log.Printf("DEBUG: Async ProcessSubscription started for %s", sub.Title)
-		qbUrl, qbUser, qbPass := FetchQBConfig()
-		qbt := downloader.NewQBittorrentClient(qbUrl)
-		if err := qbt.Login(qbUser, qbPass); err != nil {
+		qbCfg := qbutil.LoadConfig()
+		if qbutil.ManagedBinaryMissing(qbCfg, config.BinDir()) {
+			log.Printf("WARN: Skipping async subscription run for %s because qBittorrent is not installed and no external WebUI is configured", sub.Title)
+			return
+		}
+		if qbutil.MissingExternalURL(qbCfg) {
+			log.Printf("WARN: Skipping async subscription run for %s because external qBittorrent mode has no WebUI URL configured", sub.Title)
+			return
+		}
+
+		qbt := downloader.NewQBittorrentClient(qbCfg.URL)
+		if err := qbt.Login(qbCfg.Username, qbCfg.Password); err != nil {
 			log.Printf("ERROR: Async QB Login failed: %v", err)
 			return
 		}
@@ -286,11 +297,21 @@ func RunSubscriptionHandler(c *gin.Context) {
 	}
 
 	// Fetch QB Config
-	qbUrl, qbUser, qbPass := FetchQBConfig()
+	qbCfg := qbutil.LoadConfig()
+	if qbutil.ManagedBinaryMissing(qbCfg, config.BinDir()) {
+		c.Header("Content-Type", "text/html")
+		c.String(http.StatusOK, `<script>alert("未检测到 qBittorrent。请先安装托管版本，或在设置中填写外部 qBittorrent WebUI 地址。")</script>`)
+		return
+	}
+	if qbutil.MissingExternalURL(qbCfg) {
+		c.Header("Content-Type", "text/html")
+		c.String(http.StatusOK, `<script>alert("External qBittorrent mode is enabled, but the WebUI URL is still empty.")</script>`)
+		return
+	}
 
 	// Init Downloader
-	qbt := downloader.NewQBittorrentClient(qbUrl)
-	if err := qbt.Login(qbUser, qbPass); err != nil {
+	qbt := downloader.NewQBittorrentClient(qbCfg.URL)
+	if err := qbt.Login(qbCfg.Username, qbCfg.Password); err != nil {
 		log.Printf("RunSubscription: QB Login failed: %v", err)
 		c.Header("Content-Type", "text/html")
 		c.String(http.StatusOK, `<script>alert("QBittorrent 连接失败: `+err.Error()+`")</script>`)

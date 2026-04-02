@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"archive/zip"
 	"compress/gzip"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +13,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/pokerjest/animateAutoTool/internal/config"
 )
 
 const (
@@ -53,6 +56,8 @@ const (
 	ExtTarXz = ".tar.xz"
 )
 
+var ErrQBManualInstallRequired = errors.New("qBittorrent auto-download requires a manual install on this platform")
+
 func (m *Manager) ensureAlist() error {
 	exeName := "alist"
 	if runtime.GOOS == OSWindows {
@@ -61,6 +66,10 @@ func (m *Manager) ensureAlist() error {
 	targetPath := filepath.Join(m.BinDir, exeName)
 
 	if _, err := os.Stat(targetPath); err == nil {
+		return nil
+	}
+	if config.AppConfig != nil && !config.AppConfig.Managed.DownloadMissing {
+		fmt.Println("AList auto-download disabled by configuration; skipping download.")
 		return nil
 	}
 
@@ -111,18 +120,17 @@ func (m *Manager) ensureQB() error {
 		return nil
 	}
 
-	fmt.Printf("Downloading qBittorrent for %s/%s...\n", runtime.GOOS, runtime.GOARCH)
-
 	url, err := getQBUrl()
 	if err != nil {
-		if strings.Contains(err.Error(), "manual_install_required") {
-			fmt.Println(err.Error())
+		if errors.Is(err, ErrQBManualInstallRequired) {
 			return nil
 		}
 		// Fallback or warning
-		fmt.Printf("Warning: %v. Please install qBittorrent manualy.\n", err)
+		fmt.Printf("Warning: %v. Please install qBittorrent manually.\n", err)
 		return nil // Non-fatal
 	}
+
+	fmt.Printf("Downloading qBittorrent for %s/%s...\n", runtime.GOOS, runtime.GOARCH)
 
 	tmpZip := filepath.Join(m.BinDir, "qb.zip")
 	if err := downloadFile(url, tmpZip); err != nil {
@@ -167,6 +175,10 @@ func (m *Manager) EnsureJellyfin() error {
 	}
 
 	if _, err := os.Stat(jellyfinDir); err != nil {
+		if config.AppConfig != nil && !config.AppConfig.Managed.DownloadMissing {
+			fmt.Println("Jellyfin auto-download disabled by configuration; skipping download.")
+			return nil
+		}
 		fmt.Printf("Downloading Jellyfin for %s/%s...\n", runtime.GOOS, runtime.GOARCH)
 		url, err := getJellyfinUrl()
 		if err != nil {
@@ -296,22 +308,23 @@ func getAlistUrl() (string, bool, error) {
 }
 
 func getQBUrl() (string, error) {
-	os := runtime.GOOS
-	arch := runtime.GOARCH
+	return getQBUrlForPlatform(runtime.GOOS, runtime.GOARCH)
+}
 
-	switch os {
+func getQBUrlForPlatform(goos, goarch string) (string, error) {
+	switch goos {
 	case OSWindows:
 		// Portable zip not consistently available for newer versions.
-		return "", fmt.Errorf("manual_install_required: please install qBittorrent manually (e.g. from PortableApps or official installer)")
+		return "", fmt.Errorf("%w: please install qBittorrent manually (e.g. from PortableApps or official installer)", ErrQBManualInstallRequired)
 	case OSLinux:
-		if arch == ArchArm64 {
+		if goarch == ArchArm64 {
 			return QBUrlLinuxArm64, nil
 		}
 		return QBUrlLinuxAmd64, nil
 	case OSDarwin:
-		return "", fmt.Errorf("manual_install_required: auto-download for macOS qbittorrent not supported yet. Please install it to /Applications/qbittorrent.app")
+		return "", fmt.Errorf("%w: auto-download for macOS qbittorrent not supported yet. Please install it to /Applications/qbittorrent.app", ErrQBManualInstallRequired)
 	default:
-		return "", fmt.Errorf("unsupported OS: %s", os)
+		return "", fmt.Errorf("unsupported OS: %s", goos)
 	}
 }
 

@@ -2,24 +2,34 @@ package api
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
+	"github.com/pokerjest/animateAutoTool/internal/bootstrap"
 )
+
+func isAPIRequestPath(path string) bool {
+	return strings.HasPrefix(path, "/api")
+}
+
+func setupEnforcementExempt(path string) bool {
+	switch path {
+	case "/setup":
+		return true
+	}
+
+	return path == "/logout" || strings.HasPrefix(path, "/api/setup/")
+}
 
 func AuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		session := sessions.Default(c)
 		userID := session.Get("user_id")
+		path := c.Request.URL.Path
 
 		if userID == nil {
-			// Check if it's an API request or page load
-			// For API requests, return 401
-			// For page loads, redirect to login
-			path := c.Request.URL.Path
-			// Simple check for API or Static
-			// Ideally we check Accept header too, but path is often enough
-			if len(path) >= 4 && path[:4] == "/api" {
+			if isAPIRequestPath(path) {
 				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 				return
 			}
@@ -28,6 +38,21 @@ func AuthMiddleware() gin.HandlerFunc {
 			c.Abort()
 			return
 		}
+
+		if bootstrap.BootstrapSetupPending() && !setupEnforcementExempt(path) {
+			if isAPIRequestPath(path) {
+				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+					"error":    "setup required",
+					"redirect": "/setup",
+				})
+				return
+			}
+
+			c.Redirect(http.StatusFound, "/setup")
+			c.Abort()
+			return
+		}
+
 		c.Next()
 	}
 }

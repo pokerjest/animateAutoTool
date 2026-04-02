@@ -8,9 +8,11 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/pokerjest/animateAutoTool/internal/bangumi"
+	"github.com/pokerjest/animateAutoTool/internal/config"
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/downloader"
 	"github.com/pokerjest/animateAutoTool/internal/model"
+	"github.com/pokerjest/animateAutoTool/internal/qbutil"
 )
 
 type DashboardData struct {
@@ -22,8 +24,6 @@ type DashboardData struct {
 	BangumiLogin      bool
 	TMDBConnected     bool
 	JellyfinConnected bool
-	// WatchingList      []bangumi.UserCollectionItem // Removed for async load
-	// CompletedList     []bangumi.UserCollectionItem // Removed for async load
 }
 
 func DashboardHandler(c *gin.Context) {
@@ -41,28 +41,21 @@ func DashboardHandler(c *gin.Context) {
 	var totalDownloads int64
 	db.DB.Model(&model.DownloadLog{}).Count(&totalDownloads)
 
-	// Check QB Status (Async)
-	// Removed synchronous blocking check.
-	// qbConnected and qbVersion default to zero values (false, "").
 	var qbConnected bool
 	var qbVersion string
 
-	// Check Bangumi Status & Fetch Data
-	// Check Bangumi Status (Basic Check)
 	var bangumiLogin bool
 	var tokenConfig model.GlobalConfig
 	if err := db.DB.Where("key = ?", model.ConfigKeyBangumiAccessToken).First(&tokenConfig).Error; err == nil && tokenConfig.Value != "" {
 		bangumiLogin = true
 	}
 
-	// Check TMDB Status (Simple check if configured)
 	var tmdbConnected bool
 	var tmdbConfig model.GlobalConfig
 	if err := db.DB.Where("key = ?", model.ConfigKeyTMDBToken).First(&tmdbConfig).Error; err == nil && tmdbConfig.Value != "" {
 		tmdbConnected = true
 	}
 
-	// Check Jellyfin Status (Simple check if configured)
 	var jellyfinConnected bool
 	var jellyfinConfig model.GlobalConfig
 	if err := db.DB.Where("key = ?", model.ConfigKeyJellyfinUrl).First(&jellyfinConfig).Error; err == nil && jellyfinConfig.Value != "" {
@@ -84,19 +77,13 @@ func DashboardHandler(c *gin.Context) {
 }
 
 func DashboardBangumiDataHandler(c *gin.Context) {
-	// Check Bangumi Status & Fetch Data
 	var watchingList []bangumi.UserCollectionItem
-	// var completedList []bangumi.UserCollectionItem // Unused for now
-	// var bangumiLogin bool // Unused if we only pass watchingList
 
 	var tokenConfig model.GlobalConfig
 	if err := db.DB.Where("key = ?", model.ConfigKeyBangumiAccessToken).First(&tokenConfig).Error; err == nil && tokenConfig.Value != "" {
-		// bangumiLogin = true
-
 		client := bangumi.NewClient("", "", "")
 		user, err := client.GetCurrentUser(tokenConfig.Value)
 		if err == nil {
-			// 1. Fetch Watching (Type 3)
 			watching, err1 := client.GetUserCollection(tokenConfig.Value, user.Username, 3, 12, 0)
 			if err1 != nil {
 				log.Printf("Error fetching watching collection: %v", err1)
@@ -113,7 +100,6 @@ func DashboardBangumiDataHandler(c *gin.Context) {
 	})
 }
 
-// Handler for async QB check
 func DashboardQBStatusHandler(c *gin.Context) {
 	start := time.Now()
 	log.Printf("DEBUG: DashboardQBStatusHandler Started")
@@ -121,13 +107,23 @@ func DashboardQBStatusHandler(c *gin.Context) {
 		log.Printf("DEBUG: DashboardQBStatusHandler Finished in %v", time.Since(start))
 	}()
 
-	qbUrl, qbUser, qbPass := FetchQBConfig()
+	qbCfg := qbutil.LoadConfig()
+	if qbutil.ManagedBinaryMissing(qbCfg, config.BinDir()) {
+		c.Header("Content-Type", "text/html")
+		c.String(http.StatusOK, `<div id="qb-status-dashboard" title="Managed qBittorrent binary not found and no external WebUI is configured" class="text-amber-600 font-bold flex items-center gap-1.5 bg-amber-50 px-2 py-0.5 rounded-full text-xs"><span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span> Missing</div>`)
+		return
+	}
+	if qbutil.MissingExternalURL(qbCfg) {
+		c.Header("Content-Type", "text/html")
+		c.String(http.StatusOK, `<div id="qb-status-dashboard" title="External qBittorrent mode is enabled, but the WebUI URL is empty" class="text-amber-600 font-bold flex items-center gap-1.5 bg-amber-50 px-2 py-0.5 rounded-full text-xs"><span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span> Config</div>`)
+		return
+	}
 
 	var qbConnected bool
 	var qbVersion string
-	if qbUrl != "" {
-		qbt := downloader.NewQBittorrentClient(qbUrl)
-		if err := qbt.Login(qbUser, qbPass); err == nil {
+	if qbCfg.URL != "" {
+		qbt := downloader.NewQBittorrentClient(qbCfg.URL)
+		if err := qbt.Login(qbCfg.Username, qbCfg.Password); err == nil {
 			if ver, err := qbt.GetVersion(); err == nil {
 				qbConnected = true
 				qbVersion = ver
@@ -137,9 +133,9 @@ func DashboardQBStatusHandler(c *gin.Context) {
 
 	html := ""
 	if qbConnected {
-		html = fmt.Sprintf(`<span class="text-emerald-600 font-bold flex items-center gap-1.5 bg-emerald-50 px-2 py-0.5 rounded-full text-xs" title="%s"><span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> 已连接 (%s)</span>`, qbVersion, qbVersion)
+		html = fmt.Sprintf(`<span class="text-emerald-600 font-bold flex items-center gap-1.5 bg-emerald-50 px-2 py-0.5 rounded-full text-xs" title="%s"><span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> Connected (%s)</span>`, qbVersion, qbVersion)
 	} else {
-		html = `<span class="text-red-500 font-bold flex items-center gap-1.5 bg-red-50 px-2 py-0.5 rounded-full text-xs"><span class="w-1.5 h-1.5 rounded-full bg-red-500"></span> 未连接</span>`
+		html = `<span class="text-red-500 font-bold flex items-center gap-1.5 bg-red-50 px-2 py-0.5 rounded-full text-xs"><span class="w-1.5 h-1.5 rounded-full bg-red-500"></span> Offline</span>`
 	}
 	c.Header("Content-Type", "text/html")
 	c.String(http.StatusOK, html)

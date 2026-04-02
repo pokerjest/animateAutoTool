@@ -51,6 +51,13 @@ func NewQBittorrentClient(baseURL string) *QBittorrentClient {
 }
 
 func (q *QBittorrentClient) Login(username, password string) error {
+	if username == "" && password == "" {
+		if _, err := q.GetVersion(); err == nil {
+			log.Printf("DEBUG: qBittorrent is reachable without explicit login; using localhost-auth bypass")
+			return nil
+		}
+	}
+
 	resp, err := q.client.R().
 		SetFormData(map[string]string{
 			"username": username,

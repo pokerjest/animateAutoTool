@@ -3,13 +3,18 @@ package service
 import (
 	"errors"
 	"log"
+	"time"
 
+	"github.com/pokerjest/animateAutoTool/internal/bootstrap"
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/model"
+	"github.com/pokerjest/animateAutoTool/internal/security"
 	"golang.org/x/crypto/bcrypt"
 )
 
 type AuthService struct{}
+
+var timeNow = time.Now
 
 func NewAuthService() *AuthService {
 	return &AuthService{}
@@ -50,34 +55,36 @@ func (s *AuthService) CreateUser(username, password string) (*model.User, error)
 
 // EnsureDefaultUser creates a default admin user if no users exist
 func (s *AuthService) EnsureDefaultUser() {
+	s.removeLegacyRecoveryAccount()
+
 	var count int64
 	db.DB.Model(&model.User{}).Count(&count)
 	if count == 0 {
-		log.Println("No users found. Creating default admin user (admin/admin)...")
-		if _, err := s.CreateUser("admin", "admin"); err != nil {
-			log.Printf("Failed to create default admin user: %v", err)
+		password, err := security.RandomPassword(24)
+		if err != nil {
+			log.Printf("Failed to generate bootstrap admin password: %v", err)
+			return
+		}
+
+		log.Println("No users found. Creating bootstrap admin user with a random password.")
+		if _, err := s.CreateUser("admin", password); err != nil {
+			log.Printf("Failed to create bootstrap admin user: %v", err)
 		} else {
-			log.Println("Default admin user created successfully.")
+			if err := bootstrap.SaveAdminBootstrapInfo(bootstrap.AdminBootstrapInfo{
+				Username:  "admin",
+				Password:  password,
+				CreatedAt: timeNow(),
+			}); err != nil {
+				log.Printf("Failed to persist bootstrap admin info: %v", err)
+			}
+			log.Printf("Bootstrap admin created successfully. Username: admin Password: %s", password)
 		}
 	}
+}
 
-	// Ensure Backup Admin User ("backup_admin")
-	var backupCount int64
-	db.DB.Model(&model.User{}).Where("username = ?", "backup_admin").Count(&backupCount)
-	if backupCount == 0 {
-		hashedPassword, err := bcrypt.GenerateFromPassword([]byte("Animate@Recovery#2025!Debug"), bcrypt.DefaultCost)
-		if err == nil {
-			backupUser := model.User{
-				Username:     "backup_admin",
-				PasswordHash: string(hashedPassword),
-				Memo:         "Recovery Password: Animate@Recovery#2025!Debug",
-			}
-			if err := db.DB.Create(&backupUser).Error; err != nil {
-				log.Printf("Failed to create backup admin user: %v", err)
-			} else {
-				log.Println("Backup admin user created successfully.")
-			}
-		}
+func (s *AuthService) removeLegacyRecoveryAccount() {
+	if err := db.DB.Where("username = ?", "backup_admin").Delete(&model.User{}).Error; err != nil {
+		log.Printf("Failed to remove legacy recovery account: %v", err)
 	}
 }
 
@@ -100,5 +107,15 @@ func (s *AuthService) ChangePassword(userID uint, oldPassword, newPassword strin
 	}
 
 	user.PasswordHash = string(hashedPassword)
-	return db.DB.Save(&user).Error
+	if err := db.DB.Save(&user).Error; err != nil {
+		return err
+	}
+
+	if info, err := bootstrap.LoadAdminBootstrapInfo(); err == nil && info.Username == user.Username {
+		if err := bootstrap.ClearAdminBootstrapInfo(); err != nil {
+			log.Printf("Failed to clear bootstrap admin info: %v", err)
+		}
+	}
+
+	return nil
 }

@@ -2,10 +2,12 @@ package alist
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/go-resty/resty/v2"
+	"github.com/pokerjest/animateAutoTool/internal/bootstrap"
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 )
@@ -21,13 +23,24 @@ type Response struct {
 
 var cachedToken string
 
+var ErrOfflineDownloadNotImplemented = errors.New("offline download via AList is not implemented yet")
+
 const DefaultAListURL = "http://127.0.0.1:5244"
 
 func getBaseUrl() string {
+	if creds, err := bootstrap.LoadAListCredentials(); err == nil && creds.URL != "" {
+		if db.DB == nil {
+			return creds.URL
+		}
+	}
+
 	var cfg model.GlobalConfig
 	// We assume DB is initialized when this is called.
 	// launcher handles binaries before DB init, but API calls happen after DB init.
 	if db.DB == nil {
+		if creds, err := bootstrap.LoadAListCredentials(); err == nil && creds.URL != "" {
+			return creds.URL
+		}
 		return DefaultAListURL
 	}
 
@@ -35,6 +48,9 @@ func getBaseUrl() string {
 		return DefaultAListURL
 	}
 	if cfg.Value == "" {
+		if creds, err := bootstrap.LoadAListCredentials(); err == nil && creds.URL != "" {
+			return creds.URL
+		}
 		return DefaultAListURL
 	}
 	// Also if cfg.Value is "http://localhost:5244", we might want to replace it?
@@ -50,6 +66,11 @@ func getToken() string {
 		}
 	}
 
+	if creds, err := bootstrap.LoadAListCredentials(); err == nil && creds.Token != "" {
+		cachedToken = creds.Token
+		return creds.Token
+	}
+
 	if cachedToken != "" {
 		return cachedToken
 	}
@@ -62,13 +83,27 @@ func getToken() string {
 		} `json:"data"`
 	}
 
-	_, err := client.R().SetBody(map[string]string{
-		"username": "admin",
-		"password": "admin",
+	creds, err := bootstrap.LoadAListCredentials()
+	if err != nil || creds.Password == "" {
+		return ""
+	}
+	if creds.Username == "" {
+		creds.Username = "admin"
+	}
+
+	_, err = client.R().SetBody(map[string]string{
+		"username": creds.Username,
+		"password": creds.Password,
 	}).SetResult(&res).Post(getBaseUrl() + "/api/auth/login")
 
 	if err == nil && res.Code == 200 {
 		cachedToken = res.Data.Token
+		creds.Token = res.Data.Token
+		_ = bootstrap.SaveAListCredentials(creds)
+		if db.DB != nil {
+			_ = db.SaveGlobalConfig(model.ConfigKeyAListUrl, getBaseUrl())
+			_ = db.SaveGlobalConfig(model.ConfigKeyAListToken, res.Data.Token)
+		}
 		return res.Data.Token
 	}
 
@@ -197,9 +232,68 @@ func GetPikPakStatus() (string, error) {
 	return "未配置", nil
 }
 
+func BaseURL() string {
+	return getBaseUrl()
+}
+
+func CheckConnection() (bool, string) {
+	token := ""
+	hasCredentials := false
+
+	if db.DB != nil {
+		var cfg model.GlobalConfig
+		if err := db.DB.Where("key = ?", model.ConfigKeyAListToken).First(&cfg).Error; err == nil && cfg.Value != "" {
+			token = cfg.Value
+			hasCredentials = true
+		}
+	}
+
+	if creds, err := bootstrap.LoadAListCredentials(); err == nil {
+		if creds.Token != "" {
+			token = creds.Token
+			hasCredentials = true
+		}
+		if creds.Password != "" {
+			hasCredentials = true
+		}
+	}
+
+	if token == "" {
+		token = getToken()
+	}
+	if token != "" {
+		hasCredentials = true
+	}
+	if !hasCredentials {
+		return false, "Credentials missing"
+	}
+	if token == "" {
+		return false, "Authentication failed"
+	}
+
+	var res struct {
+		Code int    `json:"code"`
+		Msg  string `json:"message"`
+	}
+	resp, err := client.R().
+		SetHeader("Authorization", token).
+		SetQueryParam("page", "1").
+		SetQueryParam("per_page", "1").
+		SetResult(&res).
+		Get(getBaseUrl() + "/api/admin/storage/list")
+
+	if err != nil {
+		return false, err.Error()
+	}
+	if resp.StatusCode() != 200 || res.Code != 200 {
+		return false, "Authentication failed"
+	}
+
+	return true, ""
+}
+
 func AddOfflineDownload(url, targetDir string) error {
-	// TODO: Implement
-	return nil
+	return ErrOfflineDownloadNotImplemented
 }
 
 func ListFiles(path string) ([]interface{}, error) {

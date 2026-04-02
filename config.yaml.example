@@ -2,6 +2,11 @@
 server:
   port: 8306
   mode: debug # debug or release
+  public_url: "" # optional, e.g. https://anime.example.com
+  headless: false # true disables the system tray and runs as a plain web service
+  trusted_proxies: # IPs or CIDRs allowed to supply X-Forwarded-* headers
+    - 127.0.0.1
+    - ::1
 
 # Database Configuration
 database:
@@ -10,3 +15,11 @@ database:
 # Logging
 log:
   level: info
+
+# Authentication
+auth:
+  secret_key: "" # recommended: set a stable random value; if left blank, the app falls back to data/bootstrap/auth_secret
+
+# Managed sidecars
+managed_services:
+  download_missing: false # set true if you want AList/Jellyfin to auto-download when missing

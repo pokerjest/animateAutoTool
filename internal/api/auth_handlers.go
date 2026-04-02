@@ -2,9 +2,12 @@ package api
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
+	"github.com/pokerjest/animateAutoTool/internal/bootstrap"
+	"github.com/pokerjest/animateAutoTool/internal/config"
 	"github.com/pokerjest/animateAutoTool/internal/service"
 )
 
@@ -18,10 +21,23 @@ func LoginPageHandler(c *gin.Context) {
 	// If already logged in, redirect to dashboard
 	session := sessions.Default(c)
 	if session.Get("user_id") != nil {
+		if bootstrap.BootstrapSetupPending() {
+			c.Redirect(http.StatusFound, "/setup")
+			return
+		}
 		c.Redirect(http.StatusFound, "/")
 		return
 	}
-	c.HTML(http.StatusOK, "login.html", gin.H{})
+
+	bootstrapInfo, _ := bootstrap.PendingAdminBootstrapInfo()
+
+	c.HTML(http.StatusOK, "login.html", gin.H{
+		"BootstrapAdmin":      bootstrapInfo,
+		"ConfigPath":          config.ConfigFilePath(),
+		"DataDir":             config.DataDir(),
+		"ManagedDownloadsOff": !config.AppConfig.Managed.DownloadMissing,
+		"ConfigAutoCreated":   config.ConfigAutoCreated,
+	})
 }
 
 func LoginPostHandler(c *gin.Context) {
@@ -41,33 +57,32 @@ func LoginPostHandler(c *gin.Context) {
 	session := sessions.Default(c)
 	session.Set("user_id", user.ID)
 
+	maxAge := 0
 	if req.RememberMe {
-		// 30 days in seconds
-		session.Options(sessions.Options{
-			MaxAge: 3600 * 24 * 30,
-			Path:   "/",
-		})
-	} else {
-		// Browser session (cleared when browser closes)
-		// Note: Depending on cookie store implementation, 0 or -1 might be used, or just omitting MaxAge.
-		// If explicit setting is needed to reset previous persistent session:
-		session.Options(sessions.Options{
-			MaxAge: 0,
-			Path:   "/",
-		})
+		maxAge = 3600 * 24 * 30
 	}
+	session.Options(sessionCookieOptions(c, maxAge))
 
 	if err := session.Save(); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save session"})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Login successful"})
+	redirect := "/"
+	if bootstrap.BootstrapSetupPending() {
+		redirect = "/setup"
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":  "Login successful",
+		"redirect": redirect,
+	})
 }
 
 func LogoutHandler(c *gin.Context) {
 	session := sessions.Default(c)
 	session.Clear()
+	session.Options(sessionCookieOptions(c, -1))
 	if err := session.Save(); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save session"})
 		return
@@ -87,37 +102,19 @@ func ChangePasswordHandler(c *gin.Context) {
 		return
 	}
 
-	session := sessions.Default(c)
-	userID := session.Get("user_id")
-	if userID == nil {
+	req.NewPassword = strings.TrimSpace(req.NewPassword)
+	if len(req.NewPassword) < 8 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "New password must be at least 8 characters long"})
+		return
+	}
+
+	uid, err := currentSessionUserID(c)
+	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
 
 	authService := service.NewAuthService()
-	// userID from session is usually generic interface{}, needs assertion
-	uid, ok := userID.(uint)
-	if !ok {
-		// Try casting to standard int types if uint fails (depends on serialization)
-		// Usually session stores numbers as int or float64 in JSON/Gob
-		// For cookie store with gob, it preserves type if registered, but typically just cast carefully
-		// Gorm IDs are uint. Let's assume standard behavior or try safe cast.
-		// For simplicity, let's try direct assertion or check your session serialization.
-		// If using `gob.Register`, it should be fine.
-		// Let's safe check:
-		if num, ok := userID.(int); ok {
-			uid = uint(num) // Convert int to uint
-		} else if num, ok := userID.(float64); ok {
-			uid = uint(num)
-		} else if num, ok := userID.(int64); ok {
-			uid = uint(num)
-		} else {
-			// Fallback or error
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Session error"})
-			return
-		}
-	}
-
 	if err := authService.ChangePassword(uid, req.OldPassword, req.NewPassword); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
