@@ -75,7 +75,7 @@ func (m *Manager) startAlist() error {
 
 	// 1.5. Patch config.json to ensure sqlite3 is used (fix for some environments)
 	configFile := filepath.Join(dataDir, "config.json")
-	if content, err := os.ReadFile(configFile); err == nil {
+	if content, err := os.ReadFile(filepath.Clean(configFile)); err == nil { //nolint:gosec // configFile is derived from the managed AList data directory.
 		newContent := strings.Replace(string(content), `"type": "sqlite"`, `"type": "sqlite3"`, 1)
 		if newContent != string(content) {
 			_ = os.WriteFile(configFile, []byte(newContent), 0600)
@@ -236,7 +236,7 @@ func (m *Manager) startJellyfin() error {
 	//nolint:gosec // binPath and args are derived from managed-service configuration under the app workspace.
 	cmd := exec.CommandContext(m.Ctx, binPath, args...)
 
-	logFile, _ := os.Create(filepath.Join(logDir, "startup.log"))
+	logFile, _ := os.Create(filepath.Clean(filepath.Join(logDir, "startup.log"))) //nolint:gosec // startup log path is created under the managed Jellyfin log directory.
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 

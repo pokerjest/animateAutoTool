@@ -126,7 +126,7 @@ func (s *AgentService) scanLocalAssets(anime *model.LocalAnime) {
 			// For now, simple way: Read bytes and store in BLOB (Offline Cache logic)
 			// Or better: Agent should prefer local blob over re-downloading.
 
-			data, err := os.ReadFile(imgPath)
+			data, err := os.ReadFile(filepath.Clean(imgPath)) //nolint:gosec // imgPath is constrained to known local image names inside the anime directory.
 			if err == nil && len(data) > 0 {
 				if anime.MetadataID == nil || *anime.MetadataID == 0 {
 					anime.Metadata = &model.AnimeMetadata{Title: anime.Title}
