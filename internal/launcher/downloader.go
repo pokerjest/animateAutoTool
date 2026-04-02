@@ -54,6 +54,15 @@ const (
 	ExtZip   = ".zip"
 	ExtTarGz = ".tar.gz"
 	ExtTarXz = ".tar.xz"
+
+	qbExecutableWindows = "qbittorrent.exe"
+	qbExecutableNox     = "qbittorrent-nox"
+	qbEnhancedNox       = "qbittorrent-enhanced-nox"
+	jellyfinExecutable  = "jellyfin.exe"
+	jellyfinExecutableN = "jellyfin"
+	ffmpegExecutable    = "ffmpeg.exe"
+	ffmpegExecutableN   = "ffmpeg"
+	ffprobeExecutableN  = "ffprobe"
 )
 
 var ErrQBManualInstallRequired = errors.New("qBittorrent auto-download requires a manual install on this platform")
@@ -110,12 +119,7 @@ func (m *Manager) ensureAlist() error {
 }
 
 func (m *Manager) ensureQB() error {
-	exeName := "qbittorrent.exe"
-	if runtime.GOOS != OSWindows {
-		exeName = "qbittorrent-nox"
-	}
-
-	targetPath := filepath.Join(m.BinDir, exeName)
+	targetPath := filepath.Join(m.BinDir, qbExecutableName())
 	if _, err := os.Stat(targetPath); err == nil {
 		return nil
 	}
@@ -146,7 +150,7 @@ func (m *Manager) ensureQB() error {
 	// Post-processing for Linux: Rename binary
 	if runtime.GOOS == OSLinux {
 		// Find potential binary names
-		candidates := []string{"qbittorrent-enhanced-nox", "qbittorrent-nox"}
+		candidates := []string{qbEnhancedNox, qbExecutableNox}
 		for _, name := range candidates {
 			path := filepath.Join(m.BinDir, name)
 			if _, err := os.Stat(path); err == nil {
@@ -166,123 +170,133 @@ func (m *Manager) ensureQB() error {
 
 func (m *Manager) EnsureJellyfin() error {
 	jellyfinDir := filepath.Join(m.BinDir, "jellyfin")
-	ffmpegDir := filepath.Join(m.BinDir, "ffmpeg")
-
-	// 1. Jellyfin Server
-	jfExe := "jellyfin.exe"
-	if runtime.GOOS != OSWindows {
-		jfExe = "jellyfin"
+	if err := m.ensureManagedJellyfinServer(jellyfinDir); err != nil {
+		return err
 	}
-
 	if _, err := os.Stat(jellyfinDir); err != nil {
-		if config.AppConfig != nil && !config.AppConfig.Managed.DownloadMissing {
-			fmt.Println("Jellyfin auto-download disabled by configuration; skipping download.")
-			return nil
-		}
-		fmt.Printf("Downloading Jellyfin for %s/%s...\n", runtime.GOOS, runtime.GOARCH)
-		url, err := getJellyfinUrl()
-		if err != nil {
+		return nil
+	}
+
+	return m.ensureManagedFFmpeg(filepath.Join(m.BinDir, "ffmpeg"))
+}
+
+func (m *Manager) ensureManagedJellyfinServer(jellyfinDir string) error {
+	if _, err := os.Stat(jellyfinDir); err == nil {
+		return nil
+	}
+	if config.AppConfig != nil && !config.AppConfig.Managed.DownloadMissing {
+		fmt.Println("Jellyfin auto-download disabled by configuration; skipping download.")
+		return nil
+	}
+
+	fmt.Printf("Downloading Jellyfin for %s/%s...\n", runtime.GOOS, runtime.GOARCH)
+	url, err := getJellyfinUrl()
+	if err != nil {
+		return err
+	}
+	if err := m.downloadAndInstallDir(url, "jellyfin_dl", "jellyfin_tmp", jellyfinDir); err != nil {
+		return err
+	}
+	if runtime.GOOS == OSWindows {
+		return nil
+	}
+
+	return os.Chmod(filepath.Join(jellyfinDir, jellyfinExecutableName()), 0755)
+}
+
+func (m *Manager) ensureManagedFFmpeg(ffmpegDir string) error {
+	if _, err := os.Stat(ffmpegDir); err == nil {
+		return nil
+	}
+
+	fmt.Printf("Downloading FFmpeg for %s...\n", runtime.GOOS)
+	url, err := getFFmpegUrl()
+	if err != nil {
+		return err
+	}
+	if err := m.downloadAndInstallDir(url, "ffmpeg_dl", "ffmpeg_tmp", ffmpegDir); err != nil {
+		return err
+	}
+	if runtime.GOOS == OSWindows {
+		return nil
+	}
+	if err := os.Chmod(filepath.Join(ffmpegDir, ffmpegExecutableName()), 0755); err != nil {
+		return err
+	}
+	return os.Chmod(filepath.Join(ffmpegDir, ffprobeExecutableN), 0755)
+}
+
+func (m *Manager) downloadAndInstallDir(url, downloadPrefix, extractDirName, targetDir string) error {
+	ext := archiveExtension(url)
+	tmpFile := filepath.Join(m.BinDir, downloadPrefix+ext)
+	if err := downloadFile(url, tmpFile); err != nil {
+		return err
+	}
+	defer os.Remove(tmpFile)
+
+	tmpExtract := filepath.Join(m.BinDir, extractDirName)
+	_ = os.RemoveAll(tmpExtract)
+	defer os.RemoveAll(tmpExtract)
+
+	if ext == ExtZip {
+		if err := unzip(tmpFile, tmpExtract); err != nil {
 			return err
 		}
-
-		ext := ExtZip
-		if strings.HasSuffix(url, ExtTarGz) {
-			ext = ExtTarGz
-		} else if strings.HasSuffix(url, ExtTarXz) {
-			ext = ExtTarXz
-		}
-		tmpFile := filepath.Join(m.BinDir, "jellyfin_dl"+ext)
-		if err := downloadFile(url, tmpFile); err != nil {
+	} else {
+		if err := untar(tmpFile, tmpExtract); err != nil {
 			return err
-		}
-		defer os.Remove(tmpFile)
-
-		tmpExtract := filepath.Join(m.BinDir, "jellyfin_tmp")
-		os.RemoveAll(tmpExtract)
-
-		if ext == ".zip" {
-			if err := unzip(tmpFile, tmpExtract); err != nil {
-				return err
-			}
-		} else {
-			if err := untar(tmpFile, tmpExtract); err != nil {
-				return err
-			}
-		}
-
-		entries, _ := os.ReadDir(tmpExtract)
-		srcDir := tmpExtract
-		if len(entries) == 1 && entries[0].IsDir() {
-			srcDir = filepath.Join(tmpExtract, entries[0].Name())
-		}
-
-		if err := os.Rename(srcDir, jellyfinDir); err != nil {
-			return err
-		}
-		os.RemoveAll(tmpExtract)
-
-		if runtime.GOOS != OSWindows {
-			if err := os.Chmod(filepath.Join(jellyfinDir, jfExe), 0755); err != nil {
-				return err
-			}
 		}
 	}
 
-	// 2. FFmpeg
-	if _, err := os.Stat(ffmpegDir); err != nil {
-		fmt.Printf("Downloading FFmpeg for %s...\n", runtime.GOOS)
-		url, err := getFFmpegUrl()
-		if err != nil {
-			return err
-		}
-
-		ext := ExtZip
-		if strings.HasSuffix(url, ExtTarGz) {
-			ext = ExtTarGz
-		} else if strings.HasSuffix(url, ExtTarXz) {
-			ext = ExtTarXz
-		}
-
-		tmpFile := filepath.Join(m.BinDir, "ffmpeg_dl"+ext)
-		if err := downloadFile(url, tmpFile); err != nil {
-			return err
-		}
-		defer os.Remove(tmpFile)
-
-		tmpExtract := filepath.Join(m.BinDir, "ffmpeg_tmp")
-		os.RemoveAll(tmpExtract)
-
-		if ext == ".zip" {
-			if err := unzip(tmpFile, tmpExtract); err != nil {
-				return err
-			}
-		} else {
-			if err := untar(tmpFile, tmpExtract); err != nil {
-				return err
-			}
-		}
-
-		entries, _ := os.ReadDir(tmpExtract)
-		srcDir := tmpExtract
-		if len(entries) == 1 && entries[0].IsDir() {
-			srcDir = filepath.Join(tmpExtract, entries[0].Name())
-		}
-		if err := os.Rename(srcDir, ffmpegDir); err != nil {
-			return err
-		}
-		os.RemoveAll(tmpExtract)
-
-		if runtime.GOOS != OSWindows {
-			if err := os.Chmod(filepath.Join(ffmpegDir, "ffmpeg"), 0755); err != nil {
-				return err
-			}
-			if err := os.Chmod(filepath.Join(ffmpegDir, "ffprobe"), 0755); err != nil {
-				return err
-			}
-		}
+	srcDir, err := extractedRootDir(tmpExtract)
+	if err != nil {
+		return err
 	}
 
-	return nil
+	return os.Rename(srcDir, targetDir)
+}
+
+func archiveExtension(url string) string {
+	switch {
+	case strings.HasSuffix(url, ExtTarGz):
+		return ExtTarGz
+	case strings.HasSuffix(url, ExtTarXz):
+		return ExtTarXz
+	default:
+		return ExtZip
+	}
+}
+
+func extractedRootDir(extractDir string) (string, error) {
+	entries, err := os.ReadDir(extractDir)
+	if err != nil {
+		return "", err
+	}
+	if len(entries) == 1 && entries[0].IsDir() {
+		return filepath.Join(extractDir, entries[0].Name()), nil
+	}
+	return extractDir, nil
+}
+
+func qbExecutableName() string {
+	if runtime.GOOS == OSWindows {
+		return qbExecutableWindows
+	}
+	return qbExecutableNox
+}
+
+func jellyfinExecutableName() string {
+	if runtime.GOOS == OSWindows {
+		return jellyfinExecutable
+	}
+	return jellyfinExecutableN
+}
+
+func ffmpegExecutableName() string {
+	if runtime.GOOS == OSWindows {
+		return ffmpegExecutable
+	}
+	return ffmpegExecutableN
 }
 
 func getAlistUrl() (string, bool, error) {

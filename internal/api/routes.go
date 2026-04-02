@@ -1,3 +1,6 @@
+//go:build legacy_routes
+// +build legacy_routes
+
 package api
 
 import (

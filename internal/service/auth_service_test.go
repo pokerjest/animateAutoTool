@@ -12,6 +12,8 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+const bootstrapAdminUsername = "admin"
+
 func withBootstrapDataDir(t *testing.T) {
 	t.Helper()
 
@@ -44,10 +46,10 @@ func TestEnsureDefaultUserCreatesRandomBootstrapAdmin(t *testing.T) {
 	if len(users) != 1 {
 		t.Fatalf("expected exactly one bootstrap user, got %d", len(users))
 	}
-	if users[0].Username != "admin" {
+	if users[0].Username != bootstrapAdminUsername {
 		t.Fatalf("expected bootstrap username admin, got %s", users[0].Username)
 	}
-	if err := bcrypt.CompareHashAndPassword([]byte(users[0].PasswordHash), []byte("admin")); err == nil {
+	if err := bcrypt.CompareHashAndPassword([]byte(users[0].PasswordHash), []byte(bootstrapAdminUsername)); err == nil {
 		t.Fatal("bootstrap user should not use the legacy admin/admin password")
 	}
 
@@ -55,10 +57,10 @@ func TestEnsureDefaultUserCreatesRandomBootstrapAdmin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected bootstrap admin info to be persisted: %v", err)
 	}
-	if info.Username != "admin" {
+	if info.Username != bootstrapAdminUsername {
 		t.Fatalf("expected bootstrap admin username admin, got %s", info.Username)
 	}
-	if info.Password == "" || info.Password == "admin" {
+	if info.Password == "" || info.Password == bootstrapAdminUsername {
 		t.Fatalf("expected random bootstrap password, got %q", info.Password)
 	}
 }
@@ -102,7 +104,7 @@ func TestChangePasswordClearsBootstrapAdminInfo(t *testing.T) {
 	}
 
 	var admin model.User
-	if err := db.DB.Where("username = ?", "admin").First(&admin).Error; err != nil {
+	if err := db.DB.Where("username = ?", bootstrapAdminUsername).First(&admin).Error; err != nil {
 		t.Fatalf("failed to fetch admin user: %v", err)
 	}
 

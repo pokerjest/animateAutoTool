@@ -337,7 +337,7 @@ managed_services:
   download_missing: false
 `) + "\n"
 
-	return os.WriteFile(AppPaths.ConfigFile, []byte(content), 0644)
+	return os.WriteFile(AppPaths.ConfigFile, []byte(content), 0600)
 }
 
 func loadOrCreateFallbackAuthSecret() (secret string, created bool, err error) {

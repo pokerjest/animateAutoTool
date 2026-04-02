@@ -25,7 +25,6 @@ func PngToIco(inputData []byte) ([]byte, error) {
 	width := bounds.Dx()
 	height := bounds.Dy()
 
-	validPngData := inputData
 	// If decoded as PNG and size is OK, we could reuse inputData, but we can't easily know if inputData IS png bytes
 	// without checking magic bytes or relying on format string from Decode.
 	// Simpler to RE-ENCODE everything to PNG to be safe and consistent.
@@ -56,7 +55,7 @@ func PngToIco(inputData []byte) ([]byte, error) {
 	if err := png.Encode(pngBuf, img); err != nil {
 		return nil, err
 	}
-	validPngData = pngBuf.Bytes()
+	validPngData := pngBuf.Bytes()
 
 	// ICO Width/Height 0 means 256
 	wVal := uint8(width)
@@ -71,20 +70,24 @@ func PngToIco(inputData []byte) ([]byte, error) {
 	// 4. Construct ICO
 	buf := new(bytes.Buffer)
 
-	// Header
-	binary.Write(buf, binary.LittleEndian, uint16(0)) // Reserved
-	binary.Write(buf, binary.LittleEndian, uint16(1)) // Type 1 (Icon)
-	binary.Write(buf, binary.LittleEndian, uint16(1)) // Count 1
-
-	// Dir Entry
-	binary.Write(buf, binary.LittleEndian, wVal)
-	binary.Write(buf, binary.LittleEndian, hVal)
-	binary.Write(buf, binary.LittleEndian, uint8(0))                  // Colors
-	binary.Write(buf, binary.LittleEndian, uint8(0))                  // Reserved
-	binary.Write(buf, binary.LittleEndian, uint16(1))                 // Planes
-	binary.Write(buf, binary.LittleEndian, uint16(32))                // BPP
-	binary.Write(buf, binary.LittleEndian, uint32(len(validPngData))) // Size
-	binary.Write(buf, binary.LittleEndian, uint32(22))                // Offset
+	fields := []any{
+		uint16(0), // Reserved
+		uint16(1), // Type 1 (Icon)
+		uint16(1), // Count 1
+		wVal,
+		hVal,
+		uint8(0),                  // Colors
+		uint8(0),                  // Reserved
+		uint16(1),                 // Planes
+		uint16(32),                // BPP
+		uint32(len(validPngData)), // Size
+		uint32(22),                // Offset
+	}
+	for _, field := range fields {
+		if err := binary.Write(buf, binary.LittleEndian, field); err != nil {
+			return nil, err
+		}
+	}
 
 	// Write PNG Data
 	if _, err := buf.Write(validPngData); err != nil {

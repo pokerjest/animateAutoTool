@@ -76,7 +76,7 @@ func (m *Manager) startAlist() error {
 	if content, err := os.ReadFile(configFile); err == nil {
 		newContent := strings.Replace(string(content), `"type": "sqlite"`, `"type": "sqlite3"`, 1)
 		if newContent != string(content) {
-			_ = os.WriteFile(configFile, []byte(newContent), 0644)
+			_ = os.WriteFile(configFile, []byte(newContent), 0600)
 			fmt.Println("Patched alist config to use sqlite3")
 		}
 	}
@@ -105,11 +105,7 @@ func (m *Manager) startAlist() error {
 }
 
 func (m *Manager) startQB() error {
-	exeName := "qbittorrent.exe"
-	if runtime.GOOS != OSWindows {
-		exeName = "qbittorrent-nox"
-	}
-	binPath := filepath.Join(m.BinDir, exeName)
+	binPath := filepath.Join(m.BinDir, qbExecutableName())
 
 	// Check if binary exists (might be skipped on macOS)
 	if _, err := os.Stat(binPath); os.IsNotExist(err) {
@@ -174,12 +170,8 @@ WebUI\LocalHostAuth=false
 }
 
 func (m *Manager) startJellyfin() error {
-	exeName := "jellyfin.exe"
-	if runtime.GOOS != OSWindows {
-		exeName = "jellyfin"
-	}
 	binDir := filepath.Join(m.BinDir, "jellyfin")
-	binPath := filepath.Join(binDir, exeName)
+	binPath := filepath.Join(binDir, jellyfinExecutableName())
 
 	if _, err := os.Stat(binPath); os.IsNotExist(err) {
 		fmt.Println("Jellyfin binary not found, skipping managed start.")
@@ -210,11 +202,7 @@ func (m *Manager) startJellyfin() error {
 	}
 
 	// FFmpeg path
-	ffmpegName := "ffmpeg.exe"
-	if runtime.GOOS != OSWindows {
-		ffmpegName = "ffmpeg"
-	}
-	ffmpegPath := filepath.Join(m.BinDir, "ffmpeg", ffmpegName)
+	ffmpegPath := filepath.Join(m.BinDir, "ffmpeg", ffmpegExecutableName())
 
 	// If custom ffmpeg exists, use it. Otherwise let Jellyfin find system ffmpeg.
 	ffmpegArg := ""
@@ -306,7 +294,6 @@ func (m *Manager) startJellyfin() error {
 				fmt.Printf("Jellyfin Zero-Config note: %v\n", err)
 			}
 		}
-		return
 	}()
 
 	return nil
