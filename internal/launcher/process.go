@@ -17,6 +17,7 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/jellyfin"
 	"github.com/pokerjest/animateAutoTool/internal/model"
+	"github.com/pokerjest/animateAutoTool/internal/safeio"
 	"github.com/pokerjest/animateAutoTool/internal/security"
 )
 
@@ -65,6 +66,7 @@ func (m *Manager) startAlist() error {
 		return fmt.Errorf("failed to persist alist bootstrap credentials: %w", err)
 	}
 
+	//nolint:gosec // binPath and dataDir are internal managed-service paths under the app workspace.
 	cmdSetPass := exec.Command(binPath, "admin", "set", creds.Password, "--data", dataDir)
 	if output, err := cmdSetPass.CombinedOutput(); err != nil {
 		fmt.Printf("Alist set pass warning: %v, output: %s\n", err, string(output))
@@ -82,6 +84,7 @@ func (m *Manager) startAlist() error {
 	}
 
 	// 2. Start Server
+	//nolint:gosec // binPath and dataDir are internal managed-service paths under the app workspace.
 	cmd := exec.CommandContext(m.Ctx, binPath, "server", "--data", dataDir)
 	// Redirect stdout/stderr so we can debug, or suppress
 	// Logging to file would be better
@@ -131,6 +134,7 @@ func (m *Manager) startQB() error {
 		return err
 	}
 
+	//nolint:gosec // binPath and profileDir are generated from controlled application directories.
 	cmd := exec.CommandContext(m.Ctx, binPath, "--profile="+filepath.Clean(profileDir))
 	// For Linux/Mac nox, usually it stays in foreground unless -d is passed.
 	// We want it in foreground (as child of manager) to control it.
@@ -229,6 +233,7 @@ func (m *Manager) startJellyfin() error {
 		args = append(args, "--ffmpeg", ffmpegArg)
 	}
 
+	//nolint:gosec // binPath and args are derived from managed-service configuration under the app workspace.
 	cmd := exec.CommandContext(m.Ctx, binPath, args...)
 
 	logFile, _ := os.Create(filepath.Join(logDir, "startup.log"))
@@ -353,7 +358,7 @@ func getAListSummary(baseURL string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer safeio.Close(resp.Body)
 
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("unexpected status: %d", resp.StatusCode)

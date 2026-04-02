@@ -16,6 +16,7 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/event"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/parser"
+	"github.com/pokerjest/animateAutoTool/internal/safeio"
 	"github.com/pokerjest/animateAutoTool/internal/tmdb"
 )
 
@@ -602,7 +603,7 @@ func (s *MetadataService) fetchAndCacheImage(url string) []byte {
 	if err != nil || resp.StatusCode != http.StatusOK {
 		return nil
 	}
-	defer resp.Body.Close()
+	defer safeio.Close(resp.Body)
 	data, _ := io.ReadAll(resp.Body)
 	return data
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/pokerjest/animateAutoTool/internal/safeio"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
@@ -36,7 +37,7 @@ func main() {
 	var cols []string
 	db.Raw(fmt.Sprintf("PRAGMA table_info(%s)", tableName)).Scan(&struct{ Name string }{})
 	rows, _ := db.Raw(fmt.Sprintf("PRAGMA table_info(%s)", tableName)).Rows()
-	defer rows.Close()
+	defer safeio.Close(rows)
 	fmt.Println("Columns:")
 	for rows.Next() {
 		var cid int
@@ -82,7 +83,7 @@ func checkDuplicates(db *gorm.DB, tableName, col string) {
 		log.Printf("Query error: %v", err)
 		return
 	}
-	defer rows.Close()
+	defer safeio.Close(rows)
 
 	count := 0
 	for rows.Next() {

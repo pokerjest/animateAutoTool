@@ -10,6 +10,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/pokerjest/animateAutoTool/internal/safeio"
 )
 
 type Client struct {
@@ -106,7 +108,7 @@ func (c *Client) do(method, path string, body interface{}) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer safeio.Close(resp.Body)
 
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {

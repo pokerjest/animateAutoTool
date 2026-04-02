@@ -16,6 +16,7 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/config"
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/model"
+	"github.com/pokerjest/animateAutoTool/internal/safeio"
 	"github.com/pokerjest/animateAutoTool/internal/service"
 	"github.com/stretchr/testify/assert"
 )
@@ -25,7 +26,7 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic(err)
 	}
-	defer os.RemoveAll(tempAppData)
+	defer safeio.RemoveAll(tempAppData)
 
 	// Init Config
 	if err := config.LoadConfig(tempAppData); err != nil {

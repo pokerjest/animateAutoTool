@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/pokerjest/animateAutoTool/internal/safeio"
 )
 
 // RenameTask 定义重命名任务参数
@@ -56,17 +58,20 @@ func Execute(task RenameTask, mode string) error {
 }
 
 func copyFile(src, dst string) error {
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
+	src = filepath.Clean(src)
+	dst = filepath.Clean(dst)
 
-	out, err := os.Create(dst)
+	in, err := os.Open(src) //nolint:gosec // copyFile only handles paths chosen by the local rename workflow.
 	if err != nil {
 		return err
 	}
-	defer out.Close()
+	defer safeio.Close(in)
+
+	out, err := os.Create(dst) //nolint:gosec // destination path is derived from the managed library target.
+	if err != nil {
+		return err
+	}
+	defer safeio.Close(out)
 
 	_, err = io.Copy(out, in)
 	return err

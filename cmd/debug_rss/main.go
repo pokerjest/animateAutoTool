@@ -5,6 +5,8 @@ import (
 	"io"
 	"log"
 	"net/http"
+
+	"github.com/pokerjest/animateAutoTool/internal/safeio"
 )
 
 func main() {
@@ -20,7 +22,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer safeio.Close(resp.Body)
 
 	body, _ := io.ReadAll(resp.Body)
 	fmt.Printf("Status: %s\n", resp.Status)

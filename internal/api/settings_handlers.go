@@ -21,6 +21,7 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/jellyfin"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/qbutil"
+	"github.com/pokerjest/animateAutoTool/internal/safeio"
 )
 
 const (
@@ -697,7 +698,7 @@ func CheckTMDBConnection() (bool, string) {
 		})
 		return false, err.Error()
 	}
-	defer resp.Body.Close()
+	defer safeio.Close(resp.Body)
 
 	if resp.StatusCode == 200 {
 		statusCache.Store("tmdb", cachedStatus{
@@ -857,7 +858,7 @@ func CheckAniListConnection() (bool, string, string) {
 		})
 		return false, "", err.Error()
 	}
-	defer resp.Body.Close()
+	defer safeio.Close(resp.Body)
 
 	if resp.StatusCode != 200 {
 		errMsg := fmt.Sprintf("HTTP %d", resp.StatusCode)
@@ -1001,7 +1002,7 @@ func CheckJellyfinConnection() (bool, string) {
 		log.Printf("DEBUG: Jellyfin connection error: %v", err)
 		return false, err.Error()
 	}
-	defer resp.Body.Close()
+	defer safeio.Close(resp.Body)
 
 	log.Printf("DEBUG: Jellyfin connection response: %d", resp.StatusCode)
 

@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/pokerjest/animateAutoTool/internal/config"
+	"github.com/pokerjest/animateAutoTool/internal/safeio"
 )
 
 const (
@@ -98,7 +99,7 @@ func (m *Manager) ensureAlist() error {
 	if err := downloadFile(url, tmpFile); err != nil {
 		return err
 	}
-	defer os.Remove(tmpFile)
+	defer safeio.Remove(tmpFile)
 
 	if isTarGz {
 		if err := untar(tmpFile, m.BinDir); err != nil {
@@ -140,7 +141,7 @@ func (m *Manager) ensureQB() error {
 	if err := downloadFile(url, tmpZip); err != nil {
 		return err
 	}
-	defer os.Remove(tmpZip)
+	defer safeio.Remove(tmpZip)
 
 	// Linux static builds are also zips in c0re100 release
 	if err := unzip(tmpZip, m.BinDir); err != nil {
@@ -232,11 +233,11 @@ func (m *Manager) downloadAndInstallDir(url, downloadPrefix, extractDirName, tar
 	if err := downloadFile(url, tmpFile); err != nil {
 		return err
 	}
-	defer os.Remove(tmpFile)
+	defer safeio.Remove(tmpFile)
 
 	tmpExtract := filepath.Join(m.BinDir, extractDirName)
-	_ = os.RemoveAll(tmpExtract)
-	defer os.RemoveAll(tmpExtract)
+	safeio.RemoveAll(tmpExtract)
+	defer safeio.RemoveAll(tmpExtract)
 
 	if ext == ExtZip {
 		if err := unzip(tmpFile, tmpExtract); err != nil {
@@ -363,12 +364,14 @@ func getFFmpegUrl() (string, error) {
 	case OSWindows:
 		return FFmpegUrlWindows, nil
 	case OSLinux:
-		if arch == ArchAmd64 {
+		switch arch {
+		case ArchAmd64:
 			return FFmpegUrlLinuxAmd64, nil
-		} else if arch == ArchArm64 {
+		case ArchArm64:
 			return FFmpegUrlLinuxArm64, nil
+		default:
+			return "", fmt.Errorf("unsupported architecture for Linux: %s", arch)
 		}
-		return "", fmt.Errorf("unsupported architecture for Linux: %s", arch)
 	case OSDarwin:
 		if arch == ArchArm64 {
 			return FFmpegUrlMacArm64, nil
@@ -394,7 +397,7 @@ func downloadFile(url string, filepath string) error {
 		}
 		fmt.Printf("Download failed: %v\n", lastErr)
 		// Clean up partial file
-		os.Remove(filepath)
+		safeio.Remove(filepath)
 	}
 	return fmt.Errorf("failed after 3 retries: %w", lastErr)
 }
@@ -404,7 +407,7 @@ func downloadFileOnce(url string, filepath string) error {
 	if err != nil {
 		return err
 	}
-	defer out.Close()
+	defer safeio.Close(out)
 
 	// Use standard client
 	client := &http.Client{}
@@ -413,7 +416,7 @@ func downloadFileOnce(url string, filepath string) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer safeio.Close(resp.Body)
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("bad status: %s", resp.Status)
@@ -436,7 +439,7 @@ func unzip(src, dest string) error {
 	if err != nil {
 		return err
 	}
-	defer r.Close()
+	defer safeio.Close(r)
 
 	for _, f := range r.File {
 		fpath := filepath.Join(dest, f.Name)
@@ -462,7 +465,7 @@ func unzip(src, dest string) error {
 
 		rc, err := f.Open()
 		if err != nil {
-			outFile.Close()
+			safeio.Close(outFile)
 			return err
 		}
 
@@ -470,18 +473,20 @@ func unzip(src, dest string) error {
 		// Limit max file size to 10GB
 		const maxFileSize = 10 * 1024 * 1024 * 1024
 		if f.FileInfo().Size() > maxFileSize {
-			outFile.Close()
-			rc.Close()
+			safeio.Close(outFile)
+			safeio.Close(rc)
 			return fmt.Errorf("file %s too large (potential zip bomb)", f.Name)
 		}
 
 		_, err = io.Copy(outFile, io.LimitReader(rc, maxFileSize))
-
-		outFile.Close()
-		rc.Close()
+		closeErr := outFile.Close()
+		safeio.Close(rc)
 
 		if err != nil {
 			return err
+		}
+		if closeErr != nil {
+			return closeErr
 		}
 	}
 	return nil
@@ -492,12 +497,12 @@ func untar(src, dest string) error {
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer safeio.Close(file)
 
 	gzr, err := gzip.NewReader(file)
 	var tr *tar.Reader
 	if err == nil {
-		defer gzr.Close()
+		defer safeio.Close(gzr)
 		tr = tar.NewReader(gzr)
 	} else {
 		// Not gzip? maybe just tar or tar.xz
@@ -541,10 +546,12 @@ func untar(src, dest string) error {
 			// G110: Decompression bomb mitigation
 			const maxFileSize = 10 * 1024 * 1024 * 1024 // 10GB
 			if _, err := io.Copy(out, io.LimitReader(tr, maxFileSize)); err != nil {
-				out.Close()
+				safeio.Close(out)
 				return err
 			}
-			out.Close()
+			if err := out.Close(); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -554,6 +561,7 @@ func untarSystem(src, dest string) error {
 	if err := os.MkdirAll(dest, 0755); err != nil {
 		return err
 	}
+	//nolint:gosec // src and dest are internal archive paths created under the managed bin directory.
 	cmd := exec.Command("tar", "-xf", src, "-C", dest)
 	// tar usually handles auto detection of compression (z, J, etc) on modern versions
 	return cmd.Run()

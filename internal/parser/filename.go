@@ -191,7 +191,7 @@ func ParseFilename(path string) ParsedInfo {
 	allNums := spaceNumRegex.FindAllStringSubmatch(normalized, -1)
 	if len(allNums) > 0 {
 		// Find candidates
-		var candidate int = 0
+		candidate := 0
 		found := false
 
 		// Iterate backwards

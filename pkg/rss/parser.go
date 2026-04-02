@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"time"
+
+	"github.com/pokerjest/animateAutoTool/internal/safeio"
 )
 
 type RSS struct {
@@ -49,7 +51,7 @@ func ParseMikan(url string) ([]ParsedItem, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer safeio.Close(resp.Body)
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("bad status: %s", resp.Status)

@@ -3,6 +3,7 @@ package parser
 import (
 	"encoding/xml"
 	"os"
+	"path/filepath"
 )
 
 // UniqueID supports multiple IDs for Kodi/Jellyfin
@@ -53,7 +54,8 @@ type EpisodeNFO struct {
 }
 
 func ParseTVShowNFO(path string) (*TVShowNFO, error) {
-	data, err := os.ReadFile(path)
+	cleanPath := filepath.Clean(path)
+	data, err := os.ReadFile(cleanPath) //nolint:gosec // path is a local NFO discovered during library scanning.
 	if err != nil {
 		return nil, err
 	}

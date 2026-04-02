@@ -22,6 +22,7 @@ import (
 	appconfig "github.com/pokerjest/animateAutoTool/internal/config"
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/model"
+	"github.com/pokerjest/animateAutoTool/internal/safeio"
 	"gorm.io/gorm"
 )
 
@@ -189,8 +190,12 @@ func UploadToR2Handler(c *gin.Context) {
 		return
 	}
 	tempPath := tempFile.Name()
-	tempFile.Close()
-	defer os.Remove(tempPath)
+	if err := tempFile.Close(); err != nil {
+		safeio.Remove(tempPath)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to finalize temp file"})
+		return
+	}
+	defer safeio.Remove(tempPath)
 
 	if err := createBackupFile(tempPath); err != nil {
 		debugLog("DEBUG: createBackupFile error: %v", err)
@@ -206,13 +211,13 @@ func UploadToR2Handler(c *gin.Context) {
 		return
 	}
 
-	file, err := os.Open(tempPath)
+	file, err := os.Open(filepath.Clean(tempPath)) //nolint:gosec // tempPath is created by this handler before upload.
 	if err != nil {
 		debugLog("DEBUG: os.Open backup file error: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to open backup file"})
 		return
 	}
-	defer file.Close()
+	defer safeio.Close(file)
 
 	timestamp := time.Now().Format("20060102_150405")
 	key := fmt.Sprintf("animate_backup_%s.db", timestamp)
@@ -429,7 +434,7 @@ func StageR2BackupHandler(c *gin.Context) {
 			updateProgress(tID, "error", "Download init failed: "+err.Error(), 0, 0, "")
 			return
 		}
-		defer resp.Body.Close()
+		defer safeio.Close(resp.Body)
 
 		total := int64(0)
 		if resp.ContentLength != nil {
@@ -453,25 +458,30 @@ func StageR2BackupHandler(c *gin.Context) {
 		}
 
 		if _, err := io.Copy(tempFile, reader); err != nil {
-			tempFile.Close()
-			os.Remove(tempFile.Name())
+			safeio.Close(tempFile)
+			safeio.Remove(tempFile.Name())
 			updateProgress(tID, "error", "Download stream failed: "+err.Error(), total, 0, "")
 			return
 		}
-		tempFile.Close()
+		if err := tempFile.Close(); err != nil {
+			safeio.Remove(tempFile.Name())
+			updateProgress(tID, "error", "Finalize temp file failed: "+err.Error(), total, total, "")
+			return
+		}
 
 		// 4. Analyze
 		updateProgress(tID, "analyzing", "", total, total, "") // 100% downloaded
 
 		tempDB, err := gorm.Open(sqlite.Open(tempFile.Name()), &gorm.Config{})
 		if err != nil {
-			os.Remove(tempFile.Name())
+			safeio.Remove(tempFile.Name())
 			updateProgress(tID, "error", "Invalid Database File", total, total, "")
 			return
 		}
 		stats := getDBStats(tempDB, tempFile.Name())
-		sqlDB, _ := tempDB.DB()
-		sqlDB.Close()
+		if sqlDB, err := tempDB.DB(); err == nil {
+			safeio.Close(sqlDB)
+		}
 
 		// 5. Render HTML
 		restoreToken := registerRestoreArtifact(tempFile.Name())
@@ -481,7 +491,7 @@ func StageR2BackupHandler(c *gin.Context) {
 		})
 		if err != nil {
 			discardRestoreArtifact(restoreToken)
-			os.Remove(tempFile.Name())
+			safeio.Remove(tempFile.Name())
 			updateProgress(tID, "error", "Template render error: "+err.Error(), total, total, "")
 			return
 		}
@@ -574,7 +584,7 @@ func debugLog(format string, v ...interface{}) {
 		fmt.Println("Error opening debug log:", err)
 		return
 	}
-	defer f.Close()
+	defer safeio.Close(f)
 	msg := fmt.Sprintf(format, v...)
 	if len(msg) == 0 || msg[len(msg)-1] != '\n' {
 		msg += "\n"

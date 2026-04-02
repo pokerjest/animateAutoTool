@@ -109,7 +109,7 @@ func GetPlayInfoHandler(c *gin.Context) {
 	client.UserID = users[0].Id // Use the first user found
 
 	// 4. Resolve Series ID
-	var seriesId string = anime.JellyfinSeriesID
+	seriesId := anime.JellyfinSeriesID
 
 	if seriesId == "" {
 		// Priority: Bangumi ID -> TMDB ID
@@ -146,7 +146,7 @@ func GetPlayInfoHandler(c *gin.Context) {
 	}
 
 	// 5. Resolve Episode ID
-	var epId string = ep.JellyfinItemID
+	epId := ep.JellyfinItemID
 	var resume int64 = 0
 
 	// Always fetch from Jellyfin to get latest resume ticks, even if we have ID
@@ -252,7 +252,7 @@ func ReportProgressHandler(c *gin.Context) {
 	}
 
 	// 3. Resolve Jellyfin Item ID (Cache optimized)
-	var seriesId string = anime.JellyfinSeriesID
+	seriesId := anime.JellyfinSeriesID
 
 	if seriesId == "" {
 		if anime.Metadata.BangumiID != 0 {

@@ -92,8 +92,14 @@ func TestLoadConfig_EnvOverride(t *testing.T) {
 	defer func() { _ = os.Chdir(prevWD) }()
 
 	// Set environment variable
-	os.Setenv("ANIME_SERVER_PORT", "9999")
-	defer os.Unsetenv("ANIME_SERVER_PORT")
+	if err := os.Setenv("ANIME_SERVER_PORT", "9999"); err != nil {
+		t.Fatalf("Setenv failed: %v", err)
+	}
+	defer func() {
+		if err := os.Unsetenv("ANIME_SERVER_PORT"); err != nil {
+			t.Fatalf("Unsetenv failed: %v", err)
+		}
+	}()
 
 	err = LoadConfig("")
 	if err != nil {

@@ -6,12 +6,14 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/model"
+	"github.com/pokerjest/animateAutoTool/internal/safeio"
 	"github.com/pokerjest/animateAutoTool/internal/service"
 	"gorm.io/gorm"
 )
@@ -97,18 +99,24 @@ func AnalyzeBackupHandler(c *gin.Context) {
 		c.String(http.StatusInternalServerError, "Failed to open uploaded file")
 		return
 	}
-	defer src.Close()
+	defer safeio.Close(src)
 
 	if _, err := io.Copy(tempFile, src); err != nil {
+		safeio.Close(tempFile)
+		safeio.Remove(tempFile.Name())
 		c.String(http.StatusInternalServerError, "Failed to write temp file")
 		return
 	}
-	tempFile.Close()
+	if err := tempFile.Close(); err != nil {
+		safeio.Remove(tempFile.Name())
+		c.String(http.StatusInternalServerError, "Failed to finalize temp file")
+		return
+	}
 
 	// Open Temp DB
 	tempDB, err := gorm.Open(sqlite.Open(tempFile.Name()), &gorm.Config{})
 	if err != nil {
-		os.Remove(tempFile.Name())
+		safeio.Remove(tempFile.Name())
 		c.String(http.StatusBadRequest, "Invalid Database File")
 		return
 	}
@@ -117,8 +125,9 @@ func AnalyzeBackupHandler(c *gin.Context) {
 	stats := getDBStats(tempDB, tempFile.Name())
 
 	// Close Temp DB
-	sqlDB, _ := tempDB.DB()
-	sqlDB.Close()
+	if sqlDB, err := tempDB.DB(); err == nil {
+		safeio.Close(sqlDB)
+	}
 
 	// Return HTML Fragment
 	restoreToken := registerRestoreArtifact(tempFile.Name())
@@ -140,7 +149,7 @@ func ExecuteRestoreHandler(c *gin.Context) {
 		c.String(http.StatusBadRequest, err.Error())
 		return
 	}
-	defer os.Remove(tempPath) // Cleanup after attempt
+	defer safeio.Remove(tempPath) // Cleanup after attempt
 
 	// Also ensure it's a valid SQLite file before passing to service
 	if !isValidSQLite(tempPath) {
@@ -195,11 +204,12 @@ func ExecuteRestoreHandler(c *gin.Context) {
 // To avoid duplication, let's keep it here or export in utils.
 // For now, implementing locally if r2.go one is private.
 func isValidSQLite(path string) bool {
-	f, err := os.Open(path)
+	cleanPath := filepath.Clean(path)
+	f, err := os.Open(cleanPath) //nolint:gosec // path is an app-created temporary restore artifact.
 	if err != nil {
 		return false
 	}
-	defer f.Close()
+	defer safeio.Close(f)
 
 	header := make([]byte, 16)
 	if _, err := f.Read(header); err != nil {
@@ -218,8 +228,12 @@ func ExportBackupHandler(c *gin.Context) {
 		return
 	}
 	tempPath := tempFile.Name()
-	tempFile.Close() // Close file handle, let gorm open it
-	defer os.Remove(tempPath)
+	if err := tempFile.Close(); err != nil {
+		safeio.Remove(tempPath)
+		c.String(http.StatusInternalServerError, "Failed to finalize temp export file")
+		return
+	}
+	defer safeio.Remove(tempPath)
 
 	// 2. Generate Backup
 	if err := createBackupFile(tempPath); err != nil {

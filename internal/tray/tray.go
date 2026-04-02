@@ -90,10 +90,13 @@ func openBrowser(url string) {
 	var err error
 	switch runtime.GOOS {
 	case "linux":
+		//nolint:gosec // url points to the local app UI or a local data folder chosen by the app.
 		err = exec.Command("xdg-open", url).Start()
 	case "windows":
+		//nolint:gosec // url points to the local app UI or a local data folder chosen by the app.
 		err = exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
 	case "darwin":
+		//nolint:gosec // url points to the local app UI or a local data folder chosen by the app.
 		err = exec.Command("open", url).Start()
 	default:
 		err = fmt.Errorf("unsupported platform")
