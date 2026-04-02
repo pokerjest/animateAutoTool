@@ -459,7 +459,7 @@ func unzip(src, dest string) error {
 			return err
 		}
 
-		outFile, err := os.OpenFile(fpath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
+		outFile, err := os.OpenFile(fpath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode()) //nolint:gosec // fpath is validated to stay within dest before extraction.
 		if err != nil {
 			return err
 		}
@@ -494,7 +494,7 @@ func unzip(src, dest string) error {
 }
 
 func untar(src, dest string) error {
-	file, err := os.Open(src)
+	file, err := os.Open(src) //nolint:gosec // src is a managed archive downloaded into the app-controlled bin directory.
 	if err != nil {
 		return err
 	}
@@ -540,7 +540,7 @@ func untar(src, dest string) error {
 				return err
 			}
 		case tar.TypeReg:
-			out, err := os.OpenFile(target, os.O_CREATE|os.O_RDWR, os.FileMode(header.Mode))
+			out, err := os.OpenFile(target, os.O_CREATE|os.O_RDWR, os.FileMode(header.Mode)) //nolint:gosec // target is validated to stay within dest before extraction.
 			if err != nil {
 				return err
 			}
