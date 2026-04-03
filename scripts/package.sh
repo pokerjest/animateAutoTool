@@ -2,7 +2,14 @@
 
 # Configuration
 APP_NAME="animate-server"
-VERSION=${1:-"v0.3.0"}
+VERSION_FILE="./VERSION"
+DEFAULT_VERSION="v0.4.0"
+if [ -f "$VERSION_FILE" ]; then
+    FILE_VERSION=$(tr -d '[:space:]' < "$VERSION_FILE")
+else
+    FILE_VERSION="$DEFAULT_VERSION"
+fi
+VERSION=${1:-"$FILE_VERSION"}
 DIST_DIR="./dist"
 SRC_PATH="cmd/server/main.go"
 

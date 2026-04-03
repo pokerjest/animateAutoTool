@@ -25,6 +25,9 @@ jobs:
           go-version: '1.25.8'
           cache: true
 
+      - name: Read build version
+        run: echo "APP_VERSION=$(tr -d '[:space:]' < VERSION)" >> "$GITHUB_ENV"
+
       - name: Download dependencies
         run: go mod download
 
@@ -91,7 +94,36 @@ jobs:
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: animate-server-${{ matrix.goos }}-${{ matrix.goarch }}
+          name: animate-server-${{ env.APP_VERSION }}-${{ matrix.goos }}-${{ matrix.goarch }}
           path: dist/
           retention-days: 7
 
+  package:
+    name: Package Releases
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.8'
+          cache: true
+
+      - name: Read package version
+        run: echo "APP_VERSION=$(tr -d '[:space:]' < VERSION)" >> "$GITHUB_ENV"
+
+      - name: Build versioned packages
+        run: bash ./scripts/package.sh "$APP_VERSION"
+
+      - name: Upload packaged archives
+        uses: actions/upload-artifact@v4
+        with:
+          name: animate-packages-${{ env.APP_VERSION }}
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+          retention-days: 7
