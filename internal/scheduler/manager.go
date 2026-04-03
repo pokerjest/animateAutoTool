@@ -94,7 +94,7 @@ func (m *Manager) CheckUpdates() {
 
 	for _, sub := range subs {
 		log.Printf("Scheduler: Checking sub %s (%s)", sub.Title, sub.RSSUrl)
-		mgr.ProcessSubscription(&sub)
+		mgr.ProcessSubscriptionWithSource(&sub, "auto")
 		switch sub.LastRunStatus {
 		case "success", "idle":
 			successCount++

@@ -31,6 +31,13 @@ var migrations = []migration{
 			return autoMigrateCoreSchema(tx)
 		},
 	},
+	{
+		ID:          "002_subscription_run_logs",
+		Description: "Create per-run subscription history records",
+		Apply: func(tx *gorm.DB) error {
+			return tx.AutoMigrate(&model.SubscriptionRunLog{})
+		},
+	},
 }
 
 func autoMigrateCoreSchema(tx *gorm.DB) error {

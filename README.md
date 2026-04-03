@@ -290,6 +290,13 @@ animateAutoTool/
 
 这套机制的目标不是替代 GORM，而是给未来版本迭代一个正式、可审计、可回归验证的数据库演进入口。
 
+### 发布与移动端验收
+
+为了把发版流程和真机检查固定下来，仓库里还补了两份可直接复用的清单：
+
+- [docs/release-checklist.md](./docs/release-checklist.md)：发版前测试、打包、核心流程和 Release 检查项
+- [docs/mobile-qa-checklist.md](./docs/mobile-qa-checklist.md)：手机端重点页面和弹窗的真机验收项
+
 ### 技术栈
 
 | 领域 | 技术选型 |

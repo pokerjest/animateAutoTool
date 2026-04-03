@@ -46,11 +46,15 @@ func (m *SubscriptionManager) CheckUpdate() {
 	}
 
 	for _, sub := range subs {
-		m.ProcessSubscription(&sub)
+		m.ProcessSubscriptionWithSource(&sub, "auto")
 	}
 }
 
 func (m *SubscriptionManager) ProcessSubscription(sub *model.Subscription) {
+	m.ProcessSubscriptionWithSource(sub, "manual")
+}
+
+func (m *SubscriptionManager) ProcessSubscriptionWithSource(sub *model.Subscription, source string) {
 	log.Printf("DEBUG: Processing subscription %s (URL: %s)", sub.Title, sub.RSSUrl)
 	checkedAt := time.Now()
 
@@ -58,6 +62,7 @@ func (m *SubscriptionManager) ProcessSubscription(sub *model.Subscription) {
 	if err != nil {
 		log.Printf("Failed to parse RSS for %s: %v", sub.Title, err)
 		m.persistRunState(sub, subscriptionRunState{
+			Source:    normalizeRunSource(source),
 			CheckedAt: checkedAt,
 			Status:    SubscriptionRunStatusError,
 			Summary:   "RSS 解析失败",
@@ -163,8 +168,13 @@ func (m *SubscriptionManager) ProcessSubscription(sub *model.Subscription) {
 	}
 
 	state := subscriptionRunState{
+		Source:              normalizeRunSource(source),
 		CheckedAt:           checkedAt,
+		TotalEpisodes:       len(episodes),
+		FilteredCount:       filteredCount,
+		DuplicateCount:      duplicateCount,
 		NewDownloads:        addedCount,
+		FailedDownloads:     failedCount,
 		LastDownloadedTitle: latestTitle,
 		Error:               lastError,
 	}
@@ -188,11 +198,16 @@ func (m *SubscriptionManager) ProcessSubscription(sub *model.Subscription) {
 }
 
 type subscriptionRunState struct {
+	Source              string
 	CheckedAt           time.Time
 	Status              string
 	Summary             string
 	Error               string
+	TotalEpisodes       int
+	FilteredCount       int
+	DuplicateCount      int
 	NewDownloads        int
+	FailedDownloads     int
 	LastDownloadedTitle string
 }
 
@@ -230,6 +245,10 @@ func (m *SubscriptionManager) persistRunState(sub *model.Subscription, state sub
 		log.Printf("Failed to persist subscription run state for %s: %v", sub.Title, err)
 	}
 
+	if err := m.appendRunLog(sub, state); err != nil {
+		log.Printf("Failed to append subscription run log for %s: %v", sub.Title, err)
+	}
+
 	event.GlobalBus.Publish(event.EventSubscriptionRun, map[string]interface{}{
 		"subscription_id":       sub.ID,
 		"title":                 sub.Title,
@@ -240,6 +259,36 @@ func (m *SubscriptionManager) persistRunState(sub *model.Subscription, state sub
 		"last_downloaded_title": strings.TrimSpace(state.LastDownloadedTitle),
 		"checked_at":            state.CheckedAt.Format(time.RFC3339),
 	})
+}
+
+func (m *SubscriptionManager) appendRunLog(sub *model.Subscription, state subscriptionRunState) error {
+	if sub == nil || sub.ID == 0 || m.DB == nil {
+		return nil
+	}
+
+	return m.DB.Create(&model.SubscriptionRunLog{
+		SubscriptionID:      sub.ID,
+		CheckedAt:           state.CheckedAt,
+		TriggerSource:       normalizeRunSource(state.Source),
+		Status:              state.Status,
+		Summary:             strings.TrimSpace(state.Summary),
+		Error:               strings.TrimSpace(state.Error),
+		TotalEpisodes:       state.TotalEpisodes,
+		FilteredCount:       state.FilteredCount,
+		DuplicateCount:      state.DuplicateCount,
+		NewDownloads:        state.NewDownloads,
+		FailedDownloads:     state.FailedDownloads,
+		LastDownloadedTitle: strings.TrimSpace(state.LastDownloadedTitle),
+	}).Error
+}
+
+func normalizeRunSource(source string) string {
+	switch strings.TrimSpace(source) {
+	case "auto", "create":
+		return source
+	default:
+		return "manual"
+	}
 }
 
 func buildIdleRunSummary(total, filtered, duplicate int) string {

@@ -155,6 +155,7 @@ func InitRoutes(r *gin.Engine) {
 
 			apiGroup.GET("/dashboard/bangumi-data", DashboardBangumiDataHandler)
 			apiGroup.GET("/dashboard/qb-status", DashboardQBStatusHandler)
+			apiGroup.GET("/dashboard/task-overview", DashboardTaskOverviewHandler)
 		}
 	}
 }

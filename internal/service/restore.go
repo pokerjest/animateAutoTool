@@ -75,6 +75,7 @@ type restoreData struct {
 	metas    []model.AnimeMetadata
 	subs     []model.Subscription
 	logs     []model.DownloadLog
+	runLogs  []model.SubscriptionRunLog
 	dirs     []model.LocalAnimeDirectory
 	animes   []model.LocalAnime
 	episodes []model.LocalEpisode
@@ -96,6 +97,12 @@ func (s *RestoreService) readBackupData(srcDB *gorm.DB, options RestoreOptions) 
 	}
 	if options.Logs {
 		eg.Go(func() error { return srcDB.Find(&d.logs).Error })
+		eg.Go(func() error {
+			if !srcDB.Migrator().HasTable(&model.SubscriptionRunLog{}) {
+				return nil
+			}
+			return srcDB.Find(&d.runLogs).Error
+		})
 	}
 	if options.Local {
 		eg.Go(func() error { return srcDB.Find(&d.dirs).Error })
@@ -172,9 +179,15 @@ func (s *RestoreService) writeRestoreData(tx *gorm.DB, d *restoreData, options R
 	}
 
 	if options.Logs {
+		tx.Exec("DELETE FROM subscription_run_logs")
 		tx.Exec("DELETE FROM download_logs")
 		if len(d.logs) > 0 {
 			if err := createBatch(&d.logs); err != nil {
+				return err
+			}
+		}
+		if len(d.runLogs) > 0 {
+			if err := createBatch(&d.runLogs); err != nil {
 				return err
 			}
 		}

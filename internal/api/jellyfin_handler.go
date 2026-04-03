@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"os"
 	"strconv"
 	"time"
 
@@ -33,6 +34,8 @@ type PlaybackDiagnostic struct {
 	Hint             string `json:"hint"`
 	Detail           string `json:"detail,omitempty"`
 	CanUseDirectLink bool   `json:"can_use_direct_link"`
+	PrimaryAction    string `json:"primary_action,omitempty"`
+	PrimaryTarget    string `json:"primary_target,omitempty"`
 }
 
 func playbackError(c *gin.Context, status int, msg string, diagnostic *PlaybackDiagnostic) {
@@ -44,10 +47,12 @@ func playbackError(c *gin.Context, status int, msg string, diagnostic *PlaybackD
 
 func jellyfinConfigDiagnostic(detail string) *PlaybackDiagnostic {
 	return &PlaybackDiagnostic{
-		Code:    "jellyfin_not_configured",
-		Summary: "Jellyfin 还没有完成配置",
-		Hint:    "请先在设置页填写 Jellyfin 地址和 API Key，再回来播放。",
-		Detail:  detail,
+		Code:          "jellyfin_not_configured",
+		Summary:       "Jellyfin 还没有完成配置",
+		Hint:          "请先在设置页填写 Jellyfin 地址和 API Key，再回来播放。",
+		Detail:        detail,
+		PrimaryAction: "打开设置页",
+		PrimaryTarget: "/settings",
 	}
 }
 
@@ -55,42 +60,62 @@ func jellyfinUserDiagnostic(err error) *PlaybackDiagnostic {
 	switch {
 	case jellyfin.HasStatus(err, http.StatusUnauthorized, http.StatusForbidden):
 		return &PlaybackDiagnostic{
-			Code:    "jellyfin_auth_failed",
-			Summary: "Jellyfin API Key 无效，或当前账号没有读取媒体库的权限",
-			Hint:    "请在设置页重新登录 Jellyfin 或更新 API Key，然后再试一次。",
-			Detail:  err.Error(),
+			Code:          "jellyfin_auth_failed",
+			Summary:       "Jellyfin API Key 无效，或当前账号没有读取媒体库的权限",
+			Hint:          "请在设置页重新登录 Jellyfin 或更新 API Key，然后再试一次。",
+			Detail:        err.Error(),
+			PrimaryAction: "检查 Jellyfin 设置",
+			PrimaryTarget: "/settings",
 		}
 	case err != nil:
 		return &PlaybackDiagnostic{
-			Code:    "jellyfin_unreachable",
-			Summary: "当前无法连接到 Jellyfin 服务器",
-			Hint:    "请检查 Jellyfin 地址是否正确、服务是否已启动，以及反向代理是否可达。",
-			Detail:  err.Error(),
+			Code:          "jellyfin_unreachable",
+			Summary:       "当前无法连接到 Jellyfin 服务器",
+			Hint:          "请检查 Jellyfin 地址是否正确、服务是否已启动，以及反向代理是否可达。",
+			Detail:        err.Error(),
+			PrimaryAction: "检查 Jellyfin 设置",
+			PrimaryTarget: "/settings",
 		}
 	default:
 		return &PlaybackDiagnostic{
-			Code:    "jellyfin_no_users",
-			Summary: "Jellyfin 里没有可用于读取播放进度的用户",
-			Hint:    "请确认 Jellyfin 已完成初始化，并至少存在一个可登录用户。",
+			Code:          "jellyfin_no_users",
+			Summary:       "Jellyfin 里没有可用于读取播放进度的用户",
+			Hint:          "请确认 Jellyfin 已完成初始化，并至少存在一个可登录用户。",
+			PrimaryAction: "打开设置页",
+			PrimaryTarget: "/settings",
 		}
 	}
 }
 
 func seriesNotFoundDiagnostic(anime model.LocalAnime) *PlaybackDiagnostic {
+	detail := anime.Title
+	if anime.Metadata != nil {
+		switch {
+		case anime.Metadata.BangumiID != 0:
+			detail = fmt.Sprintf("%s · Bangumi ID %d", anime.Title, anime.Metadata.BangumiID)
+		case anime.Metadata.TMDBID != 0:
+			detail = fmt.Sprintf("%s · TMDB ID %d", anime.Title, anime.Metadata.TMDBID)
+		}
+	}
+
 	return &PlaybackDiagnostic{
-		Code:    "jellyfin_series_not_found",
-		Summary: "Jellyfin 里还没有找到这部番剧",
-		Hint:    "通常是媒体库还没扫描到，或元数据 ID 和 Jellyfin 中的条目对不上。可以先在 Jellyfin 里刷新资料库，再回到本地库页重试刮削或修正匹配。",
-		Detail:  anime.Title,
+		Code:          "jellyfin_series_not_found",
+		Summary:       "Jellyfin 里还没有找到这部番剧",
+		Hint:          "通常是媒体库还没扫描到，或元数据 ID 和 Jellyfin 中的条目对不上。可以先在 Jellyfin 里刷新资料库，再回到本地库页重试刮削或修正匹配。",
+		Detail:        detail,
+		PrimaryAction: "打开本地库详情",
+		PrimaryTarget: fmt.Sprintf("/local-anime?highlight=%d&open=1", anime.ID),
 	}
 }
 
-func episodeNotFoundDiagnostic(ep model.LocalEpisode) *PlaybackDiagnostic {
+func episodeNotFoundDiagnostic(anime model.LocalAnime, ep model.LocalEpisode) *PlaybackDiagnostic {
 	return &PlaybackDiagnostic{
-		Code:    "jellyfin_episode_not_found",
-		Summary: fmt.Sprintf("Jellyfin 里还没有找到 S%dE%d", ep.SeasonNum, ep.EpisodeNum),
-		Hint:    "这通常表示 Jellyfin 还没扫到这一集，或剧集号和文件解析结果不一致。可以先刷新 Jellyfin 资料库，再检查本地文件命名。",
-		Detail:  ep.Path,
+		Code:          "jellyfin_episode_not_found",
+		Summary:       fmt.Sprintf("Jellyfin 里还没有找到 S%dE%d", ep.SeasonNum, ep.EpisodeNum),
+		Hint:          "这通常表示 Jellyfin 还没扫到这一集，或剧集号和文件解析结果不一致。可以先刷新 Jellyfin 资料库，再检查本地文件命名。",
+		Detail:        ep.Path,
+		PrimaryAction: "检查本地番剧详情",
+		PrimaryTarget: fmt.Sprintf("/local-anime?highlight=%d&open=1&focus_episode=%d", anime.ID, ep.ID),
 	}
 }
 
@@ -101,6 +126,30 @@ func proxyPlaybackDiagnostic(detail string) *PlaybackDiagnostic {
 		Hint:             "可以先尝试右上角的直连播放；如果仍然失败，请检查 Jellyfin 地址、反向代理和媒体是否已入库。",
 		Detail:           detail,
 		CanUseDirectLink: true,
+		PrimaryAction:    "检查本地番剧详情",
+		PrimaryTarget:    "/local-anime",
+	}
+}
+
+func missingMetadataDiagnostic(anime model.LocalAnime) *PlaybackDiagnostic {
+	return &PlaybackDiagnostic{
+		Code:          "missing_metadata",
+		Summary:       "当前番剧还没有绑定元数据",
+		Hint:          "请先在本地库详情里完成刮削或修正匹配，之后再尝试播放。",
+		Detail:        anime.Title,
+		PrimaryAction: "打开本地库详情",
+		PrimaryTarget: fmt.Sprintf("/local-anime?highlight=%d&open=1", anime.ID),
+	}
+}
+
+func localMediaMissingDiagnostic(anime model.LocalAnime, ep model.LocalEpisode) *PlaybackDiagnostic {
+	return &PlaybackDiagnostic{
+		Code:          "local_media_missing",
+		Summary:       "对应的视频文件已经不在本地目录里",
+		Hint:          "请检查下载目录、移动/重命名记录，或重新扫描本地库后再尝试播放。",
+		Detail:        ep.Path,
+		PrimaryAction: "打开本地番剧详情",
+		PrimaryTarget: fmt.Sprintf("/local-anime?highlight=%d&open=1&focus_episode=%d", anime.ID, ep.ID),
 	}
 }
 
@@ -185,12 +234,7 @@ func GetPlayInfoHandler(c *gin.Context) {
 	}
 
 	if anime.Metadata == nil {
-		playbackError(c, http.StatusBadRequest, "这部番剧还没有关联元数据", &PlaybackDiagnostic{
-			Code:    "missing_metadata",
-			Summary: "当前番剧还没有绑定元数据",
-			Hint:    "请先在本地库详情里完成刮削或修正匹配，之后再尝试播放。",
-			Detail:  anime.Title,
-		})
+		playbackError(c, http.StatusBadRequest, "这部番剧还没有关联元数据", missingMetadataDiagnostic(anime))
 		return
 	}
 
@@ -250,7 +294,7 @@ func GetPlayInfoHandler(c *gin.Context) {
 		id, ticks, err := client.GetEpisodeFromSeries(seriesId, ep.SeasonNum, ep.EpisodeNum)
 		if err != nil {
 			log.Printf("[DEBUG] PlayInfo: Failed to resolve episode: %v", err)
-			playbackError(c, http.StatusNotFound, fmt.Sprintf("Jellyfin 里没有找到 S%dE%d", ep.SeasonNum, ep.EpisodeNum), episodeNotFoundDiagnostic(ep))
+			playbackError(c, http.StatusNotFound, fmt.Sprintf("Jellyfin 里没有找到 S%dE%d", ep.SeasonNum, ep.EpisodeNum), episodeNotFoundDiagnostic(anime, ep))
 			return
 		}
 		epId = id
@@ -268,6 +312,14 @@ func GetPlayInfoHandler(c *gin.Context) {
 	proxyUrl := fmt.Sprintf("/api/jellyfin/stream/%d", ep.ID)
 	// Direct URL for fallback
 	directUrl := client.GetStreamURL(epId)
+
+	if _, err := os.Stat(ep.Path); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			playbackError(c, http.StatusNotFound, "对应的视频文件已经不在本地目录里", localMediaMissingDiagnostic(anime, ep))
+			return
+		}
+		log.Printf("[WARN] unable to stat episode file %s: %v", ep.Path, err)
+	}
 
 	c.JSON(http.StatusOK, PlayInfoResponse{
 		StreamURL:       proxyUrl,

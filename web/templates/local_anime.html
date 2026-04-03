@@ -1625,6 +1625,11 @@ handleLibraryIssueUpdate($event.detail);
                             </template>
                         </div>
                         <div class="flex flex-wrap gap-2">
+                            <a x-show="playbackDiagnostic?.primary_action && playbackDiagnostic?.primary_target"
+                                :href="playbackDiagnostic?.primary_target || '#'"
+                                class="px-3 py-1.5 rounded-lg bg-rose-500 text-white text-xs font-bold hover:bg-rose-400 transition">
+                                <span x-text="playbackDiagnostic?.primary_action || ''"></span>
+                            </a>
                             <a x-show="directStreamUrl"
                                 :href="directStreamUrl"
                                 target="_blank"

@@ -104,6 +104,24 @@ type DownloadLog struct {
 	TargetFile     string // 最终重命名后的文件路径
 }
 
+// SubscriptionRunLog records each subscription check as a first-class run entry
+// so operators can audit trends and diagnose failures over time.
+type SubscriptionRunLog struct {
+	gorm.Model
+	SubscriptionID      uint      `gorm:"index"`
+	CheckedAt           time.Time `gorm:"index"`
+	TriggerSource       string
+	Status              string
+	Summary             string
+	Error               string
+	TotalEpisodes       int
+	FilteredCount       int
+	DuplicateCount      int
+	NewDownloads        int
+	FailedDownloads     int
+	LastDownloadedTitle string
+}
+
 // GlobalConfig 存储全局配置 (虽是单用户，但也存在DB里方便迁移)
 type GlobalConfig struct {
 	Key   string `gorm:"primaryKey"`

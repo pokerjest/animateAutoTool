@@ -13,6 +13,8 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/downloader"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/qbutil"
+	"github.com/pokerjest/animateAutoTool/internal/scheduler"
+	"github.com/pokerjest/animateAutoTool/internal/service"
 )
 
 type DashboardData struct {
@@ -25,6 +27,31 @@ type DashboardData struct {
 	TMDBConnected     bool
 	JellyfinConnected bool
 }
+
+type TaskOverviewCard struct {
+	Title        string
+	StatusLabel  string
+	StatusTone   string
+	Summary      string
+	Detail       string
+	StartedAt    *time.Time
+	FinishedAt   *time.Time
+	ProgressText string
+	Error        string
+}
+
+type TaskOverviewData struct {
+	Scheduler TaskOverviewCard
+	Scanner   TaskOverviewCard
+	Metadata  TaskOverviewCard
+}
+
+const (
+	taskToneAmber       = "amber"
+	taskToneEmerald     = "emerald"
+	taskStatusCompleted = "最近已完成"
+	taskStatusIdle      = "待命"
+)
 
 func DashboardHandler(c *gin.Context) {
 	start := time.Now()
@@ -100,6 +127,15 @@ func DashboardBangumiDataHandler(c *gin.Context) {
 	})
 }
 
+func DashboardTaskOverviewHandler(c *gin.Context) {
+	data := TaskOverviewData{
+		Scheduler: buildSchedulerTaskCard(),
+		Scanner:   buildScannerTaskCard(),
+		Metadata:  buildMetadataTaskCard(),
+	}
+	c.HTML(http.StatusOK, "dashboard_task_overview.html", data)
+}
+
 func DashboardQBStatusHandler(c *gin.Context) {
 	start := time.Now()
 	log.Printf("DEBUG: DashboardQBStatusHandler Started")
@@ -139,4 +175,141 @@ func DashboardQBStatusHandler(c *gin.Context) {
 	}
 	c.Header("Content-Type", "text/html")
 	c.String(http.StatusOK, html)
+}
+
+func buildSchedulerTaskCard() TaskOverviewCard {
+	status := scheduler.GlobalRunStatus.Snapshot()
+	card := TaskOverviewCard{
+		Title:      "订阅调度",
+		StatusTone: "slate",
+	}
+
+	switch {
+	case status.IsRunning:
+		card.StatusLabel = "运行中"
+		card.StatusTone = taskToneAmber
+		card.Summary = fmt.Sprintf("正在检查 %d 个订阅", max(status.TotalSubscriptions, 1))
+		card.ProgressText = formatSchedulerDetail(status)
+	case status.LastFinishedAt != nil || status.LastStartedAt != nil:
+		card.StatusLabel = taskStatusCompleted
+		card.StatusTone = statusToneFromCounts(status.ErrorCount, status.WarningCount)
+		card.Summary = fallbackText(status.LastSummary, "最近一轮调度已结束")
+		card.Detail = formatSchedulerDetail(status)
+		card.StartedAt = status.LastStartedAt
+		card.FinishedAt = status.LastFinishedAt
+		card.Error = status.LastError
+	default:
+		card.StatusLabel = taskStatusIdle
+		card.Summary = "还没有运行过订阅调度"
+		card.Detail = "启动后会自动轮询，也可以在订阅页手动立即运行。"
+	}
+
+	if status.IsRunning {
+		card.StartedAt = status.LastStartedAt
+		card.Error = status.LastError
+	}
+
+	return card
+}
+
+func buildScannerTaskCard() TaskOverviewCard {
+	status := service.GlobalScanStatus.Snapshot()
+	card := TaskOverviewCard{
+		Title:      "本地扫描",
+		StatusTone: "slate",
+	}
+
+	switch {
+	case status.IsRunning:
+		card.StatusLabel = "扫描中"
+		card.StatusTone = taskToneAmber
+		card.Summary = fallbackText(status.LastSummary, "正在扫描本地媒体目录")
+		card.ProgressText = fmt.Sprintf("进度 %d/%d", status.ProcessedDirectories, max(status.TotalDirectories, 1))
+		if status.CurrentDirectory != "" {
+			card.Detail = status.CurrentDirectory
+		}
+		card.StartedAt = status.LastStartedAt
+		card.Error = status.LastError
+	case status.LastFinishedAt != nil || status.LastStartedAt != nil:
+		card.StatusLabel = taskStatusCompleted
+		card.StatusTone = statusToneFromFailure(status.FailedDirectories)
+		card.Summary = fallbackText(status.LastSummary, "最近一轮扫描已结束")
+		card.Detail = fmt.Sprintf("新增 %d，更新 %d，失败 %d", status.AddedCount, status.UpdatedCount, status.FailedDirectories)
+		card.StartedAt = status.LastStartedAt
+		card.FinishedAt = status.LastFinishedAt
+		card.ProgressText = status.LastDuration
+		card.Error = status.LastError
+	default:
+		card.StatusLabel = taskStatusIdle
+		card.Summary = "还没有运行过本地库扫描"
+		card.Detail = "从本地番剧页触发扫描后，这里会展示最近一轮摘要。"
+	}
+
+	return card
+}
+
+func buildMetadataTaskCard() TaskOverviewCard {
+	status := service.GlobalRefreshStatus.Snapshot()
+	card := TaskOverviewCard{
+		Title:      "元数据刷新",
+		StatusTone: "slate",
+	}
+
+	switch {
+	case status.IsRunning:
+		card.StatusLabel = "刷新中"
+		card.StatusTone = taskToneAmber
+		card.Summary = "正在刷新媒体库元数据"
+		card.ProgressText = fmt.Sprintf("进度 %d/%d", status.Current, max(status.Total, 1))
+		card.Detail = fallbackText(status.CurrentTitle, "正在准备本轮刷新")
+	case status.LastResult != "":
+		card.StatusLabel = taskStatusCompleted
+		card.StatusTone = taskToneEmerald
+		card.Summary = status.LastResult
+		card.Detail = "可在媒体库页再次触发全量或增量刷新。"
+	default:
+		card.StatusLabel = taskStatusIdle
+		card.Summary = "还没有运行过元数据全库刷新"
+		card.Detail = "媒体库页的刷新按钮会在这里显示进度和结果。"
+	}
+
+	return card
+}
+
+func formatSchedulerDetail(status scheduler.RunStatus) string {
+	sourceLabel := map[string]string{
+		"auto":   "自动调度",
+		"manual": "手动运行",
+		"create": "创建后首次检查",
+	}[status.LastRunSource]
+	if sourceLabel == "" {
+		sourceLabel = "最近一轮"
+	}
+
+	return fmt.Sprintf("%s · 成功 %d / 警告 %d / 失败 %d / 跳过 %d", sourceLabel, status.SuccessCount, status.WarningCount, status.ErrorCount, status.SkippedCount)
+}
+
+func statusToneFromCounts(errorsCount, warnings int) string {
+	switch {
+	case errorsCount > 0:
+		return "rose"
+	case warnings > 0:
+		return taskToneAmber
+	default:
+		return taskToneEmerald
+	}
+}
+
+func statusToneFromFailure(failed int) string {
+	if failed > 0 {
+		return taskToneAmber
+	}
+	return taskToneEmerald
+}
+
+func fallbackText(value, fallback string) string {
+	if value == "" {
+		return fallback
+	}
+	return value
 }

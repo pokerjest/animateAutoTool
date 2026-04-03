@@ -138,7 +138,7 @@ func InspectBackup(path string) (BackupDescriptor, error) {
 	desc.HasConfigs = targetDB.Migrator().HasTable(&model.GlobalConfig{})
 	desc.HasMetadata = targetDB.Migrator().HasTable(&model.AnimeMetadata{})
 	desc.HasSubscriptions = targetDB.Migrator().HasTable(&model.Subscription{})
-	desc.HasLogs = targetDB.Migrator().HasTable(&model.DownloadLog{})
+	desc.HasLogs = targetDB.Migrator().HasTable(&model.DownloadLog{}) || targetDB.Migrator().HasTable(&model.SubscriptionRunLog{})
 	desc.HasUsers = targetDB.Migrator().HasTable(&model.User{})
 	desc.HasLocal = targetDB.Migrator().HasTable(&model.LocalAnime{}) ||
 		targetDB.Migrator().HasTable(&model.LocalAnimeDirectory{}) ||
@@ -153,6 +153,11 @@ func InspectBackup(path string) (BackupDescriptor, error) {
 	}
 	if desc.HasLogs {
 		targetDB.Model(&model.DownloadLog{}).Count(&desc.DownloadLogCount)
+		if targetDB.Migrator().HasTable(&model.SubscriptionRunLog{}) {
+			var runLogCount int64
+			targetDB.Model(&model.SubscriptionRunLog{}).Count(&runLogCount)
+			desc.DownloadLogCount += runLogCount
+		}
 	}
 	if desc.HasLocal {
 		targetDB.Model(&model.LocalAnime{}).Count(&desc.LocalAnimeCount)

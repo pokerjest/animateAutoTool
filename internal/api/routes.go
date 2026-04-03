@@ -170,6 +170,7 @@ func initRoutesLegacy(r *gin.Engine) {
 			// Dashboard Async Data
 			apiGroup.GET("/dashboard/bangumi-data", DashboardBangumiDataHandler)
 			apiGroup.GET("/dashboard/qb-status", DashboardQBStatusHandler)
+			apiGroup.GET("/dashboard/task-overview", DashboardTaskOverviewHandler)
 
 			// SSE
 		}

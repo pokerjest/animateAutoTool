@@ -1,0 +1,64 @@
+<div class="space-y-4">
+    <div class="flex items-center justify-between gap-3">
+        <div>
+            <h3 class="text-lg md:text-xl font-black text-gray-800">后台任务总览</h3>
+            <p class="text-xs md:text-sm text-gray-500 mt-1">统一查看订阅调度、本地扫描和元数据刷新状态。</p>
+        </div>
+        <span class="text-[11px] font-bold uppercase tracking-[0.18em] text-gray-400">自动刷新</span>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {{ template "task_card" .Scheduler }}
+        {{ template "task_card" .Scanner }}
+        {{ template "task_card" .Metadata }}
+    </div>
+</div>
+
+{{ define "task_card" }}
+<div class="bg-white/70 backdrop-blur-md rounded-3xl border border-white/70 shadow-sm p-5 md:p-6 space-y-4">
+    <div class="flex items-start justify-between gap-3">
+        <div>
+            <div class="text-xs font-bold uppercase tracking-[0.2em] text-gray-400">{{ .Title }}</div>
+            <div class="mt-2 text-lg font-black text-gray-800">{{ .Summary }}</div>
+        </div>
+        <span class="inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-bold whitespace-nowrap
+            {{ if eq .StatusTone "emerald" }}bg-emerald-50 text-emerald-600{{ else if eq .StatusTone "amber" }}bg-amber-50 text-amber-700{{ else if eq .StatusTone "rose" }}bg-rose-50 text-rose-600{{ else }}bg-gray-100 text-gray-500{{ end }}">
+            <span class="w-2 h-2 rounded-full
+                {{ if eq .StatusTone "emerald" }}bg-emerald-500{{ else if eq .StatusTone "amber" }}bg-amber-500{{ else if eq .StatusTone "rose" }}bg-rose-500{{ else }}bg-gray-400{{ end }}"></span>
+            {{ .StatusLabel }}
+        </span>
+    </div>
+
+    {{ if .Detail }}
+    <div class="text-sm text-gray-600 leading-relaxed">{{ .Detail }}</div>
+    {{ end }}
+
+    <div class="space-y-2 text-xs text-gray-500">
+        {{ if .ProgressText }}
+        <div class="flex items-center justify-between gap-3">
+            <span class="font-medium text-gray-400">进度</span>
+            <span class="font-semibold text-gray-600 text-right">{{ .ProgressText }}</span>
+        </div>
+        {{ end }}
+        {{ if .StartedAt }}
+        <div class="flex items-center justify-between gap-3">
+            <span class="font-medium text-gray-400">开始时间</span>
+            <span class="font-semibold text-gray-600 text-right">{{ formatTime .StartedAt }}</span>
+        </div>
+        {{ end }}
+        {{ if .FinishedAt }}
+        <div class="flex items-center justify-between gap-3">
+            <span class="font-medium text-gray-400">完成时间</span>
+            <span class="font-semibold text-gray-600 text-right">{{ formatTime .FinishedAt }}</span>
+        </div>
+        {{ end }}
+    </div>
+
+    {{ if .Error }}
+    <div class="rounded-2xl bg-rose-50 border border-rose-100 px-4 py-3">
+        <div class="text-[11px] font-bold uppercase tracking-[0.18em] text-rose-400">最近错误</div>
+        <div class="mt-1 text-sm text-rose-700 break-all">{{ .Error }}</div>
+    </div>
+    {{ end }}
+</div>
+{{ end }}

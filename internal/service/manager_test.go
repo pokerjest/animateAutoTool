@@ -100,6 +100,20 @@ func TestProcessSubscriptionPersistsSuccessState(t *testing.T) {
 	if updated.LastCheckAt == nil || updated.LastSuccessAt == nil {
 		t.Fatal("expected check timestamps to be recorded")
 	}
+
+	var runLogs []model.SubscriptionRunLog
+	if err := db.DB.Where("subscription_id = ?", sub.ID).Find(&runLogs).Error; err != nil {
+		t.Fatalf("failed to load run logs: %v", err)
+	}
+	if len(runLogs) != 1 {
+		t.Fatalf("expected 1 run log, got %d", len(runLogs))
+	}
+	if runLogs[0].Status != SubscriptionRunStatusSuccess {
+		t.Fatalf("expected success run log, got %q", runLogs[0].Status)
+	}
+	if runLogs[0].TriggerSource != "manual" {
+		t.Fatalf("expected manual trigger source, got %q", runLogs[0].TriggerSource)
+	}
 }
 
 func TestProcessSubscriptionPersistsIdleStateForDuplicates(t *testing.T) {
@@ -244,5 +258,38 @@ func TestProcessSubscriptionPublishesSubscriptionRunEvent(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("expected subscription run event to be published")
+	}
+}
+
+func TestProcessSubscriptionWithSourcePersistsRunSource(t *testing.T) {
+	withServiceTestDB(t)
+
+	sub := model.Subscription{
+		Title:    "Auto Show",
+		RSSUrl:   "https://example.test/auto",
+		IsActive: true,
+	}
+	if err := db.DB.Create(&sub).Error; err != nil {
+		t.Fatalf("failed to create subscription: %v", err)
+	}
+
+	mgr := &SubscriptionManager{
+		RSSParser: fakeRSSParser{
+			episodes: []parser.Episode{
+				{Title: "[Group] Auto Show - 01", EpisodeNum: "01", TorrentURL: "magnet:?xt=urn:btih:auto-1"},
+			},
+		},
+		Downloader: &fakeDownloader{},
+		DB:         db.DB,
+	}
+
+	mgr.ProcessSubscriptionWithSource(&sub, "auto")
+
+	var runLog model.SubscriptionRunLog
+	if err := db.DB.Where("subscription_id = ?", sub.ID).First(&runLog).Error; err != nil {
+		t.Fatalf("failed to load run log: %v", err)
+	}
+	if runLog.TriggerSource != "auto" {
+		t.Fatalf("expected auto trigger source, got %q", runLog.TriggerSource)
 	}
 }

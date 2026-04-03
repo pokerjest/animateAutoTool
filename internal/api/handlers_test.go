@@ -845,6 +845,25 @@ func TestSubscriptionHistoryEndpointRendersRecentRuns(t *testing.T) {
 	if err := db.DB.Create(&logs).Error; err != nil {
 		t.Fatalf("failed to create download logs: %v", err)
 	}
+	runLogs := []model.SubscriptionRunLog{
+		{
+			SubscriptionID:      sub.ID,
+			CheckedAt:           now,
+			TriggerSource:       "auto",
+			Status:              "warning",
+			Summary:             "新增 2 集，另有 1 集加入下载失败",
+			Error:               "Episode 03: qb timeout",
+			TotalEpisodes:       4,
+			FilteredCount:       1,
+			DuplicateCount:      0,
+			NewDownloads:        2,
+			FailedDownloads:     1,
+			LastDownloadedTitle: "[Group] History Show - 02",
+		},
+	}
+	if err := db.DB.Create(&runLogs).Error; err != nil {
+		t.Fatalf("failed to create subscription run logs: %v", err)
+	}
 
 	cookie, _ := loginCookie(t, r, "admin")
 
@@ -861,6 +880,9 @@ func TestSubscriptionHistoryEndpointRendersRecentRuns(t *testing.T) {
 
 	assert.Contains(t, w.Body.String(), "新增 2 集，另有 1 集加入下载失败")
 	assert.Contains(t, w.Body.String(), "Episode 03: qb timeout")
+	assert.Contains(t, w.Body.String(), "逐次运行日志")
+	assert.Contains(t, w.Body.String(), "自动调度")
+	assert.Contains(t, w.Body.String(), "RSS 4 条")
 	assert.Contains(t, w.Body.String(), "[Group] History Show - 02")
 	assert.Contains(t, w.Body.String(), "/downloads/history-show/01.mkv")
 }
@@ -1085,6 +1107,7 @@ func TestGetPlayInfoReturnsDiagnosticWhenJellyfinNotConfigured(t *testing.T) {
 
 	assert.Contains(t, w.Body.String(), `"code":"jellyfin_not_configured"`)
 	assert.Contains(t, w.Body.String(), "设置页填写 Jellyfin 地址和 API Key")
+	assert.Contains(t, w.Body.String(), `"primary_action":"打开设置页"`)
 }
 
 func TestGetPlayInfoReturnsDiagnosticWhenSeriesMissingInJellyfin(t *testing.T) {
@@ -1144,6 +1167,106 @@ func TestGetPlayInfoReturnsDiagnosticWhenSeriesMissingInJellyfin(t *testing.T) {
 
 	assert.Contains(t, w.Body.String(), `"code":"jellyfin_series_not_found"`)
 	assert.Contains(t, w.Body.String(), "刷新资料库")
+	assert.Contains(t, w.Body.String(), "/local-anime?highlight=")
+}
+
+func TestGetPlayInfoReturnsDiagnosticWhenLocalMediaMissing(t *testing.T) {
+	resetAuthFixtures(t)
+	r := setupRouter()
+
+	jf := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		switch {
+		case req.Method == http.MethodGet && req.URL.Path == "/Users":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[{"Id":"user-1","Name":"admin"}]`))
+		case req.Method == http.MethodGet && req.URL.Path == "/Items":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"Items":[{"Id":"series-1","ProviderIds":{"bangumi":"3333"}}]}`))
+		case req.Method == http.MethodGet && strings.HasPrefix(req.URL.Path, "/Users/user-1/Items"):
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"Items":[{"Id":"episode-1","UserData":{"PlaybackPositionTicks":0,"Played":false}}]}`))
+		default:
+			http.NotFound(w, req)
+		}
+	}))
+	defer jf.Close()
+
+	configs := []model.GlobalConfig{
+		{Key: model.ConfigKeyJellyfinUrl, Value: jf.URL},
+		{Key: model.ConfigKeyJellyfinApiKey, Value: "test-key"},
+	}
+	for _, cfg := range configs {
+		if err := db.DB.Save(&cfg).Error; err != nil {
+			t.Fatalf("failed to seed jellyfin config %s: %v", cfg.Key, err)
+		}
+	}
+
+	metadata := model.AnimeMetadata{Title: "Missing Media", BangumiID: 3333}
+	if err := db.DB.Create(&metadata).Error; err != nil {
+		t.Fatalf("failed to create metadata: %v", err)
+	}
+
+	anime := model.LocalAnime{Title: "Missing Media", Path: "/library/missing-media", MetadataID: &metadata.ID}
+	if err := db.DB.Create(&anime).Error; err != nil {
+		t.Fatalf("failed to create anime: %v", err)
+	}
+
+	ep := model.LocalEpisode{LocalAnimeID: anime.ID, Title: "Episode 1", EpisodeNum: 1, SeasonNum: 1, Path: "/tmp/definitely-not-found-animate-auto-tool.mkv"}
+	if err := db.DB.Create(&ep).Error; err != nil {
+		t.Fatalf("failed to create episode: %v", err)
+	}
+
+	cookie, _ := loginCookie(t, r, "admin")
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", fmt.Sprintf("/api/jellyfin/play/%d", ep.ID), nil)
+	req.Header.Set("Cookie", cookie)
+	markLocalRequest(req)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected local media missing to return 404, got %d: %s", w.Code, w.Body.String())
+	}
+
+	assert.Contains(t, w.Body.String(), `"code":"local_media_missing"`)
+	assert.Contains(t, w.Body.String(), "重新扫描本地库")
+}
+
+func TestDashboardTaskOverviewEndpointRendersStatuses(t *testing.T) {
+	resetAuthFixtures(t)
+	r := setupRouter()
+
+	scheduler.GlobalRunStatus.Begin("auto", 3)
+	service.GlobalScanStatus.Begin(2)
+	service.GlobalScanStatus.Advance("/library/a", 1, 0, nil)
+	if service.GlobalRefreshStatus.TryStart() {
+		service.GlobalRefreshStatus.SetTotal(5)
+		service.GlobalRefreshStatus.UpdateProgress(2, "Test Metadata")
+	}
+	t.Cleanup(func() {
+		scheduler.GlobalRunStatus.Skip("auto", "待命")
+		service.GlobalScanStatus.Skip("待命")
+		service.GlobalRefreshStatus.Finish("已结束")
+	})
+
+	cookie, _ := loginCookie(t, r, "admin")
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/dashboard/task-overview", nil)
+	req.Header.Set("Cookie", cookie)
+	req.Header.Set("HX-Request", "true")
+	markLocalRequest(req)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected dashboard task overview endpoint to succeed, got %d: %s", w.Code, w.Body.String())
+	}
+
+	assert.Contains(t, w.Body.String(), "后台任务总览")
+	assert.Contains(t, w.Body.String(), "订阅调度")
+	assert.Contains(t, w.Body.String(), "扫描中")
+	assert.Contains(t, w.Body.String(), "元数据刷新")
+	assert.Contains(t, w.Body.String(), "Test Metadata")
 }
 
 func TestDeploymentCheckEndpointRendersWarnings(t *testing.T) {

@@ -40,6 +40,11 @@ func getDBStats(targetDB *gorm.DB, dbPath string) BackupStats {
 	if targetDB.Migrator().HasTable(&model.DownloadLog{}) {
 		targetDB.Model(&model.DownloadLog{}).Count(&logCount)
 	}
+	if targetDB.Migrator().HasTable(&model.SubscriptionRunLog{}) {
+		var runLogCount int64
+		targetDB.Model(&model.SubscriptionRunLog{}).Count(&runLogCount)
+		logCount += runLogCount
+	}
 	if targetDB.Migrator().HasTable(&model.GlobalConfig{}) {
 		targetDB.Model(&model.GlobalConfig{}).Count(&configCount)
 	}

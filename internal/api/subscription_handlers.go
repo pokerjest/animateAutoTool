@@ -32,6 +32,7 @@ type SubscriptionsData struct {
 
 type SubscriptionHistoryData struct {
 	Subscription model.Subscription
+	Runs         []model.SubscriptionRunLog
 	Logs         []model.DownloadLog
 }
 
@@ -172,7 +173,7 @@ func createSubscriptionInternal(sub *model.Subscription) error {
 			return
 		}
 		mgr := service.NewSubscriptionManager(qbt)
-		mgr.ProcessSubscription(sub)
+		mgr.ProcessSubscriptionWithSource(sub, "create")
 	}()
 
 	return nil
@@ -347,7 +348,7 @@ func RunSubscriptionHandler(c *gin.Context) {
 	// Init Manager and Run
 	mgr := service.NewSubscriptionManager(qbt)
 	// Let's do Sync for now as it shouldn't be too long for RSS parse.
-	mgr.ProcessSubscription(&sub)
+	mgr.ProcessSubscriptionWithSource(&sub, "manual")
 
 	time.Sleep(1 * time.Second) // Smooth transition
 	cardSub, err := loadSubscriptionCard(sub.ID)
@@ -690,8 +691,17 @@ func loadSubscriptionHistory(id uint) (SubscriptionHistoryData, error) {
 		return SubscriptionHistoryData{}, err
 	}
 
+	var runs []model.SubscriptionRunLog
+	if err := db.DB.Where("subscription_id = ?", sub.ID).
+		Order("checked_at DESC").
+		Limit(10).
+		Find(&runs).Error; err != nil {
+		return SubscriptionHistoryData{}, err
+	}
+
 	return SubscriptionHistoryData{
 		Subscription: sub,
+		Runs:         runs,
 		Logs:         logs,
 	}, nil
 }
