@@ -6,15 +6,23 @@ import (
 	"testing"
 )
 
+const testDarwinGOOS = "darwin"
+
 func TestLoadConfig_Defaults(t *testing.T) {
 	tempRoot := t.TempDir()
 	prevRootOverride := appRootOverride
 	prevSecretOverride := authSecretFallbackPathOverride
+	prevExecutablePathFunc := executablePathFunc
+	prevUserConfigDirFunc := userConfigDirFunc
+	prevGoosOverride := goosOverride
 	appRootOverride = tempRoot
 	authSecretFallbackPathOverride = ""
 	defer func() {
 		appRootOverride = prevRootOverride
 		authSecretFallbackPathOverride = prevSecretOverride
+		executablePathFunc = prevExecutablePathFunc
+		userConfigDirFunc = prevUserConfigDirFunc
+		goosOverride = prevGoosOverride
 	}()
 
 	prevWD, err := os.Getwd()
@@ -75,11 +83,17 @@ func TestLoadConfig_EnvOverride(t *testing.T) {
 	tempRoot := t.TempDir()
 	prevRootOverride := appRootOverride
 	prevSecretOverride := authSecretFallbackPathOverride
+	prevExecutablePathFunc := executablePathFunc
+	prevUserConfigDirFunc := userConfigDirFunc
+	prevGoosOverride := goosOverride
 	appRootOverride = tempRoot
 	authSecretFallbackPathOverride = ""
 	defer func() {
 		appRootOverride = prevRootOverride
 		authSecretFallbackPathOverride = prevSecretOverride
+		executablePathFunc = prevExecutablePathFunc
+		userConfigDirFunc = prevUserConfigDirFunc
+		goosOverride = prevGoosOverride
 	}()
 
 	prevWD, err := os.Getwd()
@@ -119,11 +133,17 @@ func TestLoadConfig_ReusesPersistedFallbackAuthSecret(t *testing.T) {
 	tempSecretPath := filepath.Join(tempRoot, "auth_secret")
 	prevRootOverride := appRootOverride
 	prevSecretOverride := authSecretFallbackPathOverride
+	prevExecutablePathFunc := executablePathFunc
+	prevUserConfigDirFunc := userConfigDirFunc
+	prevGoosOverride := goosOverride
 	appRootOverride = tempRoot
 	authSecretFallbackPathOverride = tempSecretPath
 	defer func() {
 		appRootOverride = prevRootOverride
 		authSecretFallbackPathOverride = prevSecretOverride
+		executablePathFunc = prevExecutablePathFunc
+		userConfigDirFunc = prevUserConfigDirFunc
+		goosOverride = prevGoosOverride
 	}()
 
 	prevWD, err := os.Getwd()
@@ -160,9 +180,15 @@ func TestLoadConfig_ExplicitConfigDirCreatesFilesThere(t *testing.T) {
 	otherWD := t.TempDir()
 
 	prevSecretOverride := authSecretFallbackPathOverride
+	prevExecutablePathFunc := executablePathFunc
+	prevUserConfigDirFunc := userConfigDirFunc
+	prevGoosOverride := goosOverride
 	authSecretFallbackPathOverride = ""
 	defer func() {
 		authSecretFallbackPathOverride = prevSecretOverride
+		executablePathFunc = prevExecutablePathFunc
+		userConfigDirFunc = prevUserConfigDirFunc
+		goosOverride = prevGoosOverride
 	}()
 
 	prevWD, err := os.Getwd()
@@ -189,5 +215,59 @@ func TestLoadConfig_ExplicitConfigDirCreatesFilesThere(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(tempRoot, "config.yaml")); err != nil {
 		t.Fatalf("Expected config file to be created in explicit root, got %v", err)
+	}
+}
+
+func TestDefaultAppRoot_UsesUserConfigDirInsideMacOSAppBundle(t *testing.T) {
+	prevRootOverride := appRootOverride
+	prevExecutablePathFunc := executablePathFunc
+	prevUserConfigDirFunc := userConfigDirFunc
+	prevGoosOverride := goosOverride
+	appRootOverride = ""
+	goosOverride = testDarwinGOOS
+	executablePathFunc = func() (string, error) {
+		return "/Applications/Animate Auto Tool.app/Contents/MacOS/animate-server", nil
+	}
+	userConfigDirFunc = func() (string, error) {
+		return "/Users/test/Library/Application Support", nil
+	}
+	defer func() {
+		appRootOverride = prevRootOverride
+		executablePathFunc = prevExecutablePathFunc
+		userConfigDirFunc = prevUserConfigDirFunc
+		goosOverride = prevGoosOverride
+	}()
+
+	root := defaultAppRoot()
+	want := "/Users/test/Library/Application Support/AnimateAutoTool"
+	if root != want {
+		t.Fatalf("Expected bundle installs to use user config dir %q, got %q", want, root)
+	}
+}
+
+func TestDefaultAppRoot_UsesExecutableDirOutsideMacOSAppBundle(t *testing.T) {
+	prevRootOverride := appRootOverride
+	prevExecutablePathFunc := executablePathFunc
+	prevUserConfigDirFunc := userConfigDirFunc
+	prevGoosOverride := goosOverride
+	appRootOverride = ""
+	goosOverride = testDarwinGOOS
+	executablePathFunc = func() (string, error) {
+		return "/Users/test/Downloads/animate-server", nil
+	}
+	userConfigDirFunc = func() (string, error) {
+		return "/Users/test/Library/Application Support", nil
+	}
+	defer func() {
+		appRootOverride = prevRootOverride
+		executablePathFunc = prevExecutablePathFunc
+		userConfigDirFunc = prevUserConfigDirFunc
+		goosOverride = prevGoosOverride
+	}()
+
+	root := defaultAppRoot()
+	want := "/Users/test/Downloads"
+	if root != want {
+		t.Fatalf("Expected direct binaries to keep using executable dir %q, got %q", want, root)
 	}
 }

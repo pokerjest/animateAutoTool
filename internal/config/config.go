@@ -64,6 +64,9 @@ const (
 var appRootOverride string
 var authSecretFallbackPath string
 var authSecretFallbackPathOverride string
+var executablePathFunc = os.Executable
+var userConfigDirFunc = os.UserConfigDir
+var goosOverride string
 
 func LoadConfig(configPath string) error {
 	AppPaths = resolveAppPaths(configPath)
@@ -201,7 +204,7 @@ func explicitConfigDir(configPath string) string {
 }
 
 func executableDir() (string, error) {
-	exePath, err := os.Executable()
+	exePath, err := executablePathFunc()
 	if err != nil {
 		return "", err
 	}
@@ -234,16 +237,21 @@ func defaultAppRoot() string {
 	}
 
 	if exeDir, err := executableDir(); err == nil && strings.TrimSpace(exeDir) != "" {
+		if macOSBundleDataRoot(exeDir) {
+			if dir, err := userConfigDirFunc(); err == nil && dir != "" {
+				return filepath.Join(dir, appName)
+			}
+		}
 		return exeDir
 	}
 
-	if runtime.GOOS == "windows" {
+	if currentGOOS() == "windows" {
 		if local := strings.TrimSpace(os.Getenv("LOCALAPPDATA")); local != "" {
 			return filepath.Join(local, appName)
 		}
 	}
 
-	if dir, err := os.UserConfigDir(); err == nil && dir != "" {
+	if dir, err := userConfigDirFunc(); err == nil && dir != "" {
 		return filepath.Join(dir, appName)
 	}
 
@@ -252,6 +260,20 @@ func defaultAppRoot() string {
 	}
 
 	return appName
+}
+
+func currentGOOS() string {
+	if goosOverride != "" {
+		return goosOverride
+	}
+	return runtime.GOOS
+}
+
+func macOSBundleDataRoot(exeDir string) bool {
+	if currentGOOS() != "darwin" {
+		return false
+	}
+	return strings.HasSuffix(filepath.ToSlash(filepath.Clean(exeDir)), ".app/Contents/MacOS")
 }
 
 func resolvedAuthSecretFallbackPath() string {
@@ -315,7 +337,7 @@ server:
   port: 8306
   mode: release
   public_url: ""
-  headless: false
+  # headless: true # optional; leave unset to use the platform default (Windows tray=false, macOS/Linux headless=true)
   trusted_proxies:
     - 127.0.0.1
     - ::1
