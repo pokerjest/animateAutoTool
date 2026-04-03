@@ -15,6 +15,11 @@ const (
 	EventScanComplete     EventType = "scan_complete"
 	EventMetadataUpdated  EventType = "metadata_updated"
 	EventDownloadProgress EventType = "download_progress"
+	EventDownloadReady    EventType = "download_ready"
+	EventLibraryIssue     EventType = "library_issue"
+	EventScanRun          EventType = "scan_run"
+	EventSubscriptionRun  EventType = "subscription_run"
+	EventSchedulerRun     EventType = "scheduler_run"
 )
 
 // Event 代表一个系统事件

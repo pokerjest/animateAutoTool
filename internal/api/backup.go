@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/glebarez/sqlite"
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/safeio"
@@ -24,12 +23,13 @@ type BackupStats struct {
 	DownloadLogCount   int64
 	LocalAnimeCount    int64
 	UserCount          int64
+	GlobalConfigCount  int64
 	DatabaseSize       string
 	LastModified       string
 }
 
 func getDBStats(targetDB *gorm.DB, dbPath string) BackupStats {
-	var subCount, logCount, localCount int64
+	var subCount, logCount, localCount, configCount int64
 	var titles []string
 
 	// Check if tables exist (handle partial backups)
@@ -39,6 +39,9 @@ func getDBStats(targetDB *gorm.DB, dbPath string) BackupStats {
 	}
 	if targetDB.Migrator().HasTable(&model.DownloadLog{}) {
 		targetDB.Model(&model.DownloadLog{}).Count(&logCount)
+	}
+	if targetDB.Migrator().HasTable(&model.GlobalConfig{}) {
+		targetDB.Model(&model.GlobalConfig{}).Count(&configCount)
 	}
 	if targetDB.Migrator().HasTable(&model.LocalAnime{}) {
 		targetDB.Model(&model.LocalAnime{}).Count(&localCount)
@@ -63,6 +66,7 @@ func getDBStats(targetDB *gorm.DB, dbPath string) BackupStats {
 		DownloadLogCount:   logCount,
 		LocalAnimeCount:    localCount,
 		UserCount:          userCount,
+		GlobalConfigCount:  configCount,
 		DatabaseSize:       size,
 		LastModified:       modTime,
 	}
@@ -113,20 +117,11 @@ func AnalyzeBackupHandler(c *gin.Context) {
 		return
 	}
 
-	// Open Temp DB
-	tempDB, err := gorm.Open(sqlite.Open(tempFile.Name()), &gorm.Config{})
+	stats, err := service.InspectBackup(tempFile.Name())
 	if err != nil {
 		safeio.Remove(tempFile.Name())
 		c.String(http.StatusBadRequest, "Invalid Database File")
 		return
-	}
-
-	// Get Stats
-	stats := getDBStats(tempDB, tempFile.Name())
-
-	// Close Temp DB
-	if sqlDB, err := tempDB.DB(); err == nil {
-		safeio.Close(sqlDB)
 	}
 
 	// Return HTML Fragment
@@ -219,9 +214,8 @@ func isValidSQLite(path string) bool {
 }
 
 func ExportBackupHandler(c *gin.Context) {
-	// Create Filtered Backup (Exclude Local Anime)
+	mode := service.NormalizeBackupMode(c.DefaultQuery("mode", service.BackupModeFull))
 
-	// 1. Create Temp DB
 	tempFile, err := os.CreateTemp("", "export_*.db")
 	if err != nil {
 		c.String(http.StatusInternalServerError, "Failed to create temp export file")
@@ -235,48 +229,14 @@ func ExportBackupHandler(c *gin.Context) {
 	}
 	defer safeio.Remove(tempPath)
 
-	// 2. Generate Backup
-	if err := createBackupFile(tempPath); err != nil {
+	if err := service.CreateBackupFile(tempPath, mode); err != nil {
 		c.String(http.StatusInternalServerError, "Failed to create backup: "+err.Error())
 		return
 	}
 
-	// 3. Stream File
-	timestamp := time.Now().Format("20060102_150405")
-	filename := fmt.Sprintf("animateData_filtered_%s.db", timestamp)
-
-	c.FileAttachment(tempPath, filename)
+	c.FileAttachment(tempPath, service.BackupFilename(mode, time.Now()))
 }
 
 func ImportBackupHandler(c *gin.Context) {
 	c.String(http.StatusBadRequest, "Direct restore has been disabled. Please use the analyze/preview flow before restoring.")
-}
-
-// createBackupFile generates a standard backup database at destPath
-func createBackupFile(destPath string) error {
-	debugLog("DEBUG: Creating backup at %s using Source DB: %s", destPath, db.CurrentDBPath)
-
-	// Use VACUUM INTO for safe online backup (Requires SQLite 3.27+)
-	// This creates a consistent snapshot even if writes are happening.
-
-	// VACUUM INTO requires the target file to NOT exist.
-	if err := os.Remove(destPath); err != nil && !os.IsNotExist(err) {
-		debugLog("DEBUG: Failed to clear previous backup file: %v", err)
-		return fmt.Errorf("failed to clear target file: %v", err)
-	}
-
-	// db.DB is the GORM instance. Get the underlying sql.DB to exec raw command?
-	// Or use GORM's Exec.
-	if err := db.DB.Exec("VACUUM INTO ?", destPath).Error; err != nil {
-		debugLog("DEBUG: VACUUM INTO failed: %v", err)
-		return fmt.Errorf("backup failed (VACUUM INTO): %v", err)
-	}
-
-	// Verify file size
-	fi, err := os.Stat(destPath)
-	if err == nil {
-		debugLog("DEBUG: Final Backup Size: %d bytes (%.2f MB)", fi.Size(), float64(fi.Size())/1024/1024)
-	}
-
-	return nil
 }

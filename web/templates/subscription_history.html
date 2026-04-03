@@ -1,0 +1,96 @@
+{{ define "subscription_history.html" }}
+<div class="space-y-4">
+    <div class="rounded-2xl border border-white/80 bg-white/80 p-4 shadow-sm">
+        <div class="flex flex-wrap items-start justify-between gap-3">
+            <div>
+                <div class="text-xs font-bold uppercase tracking-wider text-gray-400">最近一次检查</div>
+                <div class="mt-1 text-lg font-black text-gray-800">{{ .Subscription.Title }}</div>
+                <div class="mt-1 text-xs text-gray-500">
+                    检查于 <span class="font-semibold text-gray-700">{{ formatTime .Subscription.LastCheckAt }}</span>
+                    {{ if .Subscription.LastSuccessAt }}
+                    · 最近成功 <span class="font-semibold text-gray-700">{{ timeAgo .Subscription.LastSuccessAt }}</span>
+                    {{ end }}
+                </div>
+            </div>
+            <div>
+                {{ if eq .Subscription.LastRunStatus "success" }}
+                <span class="inline-flex items-center px-2.5 py-1 rounded-xl text-[11px] bg-emerald-50 text-emerald-700 border border-emerald-100 font-bold">下载成功</span>
+                {{ else if eq .Subscription.LastRunStatus "warning" }}
+                <span class="inline-flex items-center px-2.5 py-1 rounded-xl text-[11px] bg-amber-50 text-amber-700 border border-amber-100 font-bold">部分失败</span>
+                {{ else if eq .Subscription.LastRunStatus "error" }}
+                <span class="inline-flex items-center px-2.5 py-1 rounded-xl text-[11px] bg-red-50 text-red-700 border border-red-100 font-bold">检查失败</span>
+                {{ else if eq .Subscription.LastRunStatus "idle" }}
+                <span class="inline-flex items-center px-2.5 py-1 rounded-xl text-[11px] bg-slate-100 text-slate-700 border border-slate-200 font-bold">无新内容</span>
+                {{ else }}
+                <span class="inline-flex items-center px-2.5 py-1 rounded-xl text-[11px] bg-gray-100 text-gray-600 border border-gray-200 font-bold">未运行</span>
+                {{ end }}
+            </div>
+        </div>
+
+        <div class="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div class="rounded-xl bg-gray-50 border border-gray-100 px-3 py-2">
+                <div class="text-[10px] font-bold uppercase tracking-wide text-gray-400">运行摘要</div>
+                <div class="mt-1 text-sm text-gray-700">
+                    {{ if .Subscription.LastRunSummary }}{{ .Subscription.LastRunSummary }}{{ else }}还没有执行记录{{ end }}
+                </div>
+            </div>
+            <div class="rounded-xl bg-gray-50 border border-gray-100 px-3 py-2">
+                <div class="text-[10px] font-bold uppercase tracking-wide text-gray-400">最近错误</div>
+                <div class="mt-1 text-sm {{ if .Subscription.LastError }}text-red-600{{ else }}text-gray-400{{ end }}">
+                    {{ if .Subscription.LastError }}{{ .Subscription.LastError }}{{ else }}没有记录到错误{{ end }}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="rounded-2xl border border-white/80 bg-white/80 p-4 shadow-sm">
+        <div class="flex items-center justify-between gap-3">
+            <div>
+                <div class="text-xs font-bold uppercase tracking-wider text-gray-400">最近加入下载</div>
+                <div class="mt-1 text-sm font-semibold text-gray-700">
+                    {{ if .Logs }}最近 12 条下载记录{{ else }}还没有下载记录{{ end }}
+                </div>
+            </div>
+            <div class="text-xs text-gray-500">
+                已下载记录 <span class="font-black text-gray-800">{{ .Subscription.DownloadedCount }}</span> 条
+            </div>
+        </div>
+
+        {{ if .Logs }}
+        <div class="mt-4 space-y-3">
+            {{ range .Logs }}
+            <div class="rounded-xl border border-gray-100 bg-gray-50/80 px-3 py-3">
+                <div class="flex items-start justify-between gap-3">
+                    <div class="min-w-0">
+                        <div class="text-sm font-bold text-gray-800 break-all">{{ .Title }}</div>
+                        <div class="mt-1 text-[11px] text-gray-500">
+                            {{ formatTime .CreatedAt }}
+                            {{ if .Episode }} · 第 {{ .Episode }} 集{{ end }}
+                            {{ if .SeasonVal }} · {{ .SeasonVal }}{{ end }}
+                        </div>
+                    </div>
+                    <span class="shrink-0 inline-flex items-center px-2 py-0.5 rounded-lg text-[10px] font-bold
+                        {{ if eq .Status "completed" }}bg-emerald-50 text-emerald-700 border border-emerald-100
+                        {{ else if eq .Status "failed" }}bg-red-50 text-red-700 border border-red-100
+                        {{ else if eq .Status "renamed" }}bg-indigo-50 text-indigo-700 border border-indigo-100
+                        {{ else }}bg-blue-50 text-blue-700 border border-blue-100{{ end }}">
+                        {{ if eq .Status "completed" }}已完成
+                        {{ else if eq .Status "failed" }}失败
+                        {{ else if eq .Status "renamed" }}已重命名
+                        {{ else }}下载中{{ end }}
+                    </span>
+                </div>
+                {{ if .TargetFile }}
+                <div class="mt-2 text-[11px] text-gray-500 break-all">{{ .TargetFile }}</div>
+                {{ end }}
+            </div>
+            {{ end }}
+        </div>
+        {{ else }}
+        <div class="mt-4 rounded-xl border border-dashed border-gray-200 bg-gray-50/60 px-4 py-8 text-center text-sm text-gray-400">
+            这部番剧还没有产生下载记录
+        </div>
+        {{ end }}
+    </div>
+</div>
+{{ end }}

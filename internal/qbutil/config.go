@@ -4,6 +4,7 @@ import (
 	"log"
 	"strings"
 
+	"github.com/pokerjest/animateAutoTool/internal/bootstrap"
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/launcher"
 	"github.com/pokerjest/animateAutoTool/internal/model"
@@ -29,7 +30,7 @@ func LoadConfig() Config {
 	}
 
 	if db.DB == nil {
-		cfg.URL = DefaultURL
+		applyManagedBootstrapCredentials(&cfg)
 		return cfg
 	}
 
@@ -61,9 +62,7 @@ func LoadConfig() Config {
 
 	if UsesManagedInstance(cfg) {
 		cfg.Mode = ModeManaged
-		cfg.URL = DefaultURL
-		cfg.Username = ""
-		cfg.Password = ""
+		applyManagedBootstrapCredentials(&cfg)
 	} else {
 		cfg.Mode = ModeExternal
 		cfg.URL = strings.TrimSpace(cfg.URL)
@@ -124,4 +123,21 @@ func deriveModeFromURL(raw string) string {
 		return ModeManaged
 	}
 	return ModeExternal
+}
+
+func applyManagedBootstrapCredentials(cfg *Config) {
+	cfg.URL = DefaultURL
+	cfg.Username = ""
+	cfg.Password = ""
+
+	creds, err := bootstrap.LoadQBCredentials()
+	if err != nil {
+		return
+	}
+
+	if strings.TrimSpace(creds.URL) != "" {
+		cfg.URL = strings.TrimSpace(creds.URL)
+	}
+	cfg.Username = strings.TrimSpace(creds.Username)
+	cfg.Password = strings.TrimSpace(creds.Password)
 }

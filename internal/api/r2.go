@@ -17,13 +17,12 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/gin-gonic/gin"
-	"github.com/glebarez/sqlite"
 	"github.com/google/uuid"
 	appconfig "github.com/pokerjest/animateAutoTool/internal/config"
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/safeio"
-	"gorm.io/gorm"
+	"github.com/pokerjest/animateAutoTool/internal/service"
 )
 
 // Progress Management
@@ -182,7 +181,6 @@ func isMasked(s string) bool {
 
 func UploadToR2Handler(c *gin.Context) {
 	debugLog("DEBUG: UploadToR2Handler called")
-	// 1. Create Filtered Backup (Reusing logic from ExportBackupHandler mainly)
 	tempFile, err := os.CreateTemp("", "backup_r2_*.db")
 	if err != nil {
 		debugLog("DEBUG: CreateTemp error: %v", err)
@@ -197,7 +195,7 @@ func UploadToR2Handler(c *gin.Context) {
 	}
 	defer safeio.Remove(tempPath)
 
-	if err := createBackupFile(tempPath); err != nil {
+	if err := service.CreateBackupFile(tempPath, service.BackupModeFull); err != nil {
 		debugLog("DEBUG: createBackupFile error: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create backup: " + err.Error()})
 		return
@@ -219,8 +217,7 @@ func UploadToR2Handler(c *gin.Context) {
 	}
 	defer safeio.Close(file)
 
-	timestamp := time.Now().Format("20060102_150405")
-	key := fmt.Sprintf("animate_backup_%s.db", timestamp)
+	key := service.R2BackupObjectKey(service.BackupModeFull, time.Now())
 
 	debugLog("DEBUG: Starting Upload to Bucket=%s, Key=%s", bucket, key)
 	_, err = client.PutObject(c.Request.Context(), &s3.PutObjectInput{
@@ -472,15 +469,11 @@ func StageR2BackupHandler(c *gin.Context) {
 		// 4. Analyze
 		updateProgress(tID, "analyzing", "", total, total, "") // 100% downloaded
 
-		tempDB, err := gorm.Open(sqlite.Open(tempFile.Name()), &gorm.Config{})
+		stats, err := service.InspectBackup(tempFile.Name())
 		if err != nil {
 			safeio.Remove(tempFile.Name())
 			updateProgress(tID, "error", "Invalid Database File", total, total, "")
 			return
-		}
-		stats := getDBStats(tempDB, tempFile.Name())
-		if sqlDB, err := tempDB.DB(); err == nil {
-			safeio.Close(sqlDB)
 		}
 
 		// 5. Render HTML

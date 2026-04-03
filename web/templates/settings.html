@@ -543,6 +543,17 @@
                 </div>
             </div>
         </form>
+
+        <div id="deployment-check-container"
+            hx-get="/api/settings/deployment-check"
+            hx-trigger="revealed, tab-network from:body"
+            hx-target="this"
+            hx-swap="innerHTML"
+            class="min-h-[120px]">
+            <div class="bg-white/40 rounded-xl border border-white/70 p-6 text-sm text-gray-400 flex items-center gap-2">
+                <span class="animate-spin text-xs">⌛</span> 正在检查部署配置...
+            </div>
+        </div>
     </div>
 
     <!-- Backup Tab -->
@@ -813,6 +824,8 @@
                         <span>📦</span> 备份数据
                     </h3>
                     <div class="mb-4 text-sm text-gray-600 space-y-1 bg-white/50 p-3 rounded-lg border border-gray-100">
+                        <div class="flex justify-between"><span>系统设置:</span> <span class="font-bold">{{
+                                .Stats.GlobalConfigCount }}</span></div>
                         <div class="flex justify-between"><span>订阅总数:</span> <span class="font-bold">{{
                                 .Stats.SubscriptionCount }}</span></div>
                         <div class="flex justify-between"><span>历史记录:</span> <span class="font-bold">{{
@@ -839,12 +852,25 @@
                         {{ end }}
                     </div>
                     <p class="text-sm text-gray-600 mb-4">
-                        下载经过筛选的数据库文件 (仅包含订阅、日志和设置，不含本地番剧索引)。
+                        支持三种备份模式：全量数据库、仅系统设置，以及只导出 Cloudflare R2 云存档配置。
                     </p>
-                    <a href="/api/backup/export" target="_blank"
-                        class="inline-flex items-center gap-2 px-6 py-2 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition shadow-lg shadow-emerald-200">
-                        <span>⬇️</span> 下载备份
-                    </a>
+                    <div class="grid gap-3 md:grid-cols-3">
+                        <a href="/api/backup/export?mode=full" target="_blank"
+                            class="rounded-xl border border-emerald-200 bg-emerald-50 p-4 hover:bg-emerald-100 transition">
+                            <div class="font-semibold text-emerald-700 mb-1">全量备份</div>
+                            <div class="text-xs text-emerald-600">完整导出当前数据库中的所有数据。</div>
+                        </a>
+                        <a href="/api/backup/export?mode=settings" target="_blank"
+                            class="rounded-xl border border-blue-200 bg-blue-50 p-4 hover:bg-blue-100 transition">
+                            <div class="font-semibold text-blue-700 mb-1">系统设置备份</div>
+                            <div class="text-xs text-blue-600">只导出系统设置中的配置数据，适合迁移环境参数。</div>
+                        </a>
+                        <a href="/api/backup/export?mode=cloudflare" target="_blank"
+                            class="rounded-xl border border-orange-200 bg-orange-50 p-4 hover:bg-orange-100 transition">
+                            <div class="font-semibold text-orange-700 mb-1">Cloudflare 云存档凭据</div>
+                            <div class="text-xs text-orange-600">当完整数据已经上传到云端时，只导出 R2 连接配置。</div>
+                        </a>
+                    </div>
                 </div>
                 <div
                     class="absolute -right-10 -bottom-10 text-9xl text-emerald-100 opacity-50 group-hover:scale-110 transition duration-500 select-none">
@@ -955,6 +981,9 @@
                                 </button>
                             </div>
                         </div>
+                        <p class="text-xs text-gray-500 -mt-1">
+                            “立即上传”会把一份全量备份传到 R2；如果数据已经在云端，只需要迁移连接配置，请使用上面的“Cloudflare 云存档凭据”导出。
+                        </p>
 
                         <!-- Backup List -->
                         <div

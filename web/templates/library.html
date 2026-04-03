@@ -462,7 +462,7 @@
                                     <template x-for="res in fixMatchResults" :key="res.id">
                                         <div class="flex items-center gap-3 p-2 bg-white/80 rounded-lg border border-gray-100 hover:border-indigo-300 transition cursor-pointer group hover:shadow-sm"
                                             @click="applyFixMatch(res.id)">
-                                            <img :src="res.images.large || '/static/img/no_poster.jpg'"
+                                            <img :src="res.images.large || '/static/img/no_poster.svg'"
                                                 class="w-10 h-14 object-cover rounded shadow-sm bg-gray-200">
                                             <div class="flex-1 min-w-0">
                                                 <div class="font-bold text-sm text-gray-800 truncate"

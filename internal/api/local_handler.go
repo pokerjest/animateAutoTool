@@ -19,19 +19,40 @@ type LocalAnimeData struct {
 	SkipLayout       bool
 	Directories      []model.LocalAnimeDirectory
 	AnimeList        []model.LocalAnime
+	ScanStatus       service.ScanRunStatus
+	Diagnostics      []model.LibraryIssue
 	JellyfinURL      string
 	JellyfinServerID string // Added Server ID
+	HighlightAnimeID uint
+	AutoOpenAnimeID  uint
+	AutoFocusEpisode string
 }
 
 // LocalAnimePageHandler 渲染本地番剧管理页面
 func LocalAnimePageHandler(c *gin.Context) {
 	skip := IsHTMX(c)
+	highlightID := uint(0)
+	if raw := c.Query("highlight"); raw != "" {
+		if parsed, err := strconv.ParseUint(raw, 10, 32); err == nil {
+			highlightID = uint(parsed)
+		}
+	}
+	autoOpenID := uint(0)
+	if c.Query("open") == "1" || c.Query("open") == ValueTrue {
+		autoOpenID = highlightID
+	}
+	focusEpisode := c.Query("focus_episode")
 
 	var dirs []model.LocalAnimeDirectory
 	db.DB.Find(&dirs)
 
 	var animes []model.LocalAnime
 	db.DB.Preload("Metadata").Find(&animes) // TODO: Pagination? For now fetch all
+
+	diagnostics, err := service.ListOpenLibraryIssues(12)
+	if err != nil {
+		log.Printf("ERROR: failed to load library diagnostics: %v", err)
+	}
 
 	var urlCfg, keyCfg model.GlobalConfig
 	db.DB.Where("key = ?", model.ConfigKeyJellyfinUrl).First(&urlCfg)
@@ -71,11 +92,47 @@ func LocalAnimePageHandler(c *gin.Context) {
 		SkipLayout:       skip,
 		Directories:      dirs,
 		AnimeList:        animes,
+		ScanStatus:       service.GlobalScanStatus.Snapshot(),
+		Diagnostics:      diagnostics,
 		JellyfinURL:      urlCfg.Value,
 		JellyfinServerID: serverId,
+		HighlightAnimeID: highlightID,
+		AutoOpenAnimeID:  autoOpenID,
+		AutoFocusEpisode: focusEpisode,
 	}
 
 	c.HTML(http.StatusOK, "local_anime.html", data)
+}
+
+func LocalAnimeScanStatusHandler(c *gin.Context) {
+	c.HTML(http.StatusOK, "local_scan_status.html", service.GlobalScanStatus.Snapshot())
+}
+
+func GetLocalAnimeCardHandler(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		c.String(http.StatusBadRequest, "Invalid anime ID")
+		return
+	}
+
+	var anime model.LocalAnime
+	if err := db.DB.Preload("Metadata").First(&anime, uint(id)).Error; err != nil {
+		c.String(http.StatusNotFound, "Not Found")
+		return
+	}
+
+	c.HTML(http.StatusOK, "local_anime_card.html", anime)
+}
+
+func LocalAnimeDiagnosticsHandler(c *gin.Context) {
+	diagnostics, err := service.ListOpenLibraryIssues(12)
+	if err != nil {
+		c.String(http.StatusInternalServerError, "加载诊断失败")
+		return
+	}
+
+	c.HTML(http.StatusOK, "local_anime_diagnostics.html", diagnostics)
 }
 
 // AddLocalDirectoryHandler 添加新的目录

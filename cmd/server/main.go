@@ -11,6 +11,7 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/launcher"
 	"github.com/pokerjest/animateAutoTool/internal/scheduler"
+	"github.com/pokerjest/animateAutoTool/internal/startup"
 	"github.com/pokerjest/animateAutoTool/internal/tray"
 )
 
@@ -48,6 +49,7 @@ func runServer() {
 	log.Printf("Initializing database at: %s", absPath)
 
 	db.InitDB(config.AppConfig.Database.Path)
+	startup.Run()
 
 	r := gin.Default()
 	if err := r.SetTrustedProxies(config.AppConfig.Server.TrustedProxies); err != nil {

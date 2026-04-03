@@ -1,7 +1,9 @@
 package api
 
 import (
+	"math"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/gin-contrib/sessions"
@@ -30,9 +32,14 @@ func LoginPageHandler(c *gin.Context) {
 	}
 
 	bootstrapInfo, _ := bootstrap.PendingAdminBootstrapInfo()
+	bootstrapInfoPath := ""
+	if bootstrapInfo != nil {
+		bootstrapInfoPath = bootstrap.AdminBootstrapInfoPath()
+	}
 
 	c.HTML(http.StatusOK, "login.html", gin.H{
 		"BootstrapAdmin":      bootstrapInfo,
+		"BootstrapInfoPath":   bootstrapInfoPath,
 		"ConfigPath":          config.ConfigFilePath(),
 		"DataDir":             config.DataDir(),
 		"ManagedDownloadsOff": !config.AppConfig.Managed.DownloadMissing,
@@ -47,12 +54,29 @@ func LoginPostHandler(c *gin.Context) {
 		return
 	}
 
+	clientIP := requestClientIP(c)
+	if retryAfter, blocked := checkLoginThrottle(clientIP); blocked {
+		retrySeconds := int(math.Ceil(retryAfter.Seconds()))
+		if retrySeconds < 1 {
+			retrySeconds = 1
+		}
+		c.Header("Retry-After", strconv.Itoa(retrySeconds))
+		c.JSON(http.StatusTooManyRequests, gin.H{
+			"error":               "Too many login attempts, please wait before trying again",
+			"retry_after_seconds": retrySeconds,
+		})
+		return
+	}
+
 	authService := service.NewAuthService()
 	user, err := authService.Login(req.Username, req.Password)
 	if err != nil {
+		registerFailedLoginAttempt(clientIP)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid username or password"})
 		return
 	}
+
+	clearFailedLoginAttempts(clientIP)
 
 	session := sessions.Default(c)
 	session.Set("user_id", user.ID)

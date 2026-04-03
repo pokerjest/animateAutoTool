@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -17,12 +18,148 @@ import (
 )
 
 type PlayInfoResponse struct {
-	StreamURL       string `json:"stream_url"`
-	DirectStreamURL string `json:"direct_stream_url"`
-	ResumeTicks     int64  `json:"resume_ticks"`
-	PosterURL       string `json:"poster_url"`
-	Title           string `json:"title"`
-	EpisodeTitle    string `json:"episode_title"`
+	StreamURL       string              `json:"stream_url"`
+	DirectStreamURL string              `json:"direct_stream_url"`
+	ResumeTicks     int64               `json:"resume_ticks"`
+	PosterURL       string              `json:"poster_url"`
+	Title           string              `json:"title"`
+	EpisodeTitle    string              `json:"episode_title"`
+	Diagnostic      *PlaybackDiagnostic `json:"diagnostic,omitempty"`
+}
+
+type PlaybackDiagnostic struct {
+	Code             string `json:"code"`
+	Summary          string `json:"summary"`
+	Hint             string `json:"hint"`
+	Detail           string `json:"detail,omitempty"`
+	CanUseDirectLink bool   `json:"can_use_direct_link"`
+}
+
+func playbackError(c *gin.Context, status int, msg string, diagnostic *PlaybackDiagnostic) {
+	c.JSON(status, gin.H{
+		"error":      msg,
+		"diagnostic": diagnostic,
+	})
+}
+
+func jellyfinConfigDiagnostic(detail string) *PlaybackDiagnostic {
+	return &PlaybackDiagnostic{
+		Code:    "jellyfin_not_configured",
+		Summary: "Jellyfin 还没有完成配置",
+		Hint:    "请先在设置页填写 Jellyfin 地址和 API Key，再回来播放。",
+		Detail:  detail,
+	}
+}
+
+func jellyfinUserDiagnostic(err error) *PlaybackDiagnostic {
+	switch {
+	case jellyfin.HasStatus(err, http.StatusUnauthorized, http.StatusForbidden):
+		return &PlaybackDiagnostic{
+			Code:    "jellyfin_auth_failed",
+			Summary: "Jellyfin API Key 无效，或当前账号没有读取媒体库的权限",
+			Hint:    "请在设置页重新登录 Jellyfin 或更新 API Key，然后再试一次。",
+			Detail:  err.Error(),
+		}
+	case err != nil:
+		return &PlaybackDiagnostic{
+			Code:    "jellyfin_unreachable",
+			Summary: "当前无法连接到 Jellyfin 服务器",
+			Hint:    "请检查 Jellyfin 地址是否正确、服务是否已启动，以及反向代理是否可达。",
+			Detail:  err.Error(),
+		}
+	default:
+		return &PlaybackDiagnostic{
+			Code:    "jellyfin_no_users",
+			Summary: "Jellyfin 里没有可用于读取播放进度的用户",
+			Hint:    "请确认 Jellyfin 已完成初始化，并至少存在一个可登录用户。",
+		}
+	}
+}
+
+func seriesNotFoundDiagnostic(anime model.LocalAnime) *PlaybackDiagnostic {
+	return &PlaybackDiagnostic{
+		Code:    "jellyfin_series_not_found",
+		Summary: "Jellyfin 里还没有找到这部番剧",
+		Hint:    "通常是媒体库还没扫描到，或元数据 ID 和 Jellyfin 中的条目对不上。可以先在 Jellyfin 里刷新资料库，再回到本地库页重试刮削或修正匹配。",
+		Detail:  anime.Title,
+	}
+}
+
+func episodeNotFoundDiagnostic(ep model.LocalEpisode) *PlaybackDiagnostic {
+	return &PlaybackDiagnostic{
+		Code:    "jellyfin_episode_not_found",
+		Summary: fmt.Sprintf("Jellyfin 里还没有找到 S%dE%d", ep.SeasonNum, ep.EpisodeNum),
+		Hint:    "这通常表示 Jellyfin 还没扫到这一集，或剧集号和文件解析结果不一致。可以先刷新 Jellyfin 资料库，再检查本地文件命名。",
+		Detail:  ep.Path,
+	}
+}
+
+func proxyPlaybackDiagnostic(detail string) *PlaybackDiagnostic {
+	return &PlaybackDiagnostic{
+		Code:             "jellyfin_proxy_failed",
+		Summary:          "Jellyfin 代理流播放失败",
+		Hint:             "可以先尝试右上角的直连播放；如果仍然失败，请检查 Jellyfin 地址、反向代理和媒体是否已入库。",
+		Detail:           detail,
+		CanUseDirectLink: true,
+	}
+}
+
+func resolveJellyfinPlaybackClient() (*jellyfin.Client, error) {
+	var urlCfg, keyCfg model.GlobalConfig
+	db.DB.Where("key = ?", model.ConfigKeyJellyfinUrl).First(&urlCfg)
+	db.DB.Where("key = ?", model.ConfigKeyJellyfinApiKey).First(&keyCfg)
+
+	if urlCfg.Value == "" || keyCfg.Value == "" {
+		return nil, errors.New("missing jellyfin url or api key")
+	}
+
+	client := jellyfin.NewClient(urlCfg.Value, keyCfg.Value)
+	users, err := client.GetUsers()
+	if err != nil {
+		return nil, err
+	}
+	if len(users) == 0 {
+		return nil, nil
+	}
+	client.UserID = users[0].Id
+	return client, nil
+}
+
+func resolveSeriesIDForPlayback(client *jellyfin.Client, anime *model.LocalAnime) string {
+	if anime == nil || anime.Metadata == nil {
+		return ""
+	}
+
+	seriesID := anime.JellyfinSeriesID
+	if seriesID != "" {
+		return seriesID
+	}
+
+	if anime.Metadata.BangumiID != 0 {
+		sid, err := client.GetItemByProviderID("bangumi", strconv.Itoa(anime.Metadata.BangumiID))
+		if err == nil {
+			seriesID = sid
+		} else {
+			sid, err = client.GetItemByProviderID("Bangumi", strconv.Itoa(anime.Metadata.BangumiID))
+			if err == nil {
+				seriesID = sid
+			}
+		}
+	}
+
+	if seriesID == "" && anime.Metadata.TMDBID != 0 {
+		sid, err := client.GetItemByProviderID("tmdb", strconv.Itoa(anime.Metadata.TMDBID))
+		if err == nil {
+			seriesID = sid
+		}
+	}
+
+	if seriesID != "" {
+		anime.JellyfinSeriesID = seriesID
+		db.DB.Save(anime)
+	}
+
+	return seriesID
 }
 
 // GetPlayInfoHandler resolves a local episode to a Jellyfin stream URL
@@ -48,100 +185,39 @@ func GetPlayInfoHandler(c *gin.Context) {
 	}
 
 	if anime.Metadata == nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "No metadata linked to this anime"})
+		playbackError(c, http.StatusBadRequest, "这部番剧还没有关联元数据", &PlaybackDiagnostic{
+			Code:    "missing_metadata",
+			Summary: "当前番剧还没有绑定元数据",
+			Hint:    "请先在本地库详情里完成刮削或修正匹配，之后再尝试播放。",
+			Detail:  anime.Title,
+		})
 		return
 	}
 
 	// 2. Refresh Jellyfin Config
-	var urlCfg, keyCfg model.GlobalConfig
+	var urlCfg model.GlobalConfig
 	db.DB.Where("key = ?", model.ConfigKeyJellyfinUrl).First(&urlCfg)
+	var keyCfg model.GlobalConfig
 	db.DB.Where("key = ?", model.ConfigKeyJellyfinApiKey).First(&keyCfg)
-
 	if urlCfg.Value == "" || keyCfg.Value == "" {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Jellyfin not configured"})
+		playbackError(c, http.StatusServiceUnavailable, "Jellyfin 暂时不可用", jellyfinConfigDiagnostic("missing jellyfin config"))
 		return
 	}
 
-	client := jellyfin.NewClient(urlCfg.Value, keyCfg.Value)
-
-	// 3. Authenticate to get userId (needed for user data/resume)
-	// We use the admin user for now or the configured one.
-	// Since we set up "admin", let's assume we can Auth as admin.
-	// OR: We store the AccessToken globally? client.go doesn't persist it well yet.
-	// Let's Authenticate on the fly for now (overhead matches typical usage).
-	// Ideally we cache this token.
-	// HACK: Use "admin"/"admin" or try to reuse stored token if we had one?
-	// We don't have stored user credentials easily accessible here besides checking config?
-	// SetupWizard creates admin/admin. Let's try that.
-	// TODO: Store proper user creds for playback.
-
-	// For now, let's look for "JellyfinAccessToken" config if exists? No.
-	// Let's try to Auth with "admin"/"admin" as fallback or check if apiKey is enough for GetItems?
-	// ApiKey gives admin access usually.
-
-	// But GetItems needs a UserID to get "UserData" (Played status).
-	// We need to fetch *some* user.
-	// Let's fetch Public Users? Or just use the first user found in system?
-	// client.Authenticate helps but needs pwd.
-
-	// Hack: Get All Users with ApiKey, pick the first one (usually admin).
-	// Since we don't have `GetUsers` in client, let's mock authentication or assume user knew what they did.
-	// Actually, `NewClient` just takes API Key.
-	// We need `UserID` for UserData.
-	// Let's Assume the setup process saved the UserID? Not yet.
-	// Let's add `GetUsers` to client to find a valid user ID.
-
-	// Workaround: We'll skip UserData resume for MVP if we can't find a user,
-	// BUT the plan says "Sync". We MUST have a user.
-	// Let's blindly try Authenticating "admin"/"admin" (default) or "admin"/random if we generated it.
-	// Wait, we have `SetupWizard` which generates random password. We didn't save it to DB?
-	// We did `CreateUser` with `JellyfinDefaultPassword`? No code for that visible.
-
-	// Let's assume the user has configured the tool effectively.
-	// We will query `/Users` endpoint (requires admin key) to get the first user ID.
-
-	users, err := client.GetUsers()
-	if err != nil || len(users) == 0 {
-		log.Printf("Jellyfin User Fetch Failed: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not find any Jellyfin user"})
+	client, err := resolveJellyfinPlaybackClient()
+	if err != nil {
+		playbackError(c, http.StatusServiceUnavailable, "Jellyfin 暂时不可用", jellyfinUserDiagnostic(err))
 		return
 	}
-	client.UserID = users[0].Id // Use the first user found
+	if client == nil {
+		playbackError(c, http.StatusServiceUnavailable, "Jellyfin 暂时不可用", jellyfinUserDiagnostic(nil))
+		return
+	}
 
 	// 4. Resolve Series ID
-	seriesId := anime.JellyfinSeriesID
-
+	seriesId := resolveSeriesIDForPlayback(client, &anime)
 	if seriesId == "" {
-		// Priority: Bangumi ID -> TMDB ID
-		if anime.Metadata.BangumiID != 0 {
-			sid, err := client.GetItemByProviderID("bangumi", strconv.Itoa(anime.Metadata.BangumiID))
-			if err == nil {
-				seriesId = sid
-			} else {
-				// Try "Bangumi" (capitalized?)
-				sid, err = client.GetItemByProviderID("Bangumi", strconv.Itoa(anime.Metadata.BangumiID))
-				if err == nil {
-					seriesId = sid
-				}
-			}
-		}
-
-		if seriesId == "" && anime.Metadata.TMDBID != 0 {
-			sid, err := client.GetItemByProviderID("tmdb", strconv.Itoa(anime.Metadata.TMDBID))
-			if err == nil {
-				seriesId = sid
-			}
-		}
-
-		if seriesId != "" {
-			// Cache it
-			anime.JellyfinSeriesID = seriesId
-			db.DB.Save(&anime)
-		}
-	}
-
-	if seriesId == "" {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Could not match Series in Jellyfin"})
+		playbackError(c, http.StatusNotFound, "Jellyfin 里还没有找到这部番剧", seriesNotFoundDiagnostic(anime))
 		return
 	}
 
@@ -174,7 +250,7 @@ func GetPlayInfoHandler(c *gin.Context) {
 		id, ticks, err := client.GetEpisodeFromSeries(seriesId, ep.SeasonNum, ep.EpisodeNum)
 		if err != nil {
 			log.Printf("[DEBUG] PlayInfo: Failed to resolve episode: %v", err)
-			c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("Episode S%dE%d not found in Jellyfin", ep.SeasonNum, ep.EpisodeNum)})
+			playbackError(c, http.StatusNotFound, fmt.Sprintf("Jellyfin 里没有找到 S%dE%d", ep.SeasonNum, ep.EpisodeNum), episodeNotFoundDiagnostic(ep))
 			return
 		}
 		epId = id
@@ -200,6 +276,7 @@ func GetPlayInfoHandler(c *gin.Context) {
 		PosterURL:       anime.Metadata.Image, // Use local image
 		Title:           anime.Metadata.Title,
 		EpisodeTitle:    fmt.Sprintf("S%dE%d - %s", ep.SeasonNum, ep.EpisodeNum, ep.Title),
+		Diagnostic:      proxyPlaybackDiagnostic("代理流若黑屏或加载失败，可直接打开 Jellyfin 直连链接继续播放。"),
 	})
 }
 

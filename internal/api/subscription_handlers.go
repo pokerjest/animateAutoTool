@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"sync"
 	"time"
@@ -17,13 +18,46 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/parser"
 	"github.com/pokerjest/animateAutoTool/internal/qbutil"
+	"github.com/pokerjest/animateAutoTool/internal/scheduler"
 	"github.com/pokerjest/animateAutoTool/internal/service"
 	"gorm.io/gorm"
 )
 
 type SubscriptionsData struct {
-	SkipLayout    bool
-	Subscriptions []model.Subscription
+	SkipLayout      bool
+	Subscriptions   []model.Subscription
+	SchedulerStatus scheduler.RunStatus
+	TrendReport     SubscriptionTrendReport
+}
+
+type SubscriptionHistoryData struct {
+	Subscription model.Subscription
+	Logs         []model.DownloadLog
+}
+
+type SubscriptionTrendReport struct {
+	WindowLabel                string
+	CheckedCount               int
+	SuccessCount               int
+	WarningCount               int
+	ErrorCount                 int
+	DownloadLogCount           int64
+	CompletedCount             int64
+	RecentNewDownloads         int
+	ActiveIssueCount           int
+	TopIssueSubscriptions      []SubscriptionTrendItem
+	RecentWinningSubscriptions []SubscriptionTrendItem
+}
+
+type SubscriptionTrendItem struct {
+	ID               uint
+	Title            string
+	Status           string
+	StatusLabel      string
+	LastRunSummary   string
+	LastError        string
+	LastNewDownloads int
+	LastCheckLabel   string
 }
 
 func SubscriptionsHandler(c *gin.Context) {
@@ -33,16 +67,13 @@ func SubscriptionsHandler(c *gin.Context) {
 		log.Printf("Error fetching subscriptions: %v", err)
 	}
 
-	// Populate DownloadedCount
-	for i := range subs {
-		var count int64
-		db.DB.Model(&model.DownloadLog{}).Where("subscription_id = ?", subs[i].ID).Count(&count)
-		subs[i].DownloadedCount = count
-	}
+	populateSubscriptionStats(subs)
 
 	data := SubscriptionsData{
-		SkipLayout:    skip,
-		Subscriptions: subs,
+		SkipLayout:      skip,
+		Subscriptions:   subs,
+		SchedulerStatus: scheduler.GlobalRunStatus.Snapshot(),
+		TrendReport:     loadSubscriptionTrendReport(7),
 	}
 	c.HTML(http.StatusOK, "subscriptions.html", data)
 }
@@ -228,25 +259,20 @@ func ToggleSubscriptionHandler(c *gin.Context) {
 	}
 
 	sub.IsActive = !sub.IsActive
-	db.DB.Save(&sub)
-
-	time.Sleep(1 * time.Second) // Smooth transition
-
-	btnClass := "bg-green-500 hover:bg-green-600"
-	btnText := "Running"
-	if !sub.IsActive {
-		btnClass = "bg-gray-400 hover:bg-gray-500"
-		btnText = "Paused"
+	if err := db.DB.Save(&sub).Error; err != nil {
+		c.String(http.StatusInternalServerError, "Failed to update subscription: "+err.Error())
+		return
 	}
 
-	// ID for indicator
-	toggleID := "toggle-" + strconv.Itoa(int(sub.ID))
-	html := `<button id="` + toggleID + `" hx-post="/api/subscriptions/` + strconv.Itoa(int(sub.ID)) + `/toggle" hx-swap="outerHTML" hx-indicator="#` + toggleID + `" class="px-3 py-1 rounded text-white text-xs transition-colors ` + btnClass + ` flex items-center gap-1 disabled:opacity-50">` +
-		`<span class="htmx-indicator hidden animate-spin">⌛</span>` +
-		`<span class="htmx-request:hidden">` + btnText + `</span>` +
-		`</button>`
-	c.Header("Content-Type", "text/html")
-	c.String(http.StatusOK, html)
+	time.Sleep(300 * time.Millisecond)
+
+	cardSub, err := loadSubscriptionCard(sub.ID)
+	if err != nil {
+		c.String(http.StatusInternalServerError, "Failed to reload subscription card: "+err.Error())
+		return
+	}
+
+	c.HTML(http.StatusOK, "subscription_card.html", cardSub)
 }
 
 func DeleteSubscriptionHandler(c *gin.Context) {
@@ -323,9 +349,56 @@ func RunSubscriptionHandler(c *gin.Context) {
 	// Let's do Sync for now as it shouldn't be too long for RSS parse.
 	mgr.ProcessSubscription(&sub)
 
-	c.Header("Content-Type", "text/html")
 	time.Sleep(1 * time.Second) // Smooth transition
-	c.Status(http.StatusOK)
+	cardSub, err := loadSubscriptionCard(sub.ID)
+	if err != nil {
+		c.String(http.StatusInternalServerError, "Failed to reload subscription card: "+err.Error())
+		return
+	}
+
+	c.HTML(http.StatusOK, "subscription_card.html", cardSub)
+}
+
+func GetSubscriptionCardHandler(c *gin.Context) {
+	idStr := c.Param("id")
+	idUint64, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		c.String(http.StatusBadRequest, "Invalid subscription ID")
+		return
+	}
+
+	sub, err := loadSubscriptionCard(uint(idUint64))
+	if err != nil {
+		c.String(http.StatusNotFound, "Not Found")
+		return
+	}
+
+	c.HTML(http.StatusOK, "subscription_card.html", sub)
+}
+
+func GetSchedulerStatusHandler(c *gin.Context) {
+	c.HTML(http.StatusOK, "scheduler_status.html", scheduler.GlobalRunStatus.Snapshot())
+}
+
+func GetSubscriptionTrendsHandler(c *gin.Context) {
+	c.HTML(http.StatusOK, "subscription_trends.html", loadSubscriptionTrendReport(7))
+}
+
+func GetSubscriptionHistoryHandler(c *gin.Context) {
+	idStr := c.Param("id")
+	idUint64, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		c.String(http.StatusBadRequest, "Invalid subscription ID")
+		return
+	}
+
+	data, err := loadSubscriptionHistory(uint(idUint64))
+	if err != nil {
+		c.String(http.StatusNotFound, "Not Found")
+		return
+	}
+
+	c.HTML(http.StatusOK, "subscription_history.html", data)
 }
 
 func UpdateSubscriptionHandler(c *gin.Context) {
@@ -371,10 +444,18 @@ func UpdateSubscriptionHandler(c *gin.Context) {
 		return
 	}
 
+	populateSubscriptionStat(&sub)
+
 	// Sleep for smooth UI feel
 	time.Sleep(500 * time.Millisecond)
 
-	c.HTML(http.StatusOK, "subscription_card.html", sub)
+	cardSub, err := loadSubscriptionCard(sub.ID)
+	if err != nil {
+		c.String(http.StatusInternalServerError, "Error loading updated card: "+err.Error())
+		return
+	}
+
+	c.HTML(http.StatusOK, "subscription_card.html", cardSub)
 }
 
 func RefreshSubscriptionMetadataHandler(c *gin.Context) {
@@ -397,12 +478,13 @@ func RefreshSubscriptionMetadataHandler(c *gin.Context) {
 	// Sleep for smooth UI feel
 	time.Sleep(500 * time.Millisecond)
 
-	// Populate DownloadedCount for the card view
-	var count int64
-	db.DB.Model(&model.DownloadLog{}).Where("subscription_id = ?", sub.ID).Count(&count)
-	sub.DownloadedCount = count
+	cardSub, err := loadSubscriptionCard(sub.ID)
+	if err != nil {
+		c.String(http.StatusInternalServerError, "Failed to reload card: "+err.Error())
+		return
+	}
 
-	c.HTML(http.StatusOK, "subscription_card.html", sub)
+	c.HTML(http.StatusOK, "subscription_card.html", cardSub)
 }
 
 // SwitchSubscriptionSourceHandler 切换订阅的数据源并全局同步
@@ -452,7 +534,166 @@ func SwitchSubscriptionSourceHandler(c *gin.Context) {
 	metaSvc := service.NewMetadataService()
 	metaSvc.SyncMetadataToModels(m)
 
-	c.HTML(http.StatusOK, "subscription_card.html", sub)
+	cardSub, err := loadSubscriptionCard(sub.ID)
+	if err != nil {
+		c.String(http.StatusInternalServerError, "Failed to reload card: "+err.Error())
+		return
+	}
+
+	c.HTML(http.StatusOK, "subscription_card.html", cardSub)
+}
+
+func populateSubscriptionStats(subs []model.Subscription) {
+	for i := range subs {
+		populateSubscriptionStat(&subs[i])
+	}
+}
+
+func loadSubscriptionTrendReport(windowDays int) SubscriptionTrendReport {
+	if windowDays <= 0 {
+		windowDays = 7
+	}
+
+	report := SubscriptionTrendReport{
+		WindowLabel: fmt.Sprintf("近 %d 天", windowDays),
+	}
+	if db.DB == nil {
+		return report
+	}
+
+	cutoff := time.Now().AddDate(0, 0, -windowDays)
+	var recentSubs []model.Subscription
+	if err := db.DB.Where("last_check_at IS NOT NULL AND last_check_at >= ?", cutoff).
+		Order("last_check_at DESC").
+		Find(&recentSubs).Error; err != nil {
+		return report
+	}
+
+	var topIssues []SubscriptionTrendItem
+	var recentWinners []SubscriptionTrendItem
+	for _, sub := range recentSubs {
+		report.CheckedCount++
+		report.RecentNewDownloads += sub.LastNewDownloads
+		switch sub.LastRunStatus {
+		case service.SubscriptionRunStatusSuccess:
+			report.SuccessCount++
+		case service.SubscriptionRunStatusWarning:
+			report.WarningCount++
+			report.ActiveIssueCount++
+			topIssues = append(topIssues, newSubscriptionTrendItem(sub))
+		case service.SubscriptionRunStatusError:
+			report.ErrorCount++
+			report.ActiveIssueCount++
+			topIssues = append(topIssues, newSubscriptionTrendItem(sub))
+		}
+
+		if sub.LastNewDownloads > 0 {
+			recentWinners = append(recentWinners, newSubscriptionTrendItem(sub))
+		}
+	}
+
+	sort.Slice(topIssues, func(i, j int) bool {
+		if topIssues[i].Status != topIssues[j].Status {
+			return topIssues[i].Status == service.SubscriptionRunStatusError
+		}
+		return topIssues[i].LastNewDownloads < topIssues[j].LastNewDownloads
+	})
+	if len(topIssues) > 5 {
+		topIssues = topIssues[:5]
+	}
+	report.TopIssueSubscriptions = topIssues
+
+	sort.Slice(recentWinners, func(i, j int) bool {
+		if recentWinners[i].LastNewDownloads != recentWinners[j].LastNewDownloads {
+			return recentWinners[i].LastNewDownloads > recentWinners[j].LastNewDownloads
+		}
+		return recentWinners[i].Title < recentWinners[j].Title
+	})
+	if len(recentWinners) > 5 {
+		recentWinners = recentWinners[:5]
+	}
+	report.RecentWinningSubscriptions = recentWinners
+
+	db.DB.Model(&model.DownloadLog{}).
+		Where("created_at >= ?", cutoff).
+		Count(&report.DownloadLogCount)
+	db.DB.Model(&model.DownloadLog{}).
+		Where("status = ? AND updated_at >= ?", "completed", cutoff).
+		Count(&report.CompletedCount)
+
+	return report
+}
+
+func newSubscriptionTrendItem(sub model.Subscription) SubscriptionTrendItem {
+	item := SubscriptionTrendItem{
+		ID:               sub.ID,
+		Title:            sub.Title,
+		Status:           sub.LastRunStatus,
+		StatusLabel:      subscriptionStatusLabel(sub.LastRunStatus),
+		LastRunSummary:   sub.LastRunSummary,
+		LastError:        sub.LastError,
+		LastNewDownloads: sub.LastNewDownloads,
+		LastCheckLabel:   "未知",
+	}
+	if sub.LastCheckAt != nil {
+		item.LastCheckLabel = humanizeTimeAgo(time.Since(*sub.LastCheckAt))
+	}
+	return item
+}
+
+func subscriptionStatusLabel(status string) string {
+	switch status {
+	case service.SubscriptionRunStatusSuccess:
+		return "正常"
+	case service.SubscriptionRunStatusWarning:
+		return "警告"
+	case service.SubscriptionRunStatusError:
+		return "失败"
+	case service.SubscriptionRunStatusIdle:
+		return "无更新"
+	default:
+		return "未知"
+	}
+}
+
+func populateSubscriptionStat(sub *model.Subscription) {
+	if sub == nil || db.DB == nil {
+		return
+	}
+
+	var count int64
+	db.DB.Model(&model.DownloadLog{}).Where("subscription_id = ?", sub.ID).Count(&count)
+	sub.DownloadedCount = count
+}
+
+func loadSubscriptionCard(id uint) (model.Subscription, error) {
+	var sub model.Subscription
+	if err := db.DB.Preload("Metadata").First(&sub, id).Error; err != nil {
+		return model.Subscription{}, err
+	}
+
+	populateSubscriptionStat(&sub)
+	return sub, nil
+}
+
+func loadSubscriptionHistory(id uint) (SubscriptionHistoryData, error) {
+	sub, err := loadSubscriptionCard(id)
+	if err != nil {
+		return SubscriptionHistoryData{}, err
+	}
+
+	var logs []model.DownloadLog
+	if err := db.DB.Where("subscription_id = ?", sub.ID).
+		Order("created_at DESC").
+		Limit(12).
+		Find(&logs).Error; err != nil {
+		return SubscriptionHistoryData{}, err
+	}
+
+	return SubscriptionHistoryData{
+		Subscription: sub,
+		Logs:         logs,
+	}, nil
 }
 
 func SearchAnimeHandler(c *gin.Context) {

@@ -280,7 +280,7 @@
                                     <img src="{{ .Images.Large }}"
                                         alt="{{ if .NameCN }}{{ .NameCN }}{{ else }}{{ .Name }}{{ end }}"
                                         class="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
-                                        loading="lazy" onerror="this.src='/static/img/placeholder.png'">
+                                        loading="lazy" onerror="this.onerror=null;this.src='/static/img/no_poster.svg'">
 
                                     <!-- Rating Badge -->
                                     {{ if .Rating.Score }}
@@ -715,4 +715,3 @@
 
 {{ end }}
 {{ end }}
-

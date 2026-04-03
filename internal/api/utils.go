@@ -3,6 +3,7 @@ package api
 import (
 	"fmt"
 	"net"
+	"net/url"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -30,9 +31,9 @@ func firstHeaderValue(raw string) string {
 	return strings.TrimSpace(parts[0])
 }
 
-func requestFromTrustedProxy(c *gin.Context) bool {
-	if c == nil || c.Request == nil || config.AppConfig == nil || len(config.AppConfig.Server.TrustedProxies) == 0 {
-		return false
+func remoteRequestIP(c *gin.Context) net.IP {
+	if c == nil || c.Request == nil {
+		return nil
 	}
 
 	remoteHost := strings.TrimSpace(c.Request.RemoteAddr)
@@ -40,7 +41,60 @@ func requestFromTrustedProxy(c *gin.Context) bool {
 		remoteHost = host
 	}
 
-	remoteIP := net.ParseIP(remoteHost)
+	if remoteHost == "" {
+		return nil
+	}
+
+	return net.ParseIP(remoteHost)
+}
+
+func requestFromLoopback(c *gin.Context) bool {
+	remoteIP := remoteRequestIP(c)
+	return remoteIP != nil && remoteIP.IsLoopback()
+}
+
+func requestUsesForwardedHeaders(c *gin.Context) bool {
+	if c == nil || c.Request == nil {
+		return false
+	}
+
+	for _, key := range []string{"Forwarded", "X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto"} {
+		if strings.TrimSpace(c.Request.Header.Get(key)) != "" {
+			return true
+		}
+	}
+
+	return false
+}
+
+func requestTargetsLoopbackHost(c *gin.Context) bool {
+	if c == nil || c.Request == nil {
+		return false
+	}
+
+	host := strings.TrimSpace(c.Request.Host)
+	if host == "" {
+		return false
+	}
+	if parsedHost, _, err := net.SplitHostPort(host); err == nil {
+		host = parsedHost
+	}
+
+	host = strings.Trim(host, "[]")
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+
+	hostIP := net.ParseIP(host)
+	return hostIP != nil && hostIP.IsLoopback()
+}
+
+func requestFromTrustedProxy(c *gin.Context) bool {
+	if c == nil || c.Request == nil || config.AppConfig == nil || len(config.AppConfig.Server.TrustedProxies) == 0 {
+		return false
+	}
+
+	remoteIP := remoteRequestIP(c)
 	if remoteIP == nil {
 		return false
 	}
@@ -56,6 +110,65 @@ func requestFromTrustedProxy(c *gin.Context) bool {
 		if ip := net.ParseIP(candidate); ip != nil && ip.Equal(remoteIP) {
 			return true
 		}
+	}
+
+	return false
+}
+
+func requestClientIP(c *gin.Context) string {
+	if c == nil || c.Request == nil {
+		return ""
+	}
+
+	if requestFromTrustedProxy(c) {
+		if forwardedFor := firstHeaderValue(c.Request.Header.Get("X-Forwarded-For")); forwardedFor != "" {
+			forwardedFor = strings.TrimSpace(strings.Trim(forwardedFor, "[]"))
+			if host, _, err := net.SplitHostPort(forwardedFor); err == nil {
+				forwardedFor = host
+			}
+			if ip := net.ParseIP(forwardedFor); ip != nil {
+				return ip.String()
+			}
+		}
+	}
+
+	if remoteIP := remoteRequestIP(c); remoteIP != nil {
+		return remoteIP.String()
+	}
+
+	return ""
+}
+
+func normalizeRequestOrigin(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return ""
+	}
+
+	return strings.ToLower(parsed.Scheme) + "://" + strings.ToLower(parsed.Host)
+}
+
+func requestSameOrigin(c *gin.Context) bool {
+	if c == nil || c.Request == nil {
+		return false
+	}
+
+	expected := normalizeRequestOrigin(getServerBaseURL(c))
+	if expected == "" {
+		return false
+	}
+
+	if origin := normalizeRequestOrigin(c.Request.Header.Get("Origin")); origin != "" {
+		return origin == expected
+	}
+
+	if referer := normalizeRequestOrigin(c.Request.Header.Get("Referer")); referer != "" {
+		return referer == expected
 	}
 
 	return false

@@ -4,57 +4,24 @@
 package api
 
 import (
-	"encoding/json"
-	"fmt"
-	"html/template"
 	"time"
 
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-contrib/sessions/cookie"
 	"github.com/gin-gonic/gin"
 	"github.com/pokerjest/animateAutoTool/internal/config"
-	"github.com/pokerjest/animateAutoTool/internal/service"
-	"github.com/pokerjest/animateAutoTool/internal/worker"
 )
 
 func initRoutesLegacy(r *gin.Engine) {
-	// Perform startup cleanup
-	scannerSvc := service.NewScannerService()
-	scannerSvc.CleanupGarbage()
-
-	metaSvc := service.NewMetadataService()
-	metaSvc.StartMetadataMigration() // Start background image caching
-
-	// Start Event Workers
-	worker.StartMetadataWorker()
-
-	// Create default user if needed
-	authSvc := service.NewAuthService()
-	authSvc.EnsureDefaultUser()
-
 	// Initialize Session Store
 	store := cookie.NewStore([]byte(config.AppConfig.Auth.SecretKey))
 	store.Options(sessionCookieOptions(nil, 0))
 	r.Use(sessions.Sessions("animate_session", store))
+	r.Use(SecurityHeadersMiddleware())
+	r.Use(BootstrapLocalOnlyMiddleware())
 
 	// 注册模板函数
-	r.SetFuncMap(template.FuncMap{
-		"div": func(a, b float64) float64 {
-			return a / b
-		},
-		"toGB": func(size int64) string {
-			gb := float64(size) / 1024 / 1024 / 1024
-			return fmt.Sprintf("%.2f GB", gb)
-		},
-		"json": func(v interface{}) template.JS {
-			a, _ := json.Marshal(v)
-			return template.JS(a) //nolint:gosec // json.Marshal escapes HTML
-		},
-		"toJson": func(v interface{}) string {
-			a, _ := json.Marshal(v)
-			return string(a)
-		},
-	})
+	r.SetFuncMap(templateFuncMap())
 
 	// 加载模板，注意路径问题，在此我们假设运行在项目根目录
 	// 匹配 web/templates 下的所有 html
@@ -67,12 +34,21 @@ func initRoutesLegacy(r *gin.Engine) {
 	r.POST("/api/login", LoginPostHandler)
 	r.GET("/logout", LogoutHandler)
 
+	recovery := r.Group("/")
+	recovery.Use(DirectLocalOnlyMiddleware())
+	recovery.Use(SameOriginMiddleware())
+	{
+		recovery.GET("/recover", RecoveryPageHandler)
+		recovery.POST("/api/recovery/reset-admin", LocalResetAdminPasswordHandler)
+	}
+
 	// Public API Routes (Bypass Auth for Images only)
 	r.GET("/api/tmdb/image", ProxyTMDBImageHandler)
 
 	// Protected Routes Group
 	authorized := r.Group("/")
 	authorized.Use(AuthMiddleware())
+	authorized.Use(SameOriginMiddleware())
 	{
 		authorized.POST("/api/change-password", ChangePasswordHandler)
 		authorized.GET("/", DashboardHandler)
@@ -103,6 +79,9 @@ func initRoutesLegacy(r *gin.Engine) {
 			apiGroup.POST("/subscriptions/batch-preview", BatchPreviewHandler)
 			apiGroup.POST("/subscriptions/:id/toggle", ToggleSubscriptionHandler)
 			apiGroup.POST("/subscriptions/:id/run", RunSubscriptionHandler)
+			apiGroup.GET("/subscriptions/:id/card", GetSubscriptionCardHandler)
+			apiGroup.GET("/subscriptions/:id/history", GetSubscriptionHistoryHandler)
+			apiGroup.GET("/subscriptions/trends", GetSubscriptionTrendsHandler)
 			apiGroup.POST("/subscriptions/:id/refresh-metadata", RefreshSubscriptionMetadataHandler)
 			apiGroup.PUT("/subscriptions/:id", UpdateSubscriptionHandler)
 			apiGroup.DELETE("/subscriptions/:id", DeleteSubscriptionHandler)
@@ -117,9 +96,11 @@ func initRoutesLegacy(r *gin.Engine) {
 
 			// Player
 			apiGroup.POST("/subscriptions/refresh", RefreshSubscriptionsHandler)
+			apiGroup.GET("/subscriptions/scheduler-status", GetSchedulerStatusHandler)
 
 			// Settings
 			apiGroup.POST("/settings", UpdateSettingsHandler) // Keep for backward compat if needed, or remove?
+			apiGroup.GET("/settings/deployment-check", GetDeploymentCheckHandler)
 			apiGroup.POST("/settings/qb-save-test", QBSaveAndTestHandler)
 			apiGroup.POST("/settings/bangumi-save", BangumiSaveHandler)
 			apiGroup.GET("/settings/qb-status", GetQBStatusHandler)
@@ -135,6 +116,9 @@ func initRoutesLegacy(r *gin.Engine) {
 			apiGroup.POST("/local-directories", AddLocalDirectoryHandler)
 			apiGroup.DELETE("/local-directories/:id", DeleteLocalDirectoryHandler)
 			apiGroup.POST("/local-directories/scan", ScanLocalDirectoryHandler)
+			apiGroup.GET("/local-anime/scan-status", LocalAnimeScanStatusHandler)
+			apiGroup.GET("/local-anime/diagnostics", LocalAnimeDiagnosticsHandler)
+			apiGroup.GET("/local-anime/:id/card", GetLocalAnimeCardHandler)
 			apiGroup.GET("/local-anime/:id/files", GetLocalAnimeFilesHandler) // Keep for debugging if needed
 			apiGroup.POST("/local-directories/:id/rename-preview", PreviewDirectoryRenameHandler)
 			apiGroup.POST("/local-directories/:id/rename", ApplyDirectoryRenameHandler)

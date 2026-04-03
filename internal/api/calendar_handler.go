@@ -27,11 +27,7 @@ func GetCalendarHandler(c *gin.Context) {
 		})
 		return
 	}
-	// Determine today's weekday for highlighting (1=Mon, 7=Sun)
-	today := int(time.Now().Weekday())
-	if today == 0 {
-		today = 7
-	}
+	today := calendarTodayTab(calendar, time.Now())
 
 	// Check for HTMX request
 	isHTMX := c.GetHeader("HX-Request") == ValueTrue
@@ -114,4 +110,33 @@ func GetCalendarHandler(c *gin.Context) {
 		"SkipLayout": isHTMX,
 		"SubMap":     subMap,
 	})
+}
+
+func calendarTodayTab(calendar []bangumi.CalendarItem, now time.Time) int {
+	target := int(now.Weekday())
+	candidates := []int{target}
+	if target == 0 {
+		candidates = []int{7, 0}
+	}
+
+	available := make(map[int]struct{}, len(calendar))
+	for _, day := range calendar {
+		available[day.Weekday.ID] = struct{}{}
+	}
+
+	for _, candidate := range candidates {
+		if _, ok := available[candidate]; ok {
+			return candidate
+		}
+	}
+
+	if len(calendar) > 0 {
+		return calendar[0].Weekday.ID
+	}
+
+	if len(candidates) > 0 {
+		return candidates[0]
+	}
+
+	return target
 }

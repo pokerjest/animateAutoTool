@@ -2,6 +2,7 @@ package worker
 
 import (
 	"log"
+	"strconv"
 
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/event"
@@ -44,8 +45,18 @@ func StartMetadataWorker() {
 
 		if err := metaSvc.EnrichAnime(&anime); err != nil {
 			log.Printf("Worker: Failed to enrich anime %d: %v", animeID, err)
+			_ = service.ReportLibraryIssue(service.LibraryIssueInput{
+				IssueKey:      "scrape:" + strconv.FormatUint(uint64(anime.ID), 10),
+				IssueType:     service.LibraryIssueTypeScrape,
+				Title:         anime.Title,
+				DirectoryPath: anime.Path,
+				LocalAnimeID:  &anime.ID,
+				Message:       err.Error(),
+				Hint:          "检查元数据源配置，或在详情里使用修正匹配手动关联番剧。",
+			})
 		} else {
 			log.Printf("Worker: Automatically enriched anime %s", anime.Title)
+			_ = service.ResolveLibraryIssue("scrape:" + strconv.FormatUint(uint64(anime.ID), 10))
 			// Notify Frontend of update
 			// We can republish an event or relying on polling/SSE of "metadata_updated"
 		}

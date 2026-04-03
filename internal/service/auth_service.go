@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/pokerjest/animateAutoTool/internal/bootstrap"
@@ -101,6 +102,36 @@ func (s *AuthService) ChangePassword(userID uint, oldPassword, newPassword strin
 	}
 
 	// Hash new password
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+
+	user.PasswordHash = string(hashedPassword)
+	if err := db.DB.Save(&user).Error; err != nil {
+		return err
+	}
+
+	if info, err := bootstrap.LoadAdminBootstrapInfo(); err == nil && info.Username == user.Username {
+		if err := bootstrap.ClearAdminBootstrapInfo(); err != nil {
+			log.Printf("Failed to clear bootstrap admin info: %v", err)
+		}
+	}
+
+	return nil
+}
+
+func (s *AuthService) ResetPasswordByUsername(username, newPassword string) error {
+	username = strings.TrimSpace(username)
+	if username == "" {
+		return errors.New("user not found")
+	}
+
+	var user model.User
+	if err := db.DB.Where("username = ?", username).First(&user).Error; err != nil {
+		return errors.New("user not found")
+	}
+
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
 	if err != nil {
 		return err

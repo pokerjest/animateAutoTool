@@ -1,27 +1,36 @@
 package model
 
 import (
+	"time"
+
 	"gorm.io/gorm"
 )
 
 // Subscription 代表一个番剧订阅
 type Subscription struct {
 	gorm.Model
-	MikanID         string `json:"mikan_id"`                                 // 蜜柑计划的 RSS ID 或 Group ID
-	Title           string `json:"title" form:"Title"`                       // 番剧名称 (RSS 原始标题)
-	RSSUrl          string `json:"rss_url" form:"RSSUrl" gorm:"uniqueIndex"` // 具体的 RSS 链接
-	Image           string `json:"image" form:"Image"`                       // 番剧封面图片 (RSS 原始封面)
-	SubtitleGroup   string `json:"subtitle_group" form:"SubtitleGroup"`      // 字幕组名称
-	Season          string `json:"season" form:"season"`                     // 季度
-	FilterRule      string `json:"filter_rule" form:"FilterRule"`            // 过滤规则
-	ExcludeRule     string `json:"exclude_rule" form:"ExcludeRule"`          // 排除规则
-	SavePath        string `json:"save_path"`                                // 保存路径
-	RenameEnabled   bool   `json:"rename_enabled"`                           // 是否启用重命名
-	Offset          int    `json:"offset"`                                   // 偏移
-	LastEp          int    `json:"last_ep"`                                  // 最后集数
-	IsActive        bool   `json:"is_active"`                                // 激活状态
-	Summary         string `json:"summary"`                                  // 简介
-	DownloadedCount int64  `json:"downloaded_count" gorm:"-"`                // 实际已下载的集数 (动态计算)
+	MikanID             string     `json:"mikan_id"`                                 // 蜜柑计划的 RSS ID 或 Group ID
+	Title               string     `json:"title" form:"Title"`                       // 番剧名称 (RSS 原始标题)
+	RSSUrl              string     `json:"rss_url" form:"RSSUrl" gorm:"uniqueIndex"` // 具体的 RSS 链接
+	Image               string     `json:"image" form:"Image"`                       // 番剧封面图片 (RSS 原始封面)
+	SubtitleGroup       string     `json:"subtitle_group" form:"SubtitleGroup"`      // 字幕组名称
+	Season              string     `json:"season" form:"season"`                     // 季度
+	FilterRule          string     `json:"filter_rule" form:"FilterRule"`            // 过滤规则
+	ExcludeRule         string     `json:"exclude_rule" form:"ExcludeRule"`          // 排除规则
+	SavePath            string     `json:"save_path"`                                // 保存路径
+	RenameEnabled       bool       `json:"rename_enabled"`                           // 是否启用重命名
+	Offset              int        `json:"offset"`                                   // 偏移
+	LastEp              int        `json:"last_ep"`                                  // 最后集数
+	IsActive            bool       `json:"is_active"`                                // 激活状态
+	Summary             string     `json:"summary"`                                  // 简介
+	DownloadedCount     int64      `json:"downloaded_count" gorm:"-"`                // 实际已下载的集数 (动态计算)
+	LastCheckAt         *time.Time `json:"last_check_at"`
+	LastSuccessAt       *time.Time `json:"last_success_at"`
+	LastRunStatus       string     `json:"last_run_status"`
+	LastRunSummary      string     `json:"last_run_summary"`
+	LastError           string     `json:"last_error"`
+	LastNewDownloads    int        `json:"last_new_downloads"`
+	LastDownloadedTitle string     `json:"last_downloaded_title"`
 
 	// Refactored Metadata
 	MetadataID *uint          `json:"metadata_id"`
@@ -194,6 +203,21 @@ type LocalEpisode struct {
 	AudioCodec   string `json:"audio_codec"`   // 音频编码
 	BitDepth     string `json:"bit_depth"`     // 位深
 	Source       string `json:"source"`        // 来源
+}
+
+type LibraryIssue struct {
+	gorm.Model
+	IssueKey        string `gorm:"uniqueIndex"`
+	IssueType       string `gorm:"index"` // scan, scrape
+	Status          string `gorm:"index"` // open, resolved
+	Title           string
+	DirectoryPath   string
+	LocalAnimeID    *uint `gorm:"index"`
+	Message         string
+	Hint            string
+	OccurrenceCount int
+	LastSeenAt      *time.Time
+	ResolvedAt      *time.Time
 }
 
 // Append AniList Config Key

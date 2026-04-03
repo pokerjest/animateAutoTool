@@ -8,26 +8,15 @@ import (
 	"github.com/gin-contrib/sessions/cookie"
 	"github.com/gin-gonic/gin"
 	"github.com/pokerjest/animateAutoTool/internal/config"
-	"github.com/pokerjest/animateAutoTool/internal/service"
-	"github.com/pokerjest/animateAutoTool/internal/worker"
 	webassets "github.com/pokerjest/animateAutoTool/web"
 )
 
 func InitRoutes(r *gin.Engine) {
-	scannerSvc := service.NewScannerService()
-	scannerSvc.CleanupGarbage()
-
-	metaSvc := service.NewMetadataService()
-	metaSvc.StartMetadataMigration()
-
-	worker.StartMetadataWorker()
-
-	authSvc := service.NewAuthService()
-	authSvc.EnsureDefaultUser()
-
 	store := cookie.NewStore([]byte(config.AppConfig.Auth.SecretKey))
 	store.Options(sessionCookieOptions(nil, 0))
 	r.Use(sessions.Sessions("animate_session", store))
+	r.Use(SecurityHeadersMiddleware())
+	r.Use(BootstrapLocalOnlyMiddleware())
 
 	tmpl, err := webassets.ParseTemplates(templateFuncMap())
 	if err != nil {
@@ -45,10 +34,19 @@ func InitRoutes(r *gin.Engine) {
 	r.POST("/api/login", LoginPostHandler)
 	r.GET("/logout", LogoutHandler)
 
+	recovery := r.Group("/")
+	recovery.Use(DirectLocalOnlyMiddleware())
+	recovery.Use(SameOriginMiddleware())
+	{
+		recovery.GET("/recover", RecoveryPageHandler)
+		recovery.POST("/api/recovery/reset-admin", LocalResetAdminPasswordHandler)
+	}
+
 	r.GET("/api/tmdb/image", ProxyTMDBImageHandler)
 
 	authorized := r.Group("/")
 	authorized.Use(AuthMiddleware())
+	authorized.Use(SameOriginMiddleware())
 	{
 		authorized.POST("/api/change-password", ChangePasswordHandler)
 		authorized.GET("/", DashboardHandler)
@@ -77,6 +75,9 @@ func InitRoutes(r *gin.Engine) {
 			apiGroup.POST("/subscriptions/batch-preview", BatchPreviewHandler)
 			apiGroup.POST("/subscriptions/:id/toggle", ToggleSubscriptionHandler)
 			apiGroup.POST("/subscriptions/:id/run", RunSubscriptionHandler)
+			apiGroup.GET("/subscriptions/:id/card", GetSubscriptionCardHandler)
+			apiGroup.GET("/subscriptions/:id/history", GetSubscriptionHistoryHandler)
+			apiGroup.GET("/subscriptions/trends", GetSubscriptionTrendsHandler)
 			apiGroup.POST("/subscriptions/:id/refresh-metadata", RefreshSubscriptionMetadataHandler)
 			apiGroup.PUT("/subscriptions/:id", UpdateSubscriptionHandler)
 			apiGroup.DELETE("/subscriptions/:id", DeleteSubscriptionHandler)
@@ -90,8 +91,10 @@ func InitRoutes(r *gin.Engine) {
 			apiGroup.POST("/play/magnet", PlayMagnetHandler)
 
 			apiGroup.POST("/subscriptions/refresh", RefreshSubscriptionsHandler)
+			apiGroup.GET("/subscriptions/scheduler-status", GetSchedulerStatusHandler)
 
 			apiGroup.POST("/settings", UpdateSettingsHandler)
+			apiGroup.GET("/settings/deployment-check", GetDeploymentCheckHandler)
 			apiGroup.POST("/settings/qb-save-test", QBSaveAndTestHandler)
 			apiGroup.POST("/settings/bangumi-save", BangumiSaveHandler)
 			apiGroup.GET("/settings/qb-status", GetQBStatusHandler)
@@ -106,6 +109,9 @@ func InitRoutes(r *gin.Engine) {
 			apiGroup.POST("/local-directories", AddLocalDirectoryHandler)
 			apiGroup.DELETE("/local-directories/:id", DeleteLocalDirectoryHandler)
 			apiGroup.POST("/local-directories/scan", ScanLocalDirectoryHandler)
+			apiGroup.GET("/local-anime/scan-status", LocalAnimeScanStatusHandler)
+			apiGroup.GET("/local-anime/diagnostics", LocalAnimeDiagnosticsHandler)
+			apiGroup.GET("/local-anime/:id/card", GetLocalAnimeCardHandler)
 			apiGroup.GET("/local-anime/:id/files", GetLocalAnimeFilesHandler)
 			apiGroup.POST("/local-directories/:id/rename-preview", PreviewDirectoryRenameHandler)
 			apiGroup.POST("/local-directories/:id/rename", ApplyDirectoryRenameHandler)

@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -28,7 +29,59 @@ type RefreshStatus struct {
 	LastResult   string `json:"last_result"`
 }
 
-var GlobalRefreshStatus = RefreshStatus{}
+type refreshStatusTracker struct {
+	mu     sync.RWMutex
+	status RefreshStatus
+}
+
+func (t *refreshStatusTracker) TryStart() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if t.status.IsRunning {
+		return false
+	}
+
+	t.status = RefreshStatus{IsRunning: true}
+	return true
+}
+
+func (t *refreshStatusTracker) SetTotal(total int) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	t.status.Total = total
+	t.status.Current = 0
+	t.status.CurrentTitle = ""
+	t.status.LastResult = ""
+}
+
+func (t *refreshStatusTracker) UpdateProgress(current int, title string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	t.status.Current = current
+	t.status.CurrentTitle = title
+}
+
+func (t *refreshStatusTracker) Finish(result string) RefreshStatus {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	t.status.IsRunning = false
+	t.status.CurrentTitle = ""
+	t.status.LastResult = result
+
+	return t.status
+}
+
+func (t *refreshStatusTracker) Snapshot() RefreshStatus {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.status
+}
+
+var GlobalRefreshStatus = &refreshStatusTracker{}
 
 type MetadataService struct{}
 
@@ -775,8 +828,19 @@ func (s *MetadataService) MatchSeries(animeID uint, source string, sourceID int)
 	nfoGen := NewNFOGeneratorService()
 	_ = nfoGen.SaveLocalImages(&anime)
 	_ = nfoGen.GenerateTVShowNFO(&anime)
+	_ = ResolveLibraryIssue("scrape:" + strconv.FormatUint(uint64(anime.ID), 10))
 
 	return nil
+}
+
+// RefreshAllMetadata updates metadata records.
+func (s *MetadataService) StartRefreshAllMetadata(force bool) bool {
+	if !GlobalRefreshStatus.TryStart() {
+		return false
+	}
+
+	go s.RefreshAllMetadata(force)
+	return true
 }
 
 // RefreshAllMetadata updates metadata records.
@@ -798,20 +862,10 @@ func (s *MetadataService) RefreshAllMetadata(force bool) int {
 	}
 
 	total := len(list)
-	var statusMu sync.Mutex
-
-	statusMu.Lock()
-	GlobalRefreshStatus.Total = total
-	GlobalRefreshStatus.Current = 0
-	GlobalRefreshStatus.IsRunning = true
-	GlobalRefreshStatus.LastResult = ""
-	statusMu.Unlock()
+	GlobalRefreshStatus.SetTotal(total)
 
 	if total == 0 {
-		statusMu.Lock()
-		GlobalRefreshStatus.IsRunning = false
-		GlobalRefreshStatus.LastResult = "已是最新"
-		statusMu.Unlock()
+		GlobalRefreshStatus.Finish("已是最新")
 		return 0
 	}
 
@@ -828,10 +882,7 @@ func (s *MetadataService) RefreshAllMetadata(force bool) int {
 			defer wg.Done()
 			defer func() { <-guard }()
 
-			statusMu.Lock()
-			GlobalRefreshStatus.Current = idx + 1
-			GlobalRefreshStatus.CurrentTitle = meta.Title
-			statusMu.Unlock()
+			GlobalRefreshStatus.UpdateProgress(idx+1, meta.Title)
 
 			// Publish Event for SSE
 			event.GlobalBus.Publish(event.EventMetadataUpdated, map[string]interface{}{
@@ -857,15 +908,12 @@ func (s *MetadataService) RefreshAllMetadata(force bool) int {
 	}
 	wg.Wait()
 
-	statusMu.Lock()
-	GlobalRefreshStatus.IsRunning = false
-	GlobalRefreshStatus.LastResult = fmt.Sprintf("已更新 %d 条", updatedCount)
-	statusMu.Unlock()
+	finalStatus := GlobalRefreshStatus.Finish(fmt.Sprintf("已更新 %d 条", updatedCount))
 
 	// Publish Final Event
 	event.GlobalBus.Publish(event.EventMetadataUpdated, map[string]interface{}{
 		"type":    "complete",
-		"message": GlobalRefreshStatus.LastResult,
+		"message": finalStatus.LastResult,
 	})
 
 	return updatedCount

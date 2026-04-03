@@ -35,6 +35,12 @@ type SetupReadinessStatus struct {
 	Action   string `json:"action,omitempty"`
 }
 
+const (
+	setupStateReady   = "ready"
+	setupStatePending = "pending"
+	setupStateWarning = "warning"
+)
+
 type SetupReadinessResponse struct {
 	Services []SetupReadinessStatus `json:"services"`
 }
@@ -170,7 +176,7 @@ func buildAppReadinessStatus() SetupReadinessStatus {
 	return SetupReadinessStatus{
 		Key:      "app",
 		Label:    "应用目录",
-		State:    "ready",
+		State:    setupStateReady,
 		Headline: "配置文件和数据目录已经就绪",
 		Detail:   fmt.Sprintf("配置: %s | 数据: %s", config.ConfigFilePath(), config.DataDir()),
 	}
@@ -197,7 +203,7 @@ func buildQBReadinessStatus() SetupReadinessStatus {
 		return SetupReadinessStatus{
 			Key:      "qb",
 			Label:    "qBittorrent",
-			State:    "pending",
+			State:    setupStatePending,
 			Headline: "外部 WebUI 模式还没填地址",
 			Detail:   "如果你准备连接已有的 qB 实例，需要补一个可访问的 WebUI URL。",
 			Action:   "继续填写 WebUI 地址、用户名和密码后再保存。",
@@ -220,7 +226,7 @@ func buildQBReadinessStatus() SetupReadinessStatus {
 		return SetupReadinessStatus{
 			Key:      "qb",
 			Label:    "qBittorrent",
-			State:    "ready",
+			State:    setupStateReady,
 			Headline: "qBittorrent 已经可以连通",
 			Detail:   fmt.Sprintf("%s 已连上 %s，版本 %s。", modeLabel, cfg.URL, version),
 		}
@@ -241,7 +247,7 @@ func buildTMDBReadinessStatus() SetupReadinessStatus {
 		return SetupReadinessStatus{
 			Key:      "tmdb",
 			Label:    "TMDB",
-			State:    "pending",
+			State:    setupStatePending,
 			Headline: "还没有配置 TMDB Token",
 			Detail:   "不影响进入系统，但封面、简介和季集增强会少一部分数据源。",
 			Action:   "需要更完整的元数据时，再到设置页补一个 TMDB Token。",
@@ -253,7 +259,7 @@ func buildTMDBReadinessStatus() SetupReadinessStatus {
 		return SetupReadinessStatus{
 			Key:      "tmdb",
 			Label:    "TMDB",
-			State:    "ready",
+			State:    setupStateReady,
 			Headline: "TMDB 已连通",
 			Detail:   "元数据抓取和海报补全已经具备完整外部数据源。",
 		}
@@ -276,7 +282,7 @@ func buildJellyfinReadinessStatus() SetupReadinessStatus {
 		return SetupReadinessStatus{
 			Key:      "jellyfin",
 			Label:    "Jellyfin",
-			State:    "pending",
+			State:    setupStatePending,
 			Headline: "还没有配置 Jellyfin 地址和 API Key",
 			Detail:   "播放器和播放进度同步会先保持未启用，不影响其它功能。",
 			Action:   "等媒体库稳定后，再到设置页补 Jellyfin 连接。",
@@ -288,7 +294,7 @@ func buildJellyfinReadinessStatus() SetupReadinessStatus {
 		return SetupReadinessStatus{
 			Key:      "jellyfin",
 			Label:    "Jellyfin",
-			State:    "ready",
+			State:    setupStateReady,
 			Headline: "Jellyfin 已连通",
 			Detail:   fmt.Sprintf("当前服务器地址: %s", url),
 		}
@@ -322,7 +328,7 @@ func buildAListReadinessStatus() SetupReadinessStatus {
 		return SetupReadinessStatus{
 			Key:      "alist",
 			Label:    "AList",
-			State:    "pending",
+			State:    setupStatePending,
 			Headline: headline,
 			Detail:   detail,
 			Action:   action,
@@ -334,13 +340,13 @@ func buildAListReadinessStatus() SetupReadinessStatus {
 		return SetupReadinessStatus{
 			Key:      "alist",
 			Label:    "AList",
-			State:    "ready",
+			State:    setupStateReady,
 			Headline: "AList 已连通",
 			Detail:   fmt.Sprintf("当前服务地址: %s", alist.BaseURL()),
 		}
 	}
 
-	state := "warning"
+	state := setupStateWarning
 	headline := "AList 已配置，但当前没有连通"
 	action := "确认 AList 是否启动，以及当前凭据是否仍然有效。"
 	switch errStr {

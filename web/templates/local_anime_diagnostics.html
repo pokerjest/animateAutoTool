@@ -1,0 +1,73 @@
+{{ define "local_anime_diagnostics.html" }}
+<div class="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+    <div class="flex items-start justify-between gap-3 mb-4">
+        <div>
+            <h3 class="text-lg font-bold text-gray-800 flex items-center gap-2">
+                <span>🩺</span> 扫描与刮削诊断
+            </h3>
+            <p class="text-xs text-gray-400 mt-1">只展示当前仍未恢复的失败项，成功后会自动从这里消失。</p>
+        </div>
+        <div class="text-xs text-gray-400">最近 12 条</div>
+    </div>
+
+    {{ if . }}
+    <div class="space-y-3">
+        {{ range . }}
+        <div class="rounded-xl border px-4 py-3 {{ if eq .IssueType "scan" }}bg-amber-50/60 border-amber-100{{ else }}bg-rose-50/60 border-rose-100{{ end }}">
+            <div class="flex flex-wrap items-start justify-between gap-3">
+                <div class="min-w-0">
+                    <div class="flex flex-wrap items-center gap-2">
+                        <span class="inline-flex items-center px-2 py-0.5 rounded-lg text-[10px] font-bold {{ if eq .IssueType "scan" }}bg-amber-100 text-amber-700{{ else }}bg-rose-100 text-rose-700{{ end }}">
+                            {{ if eq .IssueType "scan" }}扫描失败{{ else }}刮削失败{{ end }}
+                        </span>
+                        <span class="text-sm font-bold text-gray-800">{{ .Title }}</span>
+                        {{ if gt .OccurrenceCount 1 }}
+                        <span class="text-[10px] font-bold bg-white/80 text-gray-500 px-2 py-0.5 rounded-full border border-white">
+                            连续 {{ .OccurrenceCount }} 次
+                        </span>
+                        {{ end }}
+                    </div>
+                    <div class="mt-2 text-sm text-gray-700 break-all">{{ .Message }}</div>
+                    {{ if .Hint }}
+                    <div class="mt-2 text-xs text-gray-500">{{ .Hint }}</div>
+                    {{ end }}
+                    {{ if .DirectoryPath }}
+                    <div class="mt-2 text-[11px] text-gray-400 break-all">{{ .DirectoryPath }}</div>
+                    {{ end }}
+                </div>
+                <div class="shrink-0 text-[11px] text-gray-400">
+                    最近出现于 {{ timeAgo .LastSeenAt }}
+                </div>
+            </div>
+
+            <div class="mt-3 flex flex-wrap gap-2">
+                {{ if eq .IssueType "scan" }}
+                <button type="button" @click="scanDirectory()"
+                    class="px-3 py-1.5 rounded-lg bg-amber-500 text-white text-xs font-bold hover:bg-amber-600 transition">
+                    重新扫描
+                </button>
+                {{ else if .LocalAnimeID }}
+                <button type="button" @click="retryScrapeIssue({{ .LocalAnimeID }}, {{ .Title | json }})"
+                    class="px-3 py-1.5 rounded-lg bg-rose-500 text-white text-xs font-bold hover:bg-rose-600 transition">
+                    重试刮削
+                </button>
+                <button type="button" @click="openFixMatchForIssue({{ .LocalAnimeID }}, {{ .Title | json }})"
+                    class="px-3 py-1.5 rounded-lg bg-white text-rose-600 text-xs font-bold border border-rose-200 hover:border-rose-300 hover:bg-rose-50 transition">
+                    修正匹配
+                </button>
+                <button type="button" @click="openDetailsById({{ .LocalAnimeID }})"
+                    class="px-3 py-1.5 rounded-lg bg-gray-800 text-white text-xs font-bold hover:bg-gray-700 transition">
+                    打开详情
+                </button>
+                {{ end }}
+            </div>
+        </div>
+        {{ end }}
+    </div>
+    {{ else }}
+    <div class="rounded-xl border border-dashed border-gray-200 bg-gray-50/60 px-4 py-8 text-center text-sm text-gray-400">
+        当前没有未恢复的扫描或刮削失败项
+    </div>
+    {{ end }}
+</div>
+{{ end }}

@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="480" viewBox="0 0 320 480" fill="none">
+  <defs>
+    <linearGradient id="bg" x1="32" y1="24" x2="288" y2="456" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FDE68A"/>
+      <stop offset="0.52" stop-color="#F9A8D4"/>
+      <stop offset="1" stop-color="#93C5FD"/>
+    </linearGradient>
+  </defs>
+  <rect width="320" height="480" rx="32" fill="url(#bg)"/>
+  <rect x="28" y="28" width="264" height="424" rx="26" fill="#FFFFFF" fill-opacity="0.68"/>
+  <circle cx="160" cy="170" r="62" fill="#FFFFFF" fill-opacity="0.88"/>
+  <path d="M137 139C137 126.85 146.85 117 159 117H161C173.15 117 183 126.85 183 139V170H137V139Z" fill="#FB7185"/>
+  <path d="M119 229C119 196.42 145.42 170 178 170H142C174.58 170 201 196.42 201 229V239H119V229Z" fill="#6366F1"/>
+  <rect x="78" y="289" width="164" height="18" rx="9" fill="#0F172A" fill-opacity="0.16"/>
+  <rect x="102" y="322" width="116" height="12" rx="6" fill="#0F172A" fill-opacity="0.12"/>
+  <rect x="118" y="350" width="84" height="12" rx="6" fill="#0F172A" fill-opacity="0.12"/>
+  <text x="160" y="404" text-anchor="middle" fill="#334155" font-family="Arial, Helvetica, sans-serif" font-size="22" font-weight="700">NO POSTER</text>
+</svg>

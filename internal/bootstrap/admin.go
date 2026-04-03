@@ -3,6 +3,8 @@ package bootstrap
 import (
 	"os"
 	"time"
+
+	"github.com/pokerjest/animateAutoTool/internal/config"
 )
 
 type AdminBootstrapInfo struct {
@@ -13,6 +15,10 @@ type AdminBootstrapInfo struct {
 
 func SaveAdminBootstrapInfo(info AdminBootstrapInfo) error {
 	return save("admin.json", info)
+}
+
+func AdminBootstrapInfoPath() string {
+	return config.DataPath("bootstrap", "admin.json")
 }
 
 func LoadAdminBootstrapInfo() (AdminBootstrapInfo, error) {

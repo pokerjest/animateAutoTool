@@ -119,7 +119,7 @@
                 </div>
 
                 <!-- Refresh Button -->
-                <button hx-post="/api/local-directories/{{ .ID }}/refresh-metadata" hx-swap="outerHTML"
+                <button hx-get="/api/local-anime/{{ .ID }}/refresh-metadata" hx-swap="outerHTML"
                     hx-target="#local-card-{{.ID}}"
                     class="w-6 h-6 flex items-center justify-center text-gray-400 hover:text-primary hover:bg-primary/10 rounded transition-colors"
                     title="刷新元数据" @click.stop>

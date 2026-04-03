@@ -11,24 +11,17 @@ echo -e "${GREEN}Initializing Animate Auto Tool Environment...${NC}"
 # 1. Check Go Version
 if ! command -v go &> /dev/null; then
     echo -e "${RED}Error: 'go' is not installed.${NC}"
-    echo "Please install Go 1.24+ from https://go.dev/dl/"
+    echo "Please install Go 1.25+ from https://go.dev/dl/"
     exit 1
 fi
 
+REQUIRED_GO="1.25"
 GO_VERSION=$(go version | awk '{print $3}' | sed 's/go//')
 echo -e "Found Go version: ${GREEN}$GO_VERSION${NC}"
 
-# Simple version check using sort -V (version sort)
-if [[ $(echo -e "1.24\n$GO_VERSION" | sort -V | head -n1) != "1.24" ]]; then
-    # This check is basic; if version is like 1.25 it will pass, if 1.23, it fails.
-    # Note: sort -V might not be available on all minimal systems, but common on dev machines.
-    # Fallback to simple major.minor parsing if needed, but let's stick to simple logic first.
-    : # Version OK or newer
-else
-    # Double check if it really IS strictly less than 1.24
-    if [[ "$GO_VERSION" < "1.24" ]]; then
-         echo -e "${RED}Warning: Go 1.24+ is recommended. Found $GO_VERSION.${NC}"
-    fi
+if [[ "$(printf '%s\n%s\n' "$REQUIRED_GO" "$GO_VERSION" | sort -V | head -n1)" != "$REQUIRED_GO" ]]; then
+    echo -e "${RED}Error: Go ${REQUIRED_GO}+ is required. Found ${GO_VERSION}.${NC}"
+    exit 1
 fi
 
 # 2. Create Directories
@@ -54,4 +47,4 @@ fi
 chmod +x scripts/*.sh 2>/dev/null
 
 echo -e "${GREEN}Setup complete!${NC}"
-echo -e "Run ${GREEN}./start.sh${NC} to start the server."
+echo -e "Run ${GREEN}./scripts/start.sh${NC} to start the server."

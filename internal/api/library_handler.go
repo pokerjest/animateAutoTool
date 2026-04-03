@@ -117,13 +117,10 @@ func GetLibraryHandler(c *gin.Context) {
 func RefreshLibraryMetadataHandler(c *gin.Context) {
 	force := c.Query("force") == ValueTrue
 	metaSvc := service.NewMetadataService()
-	if service.GlobalRefreshStatus.IsRunning {
+	if !metaSvc.StartRefreshAllMetadata(force) {
 		c.JSON(http.StatusOK, gin.H{"message": "已经在刷新中", "status": "running"})
 		return
 	}
-
-	// Run in background
-	go metaSvc.RefreshAllMetadata(force)
 
 	msg := "已开始后台增量刷新元数据"
 	if force {
@@ -157,7 +154,7 @@ func RefreshItemMetadataHandler(c *gin.Context) {
 
 // GetRefreshStatusHandler returns the current global refresh status
 func GetRefreshStatusHandler(c *gin.Context) {
-	c.JSON(http.StatusOK, service.GlobalRefreshStatus)
+	c.JSON(http.StatusOK, service.GlobalRefreshStatus.Snapshot())
 }
 
 type FixMatchRequest struct {

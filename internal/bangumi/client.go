@@ -20,6 +20,17 @@ type Client struct {
 	client      *resty.Client
 }
 
+func normalizeBangumiImageURL(raw string) string {
+	switch {
+	case strings.HasPrefix(raw, "//"):
+		return "https:" + raw
+	case strings.HasPrefix(raw, "http://"):
+		return "https://" + strings.TrimPrefix(raw, "http://")
+	default:
+		return raw
+	}
+}
+
 func NewClient(appID, appSecret, redirectURI string) *Client {
 	return &Client{
 		AppID:       appID,
@@ -159,20 +170,13 @@ func (c *Client) SearchSubjects(keyword string) ([]SearchResult, error) {
 		return nil, err
 	}
 
-	fixImage := func(url string) string {
-		if strings.HasPrefix(url, "//") {
-			return "https:" + url
-		}
-		return url
-	}
-
 	for i := range result.List {
 		item := &result.List[i]
-		item.Images.Large = fixImage(item.Images.Large)
-		item.Images.Common = fixImage(item.Images.Common)
-		item.Images.Medium = fixImage(item.Images.Medium)
-		item.Images.Small = fixImage(item.Images.Small)
-		item.Images.Grid = fixImage(item.Images.Grid)
+		item.Images.Large = normalizeBangumiImageURL(item.Images.Large)
+		item.Images.Common = normalizeBangumiImageURL(item.Images.Common)
+		item.Images.Medium = normalizeBangumiImageURL(item.Images.Medium)
+		item.Images.Small = normalizeBangumiImageURL(item.Images.Small)
+		item.Images.Grid = normalizeBangumiImageURL(item.Images.Grid)
 	}
 
 	return result.List, nil
@@ -198,14 +202,6 @@ func (c *Client) GetSubject(id int) (*Subject, error) {
 	resp, err := c.client.R().
 		SetHeader("User-Agent", "pokerjest/animateAutoTool/1.0 (https://github.com/pokerjest/animateAutoTool)").
 		Get(u)
-
-	// Helper for fixing images
-	fixImage := func(url string) string {
-		if strings.HasPrefix(url, "//") {
-			return "https:" + url
-		}
-		return url
-	}
 
 	var subject Subject
 	var success bool
@@ -260,11 +256,11 @@ func (c *Client) GetSubject(id int) (*Subject, error) {
 	}
 
 	// Fix http images
-	subject.Images.Large = fixImage(subject.Images.Large)
-	subject.Images.Common = fixImage(subject.Images.Common)
-	subject.Images.Medium = fixImage(subject.Images.Medium)
-	subject.Images.Small = fixImage(subject.Images.Small)
-	subject.Images.Grid = fixImage(subject.Images.Grid)
+	subject.Images.Large = normalizeBangumiImageURL(subject.Images.Large)
+	subject.Images.Common = normalizeBangumiImageURL(subject.Images.Common)
+	subject.Images.Medium = normalizeBangumiImageURL(subject.Images.Medium)
+	subject.Images.Small = normalizeBangumiImageURL(subject.Images.Small)
+	subject.Images.Grid = normalizeBangumiImageURL(subject.Images.Grid)
 
 	return &subject, nil
 }
@@ -453,21 +449,11 @@ func (c *Client) GetUserCollection(accessToken string, username string, collecti
 	// Fix images in subjects
 	for i := range result.Data {
 		s := &result.Data[i].Subject
-		if strings.HasPrefix(s.Images.Large, "//") {
-			s.Images.Large = "https:" + s.Images.Large
-		}
-		if strings.HasPrefix(s.Images.Common, "//") {
-			s.Images.Common = "https:" + s.Images.Common
-		}
-		if strings.HasPrefix(s.Images.Medium, "//") {
-			s.Images.Medium = "https:" + s.Images.Medium
-		}
-		if strings.HasPrefix(s.Images.Small, "//") {
-			s.Images.Small = "https:" + s.Images.Small
-		}
-		if strings.HasPrefix(s.Images.Grid, "//") {
-			s.Images.Grid = "https:" + s.Images.Grid
-		}
+		s.Images.Large = normalizeBangumiImageURL(s.Images.Large)
+		s.Images.Common = normalizeBangumiImageURL(s.Images.Common)
+		s.Images.Medium = normalizeBangumiImageURL(s.Images.Medium)
+		s.Images.Small = normalizeBangumiImageURL(s.Images.Small)
+		s.Images.Grid = normalizeBangumiImageURL(s.Images.Grid)
 	}
 
 	return result.Data, nil
@@ -550,21 +536,11 @@ func (c *Client) GetCalendar() ([]CalendarItem, error) {
 	for i := range calendar {
 		for j := range calendar[i].Items {
 			s := &calendar[i].Items[j]
-			if strings.HasPrefix(s.Images.Large, "//") {
-				s.Images.Large = "https:" + s.Images.Large
-			}
-			if strings.HasPrefix(s.Images.Common, "//") {
-				s.Images.Common = "https:" + s.Images.Common
-			}
-			if strings.HasPrefix(s.Images.Medium, "//") {
-				s.Images.Medium = "https:" + s.Images.Medium
-			}
-			if strings.HasPrefix(s.Images.Small, "//") {
-				s.Images.Small = "https:" + s.Images.Small
-			}
-			if strings.HasPrefix(s.Images.Grid, "//") {
-				s.Images.Grid = "https:" + s.Images.Grid
-			}
+			s.Images.Large = normalizeBangumiImageURL(s.Images.Large)
+			s.Images.Common = normalizeBangumiImageURL(s.Images.Common)
+			s.Images.Medium = normalizeBangumiImageURL(s.Images.Medium)
+			s.Images.Small = normalizeBangumiImageURL(s.Images.Small)
+			s.Images.Grid = normalizeBangumiImageURL(s.Images.Grid)
 		}
 	}
 

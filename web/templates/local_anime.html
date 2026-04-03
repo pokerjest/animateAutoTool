@@ -37,6 +37,8 @@
     showPlayer: false,
     player: null,
     playerTitle: '',
+    directStreamUrl: '',
+    playbackDiagnostic: null,
     episodeList: [],
     collectionStatus: {
         bangumi_collected: false,
@@ -52,6 +54,10 @@
     updatingComplete: false,
     updatingProgress: false,
     scanning: false, // New scanning state
+    highlightAnimeId: {{ .HighlightAnimeID }},
+    autoOpenAnimeId: {{ .AutoOpenAnimeID }},
+    autoFocusEpisodePath: {{ .AutoFocusEpisode | json }},
+    autoFocusedEpisode: false,
     renameState: {
         pattern: '{Title} - S{Season}E{Ep}',
         season: '',
@@ -72,6 +78,168 @@
         this.toast.type = type;
         this.toast.show = true;
         setTimeout(() => { this.toast.show = false }, 3000);
+    },
+    showPlaybackFailure(error, diagnostic = null) {
+        this.playbackDiagnostic = diagnostic || null;
+        const hint = diagnostic?.hint ? ` ${diagnostic.hint}` : '';
+        this.showToast(`❌ 播放失败: ${error}.${hint}`.trim(), 'error');
+    },
+    async refreshDiagnostics() {
+        const panel = document.getElementById('local-diagnostics-container');
+        if (!panel) return;
+        try {
+            const resp = await fetch('/api/local-anime/diagnostics', {
+                headers: { 'HX-Request': 'true' }
+            });
+            if (!resp.ok) return;
+            panel.innerHTML = await resp.text();
+        } catch (e) {
+            console.error('Refresh diagnostics failed', e);
+        }
+    },
+    async refreshScanStatus() {
+        const panel = document.getElementById('local-scan-status-container');
+        if (!panel) return;
+        try {
+            const resp = await fetch('/api/local-anime/scan-status', {
+                headers: { 'HX-Request': 'true' }
+            });
+            if (!resp.ok) return;
+            panel.innerHTML = await resp.text();
+        } catch (e) {
+            console.error('Refresh scan status failed', e);
+        }
+    },
+    replaceLocalAnimeCard(id, html) {
+        if (!id || !html) return false;
+        const container = document.createElement('div');
+        container.innerHTML = html.trim();
+        const nextCard = container.firstElementChild;
+        const currentCard = document.getElementById(`local-card-${id}`);
+        if (!nextCard || !currentCard) return false;
+        currentCard.replaceWith(nextCard);
+        return true;
+    },
+    async refreshLocalAnimeCard(id) {
+        if (!id) return false;
+        try {
+            const resp = await fetch(`/api/local-anime/${id}/card`, {
+                headers: { 'HX-Request': 'true' }
+            });
+            if (!resp.ok) return false;
+            const html = await resp.text();
+            return this.replaceLocalAnimeCard(id, html);
+        } catch (e) {
+            console.error('Refresh local anime card failed', e);
+            return false;
+        }
+    },
+    highlightRecoveredCard(id) {
+        if (!id) return;
+        this.$nextTick(() => {
+            const card = document.getElementById(`local-card-${id}`);
+            if (!card) return;
+            card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            card.classList.add('ring-4', 'ring-emerald-300', 'ring-offset-4', 'ring-offset-white');
+            setTimeout(() => {
+                card.classList.remove('ring-4', 'ring-emerald-300', 'ring-offset-4', 'ring-offset-white');
+            }, 2400);
+        });
+    },
+    async handleLibraryIssueUpdate(detail) {
+        await this.refreshDiagnostics();
+        if (!detail || detail.status !== 'resolved') return;
+        const localAnimeId = detail.localAnimeId || detail.localAnimeID || 0;
+        if (localAnimeId) {
+            await this.refreshLocalAnimeCard(localAnimeId);
+            this.highlightRecoveredCard(localAnimeId);
+        }
+    },
+    preferredFixMatchSource(localAnimeId) {
+        const anime = window.animeMap?.[localAnimeId] || window.animeMap?.[String(localAnimeId)];
+        const source = anime?.metadata?.data_source;
+        if (source === 'tmdb' || source === 'anilist' || source === 'bangumi') {
+            return source;
+        }
+        return 'bangumi';
+    },
+    async retryScrapeIssue(localAnimeId, title) {
+        if (!localAnimeId) {
+            this.showToast('缺少可重试的本地番剧 ID', 'error');
+            return;
+        }
+        try {
+            const resp = await fetch(`/api/local-anime/${localAnimeId}/refresh-metadata`);
+            if (!resp.ok) {
+                this.showToast(`❌ ${title || '该番剧'} 重新刮削失败`, 'error');
+                await this.refreshDiagnostics();
+                return;
+            }
+            const html = await resp.text();
+            this.replaceLocalAnimeCard(localAnimeId, html);
+            await this.refreshDiagnostics();
+            this.highlightRecoveredCard(localAnimeId);
+            this.showToast(`✅ ${title || '该番剧'} 已完成重新刮削`, 'success');
+        } catch (e) {
+            console.error('Retry scrape failed', e);
+            this.showToast('❌ 重新刮削失败', 'error');
+        }
+    },
+    openFixMatchForIssue(localAnimeId, title) {
+        if (!localAnimeId) {
+            this.showToast('缺少可修正的本地番剧 ID', 'error');
+            return;
+        }
+        this.openDetailsById(localAnimeId);
+        this.$nextTick(() => {
+            setTimeout(() => {
+                this.showFixMatch = true;
+                this.fixMatchSource = this.preferredFixMatchSource(localAnimeId);
+                this.fixMatchQuery = title || this.modalRaw?.title || '';
+                this.fixMatchResults = [];
+                this.activeTab = 'info';
+            }, 200);
+        });
+    },
+    init() {
+        this.$nextTick(() => {
+            this.focusHighlightedCard();
+            this.autoOpenHighlightedCard();
+        });
+    },
+    focusHighlightedCard() {
+        if (!this.highlightAnimeId) return;
+        const card = document.getElementById(`local-card-${this.highlightAnimeId}`);
+        if (!card) return;
+
+        card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        card.classList.add('ring-4', 'ring-rose-300', 'ring-offset-4', 'ring-offset-white');
+        setTimeout(() => {
+            card.classList.remove('ring-4', 'ring-rose-300', 'ring-offset-4', 'ring-offset-white');
+        }, 2600);
+    },
+    autoOpenHighlightedCard() {
+        if (!this.autoOpenAnimeId) return;
+        setTimeout(() => {
+            this.openDetailsById(this.autoOpenAnimeId);
+        }, 350);
+    },
+    isAutoFocusedEpisode(ep) {
+        return !!ep && !!this.autoFocusEpisodePath && ep.path === this.autoFocusEpisodePath;
+    },
+    focusAutoEpisode() {
+        if (this.autoFocusedEpisode || !this.autoFocusEpisodePath) return;
+        const target = Array.from(document.querySelectorAll('[data-episode-path]'))
+            .find((el) => el.dataset.episodePath === this.autoFocusEpisodePath);
+        if (!target) return;
+
+        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        target.classList.add('ring-4', 'ring-emerald-300', 'ring-offset-2', 'ring-offset-white');
+        this.autoFocusedEpisode = true;
+        this.showToast('已定位到刚下载完成的剧集', 'success');
+        setTimeout(() => {
+            target.classList.remove('ring-4', 'ring-emerald-300', 'ring-offset-2', 'ring-offset-white');
+        }, 2600);
     },
     openDetailsById(id) {
         console.log('openDetailsById called with:', id);
@@ -96,7 +264,7 @@
         this.currentLocalId = data.ID || data.id || 0;
         this.currentDirectoryId = data.directory_id || 0;
         this.currentFileCount = data.file_count || 0;
-        this.activeTab = 'info';
+        this.activeTab = (this.autoOpenAnimeId === this.currentLocalId && this.autoFocusEpisodePath) ? 'episodes' : 'info';
         this.episodeList = [];
         this.fetchEpisodes(); // Start fetching immediately
 
@@ -264,12 +432,12 @@
                 })
             });
             if (resp.ok) {
-                this.showToast('✅ 关联成功，正在全网刮削并刷新...', 'success');
+                this.showToast('✅ 关联成功，已刷新本地库卡片', 'success');
                 this.showFixMatch = false;
-                // Wait longer for scrape? Handled by backend async? 
-                // Currently backend is synchronous in MatchSeries, so when it returns, it's done.
-                // We reload page to see results.
-                setTimeout(() => window.location.reload(), 2500);
+                this.showDetailsModal = false;
+                await this.refreshLocalAnimeCard(this.currentLocalId);
+                await this.refreshDiagnostics();
+                this.highlightRecoveredCard(this.currentLocalId);
             } else {
                 const d = await resp.json();
                 this.showToast('❌ ' + (d.error || '关联失败'), 'error');
@@ -328,6 +496,10 @@
                     anilist_status: ''
                 };
                 this.inputProgress = this.collectionStatus.bangumi_watched_count || 0;
+                if (this.currentLocalId === this.autoOpenAnimeId && this.autoFocusEpisodePath) {
+                    this.activeTab = 'episodes';
+                    this.$nextTick(() => this.focusAutoEpisode());
+                }
             }
         } catch(e) {
             console.error(e);
@@ -338,18 +510,21 @@
     async startPlayer(epId) {
         if (!epId) return;
         this.showPlayer = true;
+        this.playbackDiagnostic = null;
+        this.directStreamUrl = '';
         try {
             const res = await fetch('/api/jellyfin/play/' + epId);
             const data = await res.json();
             
             if (data.error) {
-                this.showToast('❌ 播放失败: ' + data.error, 'error');
+                this.showPlaybackFailure(data.error, data.diagnostic || null);
                 this.showPlayer = false;
                 return;
             }
             
             this.playerTitle = data.episode_title;
             this.directStreamUrl = data.direct_stream_url;
+            this.playbackDiagnostic = data.diagnostic || null;
             
             this.$nextTick(() => {
                 if (this.player) this.player.destroy();
@@ -423,8 +598,18 @@ this.player.on('pause', () => {
 this.reportProgress(epId, 'pause', this.player.currentTime);
 });
 
-this.player.on('video:ended', () => {
+                this.player.on('video:ended', () => {
 this.reportProgress(epId, 'ended', this.player.currentTime);
+});
+
+this.player.on('error', () => {
+this.playbackDiagnostic = this.playbackDiagnostic || {
+code: 'jellyfin_proxy_failed',
+summary: 'Jellyfin 代理流播放失败',
+hint: '可以先尝试右上角的直连播放；如果仍然失败，请检查 Jellyfin 资料库是否已扫到这一集。',
+can_use_direct_link: true
+};
+this.showPlaybackFailure(this.playbackDiagnostic.summary, this.playbackDiagnostic);
 });
 
 // Debounced timeupdate (every 10s roughly or handled by backend? Backend handles basic Logic)
@@ -471,6 +656,7 @@ if (this.player) {
 this.player.destroy();
 this.player = null;
 }
+this.playbackDiagnostic = null;
 this.showPlayer = false;
 },
 // Rename Logic
@@ -566,7 +752,11 @@ openDetailsById($event.detail);
 $event.stopPropagation();
 openDetails($event.detail);
 " @scan-complete.window="
-window.location.reload();
+if (($event.detail && $event.detail.scope) === 'run') { window.location.reload(); }
+" @scan-run-updated.window="
+refreshScanStatus();
+" @library-issue-updated.window="
+handleLibraryIssueUpdate($event.detail);
 ">
     <!-- Header Section -->
     <div class="flex justify-between items-center">
@@ -664,6 +854,14 @@ window.location.reload();
             <p class="text-gray-400 text-sm italic">暂未配置任何本地目录</p>
             {{ end }}
         </div>
+    </div>
+
+    <div id="local-scan-status-container" hx-get="/api/local-anime/scan-status" hx-trigger="load" hx-swap="innerHTML">
+        {{ template "local_scan_status.html" .ScanStatus }}
+    </div>
+
+    <div id="local-diagnostics-container" hx-get="/api/local-anime/diagnostics" hx-trigger="load" hx-swap="innerHTML">
+        {{ template "local_anime_diagnostics.html" .Diagnostics }}
     </div>
 
     <!-- Anime List Grid -->
@@ -944,7 +1142,7 @@ window.location.reload();
                                     <template x-for="res in fixMatchResults" :key="res.id">
                                         <div class="flex items-center gap-3 p-2 bg-white rounded-lg border border-gray-100 hover:border-indigo-300 transition cursor-pointer group"
                                             @click="applyFixMatch(res.id)">
-                                            <img :src="res.images.large || '/static/img/no_poster.jpg'"
+                                            <img :src="res.images.large || '/static/img/no_poster.svg'"
                                                 class="w-10 h-14 object-cover rounded shadow-sm bg-gray-200">
                                             <div class="flex-1 min-w-0">
                                                 <div class="font-bold text-sm text-gray-800 truncate"
@@ -1147,6 +1345,8 @@ window.location.reload();
                         <div class="flex flex-col space-y-4">
                             <template x-for="ep in episodeList" :key="ep.path">
                                 <div
+                                    :data-episode-path="ep.path"
+                                    :class="isAutoFocusedEpisode(ep) ? 'ring-2 ring-emerald-200 bg-emerald-50/40 border-emerald-200 shadow-emerald-100/80' : ''"
                                     class="group bg-white rounded-xl border border-gray-100 shadow-sm hover:shadow-md hover:border-indigo-100 transition-all duration-300 overflow-hidden flex flex-col md:flex-row">
 
                                     <!-- Thumbnail Section (Left) -->
@@ -1190,6 +1390,14 @@ window.location.reload();
                                                         stroke-width="3" d="M5 13l4 4L19 7"></path>
                                                 </svg>
                                                 <span>WATCHED</span>
+                                            </div>
+                                        </template>
+
+                                        <template x-if="isAutoFocusedEpisode(ep)">
+                                            <div
+                                                class="absolute top-2 right-2 px-2 py-1 rounded-md bg-emerald-500/95 text-white text-[10px] font-bold backdrop-blur-sm shadow-lg flex items-center gap-1 animate-pulse">
+                                                <span>✨</span>
+                                                <span>刚完成</span>
                                             </div>
                                         </template>
                                     </div>
@@ -1402,6 +1610,34 @@ window.location.reload();
                         </path>
                     </svg>
                 </button>
+            </div>
+
+            <div x-show="playbackDiagnostic" x-transition
+                class="absolute top-20 left-4 right-4 z-10 pointer-events-none">
+                <div class="max-w-3xl mx-auto rounded-2xl border border-white/15 bg-black/70 text-white shadow-2xl backdrop-blur-md p-4 pointer-events-auto">
+                    <div class="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                            <div class="text-xs font-bold uppercase tracking-[0.2em] text-rose-200/80">播放诊断</div>
+                            <div class="mt-1 text-sm font-semibold" x-text="playbackDiagnostic?.summary || '播放链路异常'"></div>
+                            <div class="mt-2 text-sm text-white/80" x-text="playbackDiagnostic?.hint || ''"></div>
+                            <template x-if="playbackDiagnostic?.detail">
+                                <div class="mt-2 text-xs text-white/45 break-all" x-text="playbackDiagnostic.detail"></div>
+                            </template>
+                        </div>
+                        <div class="flex flex-wrap gap-2">
+                            <a x-show="directStreamUrl"
+                                :href="directStreamUrl"
+                                target="_blank"
+                                class="px-3 py-1.5 rounded-lg bg-white text-gray-900 text-xs font-bold hover:bg-rose-50 transition">
+                                直连播放
+                            </a>
+                            <button type="button" @click="closePlayer()"
+                                class="px-3 py-1.5 rounded-lg bg-white/10 text-white text-xs font-bold hover:bg-white/20 transition">
+                                关闭
+                            </button>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <!-- Player Container -->

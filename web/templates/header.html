@@ -141,7 +141,7 @@
                     console.log('Global Manager Connecting to SSE...');
                     const source = new EventSource('/api/events');
 
-                    source.addEventListener('EventScanProgress', (e) => {
+                    source.addEventListener('scan_progress', (e) => {
                         const data = JSON.parse(e.data);
                         this.progress.isRunning = true;
                         this.progress.title = '正在扫描目录';
@@ -152,13 +152,21 @@
                         }
                     });
 
-                    source.addEventListener('EventScanComplete', (e) => {
+                    source.addEventListener('scan_complete', (e) => {
+                        const data = JSON.parse(e.data);
                         this.progress.isRunning = false;
-                        this.showToast('扫描完成', 'success');
-                        window.dispatchEvent(new CustomEvent('scan-complete'));
+                        if (data.scope === 'run') {
+                            this.showToast(data.summary || '扫描完成', 'success');
+                        }
+                        window.dispatchEvent(new CustomEvent('scan-complete', { detail: data }));
                     });
 
-                    source.addEventListener('EventMetadataUpdated', (e) => {
+                    source.addEventListener('scan_run', (e) => {
+                        const data = JSON.parse(e.data);
+                        window.dispatchEvent(new CustomEvent('scan-run-updated', { detail: data }));
+                    });
+
+                    source.addEventListener('metadata_updated', (e) => {
                         const data = JSON.parse(e.data);
                         if (data.type === 'progress') {
                             this.progress.isRunning = true;
@@ -174,12 +182,54 @@
                         }
                     });
 
+                    source.addEventListener('subscription_run', (e) => {
+                        const data = JSON.parse(e.data);
+                        window.dispatchEvent(new CustomEvent('subscription-updated', { detail: data }));
+
+                        if (data.status === 'error') {
+                            this.showToast(`${data.title}: ${data.summary}`, 'error');
+                        } else if (data.status === 'warning') {
+                            this.showToast(`${data.title}: ${data.summary}`, 'info');
+                        }
+                    });
+
+                    source.onerror = () => {
+                        console.warn('SSE disconnected');
+                    };
+
+                    source.addEventListener('scheduler_run', (e) => {
+                        const data = JSON.parse(e.data);
+                        window.dispatchEvent(new CustomEvent('scheduler-updated', { detail: data }));
+                    });
+
+                    source.addEventListener('download_ready', (e) => {
+                        const data = JSON.parse(e.data);
+                        const msg = data.episode_title
+                            ? `下载完成: ${data.title} · ${data.episode_title}`
+                            : `下载完成: ${data.title}`;
+                        this.showToast(msg, 'success', data.url ? {
+                            label: '打开',
+                            href: data.url,
+                        } : null);
+                    });
+
+                    source.addEventListener('library_issue', (e) => {
+                        const data = JSON.parse(e.data);
+                        window.dispatchEvent(new CustomEvent('library-issue-updated', { detail: data }));
+                        if (data.status === 'resolved') {
+                            this.showToast(`已恢复: ${data.title}`, 'success');
+                            return;
+                        }
+                        const prefix = data.type === 'scan' ? '扫描失败' : '刮削失败';
+                        this.showToast(`${prefix}: ${data.title} · ${data.message}`, 'error');
+                    });
+
                     // Global Toast Listener
                     window.addEventListener('toast', (e) => {
-                        this.showToast(e.detail.msg, e.detail.type);
+                        this.showToast(e.detail.msg, e.detail.type, e.detail.action || null);
                     });
                 },
-                showToast(msg, type = 'info') {
+                showToast(msg, type = 'info', action = null) {
                     const container = document.getElementById('toast-container');
                     if (!container) return;
 
@@ -191,7 +241,11 @@
 
                     const toast = document.createElement('div');
                     toast.className = `p-3 rounded-lg border-l-4 shadow-md pointer-events-auto transition-all duration-300 transform translate-x-10 opacity-0 ${colors[type] || colors.info}`;
-                    toast.innerHTML = `<div class="text-sm font-medium">${msg}</div>`;
+                    const actionHTML = action && action.href && action.label
+                        ? `<div class="mt-2"><a href="${action.href}" class="inline-flex items-center gap-1 rounded-md bg-white/80 px-2 py-1 text-xs font-bold text-gray-700 hover:bg-white">` +
+                          `${action.label}</a></div>`
+                        : '';
+                    toast.innerHTML = `<div class="text-sm font-medium">${msg}</div>${actionHTML}`;
 
                     container.appendChild(toast);
 

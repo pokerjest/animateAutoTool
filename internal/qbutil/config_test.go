@@ -1,6 +1,28 @@
 package qbutil
 
-import "testing"
+import (
+	"path/filepath"
+	"testing"
+
+	"github.com/pokerjest/animateAutoTool/internal/bootstrap"
+	"github.com/pokerjest/animateAutoTool/internal/config"
+	"github.com/pokerjest/animateAutoTool/internal/db"
+	"github.com/pokerjest/animateAutoTool/internal/model"
+)
+
+func withQBUtilConfigPaths(t *testing.T) {
+	t.Helper()
+
+	tempRoot := t.TempDir()
+	prevPaths := config.AppPaths
+	config.AppPaths = config.Paths{
+		RootDir: tempRoot,
+		DataDir: filepath.Join(tempRoot, "data"),
+	}
+	t.Cleanup(func() {
+		config.AppPaths = prevPaths
+	})
+}
 
 func TestIsDefaultLocalURL(t *testing.T) {
 	cases := []string{
@@ -49,5 +71,37 @@ func TestMissingExternalURL(t *testing.T) {
 	cfg.URL = "http://qb.example.com"
 	if MissingExternalURL(cfg) {
 		t.Fatal("expected external URL to satisfy validation")
+	}
+}
+
+func TestLoadConfigUsesManagedBootstrapCredentials(t *testing.T) {
+	withQBUtilConfigPaths(t)
+	db.InitDB(":memory:")
+	t.Cleanup(func() {
+		_ = db.CloseDB()
+	})
+
+	if err := bootstrap.SaveQBCredentials(bootstrap.QBCredentials{
+		URL:      "http://127.0.0.1:8080",
+		Username: "admin",
+		Password: "managed-secret",
+	}); err != nil {
+		t.Fatalf("failed to save managed qb credentials: %v", err)
+	}
+
+	if err := db.SaveGlobalConfig(model.ConfigKeyQBMode, ModeManaged); err != nil {
+		t.Fatalf("failed to save qb mode: %v", err)
+	}
+
+	cfg := LoadConfig()
+
+	if cfg.Mode != ModeManaged {
+		t.Fatalf("expected managed mode, got %s", cfg.Mode)
+	}
+	if cfg.URL != "http://127.0.0.1:8080" {
+		t.Fatalf("expected managed qb url, got %s", cfg.URL)
+	}
+	if cfg.Username != "admin" || cfg.Password != "managed-secret" {
+		t.Fatalf("expected managed bootstrap credentials, got %+v", cfg)
 	}
 }

@@ -27,6 +27,12 @@ type JellyfinCredentials struct {
 	APIKey   string `json:"api_key,omitempty"`
 }
 
+type QBCredentials struct {
+	URL      string `json:"url"`
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
 func SaveAListCredentials(creds AListCredentials) error {
 	return save("alist.json", creds)
 }
@@ -44,6 +50,16 @@ func SaveJellyfinCredentials(creds JellyfinCredentials) error {
 func LoadJellyfinCredentials() (JellyfinCredentials, error) {
 	var creds JellyfinCredentials
 	err := load("jellyfin.json", &creds)
+	return creds, err
+}
+
+func SaveQBCredentials(creds QBCredentials) error {
+	return save("qbittorrent.json", creds)
+}
+
+func LoadQBCredentials() (QBCredentials, error) {
+	var creds QBCredentials
+	err := load("qbittorrent.json", &creds)
 	return creds, err
 }
 

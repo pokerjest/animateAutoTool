@@ -18,6 +18,14 @@ type QBittorrentClient struct {
 	cookies []*http.Cookie // Manually store cookies
 }
 
+type TorrentInfo struct {
+	Hash        string `json:"hash"`
+	Name        string `json:"name"`
+	State       string `json:"state"`
+	ContentPath string `json:"content_path"`
+	SavePath    string `json:"save_path"`
+}
+
 func NewQBittorrentClient(baseURL string) *QBittorrentClient {
 	// 确保 baseURL 不以 / 结尾
 	baseURL = strings.TrimSuffix(baseURL, "/")
@@ -145,4 +153,27 @@ func (q *QBittorrentClient) GetVersion() (string, error) {
 		return "", fmt.Errorf("ping failed: %s, body: %s", resp.Status(), resp.String())
 	}
 	return resp.String(), nil
+}
+
+func (q *QBittorrentClient) ListTorrents() ([]TorrentInfo, error) {
+	req := q.client.R().
+		SetQueryParam("filter", "all").
+		SetResult(&[]TorrentInfo{})
+	if len(q.cookies) > 0 {
+		req.SetCookies(q.cookies)
+	}
+
+	resp, err := req.Get("/api/v2/torrents/info")
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode() != http.StatusOK {
+		return nil, fmt.Errorf("list torrents failed: %s, body: %s", resp.Status(), resp.String())
+	}
+
+	result, ok := resp.Result().(*[]TorrentInfo)
+	if !ok || result == nil {
+		return nil, fmt.Errorf("list torrents failed: unexpected response payload")
+	}
+	return *result, nil
 }

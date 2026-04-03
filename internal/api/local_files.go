@@ -191,6 +191,17 @@ func RefreshLocalAnimeMetadataHandler(c *gin.Context) {
 
 	if err := metaSvc.EnrichAnime(&anime); err != nil {
 		log.Printf("Failed to enrich anime %s: %v", anime.Title, err)
+		_ = service.ReportLibraryIssue(service.LibraryIssueInput{
+			IssueKey:      "scrape:" + strconv.FormatUint(uint64(anime.ID), 10),
+			IssueType:     service.LibraryIssueTypeScrape,
+			Title:         anime.Title,
+			DirectoryPath: anime.Path,
+			LocalAnimeID:  &anime.ID,
+			Message:       err.Error(),
+			Hint:          "检查元数据源配置，或在详情里使用修正匹配手动关联番剧。",
+		})
+	} else {
+		_ = service.ResolveLibraryIssue("scrape:" + strconv.FormatUint(uint64(anime.ID), 10))
 	}
 
 	// Emit Complete Event

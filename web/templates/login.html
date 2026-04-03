@@ -79,9 +79,10 @@
         <div class="mb-5 rounded-2xl border border-amber-200 bg-amber-50/90 p-4 text-sm text-amber-900 shadow-sm">
             <div class="font-bold mb-2">首次启动账号</div>
             <div class="space-y-1">
-                <div>系统已自动创建管理员，请登录后尽快修改密码。</div>
+                <div>初始化阶段仅允许本机通过 <span class="font-mono font-semibold">localhost</span> 直连访问。</div>
                 <div>用户名：<span class="font-mono font-semibold">{{.BootstrapAdmin.Username}}</span></div>
-                <div>密码：<span class="font-mono font-semibold break-all">{{.BootstrapAdmin.Password}}</span></div>
+                <div class="break-all">初始化凭据文件：<span class="font-mono font-semibold">{{.BootstrapInfoPath}}</span></div>
+                <div>随机初始化密码不会在页面展示，请在本机启动日志或上面的本地文件中查看，并在登录后立即修改。</div>
             </div>
         </div>
         {{end}}

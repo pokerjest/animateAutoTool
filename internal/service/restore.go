@@ -35,6 +35,14 @@ func (s *RestoreService) PerformRestore(sourcePath string, options RestoreOption
 	log.Printf("RestoreService: Starting restore from %s", sourcePath)
 	start := time.Now()
 
+	descriptor, err := InspectBackup(sourcePath)
+	if err != nil {
+		return fmt.Errorf("failed to inspect backup file: %v", err)
+	}
+	if err := validateRestoreOptions(descriptor, options); err != nil {
+		return err
+	}
+
 	// 1. Open Source DB (ReadOnly)
 	srcDB, err := gorm.Open(sqlite.Open(sourcePath), &gorm.Config{
 		Logger: nil, // Silence logger for performance
@@ -54,7 +62,7 @@ func (s *RestoreService) PerformRestore(sourcePath string, options RestoreOption
 
 	// 3. Transaction Write Phase
 	return db.DB.Transaction(func(tx *gorm.DB) error {
-		if err := s.writeRestoreData(tx, data, options); err != nil {
+		if err := s.writeRestoreData(tx, data, options, descriptor); err != nil {
 			return err
 		}
 		log.Printf("RestoreService: Transaction committed successfully in %v", time.Since(start))
@@ -104,16 +112,43 @@ func (s *RestoreService) readBackupData(srcDB *gorm.DB, options RestoreOptions) 
 	return d, nil
 }
 
-func (s *RestoreService) writeRestoreData(tx *gorm.DB, d *restoreData, options RestoreOptions) error {
+func validateRestoreOptions(desc BackupDescriptor, options RestoreOptions) error {
+	switch {
+	case options.Configs && !desc.HasConfigs:
+		return fmt.Errorf("backup does not contain global configs")
+	case options.Metadata && !desc.HasMetadata:
+		return fmt.Errorf("backup does not contain metadata")
+	case options.Subscriptions && !desc.HasSubscriptions:
+		return fmt.Errorf("backup does not contain subscriptions")
+	case options.Logs && !desc.HasLogs:
+		return fmt.Errorf("backup does not contain download logs")
+	case options.Local && !desc.HasLocal:
+		return fmt.Errorf("backup does not contain local library data")
+	case options.Users && !desc.HasUsers:
+		return fmt.Errorf("backup does not contain users")
+	default:
+		return nil
+	}
+}
+
+func (s *RestoreService) writeRestoreData(tx *gorm.DB, d *restoreData, options RestoreOptions, desc BackupDescriptor) error {
 	createBatch := func(data interface{}) error {
 		return tx.CreateInBatches(data, s.BatchSize).Error
 	}
 
 	if options.Configs {
-		tx.Exec("DELETE FROM global_configs")
-		if len(d.configs) > 0 {
-			if err := createBatch(&d.configs); err != nil {
-				return err
+		if BackupConfigMerges(desc.Mode) {
+			for _, cfg := range d.configs {
+				if err := tx.Where(model.GlobalConfig{Key: cfg.Key}).Assign(model.GlobalConfig{Value: cfg.Value}).FirstOrCreate(&model.GlobalConfig{}).Error; err != nil {
+					return err
+				}
+			}
+		} else {
+			tx.Exec("DELETE FROM global_configs")
+			if len(d.configs) > 0 {
+				if err := createBatch(&d.configs); err != nil {
+					return err
+				}
 			}
 		}
 	}

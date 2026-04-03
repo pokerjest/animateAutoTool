@@ -1,6 +1,9 @@
 package launcher
 
 import (
+	"crypto/rand"
+	"crypto/sha512"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,10 +22,19 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/safeio"
 	"github.com/pokerjest/animateAutoTool/internal/security"
+	"golang.org/x/crypto/pbkdf2"
 )
 
 const managedJellyfinURL = "http://127.0.0.1:8096"
 const managedAListURL = "http://127.0.0.1:5244"
+const managedQBURL = "http://127.0.0.1:8080"
+const managedDefaultUsername = "admin"
+
+const legacyManagedQBConfig = `[Preferences]
+WebUI\Enabled=true
+WebUI\Port=8080
+WebUI\LocalHostAuth=false
+`
 
 func (m *Manager) startAlist() error {
 	exeName := "alist"
@@ -52,12 +64,12 @@ func (m *Manager) startAlist() error {
 		}
 		creds = bootstrap.AListCredentials{
 			URL:      managedAListURL,
-			Username: "admin",
+			Username: managedDefaultUsername,
 			Password: password,
 		}
 	}
 	if creds.Username == "" {
-		creds.Username = "admin"
+		creds.Username = managedDefaultUsername
 	}
 	if creds.URL == "" {
 		creds.URL = managedAListURL
@@ -67,7 +79,7 @@ func (m *Manager) startAlist() error {
 	}
 
 	//nolint:gosec // binPath and dataDir are internal managed-service paths under the app workspace.
-	cmdSetPass := exec.Command(binPath, "admin", "set", creds.Password, "--data", dataDir)
+	cmdSetPass := exec.Command(binPath, managedDefaultUsername, "set", creds.Password, "--data", dataDir)
 	if output, err := cmdSetPass.CombinedOutput(); err != nil {
 		fmt.Printf("Alist set pass warning: %v, output: %s\n", err, string(output))
 		// might fail if not initialized? usually works.
@@ -164,13 +176,133 @@ func (m *Manager) ensureQBConfig(profilePath string) error {
 		return err
 	}
 
-	configContent := `[Preferences]
+	existingContent := ""
+	if existing, err := os.ReadFile(filepath.Clean(confFile)); err == nil {
+		existingContent = string(existing)
+		if !managedQBConfigNeedsMigration(existingContent) {
+			return nil
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+
+	creds, err := bootstrap.LoadQBCredentials()
+	if err != nil || creds.Password == "" {
+		password, genErr := security.RandomPassword(24)
+		if genErr != nil {
+			return fmt.Errorf("failed to generate qBittorrent bootstrap password: %w", genErr)
+		}
+		creds = bootstrap.QBCredentials{
+			URL:      managedQBURL,
+			Username: managedDefaultUsername,
+			Password: password,
+		}
+	}
+	if creds.URL == "" {
+		creds.URL = managedQBURL
+	}
+	if creds.Username == "" {
+		creds.Username = managedDefaultUsername
+	}
+	if err := bootstrap.SaveQBCredentials(creds); err != nil {
+		return fmt.Errorf("failed to persist qBittorrent bootstrap credentials: %w", err)
+	}
+
+	passwordHash, err := qBPasswordPBKDF2(creds.Password)
+	if err != nil {
+		return fmt.Errorf("failed to hash qBittorrent bootstrap password: %w", err)
+	}
+
+	configContent := buildManagedQBConfig(existingContent, creds.Username, passwordHash)
+
+	return os.WriteFile(confFile, []byte(configContent), 0600) //nolint:gosec
+}
+
+func buildManagedQBConfig(existingContent, username, passwordHash string) string {
+	if strings.TrimSpace(existingContent) == "" {
+		return fmt.Sprintf(`[Preferences]
 WebUI\Enabled=true
 WebUI\Port=8080
-WebUI\LocalHostAuth=false
-`
+WebUI\LocalHostAuth=true
+WebUI\Username=%s
+WebUI\Password_PBKDF2="%s"
+`, username, passwordHash)
+	}
 
-	return os.WriteFile(confFile, []byte(configContent), 0644) //nolint:gosec
+	normalized := strings.ReplaceAll(existingContent, "\r\n", "\n")
+	lines := strings.Split(normalized, "\n")
+	var updated []string
+	foundPreferences := false
+	foundEnabled := false
+	foundPort := false
+	foundLocalHostAuth := false
+	foundUsername := false
+	foundPassword := false
+
+	for _, line := range lines {
+		switch {
+		case line == "[Preferences]":
+			foundPreferences = true
+			updated = append(updated, line)
+		case strings.HasPrefix(line, "WebUI\\Enabled="):
+			foundEnabled = true
+			updated = append(updated, "WebUI\\Enabled=true")
+		case strings.HasPrefix(line, "WebUI\\Port="):
+			foundPort = true
+			updated = append(updated, "WebUI\\Port=8080")
+		case strings.HasPrefix(line, "WebUI\\LocalHostAuth="):
+			foundLocalHostAuth = true
+			updated = append(updated, "WebUI\\LocalHostAuth=true")
+		case strings.HasPrefix(line, "WebUI\\Username="):
+			foundUsername = true
+			updated = append(updated, fmt.Sprintf("WebUI\\Username=%s", username))
+		case strings.HasPrefix(line, "WebUI\\Password_PBKDF2="):
+			foundPassword = true
+			updated = append(updated, fmt.Sprintf("WebUI\\Password_PBKDF2=\"%s\"", passwordHash))
+		default:
+			updated = append(updated, line)
+		}
+	}
+
+	if !foundPreferences {
+		updated = append([]string{"[Preferences]"}, updated...)
+	}
+	if !foundEnabled {
+		updated = append(updated, "WebUI\\Enabled=true")
+	}
+	if !foundPort {
+		updated = append(updated, "WebUI\\Port=8080")
+	}
+	if !foundLocalHostAuth {
+		updated = append(updated, "WebUI\\LocalHostAuth=true")
+	}
+	if !foundUsername {
+		updated = append(updated, fmt.Sprintf("WebUI\\Username=%s", username))
+	}
+	if !foundPassword {
+		updated = append(updated, fmt.Sprintf("WebUI\\Password_PBKDF2=\"%s\"", passwordHash))
+	}
+
+	return strings.Join(updated, "\n")
+}
+
+func managedQBConfigNeedsMigration(content string) bool {
+	normalized := strings.ReplaceAll(strings.TrimSpace(content), "\r\n", "\n")
+	return normalized == strings.TrimSpace(legacyManagedQBConfig) ||
+		strings.Contains(normalized, "WebUI\\LocalHostAuth=false")
+}
+
+func qBPasswordPBKDF2(password string) (string, error) {
+	salt := make([]byte, 16)
+	if _, err := rand.Read(salt); err != nil {
+		return "", err
+	}
+
+	derived := pbkdf2.Key([]byte(password), salt, 100000, 64, sha512.New)
+	return fmt.Sprintf("@ByteArray(%s:%s)",
+		base64.StdEncoding.EncodeToString(salt),
+		base64.StdEncoding.EncodeToString(derived),
+	), nil
 }
 
 func (m *Manager) startJellyfin() error {
@@ -266,7 +398,7 @@ func (m *Manager) startJellyfin() error {
 			}
 			creds = bootstrap.JellyfinCredentials{
 				URL:      managedJellyfinURL,
-				Username: "admin",
+				Username: managedDefaultUsername,
 				Password: password,
 			}
 		}
@@ -274,7 +406,7 @@ func (m *Manager) startJellyfin() error {
 			creds.URL = managedJellyfinURL
 		}
 		if creds.Username == "" {
-			creds.Username = "admin"
+			creds.Username = managedDefaultUsername
 		}
 		if err := bootstrap.SaveJellyfinCredentials(creds); err != nil {
 			fmt.Printf("Jellyfin bootstrap credential persist failed: %v\n", err)

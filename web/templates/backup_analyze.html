@@ -3,7 +3,22 @@
     <h4 class="font-semibold text-red-800 mb-3 flex items-center gap-2">
         <span>📋</span> 备份文件分析结果
     </h4>
+    <div class="bg-white/80 border border-red-100 rounded-lg p-3 mb-4">
+        <div class="flex items-center justify-between gap-3">
+            <div>
+                <div class="text-xs text-gray-500">备份类型</div>
+                <div class="font-bold text-gray-800">{{ .Stats.ModeLabel }}</div>
+            </div>
+            <div class="text-[11px] text-gray-500 text-right">
+                {{ .Stats.Description }}
+            </div>
+        </div>
+    </div>
     <div class="grid grid-cols-2 gap-4 text-sm mb-4">
+        <div class="bg-white p-2 rounded border border-red-100">
+            <div class="text-gray-500 text-xs">系统设置</div>
+            <div class="font-bold text-gray-800">{{ .Stats.GlobalConfigCount }}</div>
+        </div>
         <div class="bg-white p-2 rounded border border-red-100">
             <div class="text-gray-500 text-xs">订阅数</div>
             <div class="font-bold text-gray-800">{{ .Stats.SubscriptionCount }}</div>
@@ -46,40 +61,40 @@
                 <div class="space-y-1.5">
                     <!-- 默认勾选 -->
                     <label
-                        class="flex items-center gap-2 text-xs text-gray-700 cursor-pointer hover:bg-white/50 p-1 rounded">
-                        <input type="checkbox" name="restore_configs" checked class="rounded">
+                        class="flex items-center gap-2 text-xs p-1 rounded {{ if .Stats.HasConfigs }}text-gray-700 cursor-pointer hover:bg-white/50{{ else }}text-gray-400 cursor-not-allowed bg-gray-50{{ end }}">
+                        <input type="checkbox" name="restore_configs" {{ if .Stats.HasConfigs }}checked{{ else }}disabled{{ end }} class="rounded">
                         <span class="font-medium">全局配置</span>
-                        <span class="text-gray-500">(qBittorrent、Bangumi等设置)</span>
+                        <span class="text-gray-500">({{ .Stats.GlobalConfigCount }} 项设置)</span>
                     </label>
                     <label
-                        class="flex items-center gap-2 text-xs text-gray-700 cursor-pointer hover:bg-white/50 p-1 rounded">
-                        <input type="checkbox" name="restore_metadata" checked class="rounded">
+                        class="flex items-center gap-2 text-xs p-1 rounded {{ if .Stats.HasMetadata }}text-gray-700 cursor-pointer hover:bg-white/50{{ else }}text-gray-400 cursor-not-allowed bg-gray-50{{ end }}">
+                        <input type="checkbox" name="restore_metadata" {{ if .Stats.HasMetadata }}checked{{ else }}disabled{{ end }} class="rounded">
                         <span class="font-medium">元数据与海报</span>
                         <span class="text-gray-500">(动漫信息和图片缓存)</span>
                     </label>
 
                     <!-- 默认不勾选 -->
                     <label
-                        class="flex items-center gap-2 text-xs text-gray-700 cursor-pointer hover:bg-white/50 p-1 rounded">
-                        <input type="checkbox" name="restore_subscriptions" class="rounded">
+                        class="flex items-center gap-2 text-xs p-1 rounded {{ if .Stats.HasSubscriptions }}text-gray-700 cursor-pointer hover:bg-white/50{{ else }}text-gray-400 cursor-not-allowed bg-gray-50{{ end }}">
+                        <input type="checkbox" name="restore_subscriptions" {{ if not .Stats.HasSubscriptions }}disabled{{ end }} class="rounded">
                         <span>订阅配置</span>
                         <span class="text-gray-500">({{ .Stats.SubscriptionCount }} 个)</span>
                     </label>
                     <label
-                        class="flex items-center gap-2 text-xs text-gray-700 cursor-pointer hover:bg-white/50 p-1 rounded">
-                        <input type="checkbox" name="restore_logs" class="rounded">
+                        class="flex items-center gap-2 text-xs p-1 rounded {{ if .Stats.HasLogs }}text-gray-700 cursor-pointer hover:bg-white/50{{ else }}text-gray-400 cursor-not-allowed bg-gray-50{{ end }}">
+                        <input type="checkbox" name="restore_logs" {{ if not .Stats.HasLogs }}disabled{{ end }} class="rounded">
                         <span>下载日志</span>
                         <span class="text-gray-500">({{ .Stats.DownloadLogCount }} 条)</span>
                     </label>
                     <label
-                        class="flex items-center gap-2 text-xs text-gray-700 cursor-pointer hover:bg-white/50 p-1 rounded">
-                        <input type="checkbox" name="restore_local" class="rounded">
+                        class="flex items-center gap-2 text-xs p-1 rounded {{ if .Stats.HasLocal }}text-gray-700 cursor-pointer hover:bg-white/50{{ else }}text-gray-400 cursor-not-allowed bg-gray-50{{ end }}">
+                        <input type="checkbox" name="restore_local" {{ if not .Stats.HasLocal }}disabled{{ end }} class="rounded">
                         <span>本地动漫数据</span>
                         <span class="text-gray-500">({{ .Stats.LocalAnimeCount }} 个)</span>
                     </label>
                     <label
-                        class="flex items-center gap-2 text-xs text-gray-700 cursor-pointer hover:bg-white/50 p-1 rounded">
-                        <input type="checkbox" name="restore_users" class="rounded">
+                        class="flex items-center gap-2 text-xs p-1 rounded {{ if .Stats.HasUsers }}text-gray-700 cursor-pointer hover:bg-white/50{{ else }}text-gray-400 cursor-not-allowed bg-gray-50{{ end }}">
+                        <input type="checkbox" name="restore_users" {{ if not .Stats.HasUsers }}disabled{{ end }} class="rounded">
                         <span>用户账号</span>
                         <span class="text-gray-500">({{ .Stats.UserCount }} 个, 覆盖当前)</span>
                     </label>
@@ -92,7 +107,11 @@
                     <div class="text-xs text-amber-700">
                         <div class="font-semibold mb-1">注意事项</div>
                         <ul class="list-disc list-inside space-y-0.5 text-amber-600">
+                            {{ if eq .Stats.ConfigStrategy "merge" }}
+                            <li>Cloudflare 配置将<strong>合并</strong>到当前系统设置，其他设置会保留</li>
+                            {{ else }}
                             <li>已勾选的表将被备份文件中的数据<strong>完全替换</strong></li>
+                            {{ end }}
                             <li>未勾选的表保持当前状态不变</li>
                             <li>此操作不可逆，建议先备份当前数据</li>
                         </ul>

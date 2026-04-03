@@ -37,17 +37,38 @@ func (s *ScannerService) ScanAll() error {
 		return err
 	}
 
+	if len(dirs) == 0 {
+		event.GlobalBus.Publish(event.EventScanRun, GlobalScanStatus.Skip("当前没有已配置目录可扫描"))
+		return nil
+	}
+
+	event.GlobalBus.Publish(event.EventScanRun, GlobalScanStatus.Begin(len(dirs)))
+
 	for _, d := range dirs {
-		if _, err := s.ScanDirectory(&d); err != nil {
+		res, err := s.ScanDirectory(&d)
+		added := 0
+		updated := 0
+		if res != nil {
+			added = res.Added
+			updated = res.Updated
+		}
+		event.GlobalBus.Publish(event.EventScanRun, GlobalScanStatus.Advance(d.Path, added, updated, err))
+		if err != nil {
 			log.Printf("ScannerService: Failed to scan directory %s: %v", d.Path, err)
 		}
 	}
+	event.GlobalBus.Publish(event.EventScanRun, GlobalScanStatus.Finish())
+	event.GlobalBus.Publish(event.EventScanComplete, map[string]interface{}{
+		"scope":   "run",
+		"summary": GlobalScanStatus.Snapshot().LastSummary,
+	})
 	return nil
 }
 
 // ScanDirectory 扫描指定目录并更新数据库
 func (s *ScannerService) ScanDirectory(dir *model.LocalAnimeDirectory) (*ScanResult, error) {
 	log.Printf("ScannerService: Starting scan for %s", dir.Path)
+	issueKey := "scan:" + filepath.Clean(dir.Path)
 
 	event.GlobalBus.Publish(event.EventScanProgress, map[string]interface{}{
 		"type": "start",
@@ -57,8 +78,17 @@ func (s *ScannerService) ScanDirectory(dir *model.LocalAnimeDirectory) (*ScanRes
 	entries, err := os.ReadDir(dir.Path)
 	if err != nil {
 		log.Printf("ScannerService: ReadDir failed: %v", err)
+		_ = ReportLibraryIssue(LibraryIssueInput{
+			IssueKey:      issueKey,
+			IssueType:     LibraryIssueTypeScan,
+			Title:         filepath.Base(dir.Path),
+			DirectoryPath: dir.Path,
+			Message:       err.Error(),
+			Hint:          "检查目录是否存在，并确认应用对该目录有读取权限。",
+		})
 		return nil, err
 	}
+	_ = ResolveLibraryIssue(issueKey)
 
 	res := &ScanResult{DirectoryID: dir.ID}
 	total := len(entries)
@@ -137,7 +167,14 @@ func (s *ScannerService) ScanDirectory(dir *model.LocalAnimeDirectory) (*ScanRes
 
 	log.Printf("ScannerService: Scan complete. Added: %d, Updated: %d", res.Added, res.Updated)
 
-	event.GlobalBus.Publish(event.EventScanComplete, res)
+	event.GlobalBus.Publish(event.EventScanComplete, map[string]interface{}{
+		"scope":        "directory",
+		"directory_id": dir.ID,
+		"directory":    dir.Path,
+		"added":        res.Added,
+		"updated":      res.Updated,
+		"deleted":      res.Deleted,
+	})
 	return res, nil
 }
 
@@ -218,6 +255,15 @@ func (s *ScannerService) syncEpisodesForAnime(anime *model.LocalAnime) (int, int
 
 	if err := filepath.WalkDir(anime.Path, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
+			_ = ReportLibraryIssue(LibraryIssueInput{
+				IssueKey:      "scan-entry:" + filepath.Clean(anime.Path),
+				IssueType:     LibraryIssueTypeScan,
+				Title:         anime.Title,
+				DirectoryPath: anime.Path,
+				LocalAnimeID:  optionalUint(anime.ID),
+				Message:       err.Error(),
+				Hint:          "检查文件路径是否仍然存在，或是否有权限读取该目录。",
+			})
 			return nil
 		}
 		if !d.IsDir() {
@@ -260,6 +306,7 @@ func (s *ScannerService) syncEpisodesForAnime(anime *model.LocalAnime) (int, int
 	}); err != nil {
 		log.Printf("Scanner: WalkDir failed for %s: %v", anime.Path, err)
 	}
+	_ = ResolveLibraryIssue("scan-entry:" + filepath.Clean(anime.Path))
 
 	// Cleanup episodes no longer on disk
 	if anime.ID != 0 {
@@ -271,6 +318,13 @@ func (s *ScannerService) syncEpisodesForAnime(anime *model.LocalAnime) (int, int
 	}
 
 	return count, size
+}
+
+func optionalUint(v uint) *uint {
+	if v == 0 {
+		return nil
+	}
+	return &v
 }
 
 func IsVideoFile(path string) bool {

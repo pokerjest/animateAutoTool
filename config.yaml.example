@@ -2,9 +2,9 @@
 server:
   port: 8306
   mode: debug # debug or release
-  public_url: "" # optional, e.g. https://anime.example.com
-  headless: false # true disables the system tray and runs as a plain web service
-  trusted_proxies: # IPs or CIDRs allowed to supply X-Forwarded-* headers
+  public_url: "" # strongly recommended for reverse-proxy/public access, e.g. https://anime.example.com
+  # headless: true # optional; leave unset to use the platform default (Windows tray=false, macOS/Linux headless=true)
+  trusted_proxies: # only add IPs/CIDRs for reverse proxies you control
     - 127.0.0.1
     - ::1
 
@@ -18,7 +18,7 @@ log:
 
 # Authentication
 auth:
-  secret_key: "" # recommended: set a stable random value; if left blank, the app falls back to data/bootstrap/auth_secret
+  secret_key: "" # recommended: set a stable random value; if blank, the app falls back to data/bootstrap/auth_secret
 
 # Managed sidecars
 managed_services:

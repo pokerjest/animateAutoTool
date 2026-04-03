@@ -23,6 +23,26 @@ function get_pid_by_port() {
     lsof -ti :$SERVER_PORT
 }
 
+function list_port_pids() {
+    get_pid_by_port 2>/dev/null | awk 'NF {print $1}'
+}
+
+function kill_pids() {
+    local signal="$1"
+    shift
+    local pids=("$@")
+
+    for pid in "${pids[@]}"; do
+        if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+            if [ -n "$signal" ]; then
+                kill "$signal" "$pid" 2>/dev/null
+            else
+                kill "$pid" 2>/dev/null
+            fi
+        fi
+    done
+}
+
 function get_pid_from_file() {
     if [ -f "$PID_FILE" ]; then
         cat "$PID_FILE"
@@ -71,10 +91,10 @@ function stop() {
     fi
     
     # Method 2: Port
-    PID_PORT=$(get_pid_by_port)
-    if [ -n "$PID_PORT" ]; then
-        echo "Found process $PID_PORT listening on port $SERVER_PORT. Killing..."
-        kill "$PID_PORT"
+    PORT_PIDS=($(list_port_pids))
+    if [ ${#PORT_PIDS[@]} -gt 0 ]; then
+        echo "Found process(es) ${PORT_PIDS[*]} listening on port $SERVER_PORT. Killing..."
+        kill_pids "" "${PORT_PIDS[@]}"
     fi
     
     # Wait loop
@@ -87,18 +107,23 @@ function stop() {
     done
     
     # Force kill
-    PID_FINAL=$(get_pid_by_port)
-    if [ -n "$PID_FINAL" ]; then
-        echo -e "${RED}Force killing PID $PID_FINAL...${NC}"
-        kill -9 "$PID_FINAL"
+    PID_FINAL=($(list_port_pids))
+    if [ ${#PID_FINAL[@]} -gt 0 ]; then
+        echo -e "${RED}Force killing PID(s) ${PID_FINAL[*]}...${NC}"
+        kill_pids "-9" "${PID_FINAL[@]}"
     fi
 }
 
 function start() {
     # Ensure stopped
-    if [ -n "$(get_pid_by_port)" ]; then
+    if [ -n "$(list_port_pids)" ]; then
         echo -e "${YELLOW}Server seems to be running. Stopping first...${NC}"
         stop
+    fi
+
+    if [ -n "$(list_port_pids)" ]; then
+        echo -e "${RED}Port $SERVER_PORT is still in use after stop. Aborting start.${NC}"
+        exit 1
     fi
 
     echo -e "${GREEN}Starting $APP_NAME...${NC}"
@@ -106,24 +131,38 @@ function start() {
     NEW_PID=$!
     echo $NEW_PID > $PID_FILE
     
-    sleep 1
-    if kill -0 $NEW_PID 2>/dev/null; then
-        echo -e "${GREEN}Server started with PID $NEW_PID.${NC}"
-        echo -e "Logs: ${YELLOW}$LOG_FILE${NC}"
-    else
-        echo -e "${RED}Server failed to start. Check logs.${NC}"
-        tail -n 10 $LOG_FILE
-        exit 1
-    fi
+    for i in {1..10}; do
+        if kill -0 $NEW_PID 2>/dev/null; then
+            PORT_PIDS=($(list_port_pids))
+            for pid in "${PORT_PIDS[@]}"; do
+                if [ "$pid" = "$NEW_PID" ]; then
+                    echo -e "${GREEN}Server started with PID $NEW_PID.${NC}"
+                    echo -e "Logs: ${YELLOW}$LOG_FILE${NC}"
+                    return
+                fi
+            done
+        else
+            break
+        fi
+        sleep 0.5
+    done
+
+    rm -f "$PID_FILE"
+    echo -e "${RED}Server failed to start. Check logs.${NC}"
+    tail -n 20 $LOG_FILE
+    exit 1
 }
 
 function status() {
     PID=$(get_pid_from_file)
-    PID_PORT=$(get_pid_by_port)
+    PID_PORT=($(list_port_pids))
     
-    if [ -n "$PID_PORT" ]; then
-        echo -e "${GREEN}$APP_NAME is running (PID: $PID_PORT).${NC}"
+    if [ ${#PID_PORT[@]} -gt 0 ]; then
+        echo -e "${GREEN}$APP_NAME is running (PID: ${PID_PORT[*]}).${NC}"
     else
+        if [ -n "$PID" ] && ! kill -0 "$PID" 2>/dev/null; then
+            rm -f "$PID_FILE"
+        fi
         echo -e "${YELLOW}$APP_NAME is stopped.${NC}"
     fi
 }
