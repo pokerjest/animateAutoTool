@@ -118,9 +118,22 @@
                     total: 100,
                     currentTitle: ''
                 },
+                mobileNavOpen: false,
                 init() {
+                    this.$watch('mobileNavOpen', (open) => {
+                        document.body.classList.toggle('overflow-hidden', open && window.innerWidth < 1024);
+                    });
+                    window.addEventListener('resize', () => {
+                        if (window.innerWidth >= 1024) {
+                            this.mobileNavOpen = false;
+                            document.body.classList.remove('overflow-hidden');
+                        }
+                    });
                     this.loadBackground();
                     this.connect();
+                },
+                closeMobileNav() {
+                    this.mobileNavOpen = false;
                 },
                 loadBackground() {
                     // Default Background
@@ -240,7 +253,7 @@
                     };
 
                     const toast = document.createElement('div');
-                    toast.className = `p-3 rounded-lg border-l-4 shadow-md pointer-events-auto transition-all duration-300 transform translate-x-10 opacity-0 ${colors[type] || colors.info}`;
+                    toast.className = `p-3 rounded-lg border-l-4 shadow-md pointer-events-auto transition-all duration-300 transform translate-y-4 opacity-0 ${colors[type] || colors.info}`;
                     const actionHTML = action && action.href && action.label
                         ? `<div class="mt-2"><a href="${action.href}" class="inline-flex items-center gap-1 rounded-md bg-white/80 px-2 py-1 text-xs font-bold text-gray-700 hover:bg-white">` +
                           `${action.label}</a></div>`
@@ -251,12 +264,12 @@
 
                     // Animate in
                     setTimeout(() => {
-                        toast.classList.remove('translate-x-10', 'opacity-0');
+                        toast.classList.remove('translate-y-4', 'opacity-0');
                     }, 10);
 
                     // Animate out and remove
                     setTimeout(() => {
-                        toast.classList.add('opacity-0', 'translate-x-10');
+                        toast.classList.add('opacity-0', 'translate-y-4');
                         setTimeout(() => toast.remove(), 300);
                     }, 4000);
                 }
@@ -265,11 +278,12 @@
     </script>
 </head>
 
-<body class="min-h-screen text-gray-800" x-data="globalManager"
+<body class="min-h-screen overflow-x-hidden text-gray-800" x-data="globalManager" @keydown.escape.window="mobileNavOpen = false"
     style="background: url('/static/img/bg.png') no-repeat center center fixed; background-size: cover;">
 
     <!-- Global Manager (Progress + Toasts) -->
-    <div class="fixed top-6 right-6 z-[100] flex flex-col gap-3 w-80 pointer-events-none">
+    <div
+        class="fixed inset-x-4 bottom-4 z-[100] flex w-auto max-w-[calc(100vw-2rem)] flex-col gap-3 pointer-events-none md:inset-x-auto md:top-6 md:right-6 md:bottom-auto md:w-80">
 
         <!-- Progress Bar Card -->
         <template x-if="progress.isRunning">
@@ -299,9 +313,61 @@
     <!-- Global Modal Layer -->
     <div id="modal-layer" class="relative z-[100]"></div>
 
-    <div class="container mx-auto px-4 py-8 flex gap-6 h-screen overflow-hidden">
+    <div class="mx-auto flex min-h-screen w-full max-w-[1600px] flex-col gap-4 px-3 py-3 lg:h-screen lg:flex-row lg:gap-6 lg:px-4 lg:py-8 lg:overflow-hidden">
+        <div class="glass-panel flex items-center justify-between px-4 py-3 lg:hidden">
+            <div class="flex min-w-0 items-center gap-3">
+                <button type="button" @click="mobileNavOpen = true"
+                    class="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-white/60 bg-white/80 text-2xl text-gray-700 shadow-sm transition hover:bg-white"
+                    aria-label="打开导航菜单">
+                    ☰
+                </button>
+                <div class="min-w-0">
+                    <div class="flex items-center gap-2">
+                        <h1 class="truncate text-lg font-black text-accent">AnimateTool</h1>
+                        <div x-show="progress.isRunning" x-transition.opacity
+                            @click="showToast(progress.title + ': ' + progress.currentTitle, 'info')"
+                            class="h-3.5 w-3.5 shrink-0 cursor-pointer rounded-full border-2 border-accent border-t-transparent animate-spin"
+                            title="点击查看任务详情"></div>
+                    </div>
+                    <p class="truncate text-xs text-gray-500">移动端导航与任务提醒</p>
+                </div>
+            </div>
+            <a href="/logout" class="rounded-xl px-3 py-2 text-sm font-bold text-red-500 transition hover:bg-red-50">退出</a>
+        </div>
+
+        <div x-show="mobileNavOpen" x-cloak class="fixed inset-0 z-[95] lg:hidden" style="display: none;">
+            <div class="absolute inset-0 bg-slate-900/45 backdrop-blur-sm" @click="closeMobileNav()"></div>
+            <aside
+                class="absolute inset-y-0 left-0 flex w-[min(85vw,22rem)] max-w-sm flex-col border-r border-white/40 bg-white/92 p-5 shadow-2xl backdrop-blur-xl">
+                <div class="mb-6 flex items-center justify-between gap-3">
+                    <div>
+                        <h2 class="text-xl font-black text-accent">AnimateTool</h2>
+                        <p class="text-xs text-gray-500">快速导航</p>
+                    </div>
+                    <button type="button" @click="closeMobileNav()"
+                        class="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-gray-200 bg-white text-xl text-gray-600 shadow-sm">
+                        ×
+                    </button>
+                </div>
+
+                <nav class="flex flex-1 flex-col gap-2">
+                    <a href="/" class="nav-link" @click="closeMobileNav()">📊 仪表盘</a>
+                    <a href="/calendar" class="nav-link" @click="closeMobileNav()">🗓️ 追番日历</a>
+                    <a href="/subscriptions" class="nav-link" @click="closeMobileNav()">📺 订阅管理</a>
+                    <a href="/library" class="nav-link" @click="closeMobileNav()">📚 番剧图鉴</a>
+                    <a href="/local-anime" class="nav-link" @click="closeMobileNav()">📁 本地番剧</a>
+                    <a href="/settings" class="nav-link" @click="closeMobileNav()">⚙️ 系统设置</a>
+
+                    <div class="mt-auto pt-4 border-t border-gray-200/70">
+                        <a href="/logout" class="nav-link text-red-500 hover:bg-red-50 hover:text-red-600"
+                            @click="closeMobileNav()">🚪 退出登录</a>
+                    </div>
+                </nav>
+            </aside>
+        </div>
+
         <!-- Sidebar -->
-        <div class="w-64 glass-panel h-full p-6 flex flex-col shrink-0">
+        <div class="hidden w-64 glass-panel h-full p-6 shrink-0 lg:flex lg:flex-col">
             <h1 class="text-2xl font-bold text-accent mb-8 flex items-center gap-2">
                 <span>AnimateTool</span>
                 <!-- Persistent Small Spinner -->
@@ -342,10 +408,10 @@
             </nav>
 
             <div class="text-xs text-gray-500 text-center mt-4">
-                v0.4.0 Beta
+                v0.4.3 Beta
             </div>
         </div>
 
         <!-- Main Content -->
-        <main id="main-content" class="flex-1 glass-panel h-full p-8 overflow-y-auto">
+        <main id="main-content" class="glass-panel min-h-0 flex-1 p-4 md:p-6 lg:h-full lg:overflow-y-auto lg:p-8">
             {{ end }}

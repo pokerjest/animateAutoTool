@@ -759,19 +759,19 @@ refreshScanStatus();
 handleLibraryIssueUpdate($event.detail);
 ">
     <!-- Header Section -->
-    <div class="flex justify-between items-center">
+    <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <h2 class="text-2xl font-bold text-gray-700 flex items-center gap-2">
             <span>📂</span> 本地番剧目录
         </h2>
-        <div class="flex gap-2">
+        <div class="grid grid-cols-1 gap-2 sm:flex">
             <button @click="scanDirectory()" :disabled="scanning"
                 :class="scanning ? 'opacity-75 cursor-not-allowed' : 'hover:bg-blue-600'"
-                class="bg-blue-500 text-white px-4 py-2 rounded-lg transition shadow-md flex items-center gap-2">
+                class="justify-center bg-blue-500 text-white px-4 py-2 rounded-lg transition shadow-md flex items-center gap-2">
                 <span :class="scanning ? 'animate-spin' : ''">🔄</span>
                 <span x-text="scanning ? '扫描中...' : '重新扫描'"></span>
             </button>
             <button @click="showAddModal = true"
-                class="bg-primary text-white px-4 py-2 rounded-lg hover:bg-accent transition shadow-md flex items-center gap-2">
+                class="justify-center bg-primary text-white px-4 py-2 rounded-lg hover:bg-accent transition shadow-md flex items-center gap-2">
                 <span>➕</span> 添加目录
             </button>
         </div>
@@ -833,12 +833,12 @@ handleLibraryIssueUpdate($event.detail);
         <div class="space-y-2">
             {{ range .Directories }}
             <div
-                class="flex justify-between items-center bg-gray-50 p-3 rounded-lg border border-gray-100 group hover:border-blue-200 transition">
-                <div class="flex items-center gap-3">
+                class="flex flex-col gap-3 bg-gray-50 p-3 rounded-lg border border-gray-100 group hover:border-blue-200 transition sm:flex-row sm:items-center sm:justify-between">
+                <div class="flex min-w-0 items-center gap-3">
                     <span class="text-xl">📁</span>
-                    <span class="font-mono text-sm text-gray-600 tracking-tight">{{ .Path }}</span>
+                    <span class="min-w-0 break-all font-mono text-sm text-gray-600 tracking-tight">{{ .Path }}</span>
                 </div>
-                <div class="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div class="flex gap-2 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                     <button @click="openRenameModal({{ .ID }}, '{{ .Path }}')"
                         class="text-gray-400 hover:text-indigo-600 p-2 rounded-full hover:bg-indigo-50 transition"
                         title="整理/重命名">
@@ -927,7 +927,7 @@ handleLibraryIssueUpdate($event.detail);
         x-transition:enter-start="opacity-0 translate-y-2" x-transition:enter-end="opacity-100 translate-y-0"
         x-transition:leave="transition ease-in duration-200" x-transition:leave-start="opacity-100 translate-y-0"
         x-transition:leave-end="opacity-0 translate-y-2"
-        class="fixed bottom-6 right-6 px-6 py-3 rounded-lg shadow-lg text-white font-medium z-50 flex items-center gap-2 max-w-sm break-all"
+        class="fixed inset-x-4 bottom-4 px-6 py-3 rounded-lg shadow-lg text-white font-medium z-50 flex items-center gap-2 max-w-sm break-all md:inset-x-auto md:right-6 md:bottom-6"
         :class="toast.type === 'success' ? 'bg-green-500' : 'bg-red-500'" style="display: none;">
         <span x-text="toast.type === 'success' ? '✅' : '❌'"></span>
         <span x-text="toast.message"></span>
@@ -936,12 +936,12 @@ handleLibraryIssueUpdate($event.detail);
     <!-- Anime Details Modal (Redesigned) -->
     <template x-teleport="#modal-layer">
         <div x-show="showDetailsModal" style="display: none;"
-            class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md"
+            class="fixed inset-0 z-50 flex items-end justify-center p-0 md:items-center md:p-4 bg-black/80 backdrop-blur-md"
             x-transition:enter="transition ease-out duration-300" x-transition:enter-start="opacity-0 scale-95"
             x-transition:enter-end="opacity-100 scale-100" x-transition:leave="transition ease-in duration-200"
             x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95">
 
-            <div class="bg-white rounded-2xl shadow-2xl w-full max-h-[90vh] overflow-hidden flex flex-col md:flex-row relative transition-all duration-300 ease-in-out"
+            <div class="bg-white rounded-t-3xl md:rounded-2xl shadow-2xl w-full max-h-[92vh] md:max-h-[90vh] overflow-hidden flex flex-col md:flex-row relative transition-all duration-300 ease-in-out"
                 :class="activeTab === 'episodes' ? 'max-w-7xl' : 'max-w-4xl'" @click.away="showDetailsModal = false">
 
                 <!-- Close Button (Absolute) -->
@@ -955,7 +955,7 @@ handleLibraryIssueUpdate($event.detail);
 
                 <!-- Left Column: Poster & Quick Stats -->
                 <div x-ref="posterContainer"
-                    class="w-full md:w-80 bg-gray-50 p-6 flex flex-col gap-4 border-r border-gray-100 flex-shrink-0 overflow-y-auto md:overflow-visible">
+                    class="w-full md:w-80 bg-gray-50 p-5 md:p-6 flex flex-col gap-4 border-b md:border-b-0 md:border-r border-gray-100 flex-shrink-0 overflow-y-auto md:overflow-visible">
 
                     <!-- Tabs Switcher (Mobile/Desktop) -->
                     <div class="flex p-1 bg-white rounded-xl shadow-sm border border-gray-100 mb-2">
@@ -1021,7 +1021,7 @@ handleLibraryIssueUpdate($event.detail);
                 </div>
 
                 <!-- Right Column: Info & Progress -->
-                <div x-ref="detailsContainer" class="flex-1 p-8 overflow-y-auto custom-scrollbar bg-white">
+                <div x-ref="detailsContainer" class="flex-1 p-5 md:p-8 overflow-y-auto custom-scrollbar bg-white">
                     <!-- Loading State -->
                     <div x-show="loadingDetails" class="flex flex-col items-center justify-center h-full space-y-4">
                         <div class="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-600"></div>

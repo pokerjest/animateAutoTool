@@ -104,11 +104,11 @@
                 <!-- Folder Info Tooltip -->
                 <div class="group/path relative">
                     <div
-                        class="w-6 h-6 flex items-center justify-center text-gray-300 hover:text-gray-500 cursor-help transition-colors rounded hover:bg-gray-100">
+                        class="w-8 h-8 md:w-6 md:h-6 flex items-center justify-center text-gray-300 hover:text-gray-500 cursor-help transition-colors rounded hover:bg-gray-100">
                         📁
                     </div>
                     <div
-                        class="absolute bottom-full right-0 mb-2 hidden group-hover/path:block w-max max-w-[200px] z-20">
+                        class="absolute bottom-full right-0 mb-2 hidden md:group-hover/path:block w-max max-w-[200px] z-20">
                         <div class="bg-gray-800 text-white text-xs rounded px-2 py-1 break-all shadow-lg">
                             <div class="font-mono opacity-75 mb-0.5 text-[10px] uppercase">Path</div>
                             {{ .Path }}
@@ -121,7 +121,7 @@
                 <!-- Refresh Button -->
                 <button hx-get="/api/local-anime/{{ .ID }}/refresh-metadata" hx-swap="outerHTML"
                     hx-target="#local-card-{{.ID}}"
-                    class="w-6 h-6 flex items-center justify-center text-gray-400 hover:text-primary hover:bg-primary/10 rounded transition-colors"
+                    class="w-8 h-8 md:w-6 md:h-6 flex items-center justify-center text-gray-400 hover:text-primary hover:bg-primary/10 rounded transition-colors"
                     title="刷新元数据" @click.stop>
                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"

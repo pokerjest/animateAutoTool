@@ -70,7 +70,7 @@
         x-transition:leave="transition ease-in duration-200"
         x-transition:leave-start="opacity-100 transform translate-y-0"
         x-transition:leave-end="opacity-0 transform translate-y-2"
-        class="fixed top-24 right-8 z-[60] px-6 py-4 rounded-2xl shadow-2xl flex items-center gap-3 min-w-[300px]"
+        class="fixed inset-x-4 bottom-4 z-[60] px-4 py-3 rounded-2xl shadow-2xl flex items-center gap-3 md:top-24 md:right-8 md:bottom-auto md:left-auto md:min-w-[300px]"
         :class="toast.type === 'error' ? 'bg-red-50 text-red-600 border border-red-100' : 'bg-white text-gray-800 border border-gray-100'">
 
         <div class="text-2xl" x-text="toast.type === 'error' ? '⚠️' : '🎉'"></div>
@@ -81,10 +81,10 @@
     </div>
 
     <!-- Top Bar -->
-    <div class="flex justify-between items-center">
+    <div class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <h2 class="text-2xl font-bold text-gray-700">仪表盘</h2>
         <button id="sync-btn"
-            class="bg-primary text-white px-4 py-2 rounded-lg hover:bg-accent transition transform active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+            class="w-full md:w-auto justify-center bg-primary text-white px-4 py-2 rounded-lg hover:bg-accent transition transform active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
             hx-post="/api/sync" hx-swap="none" hx-indicator="#sync-btn">
             <span class="htmx-indicator hidden animate-spin">🔄</span>
             <span class="htmx-indicator hidden">同步中...</span>
@@ -190,7 +190,7 @@
 
     <!-- Bangumi Sections Template -->
     {{ define "anime_grid" }}
-    <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-6">
+        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4 md:gap-6">
         {{ range . }}
         <div @click="openModal({{ . | json }})"
             class="group bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden hover:shadow-xl transition-all duration-300 hover:-translate-y-1 cursor-pointer relative">

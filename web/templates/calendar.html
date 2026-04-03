@@ -181,11 +181,11 @@
     }
 }">
     <!-- Main Content Container with Sticky Header -->
-    <div class="-m-8"> <!-- Negate global padding -->
+    <div class="-m-4 md:-m-6 lg:-m-8"> <!-- Negate global padding -->
 
         <!-- Header & Navigation -->
         <div
-            class="sticky top-0 z-40 bg-white/90 backdrop-blur-xl px-8 py-4 border-b border-white/40 shadow-sm transition-all duration-300">
+            class="sticky top-0 z-40 bg-white/90 backdrop-blur-xl px-4 py-4 md:px-6 lg:px-8 border-b border-white/40 shadow-sm transition-all duration-300">
             <div class="flex flex-col md:flex-row justify-between items-center gap-4 max-w-[2000px] mx-auto">
                 <div class="text-center md:text-left">
                     <h1
@@ -229,7 +229,7 @@
         </div>
 
         <!-- Content Area -->
-        <div class="p-8 min-h-screen"> <!-- Restore padding -->
+        <div class="min-h-screen p-4 md:p-6 lg:p-8"> <!-- Restore padding -->
             <div class="container mx-auto">
                 <!-- Error Alert -->
                 {{ if .Error }}
