@@ -47,20 +47,12 @@ func InitDB(storagePath string) {
 		sqlDB.SetMaxIdleConns(1)
 	}
 
-	// 自动迁移模式
-	err = DB.AutoMigrate(
-		&model.Subscription{},
-		&model.DownloadLog{},
-		&model.GlobalConfig{},
-		&model.LocalAnimeDirectory{},
-		&model.LocalAnime{},
-		&model.LocalEpisode{},
-		&model.LibraryIssue{},
-		&model.AnimeMetadata{},
-		&model.User{},
-	)
+	err = RunMigrations(DB)
 	if err != nil {
 		log.Fatalf("failed to migrate database: %v", err)
+	}
+	if version := CurrentSchemaVersion(DB); version != "" {
+		log.Printf("database schema is now at %s", version)
 	}
 }
 
