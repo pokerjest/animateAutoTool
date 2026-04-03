@@ -7,7 +7,7 @@ APP_DISPLAY_NAME="Animate Auto Tool"
 APP_BUNDLE_NAME="${APP_DISPLAY_NAME}.app"
 APP_IDENTIFIER="com.pokerjest.animateautotool"
 VERSION_FILE="./VERSION"
-DEFAULT_VERSION="v0.4.3"
+DEFAULT_VERSION="v0.4.4"
 DIST_DIR="./dist"
 SRC_PATH="cmd/server/main.go"
 

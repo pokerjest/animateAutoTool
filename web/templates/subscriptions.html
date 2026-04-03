@@ -645,7 +645,7 @@
             console.error('Refresh subscription trends failed', e);
         }
     }
-}" @edit-subscription.window="
+}" x-init="const syncBodyLock = () => { document.body.style.overflow = (showDetailsModal || showHistoryModal || showAddModal || showBatchAddModal || showDashboardModal || showSearchModal || showEditModal || showDeleteModal) ? 'hidden' : ''; }; ['showDetailsModal', 'showHistoryModal', 'showAddModal', 'showBatchAddModal', 'showDashboardModal', 'showSearchModal', 'showEditModal', 'showDeleteModal'].forEach(key => $watch(key, syncBodyLock));" @edit-subscription.window="
     editForm.id = $event.detail.id;
     editForm.title = $event.detail.title;
     editForm.rss = $event.detail.rss;
@@ -844,13 +844,14 @@
 
 
     <!-- Anime Details Modal (Premium Split View) -->
-    <div x-show="showDetailsModal" x-cloak style="display: none;"
-        class="fixed inset-0 z-50 flex items-end justify-center p-0 md:items-center md:p-4 bg-black/80 backdrop-blur-md"
+    <template x-teleport="body">
+    <div x-show="showDetailsModal" x-cloak style="display: none; padding-top: max(env(safe-area-inset-top), 0.75rem); padding-bottom: max(env(safe-area-inset-bottom), 0.5rem);"
+        class="fixed inset-0 z-50 flex items-end justify-center overflow-y-auto overscroll-contain bg-black/80 backdrop-blur-md md:items-center md:p-4"
         x-transition:enter="transition ease-out duration-300" x-transition:enter-start="opacity-0 scale-95"
         x-transition:enter-end="opacity-100 scale-100" x-transition:leave="transition ease-in duration-200"
         x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95">
 
-        <div class="bg-white rounded-t-3xl md:rounded-2xl shadow-2xl w-full md:max-w-4xl max-h-[92vh] md:max-h-[90vh] overflow-hidden flex flex-col md:flex-row relative"
+        <div class="bg-white rounded-t-3xl md:rounded-2xl shadow-2xl w-full md:max-w-4xl max-h-[calc(100dvh-0.75rem)] md:max-h-[90vh] overflow-hidden flex flex-col md:flex-row relative"
             @click.away="showDetailsModal = false">
 
             <!-- Close Button -->
@@ -864,9 +865,9 @@
 
             <!-- Left Column: Poster -->
             <div
-                class="w-full md:w-80 bg-gray-50 p-6 flex flex-col gap-4 border-r border-gray-100 flex-shrink-0 overflow-y-auto md:overflow-visible text-gray-800">
+                class="w-full md:w-80 bg-gray-50 p-4 md:p-6 flex flex-col items-center md:items-stretch gap-4 border-b md:border-b-0 md:border-r border-gray-100 flex-shrink-0 overflow-y-auto md:overflow-visible text-gray-800">
                 <div
-                    class="relative w-full aspect-[2/3] rounded-2xl shadow-2xl overflow-hidden group bg-gray-200 border border-white/20">
+                    class="relative w-full max-w-[220px] md:max-w-none aspect-[2/3] rounded-2xl shadow-2xl overflow-hidden group bg-gray-200 border border-white/20">
                     <template x-if="detailsData?.images?.large">
                         <img :src="detailsData?.images?.large"
                             class="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110">
@@ -878,7 +879,7 @@
                 </div>
 
                 <!-- Source Switcher -->
-                <div class="flex p-1 bg-gray-200/50 rounded-lg">
+                <div class="flex w-full p-1 bg-gray-200/50 rounded-lg">
                     <button @click="switchSource('bangumi')"
                         :class="activeSource === 'bangumi' ? 'bg-white shadow text-pink-600 font-bold' : 'text-gray-500 hover:text-gray-700'"
                         class="flex-1 py-1.5 text-xs rounded-md transition-all flex items-center justify-center gap-1">
@@ -1015,15 +1016,19 @@
             </div>
         </div>
     </div>
+    </template>
 
-    <div x-show="showHistoryModal" x-cloak style="display: none;"
-        class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
+    <template x-teleport="body">
+    <div x-show="showHistoryModal" x-cloak
+        class="fixed inset-0 z-50 flex items-end justify-center overflow-y-auto overscroll-contain bg-black/80 backdrop-blur-md md:items-center md:p-4"
+        style="display: none; padding-top: max(env(safe-area-inset-top), 0.75rem); padding-bottom: max(env(safe-area-inset-bottom), 0.5rem);"
+        @click="showHistoryModal = false"
         x-transition:enter="transition ease-out duration-300" x-transition:enter-start="opacity-0 scale-95"
         x-transition:enter-end="opacity-100 scale-100" x-transition:leave="transition ease-in duration-200"
         x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95">
-        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[85vh] overflow-hidden flex flex-col"
-            @click.away="showHistoryModal = false">
-            <div class="px-6 py-4 border-b border-gray-100 bg-gray-50/80 flex items-center justify-between gap-4">
+        <div class="bg-white rounded-[2rem] shadow-2xl w-full max-w-3xl max-h-[calc(100dvh-0.75rem)] md:max-h-[85vh] overflow-hidden flex flex-col"
+            @click.stop>
+            <div class="px-4 sm:px-6 py-4 border-b border-gray-100 bg-gray-50/80 flex items-center justify-between gap-4">
                 <div>
                     <div class="text-xs font-bold uppercase tracking-wider text-gray-400">订阅执行历史</div>
                     <div class="mt-1 text-lg font-black text-gray-800" x-text="historyTitle || '订阅执行历史'"></div>
@@ -1036,7 +1041,7 @@
                 </button>
             </div>
 
-            <div class="flex-1 overflow-y-auto custom-scrollbar p-6 bg-gray-50/50">
+            <div class="flex-1 overflow-y-auto custom-scrollbar p-4 sm:p-6 bg-gray-50/50">
                 <div x-show="historyLoading" class="py-16 text-center text-gray-400 flex flex-col items-center gap-3">
                     <div class="animate-spin h-10 w-10 border-4 border-rose-500 border-t-transparent rounded-full"></div>
                     <span class="text-sm font-medium">正在加载最近执行历史...</span>
@@ -1045,17 +1050,21 @@
             </div>
         </div>
     </div>
+    </template>
 
 
     <!-- Add Subscription Modal -->
-    <div x-show="showAddModal" x-cloak style="display: none;"
-        class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/60 backdrop-blur-sm"
+    <template x-teleport="body">
+    <div x-show="showAddModal" x-cloak
+        class="fixed inset-0 z-50 flex items-end justify-center overflow-y-auto overscroll-contain bg-black/80 backdrop-blur-md md:items-center md:p-4"
+        style="display: none; padding-top: max(env(safe-area-inset-top), 0.75rem); padding-bottom: max(env(safe-area-inset-bottom), 0.5rem);"
+        @click="showAddModal = false"
         x-transition:enter="transition ease-out duration-300" x-transition:enter-start="opacity-0"
         x-transition:enter-end="opacity-100" x-transition:leave="transition ease-in duration-200"
         x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0">
 
-        <div class="bg-white/95 backdrop-blur-md rounded-2xl shadow-2xl w-full max-w-lg p-8 relative border border-white/50"
-            @click.away="showAddModal = false">
+        <div class="bg-white/95 backdrop-blur-md rounded-[2rem] shadow-2xl w-full max-w-lg p-5 sm:p-8 relative border border-white/50 max-h-[calc(100dvh-0.75rem)] md:max-h-[90vh] overflow-y-auto"
+            @click.stop>
             <h3 class="text-2xl font-black mb-6 text-gray-800 flex items-center gap-3">
                 <span class="bg-primary/10 text-primary p-2.5 rounded-2xl">➕</span> 新增 RSS 订阅
             </h3>
@@ -1108,7 +1117,7 @@
                         <div id="add-preview-results" class="mt-4 rounded-xl overflow-hidden"></div>
                     </div>
 
-                    <div class="grid grid-cols-2 gap-4">
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div>
                             <label
                                 class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">过滤规则</label>
@@ -1124,12 +1133,12 @@
                     </div>
                 </div>
 
-                <div class="flex justify-end gap-3 mt-8 pt-6 border-t border-gray-100">
+                <div class="flex flex-col-reverse sm:flex-row sm:justify-end gap-3 mt-8 pt-6 border-t border-gray-100">
                     <button type="button"
                         @click="showAddModal = false; document.getElementById('add-preview-results').innerHTML = ''"
-                        class="px-6 py-2.5 rounded-xl border border-gray-200 text-gray-600 font-medium hover:bg-gray-50 transition-all">取消</button>
+                        class="w-full sm:w-auto px-6 py-2.5 rounded-xl border border-gray-200 text-gray-600 font-medium hover:bg-gray-50 transition-all">取消</button>
                     <button type="submit" id="add-sub-btn" hx-indicator="#add-sub-btn"
-                        class="px-6 py-2.5 rounded-xl bg-primary text-white font-bold hover:bg-accent shadow-lg shadow-pink-200 transition-all active:scale-95 disabled:opacity-70 disabled:cursor-not-allowed flex items-center gap-2">
+                        class="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-primary text-white font-bold hover:bg-accent shadow-lg shadow-pink-200 transition-all active:scale-95 disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2">
                         <span class="htmx-indicator hidden animate-spin">⌛</span>
                         <span>确定添加</span>
                     </button>
@@ -1137,16 +1146,20 @@
             </form>
         </div>
     </div>
+    </template>
 
     <!-- Batch Subscription Modal -->
-    <div x-show="showBatchAddModal" x-cloak style="display: none;"
-        class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/60 backdrop-blur-sm"
+    <template x-teleport="body">
+    <div x-show="showBatchAddModal" x-cloak
+        class="fixed inset-0 z-50 flex items-end justify-center overflow-y-auto overscroll-contain bg-black/80 backdrop-blur-md md:items-center md:p-4"
+        style="display: none; padding-top: max(env(safe-area-inset-top), 0.75rem); padding-bottom: max(env(safe-area-inset-bottom), 0.5rem);"
+        @click="showBatchAddModal = false"
         x-transition:enter="transition ease-out duration-300" x-transition:enter-start="opacity-0"
         x-transition:enter-end="opacity-100" x-transition:leave="transition ease-in duration-200"
         x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0">
 
-        <div class="bg-white/95 backdrop-blur-md rounded-2xl shadow-2xl w-full max-w-2xl p-8 relative border border-white/50"
-            @click.away="showBatchAddModal = false">
+        <div class="bg-white/95 backdrop-blur-md rounded-[2rem] shadow-2xl w-full max-w-2xl p-5 sm:p-8 relative border border-white/50 max-h-[calc(100dvh-0.75rem)] md:max-h-[90vh] overflow-y-auto"
+            @click.stop>
             <h3 class="text-2xl font-black mb-6 text-gray-800 flex items-center gap-3">
                 <span class="bg-indigo-50 text-indigo-500 p-2.5 rounded-2xl">📦</span> 批量添加订阅
             </h3>
@@ -1217,8 +1230,8 @@
                 </template>
             </div>
 
-            <div class="flex justify-between items-center pt-6 border-t border-gray-100">
-                <div class="flex gap-4 items-center">
+            <div class="flex flex-col gap-4 sm:gap-5 pt-6 border-t border-gray-100">
+                <div class="flex flex-wrap gap-4 items-center">
                     <button @click="batchInput = ''; batchPreviewData = null"
                         class="text-xs font-bold text-gray-400 hover:text-red-500 hover:underline transition">清空列表</button>
                     <button @click="previewBatch()" :disabled="!batchInput.trim() || isPreviewingBatch"
@@ -1226,11 +1239,11 @@
                         <span>👀</span> 预览内容
                     </button>
                 </div>
-                <div class="flex gap-3">
+                <div class="flex flex-col-reverse sm:flex-row sm:justify-end gap-3">
                     <button @click="showBatchAddModal = false"
-                        class="px-5 py-2.5 rounded-xl border border-gray-200 text-gray-600 font-medium hover:bg-gray-50 transition-all">取消</button>
+                        class="w-full sm:w-auto px-5 py-2.5 rounded-xl border border-gray-200 text-gray-600 font-medium hover:bg-gray-50 transition-all">取消</button>
                     <button @click="submitBatch()" :disabled="isSubmittingBatch"
-                        class="px-6 py-2.5 rounded-xl bg-indigo-500 text-white font-bold hover:bg-indigo-600 shadow-lg shadow-indigo-200 transition-all active:scale-95 disabled:opacity-50 flex items-center gap-2">
+                        class="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-indigo-500 text-white font-bold hover:bg-indigo-600 shadow-lg shadow-indigo-200 transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2">
                         <span x-show="isSubmittingBatch" class="animate-spin text-sm">⌛</span>
                         <span x-text="isSubmittingBatch ? '正在处理...' : '确认批量添加' "></span>
                     </button>
@@ -1238,14 +1251,14 @@
             </div>
         </div>
     </div>
+    </template>
 
     <!-- Mikan Dashboard Modal -->
-    <div x-show="showDashboardModal" class="fixed inset-0 z-50 overflow-y-auto" x-cloak>
-        <div class="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
-            <div class="fixed inset-0 transition-opacity" @click="showDashboardModal = false">
-                <div class="absolute inset-0 bg-gray-500 opacity-75"></div>
-            </div>
-            <div class="inline-block align-bottom bg-white rounded-2xl text-left overflow-hidden shadow-2xl transform transition-all sm:my-8 sm:align-middle sm:max-w-6xl sm:w-full border border-gray-100"
+    <template x-teleport="body">
+    <div x-show="showDashboardModal" class="fixed inset-0 z-50 flex items-end justify-center overflow-y-auto overscroll-contain bg-black/80 backdrop-blur-md md:items-center md:p-4" x-cloak
+        style="display: none; padding-top: max(env(safe-area-inset-top), 0.75rem); padding-bottom: max(env(safe-area-inset-bottom), 0.5rem);" @click="showDashboardModal = false">
+            <div class="w-full max-w-6xl bg-white rounded-[2rem] text-left overflow-hidden shadow-2xl transform transition-all border border-gray-100 max-h-[calc(100dvh-0.75rem)] md:max-h-[90vh] flex flex-col"
+                @click.stop
                 x-transition:enter="ease-out duration-300"
                 x-transition:enter-start="opacity-0 translate-y-4 sm:translate-y-0 sm:scale-95"
                 x-transition:enter-end="opacity-100 translate-y-0 sm:scale-100"
@@ -1255,7 +1268,7 @@
 
                 <div
                     class="bg-gradient-to-r from-rose-500 to-pink-500 px-6 py-4 flex justify-between items-center shadow-lg">
-                    <div class="flex items-center gap-6">
+                    <div class="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-6">
                         <div class="flex items-center gap-3">
                             <div>
                                 <h3 class="text-xl font-bold text-white leading-tight tracking-tight">Mikan Dashboard
@@ -1267,9 +1280,9 @@
 
                         <!-- Year & Season Selector -->
                         <div
-                            class="flex items-center gap-2 bg-white/10 p-1.5 rounded-xl backdrop-blur-sm border border-white/10 shadow-inner">
+                            class="flex items-center gap-2 bg-white/10 p-1.5 rounded-xl backdrop-blur-sm border border-white/10 shadow-inner w-full sm:w-auto">
                             <select x-model="selectedYear" @change="openDashboard(selectedYear, selectedSeason)"
-                                class="bg-transparent text-white text-sm font-bold focus:outline-none cursor-pointer hover:bg-white/10 rounded-lg px-2 py-1 transition appearance-none">
+                                class="min-w-0 flex-1 bg-transparent text-white text-sm font-bold focus:outline-none cursor-pointer hover:bg-white/10 rounded-lg px-2 py-1 transition appearance-none">
                                 <template x-for="year in years" :key="year">
                                     <option :value="year" x-text="year" :selected="year === selectedYear"
                                         class="text-gray-800"></option>
@@ -1277,7 +1290,7 @@
                             </select>
                             <span class="text-white/30 text-xs shadow-sm">/</span>
                             <select x-model="selectedSeason" @change="openDashboard(selectedYear, selectedSeason)"
-                                class="bg-transparent text-white text-sm font-bold focus:outline-none cursor-pointer hover:bg-white/10 rounded-lg px-2 py-1 transition appearance-none">
+                                class="min-w-0 flex-1 bg-transparent text-white text-sm font-bold focus:outline-none cursor-pointer hover:bg-white/10 rounded-lg px-2 py-1 transition appearance-none">
                                 <template x-for="season in seasons" :key="season">
                                     <option :value="season" x-text="season + '季'" :selected="season === selectedSeason"
                                         class="text-gray-800"></option>
@@ -1296,10 +1309,10 @@
                     </button>
                 </div>
 
-                <div class="p-6 bg-gray-50/30">
+                <div class="flex-1 overflow-y-auto p-4 sm:p-6 bg-gray-50/30">
                     <!-- Day Tabs -->
                     <div
-                        class="flex flex-wrap justify-center gap-1.5 mb-8 p-1.5 bg-gray-100/60 rounded-2xl w-fit mx-auto shadow-inner border border-gray-200/50 backdrop-blur-sm">
+                        class="flex flex-nowrap overflow-x-auto justify-start sm:justify-center gap-1.5 mb-6 sm:mb-8 p-1.5 bg-gray-100/60 rounded-2xl w-full sm:w-fit mx-auto shadow-inner border border-gray-200/50 backdrop-blur-sm">
                         <template x-for="day in orderedDays" :key="day">
                             <button @click="activeDay = day"
                                 :class="activeDay === day ? 'bg-white text-rose-600 shadow-sm ring-1 ring-black/5' : 'text-gray-500 hover:bg-white/40 hover:text-gray-800'"
@@ -1323,7 +1336,7 @@
                         x-transition:enter="transition ease-out duration-500"
                         x-transition:enter-start="opacity-0 translate-y-4"
                         x-transition:enter-end="opacity-100 translate-y-0" class="space-y-6">
-                        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-5">
+                        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-5">
                             <template x-for="anime in (dashboardData?.Days[activeDay] || [])" :key="anime.MikanID">
                                 <div class="group relative bg-white/80 backdrop-blur-md rounded-2xl overflow-hidden shadow-sm hover:shadow-2xl transition-all duration-500 border border-white/60 hover:-translate-y-2 cursor-pointer flex flex-col"
                                     @click="selectAnime(anime.Title, anime.MikanID, anime.Image, dashboardData.Season)">
@@ -1358,21 +1371,24 @@
                     <p class="text-[10px] text-gray-400 font-medium italic">数据实时抓取自 Mikan Project</p>
                 </div>
             </div>
-        </div>
     </div>
+    </template>
 
     <!-- Search Modal -->
-    <div x-show="showSearchModal" x-cloak style="display: none;"
-        class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
+    <template x-teleport="body">
+    <div x-show="showSearchModal" x-cloak
+        class="fixed inset-0 z-50 flex items-end justify-center overflow-y-auto overscroll-contain bg-black/80 backdrop-blur-md md:items-center md:p-4"
+        style="display: none; padding-top: max(env(safe-area-inset-top), 0.75rem); padding-bottom: max(env(safe-area-inset-bottom), 0.5rem);"
+        @click="showSearchModal = false"
         x-transition:enter="transition ease-out duration-300" x-transition:enter-start="opacity-0"
         x-transition:enter-end="opacity-100" x-transition:leave="transition ease-in duration-200"
         x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0">
 
-        <div class="bg-white rounded-2xl shadow-xl w-full max-w-4xl h-[80vh] flex flex-col relative"
-            @click.away="showSearchModal = false">
+        <div class="bg-white rounded-[2rem] shadow-xl w-full max-w-4xl h-[calc(100dvh-0.75rem)] md:h-[80vh] flex flex-col relative overflow-hidden"
+            @click.stop>
             <div
-                class="p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50/80 backdrop-blur-md rounded-t-2xl">
-                <div class="flex items-center gap-4">
+                class="p-4 sm:p-6 border-b border-gray-100 flex justify-between items-center gap-3 bg-gray-50/80 backdrop-blur-md rounded-t-[2rem]">
+                <div class="flex items-center gap-3 sm:gap-4 min-w-0">
                     <button x-show="showSubgroupList"
                         @click="if (fromDashboard) { showSearchModal = false; showDashboardModal = true; fromDashboard = false; } else { showSubgroupList = false; }"
                         class="text-gray-500 hover:text-primary transition p-2.5 hover:bg-white rounded-xl shadow-sm border border-gray-100">
@@ -1381,7 +1397,7 @@
                             </path>
                         </svg>
                     </button>
-                    <h3 class="text-xl font-black text-gray-800 tracking-tight"
+                    <h3 class="text-lg sm:text-xl font-black text-gray-800 tracking-tight"
                         x-text="showSubgroupList ? '选择字幕组' : '发现精彩番剧'">
                     </h3>
                 </div>
@@ -1393,7 +1409,7 @@
                 </button>
             </div>
 
-            <div class="p-6 bg-white/50 backdrop-blur-sm border-b border-gray-100" x-show="!showSubgroupList">
+            <div class="p-4 sm:p-6 bg-white/50 backdrop-blur-sm border-b border-gray-100" x-show="!showSubgroupList">
                 <div class="relative group">
                     <span
                         class="absolute inset-y-0 left-0 flex items-center pl-4 text-gray-400 group-focus-within:text-primary transition-colors">🔍</span>
@@ -1413,7 +1429,7 @@
 
             <div class="flex-1 overflow-y-auto bg-gray-50/50 relative">
                 <!-- Subgroup Selection View -->
-                <div x-show="showSubgroupList" class="absolute inset-0 bg-white z-10 p-6 overflow-y-auto"
+                <div x-show="showSubgroupList" class="absolute inset-0 bg-white z-10 p-4 sm:p-6 overflow-y-auto"
                     style="display: none;">
                     <template x-if="loadingSubgroups">
                         <div class="flex flex-col items-center justify-center h-full gap-4">
@@ -1464,7 +1480,7 @@
                 </div>
 
                 <!-- HTMX Search Hits -->
-                <div id="search-hits" class="p-6" x-show="!showSubgroupList">
+                <div id="search-hits" class="p-4 sm:p-6" x-show="!showSubgroupList">
                     <div class="h-full flex flex-col items-center justify-center text-gray-400 py-20">
                         <div class="text-7xl mb-6 animate-bounce">🎬</div>
                         <p class="text-xl font-medium text-gray-500">发现精彩番剧</p>
@@ -1481,16 +1497,20 @@
             </div>
         </div>
     </div>
+    </template>
 
     <!-- Edit Subscription Modal -->
-    <div x-show="showEditModal" x-cloak style="display: none;"
-        class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/60 backdrop-blur-sm"
+    <template x-teleport="body">
+    <div x-show="showEditModal" x-cloak
+        class="fixed inset-0 z-50 flex items-end justify-center overflow-y-auto overscroll-contain bg-black/80 backdrop-blur-md md:items-center md:p-4"
+        style="display: none; padding-top: max(env(safe-area-inset-top), 0.75rem); padding-bottom: max(env(safe-area-inset-bottom), 0.5rem);"
+        @click="showEditModal = false"
         x-transition:enter="transition ease-out duration-300" x-transition:enter-start="opacity-0"
         x-transition:enter-end="opacity-100" x-transition:leave="transition ease-in duration-200"
         x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0">
 
-        <div class="bg-white/95 backdrop-blur-md rounded-2xl shadow-2xl w-full max-w-lg p-8 relative border border-white/50"
-            @click.away="showEditModal = false">
+        <div class="bg-white/95 backdrop-blur-md rounded-[2rem] shadow-2xl w-full max-w-lg p-5 sm:p-8 relative border border-white/50 max-h-[calc(100dvh-0.75rem)] md:max-h-[90vh] overflow-y-auto"
+            @click.stop>
             <h3 class="text-2xl font-black mb-6 text-gray-800 flex items-center gap-3">
                 <span class="bg-primary/10 text-primary p-2.5 rounded-2xl">✏️</span> 编辑订阅
             </h3>
@@ -1515,7 +1535,7 @@
                             class="w-full px-4 py-3 rounded-xl bg-gray-50 border border-gray-200 focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none transition-all shadow-inner">
                     </div>
 
-                    <div class="grid grid-cols-2 gap-4">
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div>
                             <label
                                 class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">过滤规则</label>
@@ -1531,11 +1551,11 @@
                     </div>
                 </div>
 
-                <div class="flex justify-end gap-3 mt-8 pt-6 border-t border-gray-100">
+                <div class="flex flex-col-reverse sm:flex-row sm:justify-end gap-3 mt-8 pt-6 border-t border-gray-100">
                     <button type="button" @click="showEditModal = false"
-                        class="px-6 py-2.5 rounded-xl border border-gray-200 text-gray-600 font-medium hover:bg-gray-50 transition-all">取消</button>
+                        class="w-full sm:w-auto px-6 py-2.5 rounded-xl border border-gray-200 text-gray-600 font-medium hover:bg-gray-50 transition-all">取消</button>
                     <button type="submit" id="edit-sub-btn" hx-indicator="#edit-sub-btn"
-                        class="px-6 py-2.5 rounded-xl bg-primary text-white font-bold hover:bg-accent shadow-lg shadow-pink-200 transition-all active:scale-95 disabled:opacity-70 disabled:cursor-not-allowed flex items-center gap-2">
+                        class="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-primary text-white font-bold hover:bg-accent shadow-lg shadow-pink-200 transition-all active:scale-95 disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2">
                         <span class="htmx-indicator hidden animate-spin">⌛</span>
                         <span>保存修改</span>
                     </button>
@@ -1543,16 +1563,20 @@
             </form>
         </div>
     </div>
+    </template>
 
     <!-- Delete Confirmation Modal -->
-    <div x-show="showDeleteModal" x-cloak style="display: none;"
-        class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
+    <template x-teleport="body">
+    <div x-show="showDeleteModal" x-cloak
+        class="fixed inset-0 z-50 flex items-end justify-center overflow-y-auto overscroll-contain bg-black/80 backdrop-blur-md md:items-center md:p-4"
+        style="display: none; padding-top: max(env(safe-area-inset-top), 0.75rem); padding-bottom: max(env(safe-area-inset-bottom), 0.5rem);"
+        @click="showDeleteModal = false"
         x-transition:enter="transition ease-out duration-300" x-transition:enter-start="opacity-0"
         x-transition:enter-end="opacity-100" x-transition:leave="transition ease-in duration-200"
         x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0">
 
-        <div class="bg-white/95 backdrop-blur-md rounded-[2rem] shadow-2xl w-full max-w-sm p-8 relative border border-white/50 overflow-hidden"
-            @click.away="showDeleteModal = false">
+        <div class="bg-white/95 backdrop-blur-md rounded-[2rem] shadow-2xl w-full max-w-sm p-6 sm:p-8 relative border border-white/50 overflow-hidden"
+            @click.stop>
             <div
                 class="w-20 h-20 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-6 border border-red-100 shadow-sm">
                 <span class="text-4xl animate-pulse">🗑️</span>
@@ -1574,6 +1598,7 @@
             </div>
         </div>
     </div>
+    </template>
 </div>
 <!-- Toast Notification -->
 <div x-show="toast.show" x-transition:enter="transition ease-out duration-300"
