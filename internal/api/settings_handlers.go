@@ -234,6 +234,7 @@ func UpdateSettingsHandler(c *gin.Context) {
 	case "media":
 		keysToProcess = []string{
 			model.ConfigKeyJellyfinUrl,
+			model.ConfigKeyJellyfinApiKey,
 			model.ConfigKeyJellyfinUsername,
 			model.ConfigKeyJellyfinPassword,
 		}
@@ -269,6 +270,7 @@ func UpdateSettingsHandler(c *gin.Context) {
 			model.ConfigKeyRepoUpdateName,
 			model.ConfigKeyRepoRequireChecksum,
 			model.ConfigKeyJellyfinUrl,
+			model.ConfigKeyJellyfinApiKey,
 			model.ConfigKeyJellyfinUsername,
 			model.ConfigKeyJellyfinPassword,
 			model.ConfigKeyProxyJellyfin,
