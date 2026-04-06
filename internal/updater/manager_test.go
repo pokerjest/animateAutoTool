@@ -2,6 +2,8 @@ package updater
 
 import "testing"
 
+const updaterVersionZero = "v0.0.0"
+
 func TestCompareVersions(t *testing.T) {
 	t.Parallel()
 
@@ -32,7 +34,7 @@ func TestNormalizeVersion(t *testing.T) {
 	if got := normalizeVersion("0.1.2"); got != "v0.1.2" {
 		t.Fatalf("normalizeVersion failed: %q", got)
 	}
-	if got := normalizeVersion(""); got != "v0.0.0" {
+	if got := normalizeVersion(""); got != updaterVersionZero {
 		t.Fatalf("normalizeVersion empty failed: %q", got)
 	}
 }

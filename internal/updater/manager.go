@@ -20,6 +20,7 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/config"
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/model"
+	"github.com/pokerjest/animateAutoTool/internal/safeio"
 	appversion "github.com/pokerjest/animateAutoTool/internal/version"
 )
 
@@ -38,6 +39,8 @@ const (
 	maxVersionParts  = 3
 	maxBackoffDelay  = 30 * time.Minute
 	defaultUserAgent = "AnimateAutoTool-Updater/1.0"
+	resultError      = "error"
+	versionZero      = "v0.0.0"
 )
 
 type settings struct {
@@ -222,7 +225,7 @@ func (m *Manager) runCheck(source string, applyWhenBehind bool) Status {
 	m.mu.Unlock()
 
 	current := normalizeVersion(currentVersion())
-	result := "error"
+	result := resultError
 	message := "检查失败"
 	errText := ""
 	latest := ""
@@ -264,7 +267,7 @@ func (m *Manager) runCheck(source string, applyWhenBehind bool) Status {
 	release, notModified, retryAfter, err := m.fetchLatestRelease(cfg.RepoOwner, cfg.RepoName)
 	if err != nil {
 		backoffUntil = m.recordFailure(now, retryAfter)
-		result = "error"
+		result = resultError
 		message = "获取最新 Release 失败"
 		if !backoffUntil.IsZero() {
 			message = fmt.Sprintf("获取最新 Release 失败，自动重试时间：%s", backoffUntil.Local().Format("2006-01-02 15:04:05"))
@@ -277,7 +280,7 @@ func (m *Manager) runCheck(source string, applyWhenBehind bool) Status {
 		release = m.getCachedRelease(cfg.RepoOwner, cfg.RepoName)
 		if release == nil {
 			backoffUntil = m.recordFailure(now, time.Time{})
-			result = "error"
+			result = resultError
 			message = "远端返回未修改，但本地无缓存可用"
 			errText = "release cache is empty"
 			return finish()
@@ -321,7 +324,7 @@ func (m *Manager) runCheck(source string, applyWhenBehind bool) Status {
 	if cfg.RequireChecksum {
 		expectedChecksum, err = fetchExpectedChecksum(release, assetName)
 		if err != nil {
-			result = "error"
+			result = resultError
 			message = "未通过完整性校验前置检查"
 			errText = err.Error()
 			return finish()
@@ -330,7 +333,7 @@ func (m *Manager) runCheck(source string, applyWhenBehind bool) Status {
 
 	artifactPath, err := downloadAsset(assetURL, assetName)
 	if err != nil {
-		result = "error"
+		result = resultError
 		message = "下载更新包失败"
 		errText = err.Error()
 		return finish()
@@ -338,7 +341,7 @@ func (m *Manager) runCheck(source string, applyWhenBehind bool) Status {
 
 	if expectedChecksum != "" {
 		if err := verifyFileSHA256(artifactPath, expectedChecksum); err != nil {
-			result = "error"
+			result = resultError
 			message = "更新包完整性校验失败"
 			errText = err.Error()
 			return finish()
@@ -347,7 +350,7 @@ func (m *Manager) runCheck(source string, applyWhenBehind bool) Status {
 	}
 
 	if err := applyUpdateForPlatform(artifactPath); err != nil {
-		result = "error"
+		result = resultError
 		message = "应用更新失败"
 		errText = err.Error()
 		return finish()
@@ -448,7 +451,7 @@ func (m *Manager) fetchLatestRelease(owner, repo string) (*githubRelease, bool, 
 	if err != nil {
 		return nil, false, time.Time{}, err
 	}
-	defer resp.Body.Close()
+	defer safeio.Close(resp.Body)
 
 	if resp.StatusCode == http.StatusNotModified {
 		return nil, true, time.Time{}, nil
@@ -579,7 +582,7 @@ func currentVersion() string {
 		}
 	}
 	if v == "" {
-		v = "v0.0.0"
+		v = versionZero
 	}
 	return normalizeVersion(v)
 }
@@ -596,7 +599,8 @@ func readVersionFile() (string, error) {
 	}
 
 	for _, path := range candidates {
-		content, err := os.ReadFile(path)
+		// Paths are restricted to app-controlled VERSION file locations.
+		content, err := os.ReadFile(path) //nolint:gosec
 		if err != nil {
 			continue
 		}
@@ -612,7 +616,7 @@ func readVersionFile() (string, error) {
 func normalizeVersion(v string) string {
 	v = strings.TrimSpace(v)
 	if v == "" {
-		return "v0.0.0"
+		return versionZero
 	}
 	if !strings.HasPrefix(v, "v") {
 		v = "v" + v
@@ -982,7 +986,7 @@ func downloadSmallTextAsset(url string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer safeio.Close(resp.Body)
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
@@ -1037,14 +1041,15 @@ func downloadAsset(url, assetName string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer safeio.Close(resp.Body)
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return "", fmt.Errorf("download failed (%d): %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 
-	file, err := os.Create(tempPath)
+	// tempPath is created inside the app-controlled updates directory.
+	file, err := os.Create(tempPath) //nolint:gosec
 	if err != nil {
 		return "", err
 	}
@@ -1073,11 +1078,12 @@ func verifyFileSHA256(path, expectedLowerHex string) error {
 		return fmt.Errorf("invalid expected sha256: %q", expectedLowerHex)
 	}
 
-	f, err := os.Open(path)
+	// path points to a downloaded artifact in the app-controlled update directory.
+	f, err := os.Open(path) //nolint:gosec
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer safeio.Close(f)
 
 	h := sha256.New()
 	if _, err := io.Copy(h, f); err != nil {
@@ -1160,11 +1166,12 @@ if %ERRORLEVEL% neq 0 (
 if exist "%BAK_EXE%" del /F /Q "%BAK_EXE%" >nul 2>nul
 start "" "%TARGET_EXE%"
 `
-	if err := os.WriteFile(scriptPath, []byte(script), 0644); err != nil {
+	if err := os.WriteFile(scriptPath, []byte(script), 0600); err != nil {
 		return err
 	}
 
-	cmd := exec.Command("cmd", "/C", scriptPath, strconv.Itoa(os.Getpid()), downloadedExe, exePath, logPath)
+	// scriptPath and all arguments are derived from app-controlled update paths.
+	cmd := exec.Command("cmd", "/C", scriptPath, strconv.Itoa(os.Getpid()), downloadedExe, exePath, logPath) //nolint:gosec
 	if err := cmd.Start(); err != nil {
 		return err
 	}
@@ -1254,11 +1261,15 @@ fi
 rm -rf "$BACKUP_APP" || true
 open "$TARGET_APP"
 `
-	if err := os.WriteFile(scriptPath, []byte(script), 0755); err != nil {
+	if err := os.WriteFile(scriptPath, []byte(script), 0600); err != nil {
+		return err
+	}
+	if err := os.Chmod(scriptPath, 0700); err != nil {
 		return err
 	}
 
-	cmd := exec.Command("/bin/bash", scriptPath, strconv.Itoa(os.Getpid()), downloadedDMG, targetDir, appName, logPath)
+	// scriptPath and all arguments are derived from app-controlled update paths.
+	cmd := exec.Command("/bin/bash", scriptPath, strconv.Itoa(os.Getpid()), downloadedDMG, targetDir, appName, logPath) //nolint:gosec
 	if err := cmd.Start(); err != nil {
 		return err
 	}
