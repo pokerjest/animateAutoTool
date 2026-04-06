@@ -1,6 +1,7 @@
 package event
 
 import (
+	"log"
 	"sync"
 
 	"github.com/google/uuid"
@@ -85,12 +86,21 @@ func (b *InMemoryBus) Unsubscribe(topic EventType, subID string) {
 
 func (b *InMemoryBus) Publish(topic EventType, payload interface{}) {
 	b.mu.RLock()
-	wrappers := b.handlers[topic]
+	wrappers := append([]HandlerWrapper(nil), b.handlers[topic]...)
 	b.mu.RUnlock()
 
 	// 异步执行所有 Handler，避免阻塞发布者
 	evt := Event{Type: topic, Payload: payload}
 	for _, w := range wrappers {
-		go w.Handler(evt)
+		handler := w.Handler
+		subID := w.ID
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("event bus handler panic topic=%s sub_id=%s err=%v", topic, subID, r)
+				}
+			}()
+			handler(evt)
+		}()
 	}
 }

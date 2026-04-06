@@ -169,7 +169,9 @@
             return;
         }
         try {
-            const resp = await fetch(`/api/local-anime/${localAnimeId}/refresh-metadata`);
+            const resp = await fetch(`/api/local-anime/${localAnimeId}/refresh-metadata`, {
+                method: 'POST'
+            });
             if (!resp.ok) {
                 this.showToast(`❌ ${title || '该番剧'} 重新刮削失败`, 'error');
                 await this.refreshDiagnostics();

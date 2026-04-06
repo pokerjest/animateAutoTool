@@ -23,12 +23,20 @@ func SSEHandler(c *gin.Context) {
 	// 我们可以创建一个 Callback，将收到的消息写入 clientChan
 
 	clientChan := make(chan event.Event, 10)
+	done := make(chan struct{})
 
 	// 定义一个闭包 Handler，用于转发消息
 	bridgeHandler := func(e event.Event) {
+		select {
+		case <-done:
+			return
+		default:
+		}
+
 		// 非阻塞发送，避免慢客户端阻塞总线
 		select {
 		case clientChan <- e:
+		case <-done:
 		default:
 			// Client channel full, drop message or log?
 		}
@@ -66,7 +74,7 @@ func SSEHandler(c *gin.Context) {
 		for t, id := range subIDs {
 			event.GlobalBus.Unsubscribe(t, id)
 		}
-		close(clientChan)
+		close(done)
 		log.Println("SSE Client disconnected")
 	}()
 
@@ -83,7 +91,7 @@ func SSEHandler(c *gin.Context) {
 			c.SSEvent(string(evt.Type), string(data))
 			c.Writer.Flush()
 
-		case <-c.Writer.CloseNotify():
+		case <-c.Request.Context().Done():
 			return
 		}
 	}

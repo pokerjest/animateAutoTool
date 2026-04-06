@@ -110,7 +110,7 @@ func AttemptZeroConfig(url, username, password string) (string, error) {
 	// This is more reliable than /Auth/Keys which seems to create inactive keys in some versions.
 	apiKey := authResp.AccessToken
 
-	log.Printf("Jellyfin: Zero-Config Successful! API Key (Session): %s", apiKey)
+	log.Printf("Jellyfin: Zero-Config successful; session API key generated.")
 	return apiKey, nil
 }
 

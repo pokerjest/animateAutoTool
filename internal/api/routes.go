@@ -122,7 +122,7 @@ func initRoutesLegacy(r *gin.Engine) {
 			apiGroup.GET("/local-anime/:id/files", GetLocalAnimeFilesHandler) // Keep for debugging if needed
 			apiGroup.POST("/local-directories/:id/rename-preview", PreviewDirectoryRenameHandler)
 			apiGroup.POST("/local-directories/:id/rename", ApplyDirectoryRenameHandler)
-			apiGroup.GET("/local-anime/:id/refresh-metadata", RefreshLocalAnimeMetadataHandler)
+			apiGroup.POST("/local-anime/:id/refresh-metadata", RefreshLocalAnimeMetadataHandler)
 			apiGroup.POST("/library/fix_match", FixMatchHandler)
 			apiGroup.GET("/metadata/search", SearchMetadataHandler)
 			apiGroup.POST("/local-anime/:id/switch-source", SwitchLocalAnimeSourceHandler)
@@ -171,6 +171,7 @@ func initRoutesLegacy(r *gin.Engine) {
 			apiGroup.GET("/dashboard/bangumi-data", DashboardBangumiDataHandler)
 			apiGroup.GET("/dashboard/qb-status", DashboardQBStatusHandler)
 			apiGroup.GET("/dashboard/task-overview", DashboardTaskOverviewHandler)
+			apiGroup.GET("/runtime/stats", RuntimeStatsHandler)
 
 			// SSE
 		}

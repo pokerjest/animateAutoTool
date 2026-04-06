@@ -1269,6 +1269,52 @@ func TestDashboardTaskOverviewEndpointRendersStatuses(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "Test Metadata")
 }
 
+func TestRuntimeStatsEndpointRequiresAuthAndReturnsMetrics(t *testing.T) {
+	resetAuthFixtures(t)
+	r := setupRouter()
+
+	unauthorized := httptest.NewRecorder()
+	unauthReq, _ := http.NewRequest("GET", "/api/runtime/stats", nil)
+	markLocalRequest(unauthReq)
+	r.ServeHTTP(unauthorized, unauthReq)
+	if unauthorized.Code != http.StatusUnauthorized {
+		t.Fatalf("expected unauthorized request to fail with 401, got %d", unauthorized.Code)
+	}
+
+	cookie, _ := loginCookie(t, r, "admin")
+
+	authorized := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/runtime/stats", nil)
+	req.Header.Set("Cookie", cookie)
+	markLocalRequest(req)
+	r.ServeHTTP(authorized, req)
+
+	if authorized.Code != http.StatusOK {
+		t.Fatalf("expected runtime stats endpoint to succeed, got %d: %s", authorized.Code, authorized.Body.String())
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(authorized.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("expected valid json response, got error: %v", err)
+	}
+
+	goInfo, ok := payload["go"].(map[string]any)
+	if !ok {
+		t.Fatal("expected response to include go runtime section")
+	}
+	if goroutines, ok := goInfo["goroutines"].(float64); !ok || goroutines < 1 {
+		t.Fatalf("expected positive goroutine count, got: %#v", goInfo["goroutines"])
+	}
+
+	memoryInfo, ok := payload["memory"].(map[string]any)
+	if !ok {
+		t.Fatal("expected response to include memory section")
+	}
+	if _, ok := memoryInfo["heap_alloc_bytes"].(float64); !ok {
+		t.Fatalf("expected heap_alloc_bytes to be numeric, got: %#v", memoryInfo["heap_alloc_bytes"])
+	}
+}
+
 func TestDeploymentCheckEndpointRendersWarnings(t *testing.T) {
 	resetAuthFixtures(t)
 	r := setupRouter()
@@ -1447,7 +1493,7 @@ func TestRenderLocalAnimeCardUsesAnimeRefreshEndpoint(t *testing.T) {
 		t.Fatalf("expected local anime card template to render, got error: %v", err)
 	}
 
-	assert.Contains(t, html, `hx-get="/api/local-anime/7/refresh-metadata"`)
+	assert.Contains(t, html, `hx-post="/api/local-anime/7/refresh-metadata"`)
 }
 
 func TestRenderLocalScanStatusTemplateIncludesSummary(t *testing.T) {
@@ -1473,4 +1519,20 @@ func TestRenderLocalScanStatusTemplateIncludesSummary(t *testing.T) {
 	assert.Contains(t, html, "最近一轮扫描了 3 个目录：新增 4，更新 2，失败 1")
 	assert.Contains(t, html, "12 秒")
 	assert.Contains(t, html, "permission denied")
+}
+
+func TestRenderSettingsTemplateIncludesRuntimeStatsCard(t *testing.T) {
+	html, err := renderTemplateToString("settings.html", gin.H{
+		"SkipLayout":       true,
+		"Config":           map[string]string{},
+		"JellyfinServerID": "",
+		"Stats":            BackupStats{},
+	})
+	if err != nil {
+		t.Fatalf("expected settings template to render, got error: %v", err)
+	}
+
+	assert.Contains(t, html, "runtimeStatsCard()")
+	assert.Contains(t, html, "/api/runtime/stats")
+	assert.Contains(t, html, "运行时状态")
 }

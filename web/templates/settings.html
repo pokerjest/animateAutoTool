@@ -1068,6 +1068,67 @@
     <div x-show="activeTab === 'security'" x-transition:enter="transition ease-out duration-300"
         x-transition:enter-start="opacity-0 translate-y-4" x-transition:enter-end="opacity-100 translate-y-0"
         class="space-y-6">
+        <div class="glass-panel p-5 md:p-8" x-data="runtimeStatsCard()" x-init="init()">
+            <div class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                <h3 class="text-xl font-bold text-gray-800 flex items-center gap-2">
+                    <span class="w-2 h-6 bg-slate-500 rounded-full"></span>
+                    运行时状态
+                </h3>
+                <div class="flex w-full flex-col gap-2 md:w-auto md:flex-row md:items-center">
+                    <span x-show="stats && !error"
+                        class="inline-flex items-center justify-center rounded-xl border px-3 py-2 text-xs font-bold"
+                        :class="healthPillClass()"
+                        x-text="healthText()"></span>
+                    <button type="button" @click="refresh()" :disabled="loading"
+                        class="w-full md:w-auto inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-60">
+                        <span x-show="!loading">🔄 刷新</span>
+                        <span x-show="loading" class="inline-flex items-center gap-2">
+                            <span class="animate-spin text-xs">⌛</span> 加载中...
+                        </span>
+                    </button>
+                </div>
+            </div>
+
+            <p class="mt-2 text-xs text-gray-500">仅本地登录用户可查看，用于观察当前运行负载。</p>
+
+            <div x-show="error" class="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700" x-text="error"></div>
+
+            <template x-if="stats && !error">
+                <div class="mt-4 space-y-4">
+                    <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                        <div class="rounded-xl border px-4 py-3 transition-colors" :class="metricCardClass('goroutines')">
+                            <p class="text-xs font-bold uppercase tracking-wider text-slate-500">Goroutines</p>
+                            <p class="mt-1 text-2xl font-black" :class="metricValueClass('goroutines')" x-text="stats.go?.goroutines ?? '-'"></p>
+                        </div>
+                        <div class="rounded-xl border px-4 py-3 transition-colors" :class="metricCardClass('heap')">
+                            <p class="text-xs font-bold uppercase tracking-wider text-slate-500">Heap Alloc</p>
+                            <p class="mt-1 text-2xl font-black" :class="metricValueClass('heap')" x-text="formatMB(stats.memory?.heap_alloc_bytes)"></p>
+                        </div>
+                        <div class="rounded-xl border px-4 py-3 transition-colors" :class="metricCardClass('gc_rate')">
+                            <p class="text-xs font-bold uppercase tracking-wider text-slate-500">GC / Hour</p>
+                            <p class="mt-1 text-2xl font-black" :class="metricValueClass('gc_rate')" x-text="gcPerHour()"></p>
+                        </div>
+                        <div class="rounded-xl border border-slate-200 bg-white px-4 py-3">
+                            <p class="text-xs font-bold uppercase tracking-wider text-slate-500">Num GC</p>
+                            <p class="mt-1 text-2xl font-black text-slate-800" x-text="stats.gc?.num_gc ?? '-'"></p>
+                        </div>
+                        <div class="rounded-xl border border-slate-200 bg-white px-4 py-3 sm:col-span-2 lg:col-span-4">
+                            <p class="text-xs font-bold uppercase tracking-wider text-slate-500">运行时长</p>
+                            <p class="mt-1 text-lg font-black text-slate-800" x-text="formatUptime(stats.uptime_seconds)"></p>
+                        </div>
+                    </div>
+
+                    <div class="rounded-xl border border-slate-200 bg-white px-4 py-3 text-xs text-slate-600">
+                        <p>GOMAXPROCS: <span class="font-bold text-slate-800" x-text="stats.go?.gomaxprocs ?? '-'"></span></p>
+                        <p class="mt-1">Num CPU: <span class="font-bold text-slate-800" x-text="stats.go?.num_cpu ?? '-'"></span></p>
+                        <p class="mt-1">最后 GC: <span class="font-bold text-slate-800" x-text="formatUnix(stats.gc?.last_gc_unix)"></span></p>
+                        <p class="mt-1">最后刷新: <span class="font-bold text-slate-800" x-text="lastUpdated || '-'"></span></p>
+                        <p class="mt-2 text-[11px] text-slate-500" x-text="healthHint()"></p>
+                    </div>
+                </div>
+            </template>
+        </div>
+
         <div class="glass-panel p-5 md:p-8" x-data="{
                         oldPwd: '', newPwd: '', confirmPwd: '', loading: false,
                         async submit() {
@@ -1143,6 +1204,133 @@
                 targetUrl = url + "/web/index.html?serverId=" + jellyfinServerId;
             }
             window.open(targetUrl, '_blank');
+        }
+
+        function runtimeStatsCard() {
+            return {
+                stats: null,
+                loading: false,
+                error: '',
+                hasLoaded: false,
+                lastUpdated: '',
+                init() {
+                    this.refresh();
+                    window.addEventListener('tab-security', () => {
+                        if (!this.hasLoaded) this.refresh();
+                    });
+                },
+                async refresh() {
+                    this.loading = true;
+                    this.error = '';
+                    try {
+                        const res = await fetch('/api/runtime/stats', {
+                            method: 'GET',
+                            headers: { 'Accept': 'application/json' }
+                        });
+                        let data = {};
+                        try {
+                            data = await res.json();
+                        } catch (_) {
+                            data = {};
+                        }
+                        if (!res.ok) {
+                            throw new Error(data.error || `请求失败 (${res.status})`);
+                        }
+                        this.stats = data;
+                        this.hasLoaded = true;
+                        this.lastUpdated = new Date().toLocaleString();
+                    } catch (e) {
+                        this.error = e?.message || '加载失败';
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+                formatMB(bytes) {
+                    if (typeof bytes !== 'number') return '-';
+                    return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+                },
+                formatUptime(seconds) {
+                    if (typeof seconds !== 'number') return '-';
+                    const d = Math.floor(seconds / 86400);
+                    const h = Math.floor((seconds % 86400) / 3600);
+                    const m = Math.floor((seconds % 3600) / 60);
+                    const s = Math.floor(seconds % 60);
+                    if (d > 0) return `${d}d ${h}h ${m}m`;
+                    if (h > 0) return `${h}h ${m}m ${s}s`;
+                    if (m > 0) return `${m}m ${s}s`;
+                    return `${s}s`;
+                },
+                formatUnix(unixTs) {
+                    if (!unixTs || typeof unixTs !== 'number') return '-';
+                    return new Date(unixTs * 1000).toLocaleString();
+                },
+                gcPerHour() {
+                    const numGC = this.stats?.gc?.num_gc;
+                    const uptime = this.stats?.uptime_seconds;
+                    if (typeof numGC !== 'number' || typeof uptime !== 'number' || uptime <= 0) return '-';
+                    const rate = (numGC * 3600) / uptime;
+                    return Number.isFinite(rate) ? rate.toFixed(1) : '-';
+                },
+                metricLevel(metric) {
+                    const goroutines = this.stats?.go?.goroutines ?? 0;
+                    const heapAlloc = this.stats?.memory?.heap_alloc_bytes ?? 0;
+                    const gcRateRaw = Number(this.gcPerHour());
+                    const gcRate = Number.isFinite(gcRateRaw) ? gcRateRaw : 0;
+
+                    if (metric === 'goroutines') {
+                        if (goroutines >= 1200) return 'danger';
+                        if (goroutines >= 500) return 'warn';
+                        return 'ok';
+                    }
+                    if (metric === 'heap') {
+                        if (heapAlloc >= 2 * 1024 * 1024 * 1024) return 'danger';
+                        if (heapAlloc >= 1 * 1024 * 1024 * 1024) return 'warn';
+                        return 'ok';
+                    }
+                    if (metric === 'gc_rate') {
+                        if (gcRate >= 900) return 'danger';
+                        if (gcRate >= 300) return 'warn';
+                        return 'ok';
+                    }
+                    return 'ok';
+                },
+                healthLevel() {
+                    const levels = ['goroutines', 'heap', 'gc_rate'].map((m) => this.metricLevel(m));
+                    if (levels.includes('danger')) return 'danger';
+                    if (levels.includes('warn')) return 'warn';
+                    return 'ok';
+                },
+                metricCardClass(metric) {
+                    const level = this.metricLevel(metric);
+                    if (level === 'danger') return 'border-red-200 bg-red-50';
+                    if (level === 'warn') return 'border-amber-200 bg-amber-50';
+                    return 'border-emerald-200 bg-emerald-50';
+                },
+                metricValueClass(metric) {
+                    const level = this.metricLevel(metric);
+                    if (level === 'danger') return 'text-red-700';
+                    if (level === 'warn') return 'text-amber-700';
+                    return 'text-emerald-700';
+                },
+                healthPillClass() {
+                    const level = this.healthLevel();
+                    if (level === 'danger') return 'border-red-200 bg-red-50 text-red-700';
+                    if (level === 'warn') return 'border-amber-200 bg-amber-50 text-amber-700';
+                    return 'border-emerald-200 bg-emerald-50 text-emerald-700';
+                },
+                healthText() {
+                    const level = this.healthLevel();
+                    if (level === 'danger') return '告警：负载偏高';
+                    if (level === 'warn') return '关注：负载上升';
+                    return '正常：运行平稳';
+                },
+                healthHint() {
+                    const level = this.healthLevel();
+                    if (level === 'danger') return '建议检查是否有异常任务、重复页面连接或长时间堆积的后台处理。';
+                    if (level === 'warn') return '当前负载有上升趋势，建议观察一段时间并结合下载/扫描任务确认。';
+                    return '当前指标在单人自用场景下表现正常。';
+                }
+            };
         }
     </script>
 </div>

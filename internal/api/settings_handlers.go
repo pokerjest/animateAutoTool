@@ -945,7 +945,7 @@ func CheckJellyfinConnection() (bool, string) {
 	db.DB.Where("key = ?", model.ConfigKeyProxyJellyfin).First(&proxyEnabled)
 
 	if urlCfg.Value == "" || keyCfg.Value == "" {
-		log.Printf("DEBUG: Jellyfin connection check failed: Config missing (URL: %s, Key: %s)", urlCfg.Value, keyCfg.Value)
+		log.Printf("DEBUG: Jellyfin connection check failed: Config missing (hasURL=%t, hasKey=%t)", urlCfg.Value != "", keyCfg.Value != "")
 		return false, "Config missing"
 	}
 

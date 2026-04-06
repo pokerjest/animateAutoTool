@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
@@ -41,14 +40,8 @@ func NewQBittorrentClient(baseURL string) *QBittorrentClient {
 	client.SetRetryCount(3).SetRetryWaitTime(2 * time.Second)
 
 	// Middleware to log requests
-	client.OnBeforeRequest(func(c *resty.Client, req *resty.Request) error {
+	client.OnBeforeRequest(func(_ *resty.Client, req *resty.Request) error {
 		log.Printf("DEBUG: Outgoing Request: %s %s", req.Method, req.URL)
-		log.Printf("DEBUG: Outgoing Headers: %v", req.Header)
-		if c.GetClient().Jar != nil {
-			u, _ := url.Parse(baseURL)
-			cookies := c.GetClient().Jar.Cookies(u)
-			log.Printf("DEBUG: Jar Cookies for %s: %v", baseURL, cookies)
-		}
 		return nil
 	})
 
@@ -77,11 +70,9 @@ func (q *QBittorrentClient) Login(username, password string) error {
 		return err
 	}
 
-	// Log everything
+	// Keep debug output minimal; avoid leaking credentials/cookies.
 	log.Printf("DEBUG: Login Status: %s", resp.Status())
-	log.Printf("DEBUG: Login Body: %s", resp.String())
-	log.Printf("DEBUG: Login Headers: %v", resp.Header())
-	log.Printf("DEBUG: Login Cookies: %v", resp.Cookies())
+	log.Printf("DEBUG: Login Cookie Count: %d", len(resp.Cookies()))
 
 	// Store cookies manually
 	q.cookies = resp.Cookies()

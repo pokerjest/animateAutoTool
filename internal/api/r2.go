@@ -27,15 +27,24 @@ import (
 
 // Progress Management
 type DownloadProgress struct {
-	TaskID     string `json:"task_id"`
-	TotalBytes int64  `json:"total_bytes"`
-	Downloaded int64  `json:"downloaded"`
-	Status     string `json:"status"` // "pending", "downloading", "analyzing", "completed", "error"
-	Error      string `json:"error,omitempty"`
-	ResultHTML string `json:"result_html,omitempty"`
+	TaskID     string    `json:"task_id"`
+	TotalBytes int64     `json:"total_bytes"`
+	Downloaded int64     `json:"downloaded"`
+	Status     string    `json:"status"` // "pending", "downloading", "analyzing", "completed", "error"
+	Error      string    `json:"error,omitempty"`
+	ResultHTML string    `json:"result_html,omitempty"`
+	UpdatedAt  time.Time `json:"-"`
 }
 
 var progressMap sync.Map
+
+const (
+	r2ProgressCleanupInterval = 15 * time.Minute
+	r2ProgressTerminalTTL     = 2 * time.Hour
+	r2ProgressActiveTTL       = 24 * time.Hour
+)
+
+var r2ProgressJanitorOnce sync.Once
 
 // Cache for R2 Backups
 var (
@@ -56,21 +65,10 @@ func (r *CountingReader) Read(p []byte) (int, error) {
 	n, err := r.Reader.Read(p)
 	if n > 0 {
 		r.Downloaded += int64(n)
-		// Update map periodically or on every read?
-		// For smooth UI, every read is fine if not too frequent lock contention.
-		// sync.Map is okay. To optimize, could update every N bytes.
-		// Let's just update directly for simplicity first.
 		if val, ok := progressMap.Load(r.TaskID); ok {
-			progress := val.(*DownloadProgress)
-			progress.Downloaded = r.Downloaded
-			// We store pointer, so modification is visible?
-			// sync.Map Store is safer for atomic replacement, but here we modify the struct field.
-			// Race condition possible if reading simultaneously.
-			// Better to use a mutex on the struct or replace the value in map.
-			// Let's replace in map to be safeish, or simple Mutex in struct.
-			// Simplified: Update the struct copy and Store back.
-			newProgress := *progress
+			newProgress := *(val.(*DownloadProgress))
 			newProgress.Downloaded = r.Downloaded
+			newProgress.UpdatedAt = time.Now()
 			progressMap.Store(r.TaskID, &newProgress)
 		}
 	}
@@ -129,7 +127,7 @@ func GetR2ConfigHandler(c *gin.Context) {
 	db.DB.Model(&model.GlobalConfig{}).Where("key = ?", model.ConfigKeyR2Bucket).Select("value").Scan(&bucket)
 
 	debugLog("DEBUG: GetR2ConfigHandler - Loaded: Endpoint=%s, AccessKey=%s, HasSecret=%v, Bucket=%s",
-		endpoint, accessKey, secretKey != "", bucket)
+		endpoint, maskSecret(accessKey), secretKey != "", bucket)
 
 	// Mask secret key if it exists
 	if secretKey != "" {
@@ -177,6 +175,16 @@ func UpdateR2ConfigHandler(c *gin.Context) {
 
 func isMasked(s string) bool {
 	return s == "********" || (len(s) >= 3 && s[:3] == "***") // Check for constant mask or legacy prefix
+}
+
+func maskSecret(s string) string {
+	if s == "" {
+		return ""
+	}
+	if len(s) <= 4 {
+		return "****"
+	}
+	return s[:2] + strings.Repeat("*", len(s)-4) + s[len(s)-2:]
 }
 
 func UploadToR2Handler(c *gin.Context) {
@@ -375,7 +383,8 @@ func ListR2BackupsHandler(c *gin.Context) {
 func GetR2ProgressHandler(c *gin.Context) {
 	taskID := c.Param("taskId")
 	if val, ok := progressMap.Load(taskID); ok {
-		c.JSON(http.StatusOK, val.(*DownloadProgress))
+		progress := *(val.(*DownloadProgress))
+		c.JSON(http.StatusOK, progress)
 		return
 	}
 	c.JSON(http.StatusNotFound, gin.H{"error": "Task not found"})
@@ -397,6 +406,7 @@ func StageR2BackupHandler(c *gin.Context) {
 
 	// Create Task ID
 	taskID := uuid.New().String()
+	ensureR2ProgressJanitor()
 
 	// Initialize Progress
 	progress := &DownloadProgress{
@@ -404,6 +414,7 @@ func StageR2BackupHandler(c *gin.Context) {
 		Status:     "pending",
 		TotalBytes: 0,
 		Downloaded: 0,
+		UpdatedAt:  time.Now(),
 	}
 	progressMap.Store(taskID, progress)
 
@@ -505,6 +516,7 @@ func updateProgress(taskID, status, errStr string, total, downloaded int64, html
 		Downloaded: downloaded,
 		Error:      errStr,
 		ResultHTML: html,
+		UpdatedAt:  time.Now(),
 	}
 	// If existing, preserve Total/Downloaded if passed 0?
 	// Simplified: callers pass correct values.
@@ -521,6 +533,37 @@ func updateProgress(taskID, status, errStr string, total, downloaded int64, html
 	}
 
 	progressMap.Store(taskID, p)
+}
+
+func ensureR2ProgressJanitor() {
+	r2ProgressJanitorOnce.Do(func() {
+		go func() {
+			ticker := time.NewTicker(r2ProgressCleanupInterval)
+			defer ticker.Stop()
+			for now := range ticker.C {
+				cleanupStaleR2Progress(now)
+			}
+		}()
+	})
+}
+
+func cleanupStaleR2Progress(now time.Time) {
+	progressMap.Range(func(key, value interface{}) bool {
+		progress, ok := value.(*DownloadProgress)
+		if !ok {
+			progressMap.Delete(key)
+			return true
+		}
+
+		ttl := r2ProgressActiveTTL
+		if progress.Status == "completed" || progress.Status == "error" {
+			ttl = r2ProgressTerminalTTL
+		}
+		if progress.UpdatedAt.IsZero() || now.Sub(progress.UpdatedAt) > ttl {
+			progressMap.Delete(key)
+		}
+		return true
+	})
 }
 
 // RestoreFromR2Handler - Deprecated?
@@ -596,7 +639,7 @@ func TestR2ConnectionHandler(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request: " + err.Error()})
 		return
 	}
-	debugLog("DEBUG: Testing R2 Config: Endpoint=%s, Bucket=%s, AccessKey=%s", req.Endpoint, req.Bucket, req.AccessKey)
+	debugLog("DEBUG: Testing R2 Config: Endpoint=%s, Bucket=%s, AccessKey=%s", req.Endpoint, req.Bucket, maskSecret(req.AccessKey))
 
 	// Validate inputs
 	if req.Endpoint == "" || req.AccessKey == "" || req.Bucket == "" {

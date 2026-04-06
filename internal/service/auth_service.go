@@ -78,7 +78,7 @@ func (s *AuthService) EnsureDefaultUser() {
 			}); err != nil {
 				log.Printf("Failed to persist bootstrap admin info: %v", err)
 			}
-			log.Printf("Bootstrap admin created successfully. Username: admin Password: %s", password)
+			log.Printf("Bootstrap admin created successfully. Username: admin")
 		}
 	}
 }

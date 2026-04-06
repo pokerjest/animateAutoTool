@@ -19,4 +19,6 @@ func Run() {
 
 	authSvc := service.NewAuthService()
 	authSvc.EnsureDefaultUser()
+
+	startRuntimeMonitor()
 }
