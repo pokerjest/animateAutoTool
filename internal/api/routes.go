@@ -114,6 +114,7 @@ func initRoutesLegacy(r *gin.Engine) {
 			apiGroup.POST("/settings/pikpak-sync", PikPakSyncHandler)
 			apiGroup.GET("/settings/pikpak-status", GetPikPakStatusHandler)
 			apiGroup.POST("/settings/test-connection", TestConnectionHandler)
+			apiGroup.POST("/system/pick-directory", PickDirectoryHandler)
 
 			// Local Anime
 			apiGroup.POST("/local-directories", AddLocalDirectoryHandler)

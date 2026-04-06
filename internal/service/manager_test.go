@@ -32,8 +32,9 @@ func (f fakeRSSParser) GetDashboard(year, season string) (*parser.MikanDashboard
 }
 
 type fakeDownloader struct {
-	addErr error
-	added  []string
+	addErr    error
+	added     []string
+	savePaths []string
 }
 
 func (f *fakeDownloader) Login(username, password string) error { return nil }
@@ -42,6 +43,7 @@ func (f *fakeDownloader) AddTorrent(url, savePath, category string, paused bool)
 		return f.addErr
 	}
 	f.added = append(f.added, url)
+	f.savePaths = append(f.savePaths, savePath)
 	return nil
 }
 func (f *fakeDownloader) Ping() error { return nil }
@@ -291,5 +293,80 @@ func TestProcessSubscriptionWithSourcePersistsRunSource(t *testing.T) {
 	}
 	if runLog.TriggerSource != "auto" {
 		t.Fatalf("expected auto trigger source, got %q", runLog.TriggerSource)
+	}
+}
+
+func TestProcessSubscriptionUsesGlobalBaseDirWhenSavePathEmpty(t *testing.T) {
+	withServiceTestDB(t)
+
+	if err := db.SaveGlobalConfig(model.ConfigKeyBaseDir, `E:\bangumi`); err != nil {
+		t.Fatalf("failed to save base dir config: %v", err)
+	}
+
+	sub := model.Subscription{
+		Title:    "Path Show",
+		RSSUrl:   "https://example.test/path-show",
+		IsActive: true,
+	}
+	if err := db.DB.Create(&sub).Error; err != nil {
+		t.Fatalf("failed to create subscription: %v", err)
+	}
+
+	down := &fakeDownloader{}
+	mgr := &SubscriptionManager{
+		RSSParser: fakeRSSParser{
+			episodes: []parser.Episode{
+				{Title: "[Group] Path Show - 01", EpisodeNum: "01", TorrentURL: "magnet:?xt=urn:btih:path-1"},
+			},
+		},
+		Downloader: down,
+		DB:         db.DB,
+	}
+
+	mgr.ProcessSubscription(&sub)
+
+	if len(down.savePaths) != 1 {
+		t.Fatalf("expected one save path, got %d", len(down.savePaths))
+	}
+	if down.savePaths[0] != `E:\bangumi\Path Show` {
+		t.Fatalf("unexpected save path, got %q", down.savePaths[0])
+	}
+}
+
+func TestProcessSubscriptionPrefersSubscriptionSavePath(t *testing.T) {
+	withServiceTestDB(t)
+
+	if err := db.SaveGlobalConfig(model.ConfigKeyBaseDir, `E:\bangumi`); err != nil {
+		t.Fatalf("failed to save base dir config: %v", err)
+	}
+
+	sub := model.Subscription{
+		Title:    "Custom Path Show",
+		RSSUrl:   "https://example.test/custom-path",
+		SavePath: `D:\manual`,
+		IsActive: true,
+	}
+	if err := db.DB.Create(&sub).Error; err != nil {
+		t.Fatalf("failed to create subscription: %v", err)
+	}
+
+	down := &fakeDownloader{}
+	mgr := &SubscriptionManager{
+		RSSParser: fakeRSSParser{
+			episodes: []parser.Episode{
+				{Title: "[Group] Custom Path Show - 01", EpisodeNum: "01", TorrentURL: "magnet:?xt=urn:btih:custom-1"},
+			},
+		},
+		Downloader: down,
+		DB:         db.DB,
+	}
+
+	mgr.ProcessSubscription(&sub)
+
+	if len(down.savePaths) != 1 {
+		t.Fatalf("expected one save path, got %d", len(down.savePaths))
+	}
+	if down.savePaths[0] != `D:\manual` {
+		t.Fatalf("expected subscription save path to be preferred, got %q", down.savePaths[0])
 	}
 }

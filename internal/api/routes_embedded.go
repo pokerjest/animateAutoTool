@@ -108,6 +108,7 @@ func InitRoutes(r *gin.Engine) {
 			apiGroup.POST("/settings/pikpak-sync", PikPakSyncHandler)
 			apiGroup.GET("/settings/pikpak-status", GetPikPakStatusHandler)
 			apiGroup.POST("/settings/test-connection", TestConnectionHandler)
+			apiGroup.POST("/system/pick-directory", PickDirectoryHandler)
 
 			apiGroup.POST("/local-directories", AddLocalDirectoryHandler)
 			apiGroup.DELETE("/local-directories/:id", DeleteLocalDirectoryHandler)

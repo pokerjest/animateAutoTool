@@ -113,12 +113,7 @@ func (m *SubscriptionManager) ProcessSubscriptionWithSource(sub *model.Subscript
 		}
 
 		// 3. 添加下载
-		// 默认保存路径：BaseDir / Title / Season
-		// 需要从配置读取 BaseDir，这里暂时假设 sub.SavePath 是完整的相对路径
-		savePath := sub.SavePath
-		if savePath == "" {
-			savePath = "downloads/" + sub.Title
-		}
+		savePath := m.resolveSavePath(sub)
 
 		log.Printf("DEBUG: Adding torrent to QB: %s -> %s", ep.Title, savePath)
 		err := m.Downloader.AddTorrent(ep.TorrentURL, savePath, "Anime", false)
@@ -304,4 +299,66 @@ func buildIdleRunSummary(total, filtered, duplicate int) string {
 	default:
 		return "未发现可下载新剧集"
 	}
+}
+
+func (m *SubscriptionManager) resolveSavePath(sub *model.Subscription) string {
+	if sub == nil {
+		return "downloads"
+	}
+
+	if savePath := strings.TrimSpace(sub.SavePath); savePath != "" {
+		return savePath
+	}
+
+	baseDir := strings.TrimSpace(m.loadGlobalConfigValue(model.ConfigKeyBaseDir))
+	if baseDir != "" {
+		return joinDownloadPath(baseDir, strings.TrimSpace(sub.Title))
+	}
+
+	return joinDownloadPath("downloads", strings.TrimSpace(sub.Title))
+}
+
+func (m *SubscriptionManager) loadGlobalConfigValue(key string) string {
+	if m.DB == nil {
+		return ""
+	}
+
+	var cfg model.GlobalConfig
+	if err := m.DB.Where("key = ?", key).First(&cfg).Error; err != nil {
+		return ""
+	}
+
+	return cfg.Value
+}
+
+func joinDownloadPath(base, child string) string {
+	base = strings.TrimSpace(base)
+	child = strings.TrimSpace(child)
+	if base == "" {
+		return child
+	}
+	if child == "" {
+		return base
+	}
+
+	if strings.HasSuffix(base, "/") || strings.HasSuffix(base, `\`) {
+		return base + child
+	}
+
+	sep := "/"
+	lastForwardSlash := strings.LastIndex(base, "/")
+	lastBackSlash := strings.LastIndex(base, `\`)
+	if lastBackSlash > lastForwardSlash || looksLikeWindowsDrive(base) {
+		sep = `\`
+	}
+
+	return base + sep + child
+}
+
+func looksLikeWindowsDrive(path string) bool {
+	if len(path) < 2 {
+		return false
+	}
+	drive := path[0]
+	return path[1] == ':' && ((drive >= 'A' && drive <= 'Z') || (drive >= 'a' && drive <= 'z'))
 }

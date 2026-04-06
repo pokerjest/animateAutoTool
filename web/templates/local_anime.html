@@ -21,6 +21,8 @@
     jellyfinUrl: ({{.JellyfinURL | json }} || '').replace(/\/$/, ''),
     jellyfinServerId: {{.JellyfinServerID | json }} || '',
     showAddModal: false,
+    newDirectoryPath: '',
+    pickingDirectory: false,
     showDeleteModal: false,
     deleteId: null,
     loadingDetails: false,
@@ -78,6 +80,33 @@
         this.toast.type = type;
         this.toast.show = true;
         setTimeout(() => { this.toast.show = false }, 3000);
+    },
+    async pickLocalDirectory() {
+        if (this.pickingDirectory) return;
+        this.pickingDirectory = true;
+        try {
+            const response = await fetch('/api/system/pick-directory', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    title: '选择本地番剧目录',
+                    default_path: (this.newDirectoryPath || '').trim()
+                })
+            });
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data.error || '目录选择失败');
+            }
+            if (data.cancelled) {
+                return;
+            }
+            this.newDirectoryPath = data.path || '';
+            this.showToast('已选择目录: ' + (data.path || ''), 'success');
+        } catch (e) {
+            this.showToast(e.message || '目录选择失败', 'error');
+        } finally {
+            this.pickingDirectory = false;
+        }
     },
     showPlaybackFailure(error, diagnostic = null) {
         this.playbackDiagnostic = diagnostic || null;
@@ -772,7 +801,7 @@ handleLibraryIssueUpdate($event.detail);
                 <span :class="scanning ? 'animate-spin' : ''">🔄</span>
                 <span x-text="scanning ? '扫描中...' : '重新扫描'"></span>
             </button>
-            <button @click="showAddModal = true"
+            <button @click="showAddModal = true; newDirectoryPath = ''"
                 class="justify-center bg-primary text-white px-4 py-2 rounded-lg hover:bg-accent transition shadow-md flex items-center gap-2">
                 <span>➕</span> 添加目录
             </button>
@@ -898,20 +927,26 @@ handleLibraryIssueUpdate($event.detail);
                 </h3>
 
                 <form hx-post="/api/local-directories" hx-swap="none"
-                    @htmx:after-request="if(event.detail.successful) { showAddModal = false; window.location.reload() }">
+                    @htmx:after-request="if(event.detail.successful) { showAddModal = false; newDirectoryPath = ''; window.location.reload() }">
                     <div class="mb-4">
                         <label class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">目录路径</label>
-                        <div class="relative">
-                            <span class="absolute inset-y-0 left-0 pl-3 flex items-center text-gray-400">/</span>
-                            <input type="text" name="path" required
-                                class="w-full pl-6 pr-4 py-3 rounded-xl bg-gray-50 border border-gray-200 focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none font-mono text-sm transition-all shadow-inner"
-                                placeholder="path/to/anime/library">
+                        <div class="flex items-center gap-2">
+                            <div class="relative flex-1">
+                                <span class="absolute inset-y-0 left-0 pl-3 flex items-center text-gray-400">/</span>
+                                <input type="text" name="path" x-model="newDirectoryPath" required
+                                    class="w-full pl-6 pr-4 py-3 rounded-xl bg-gray-50 border border-gray-200 focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none font-mono text-sm transition-all shadow-inner"
+                                    placeholder="path/to/anime/library">
+                            </div>
+                            <button type="button" @click="pickLocalDirectory()" :disabled="pickingDirectory"
+                                class="shrink-0 px-4 py-3 rounded-xl border border-gray-200 bg-white text-sm font-semibold text-gray-600 hover:text-primary hover:border-primary/40 transition disabled:cursor-not-allowed disabled:opacity-50">
+                                <span x-text="pickingDirectory ? '选择中...' : '浏览…'"></span>
+                            </button>
                         </div>
                         <p class="text-xs text-gray-400 mt-2 ml-1">💡 请输入服务器上的绝对路径，应用将扫描该目录下的子文件夹。</p>
                     </div>
 
                     <div class="flex justify-end gap-3 mt-8 pt-6 border-t border-gray-100">
-                        <button type="button" @click="showAddModal = false"
+                        <button type="button" @click="showAddModal = false; newDirectoryPath = ''"
                             class="px-6 py-2.5 rounded-xl border border-gray-200 text-gray-600 font-medium hover:bg-gray-50 transition-all">取消</button>
                         <button type="submit" id="add-dir-btn" hx-indicator="#add-dir-btn"
                             class="px-6 py-2.5 rounded-xl bg-primary text-white font-bold hover:bg-accent shadow-lg shadow-pink-200 transition-all active:scale-95 disabled:opacity-70 flex items-center gap-2">

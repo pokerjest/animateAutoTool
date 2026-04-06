@@ -186,9 +186,15 @@
                     <div class="mt-4 grid gap-4 md:grid-cols-2">
                         <label class="block">
                             <span class="mb-2 block text-sm font-semibold text-slate-600">默认下载目录</span>
-                            <input type="text" x-model="baseDir"
-                                class="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-primary focus:bg-white focus:ring-4 focus:ring-primary/10"
-                                placeholder="例如 D:\\Anime\\Downloads">
+                            <div class="flex items-center gap-2">
+                                <input type="text" x-model="baseDir"
+                                    class="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-primary focus:bg-white focus:ring-4 focus:ring-primary/10"
+                                    placeholder="例如 D:\\Anime\\Downloads">
+                                <button type="button" @click="pickBaseDirectory()" :disabled="pickingDirectory"
+                                    class="shrink-0 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-600 transition hover:border-primary/40 hover:text-primary disabled:cursor-not-allowed disabled:opacity-60">
+                                    <span x-text="pickingDirectory ? '选择中...' : '浏览…'"></span>
+                                </button>
+                            </div>
                         </label>
                         <label class="block" x-show="qbMode === 'external'" x-transition>
                             <span class="mb-2 block text-sm font-semibold text-slate-600">WebUI 地址</span>
@@ -234,6 +240,7 @@
             return {
                 loading: false,
                 error: '',
+                pickingDirectory: false,
                 readinessLoading: true,
                 readinessError: '',
                 readiness: [],
@@ -246,6 +253,33 @@
                 baseDir: '{{.BaseDir}}',
                 init() {
                     this.fetchReadiness();
+                },
+                async pickBaseDirectory() {
+                    if (this.pickingDirectory) {
+                        return;
+                    }
+                    this.pickingDirectory = true;
+                    try {
+                        const res = await fetch('/api/system/pick-directory', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                title: '选择默认下载目录',
+                                default_path: (this.baseDir || '').trim()
+                            })
+                        });
+                        const data = await res.json();
+                        if (!res.ok) {
+                            throw new Error(data.error || '目录选择失败');
+                        }
+                        if (!data.cancelled) {
+                            this.baseDir = data.path || '';
+                        }
+                    } catch (err) {
+                        this.error = err.message || '目录选择失败';
+                    } finally {
+                        this.pickingDirectory = false;
+                    }
                 },
                 get canSubmit() {
                     return this.newPassword.length >= 8 && this.confirmPassword.length >= 8;

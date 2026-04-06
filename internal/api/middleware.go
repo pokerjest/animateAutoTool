@@ -21,7 +21,10 @@ func setupEnforcementExempt(path string) bool {
 		return true
 	}
 
-	return path == "/logout" || strings.HasPrefix(path, "/api/setup/") || path == "/api/recovery/reset-admin"
+	return path == "/logout" ||
+		strings.HasPrefix(path, "/api/setup/") ||
+		path == "/api/recovery/reset-admin" ||
+		path == "/api/system/pick-directory"
 }
 
 func requestIsDirectLoopback(c *gin.Context) bool {
