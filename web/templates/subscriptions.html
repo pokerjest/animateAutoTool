@@ -1070,7 +1070,8 @@
             </h3>
 
             <form hx-post="/api/subscriptions" hx-swap="none" class="space-y-6"
-                @htmx:after-request="if(event.detail.successful && event.detail.elt.tagName === 'FORM') { showAddModal = false; window.location.reload() }">
+                @htmx:after-request="if(event.detail.successful && event.detail.elt.tagName === 'FORM') { showAddModal = false; window.location.reload() }"
+                @htmx:response-error="showToast('❌ 添加失败: ' + ((event.detail.xhr && event.detail.xhr.responseText) ? event.detail.xhr.responseText : '请求失败'), 'error')">
                 <div class="space-y-5">
                     <input type="hidden" name="Image" x-model="addForm.image">
                     <input type="hidden" name="SubtitleGroup" x-model="addForm.subtitle_group">

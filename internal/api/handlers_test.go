@@ -535,7 +535,7 @@ func TestProtectedWriteRequiresSameOriginHeaders(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Cookie", cookie)
 	req.RemoteAddr = "127.0.0.1:12345"
-	req.Host = "localhost:8306"
+	req.Host = testLocalHost
 	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusForbidden {

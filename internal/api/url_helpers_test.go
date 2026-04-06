@@ -141,3 +141,30 @@ func TestRequestSameOriginRejectsCrossSiteOrigin(t *testing.T) {
 		t.Fatal("expected same-origin check to reject mismatched origin")
 	}
 }
+
+func TestRequestSameOriginAcceptsRequestHostOriginWhenPublicURLDiffers(t *testing.T) {
+	prev := config.AppConfig
+	t.Cleanup(func() {
+		config.AppConfig = prev
+	})
+
+	config.AppConfig = &config.Config{
+		Server: config.ServerConfig{
+			Port:      8306,
+			PublicURL: "https://anime.example.com",
+		},
+		Auth: config.AuthConfig{SecretKey: "test"},
+	}
+
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	req := httptest.NewRequest("POST", "/api/subscriptions", nil)
+	req.Host = "localhost:8306"
+	req.RemoteAddr = testLocalRemoteAddr
+	req.Header.Set("Origin", "http://localhost:8306")
+	ctx.Request = req
+
+	if !requestSameOrigin(ctx) {
+		t.Fatal("expected same-origin check to accept request-host origin when public_url differs")
+	}
+}

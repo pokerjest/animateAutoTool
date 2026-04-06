@@ -158,17 +158,25 @@ func requestSameOrigin(c *gin.Context) bool {
 		return false
 	}
 
-	expected := normalizeRequestOrigin(getServerBaseURL(c))
-	if expected == "" {
+	allowed := map[string]struct{}{}
+	if expected := normalizeRequestOrigin(getServerBaseURL(c)); expected != "" {
+		allowed[expected] = struct{}{}
+	}
+	if expectedReq := normalizeRequestOrigin(getRequestBaseURL(c)); expectedReq != "" {
+		allowed[expectedReq] = struct{}{}
+	}
+	if len(allowed) == 0 {
 		return false
 	}
 
 	if origin := normalizeRequestOrigin(c.Request.Header.Get("Origin")); origin != "" {
-		return origin == expected
+		_, ok := allowed[origin]
+		return ok
 	}
 
 	if referer := normalizeRequestOrigin(c.Request.Header.Get("Referer")); referer != "" {
-		return referer == expected
+		_, ok := allowed[referer]
+		return ok
 	}
 
 	return false
@@ -179,6 +187,10 @@ func getServerBaseURL(c *gin.Context) string {
 		return strings.TrimRight(config.AppConfig.Server.PublicURL, "/")
 	}
 
+	return getRequestBaseURL(c)
+}
+
+func getRequestBaseURL(c *gin.Context) string {
 	if c != nil && c.Request != nil {
 		scheme := "http"
 		if c.Request.TLS != nil {

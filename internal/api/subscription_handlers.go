@@ -103,15 +103,19 @@ func CreateSubscriptionHandler(c *gin.Context) {
 }
 
 func createSubscriptionInternal(sub *model.Subscription) error {
+	if sub.Metadata == nil {
+		sub.Metadata = &model.AnimeMetadata{}
+	}
+	if sub.Metadata.Title == "" {
+		sub.Metadata.Title = parser.CleanTitle(sub.Title)
+	}
+
 	// Try to extract BangumiID from RSS URL
 	if sub.RSSUrl != "" {
 		if u, err := url.Parse(sub.RSSUrl); err == nil {
 			q := u.Query()
 			if bidStr := q.Get("bangumiId"); bidStr != "" {
 				if bid, err := strconv.Atoi(bidStr); err == nil {
-					if sub.Metadata == nil {
-						sub.Metadata = &model.AnimeMetadata{}
-					}
 					sub.Metadata.BangumiID = bid
 				}
 			}
