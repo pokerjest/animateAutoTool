@@ -48,8 +48,9 @@ build_binary() {
     local os="$1"
     local arch="$2"
     local output_path="$3"
+    local ldflags="-s -w -X github.com/pokerjest/animateAutoTool/internal/version.AppVersion=${VERSION}"
 
-    env CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -ldflags "-s -w" -o "$output_path" "$SRC_PATH"
+    env CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -ldflags "$ldflags" -o "$output_path" "$SRC_PATH"
 }
 
 write_unix_entry_script() {
@@ -193,6 +194,28 @@ EOF
     rm -rf "$stage_dir"
 }
 
+generate_checksums() {
+    local output_file="$DIST_DIR/SHA256SUMS.txt"
+
+    if command -v shasum >/dev/null 2>&1; then
+        (
+            cd "$DIST_DIR"
+            shasum -a 256 * > "$(basename "$output_file")"
+        )
+        return
+    fi
+
+    if command -v sha256sum >/dev/null 2>&1; then
+        (
+            cd "$DIST_DIR"
+            sha256sum * > "$(basename "$output_file")"
+        )
+        return
+    fi
+
+    echo -e "${YELLOW}No checksum tool found (shasum/sha256sum). Skipping SHA256SUMS generation.${NC}"
+}
+
 rm -rf "$DIST_DIR"
 mkdir -p "$DIST_DIR"
 
@@ -226,6 +249,8 @@ while IFS= read -r platform; do
 
     rm -f "$build_output"
 done < <(read_platforms)
+
+generate_checksums
 
 if ! should_build_dmg; then
     echo -e "${YELLOW}Skipping DMG packaging because hdiutil is unavailable or disabled.${NC}"

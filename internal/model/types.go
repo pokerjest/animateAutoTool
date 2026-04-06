@@ -133,32 +133,38 @@ const (
 )
 
 const (
-	ConfigKeyQBUrl               = "qb_url"
-	ConfigKeyQBUsername          = "qb_username"
-	ConfigKeyQBPassword          = "qb_password"
-	ConfigKeyQBMode              = "qb_mode"
-	ConfigKeyBaseDir             = "base_download_dir"
-	ConfigKeyBangumiAppID        = "bangumi_app_id"
-	ConfigKeyBangumiAppSecret    = "bangumi_app_secret" //nolint:gosec
-	ConfigKeyBangumiAccessToken  = "bangumi_access_token"
-	ConfigKeyBangumiRefreshToken = "bangumi_refresh_token"
-	ConfigKeyTMDBToken           = "tmdb_token"
-	ConfigKeyProxyURL            = "proxy_url"
-	ConfigKeyProxyBangumi        = "proxy_bangumi_enabled"
-	ConfigKeyProxyTMDB           = "proxy_tmdb_enabled"
-	ConfigKeyAniListToken        = "anilist_token"
-	ConfigKeyProxyAniList        = "proxy_anilist_enabled"
-	ConfigKeyJellyfinUrl         = "jellyfin_url"
-	ConfigKeyJellyfinUsername    = "jellyfin_username"
-	ConfigKeyJellyfinPassword    = "jellyfin_password"
-	ConfigKeyJellyfinApiKey      = "jellyfin_api_key" //nolint:gosec
-	ConfigKeyProxyJellyfin       = "proxy_jellyfin_enabled"
-	ConfigKeyAListUrl            = "alist_url"
-	ConfigKeyAListToken          = "alist_token"
-	ConfigKeyPikPakUsername      = "pikpak_username"
-	ConfigKeyPikPakPassword      = "pikpak_password"
-	ConfigKeyPikPakRefreshToken  = "pikpak_refresh_token" //nolint:gosec
-	ConfigKeyPikPakCaptchaToken  = "pikpak_captcha_token" //nolint:gosec
+	ConfigKeyQBUrl                     = "qb_url"
+	ConfigKeyQBUsername                = "qb_username"
+	ConfigKeyQBPassword                = "qb_password"
+	ConfigKeyQBMode                    = "qb_mode"
+	ConfigKeyBaseDir                   = "base_download_dir"
+	ConfigKeyBangumiAppID              = "bangumi_app_id"
+	ConfigKeyBangumiAppSecret          = "bangumi_app_secret" //nolint:gosec
+	ConfigKeyBangumiAccessToken        = "bangumi_access_token"
+	ConfigKeyBangumiRefreshToken       = "bangumi_refresh_token"
+	ConfigKeyTMDBToken                 = "tmdb_token"
+	ConfigKeyProxyURL                  = "proxy_url"
+	ConfigKeyProxyBangumi              = "proxy_bangumi_enabled"
+	ConfigKeyProxyTMDB                 = "proxy_tmdb_enabled"
+	ConfigKeyAniListToken              = "anilist_token"
+	ConfigKeyProxyAniList              = "proxy_anilist_enabled"
+	ConfigKeyRepoUpdateEnabled         = "repo_update_enabled"
+	ConfigKeyRepoAutoPullEnabled       = "repo_auto_pull_enabled"
+	ConfigKeyRepoUpdateIntervalMinutes = "repo_update_interval_minutes"
+	ConfigKeyRepoUpdateOwner           = "repo_update_owner"
+	ConfigKeyRepoUpdateName            = "repo_update_name"
+	ConfigKeyRepoRequireChecksum       = "repo_update_require_checksum"
+	ConfigKeyJellyfinUrl               = "jellyfin_url"
+	ConfigKeyJellyfinUsername          = "jellyfin_username"
+	ConfigKeyJellyfinPassword          = "jellyfin_password"
+	ConfigKeyJellyfinApiKey            = "jellyfin_api_key" //nolint:gosec
+	ConfigKeyProxyJellyfin             = "proxy_jellyfin_enabled"
+	ConfigKeyAListUrl                  = "alist_url"
+	ConfigKeyAListToken                = "alist_token"
+	ConfigKeyPikPakUsername            = "pikpak_username"
+	ConfigKeyPikPakPassword            = "pikpak_password"
+	ConfigKeyPikPakRefreshToken        = "pikpak_refresh_token" //nolint:gosec
+	ConfigKeyPikPakCaptchaToken        = "pikpak_captcha_token" //nolint:gosec
 
 	// Cloudflare R2
 	// Cloudflare R2

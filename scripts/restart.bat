@@ -27,5 +27,9 @@ pause
 exit /b 0
 
 :build
-    go build -ldflags="-s -w" -o "bin\animate-server.exe" "cmd/server/main.go"
+    set "BUILD_VERSION=dev"
+    if exist "VERSION" (
+        set /p BUILD_VERSION=<VERSION
+    )
+    go build -ldflags="-s -w -X github.com/pokerjest/animateAutoTool/internal/version.AppVersion=%BUILD_VERSION%" -o "bin\animate-server.exe" "cmd/server/main.go"
     exit /b %ERRORLEVEL%

@@ -2,6 +2,7 @@ package startup
 
 import (
 	"github.com/pokerjest/animateAutoTool/internal/service"
+	"github.com/pokerjest/animateAutoTool/internal/updater"
 	"github.com/pokerjest/animateAutoTool/internal/worker"
 )
 
@@ -19,6 +20,8 @@ func Run() {
 
 	authSvc := service.NewAuthService()
 	authSvc.EnsureDefaultUser()
+
+	updater.Start()
 
 	startRuntimeMonitor()
 }

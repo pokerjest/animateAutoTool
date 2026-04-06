@@ -197,13 +197,29 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
       - name: Read release version
         run: echo "APP_VERSION=${GITHUB_REF_NAME}" >> "$GITHUB_ENV"
 
       - name: Download packaged artifacts
         uses: actions/download-artifact@v4
         with:
-          path: release-artifacts
+          path: dist
+          merge-multiple: true
+
+      - name: Generate release checksums
+        run: |
+          cd dist
+          if command -v shasum >/dev/null 2>&1; then
+            shasum -a 256 * > SHA256SUMS.txt
+          else
+            sha256sum * > SHA256SUMS.txt
+          fi
+
+      - name: Validate updater release assets
+        run: DIST_DIR=./dist bash ./scripts/check_release_assets.sh "$APP_VERSION"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -213,7 +229,8 @@ jobs:
           generate_release_notes: true
           prerelease: true
           files: |
-            release-artifacts/**/*.tar.gz
-            release-artifacts/**/*.zip
-            release-artifacts/**/*.exe
-            release-artifacts/**/*.dmg
+            dist/*.tar.gz
+            dist/*.zip
+            dist/*.exe
+            dist/*.dmg
+            dist/SHA256SUMS.txt

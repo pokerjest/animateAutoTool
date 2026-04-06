@@ -22,6 +22,7 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/qbutil"
 	"github.com/pokerjest/animateAutoTool/internal/safeio"
+	"github.com/pokerjest/animateAutoTool/internal/updater"
 )
 
 const (
@@ -217,12 +218,18 @@ func UpdateSettingsHandler(c *gin.Context) {
 	case "network":
 		keysToProcess = []string{
 			model.ConfigKeyProxyURL,
+			model.ConfigKeyRepoUpdateIntervalMinutes,
+			model.ConfigKeyRepoUpdateOwner,
+			model.ConfigKeyRepoUpdateName,
 		}
 		checkboxesToProcess = []string{
 			model.ConfigKeyProxyBangumi,
 			model.ConfigKeyProxyTMDB,
 			model.ConfigKeyProxyAniList,
 			model.ConfigKeyProxyJellyfin,
+			model.ConfigKeyRepoUpdateEnabled,
+			model.ConfigKeyRepoAutoPullEnabled,
+			model.ConfigKeyRepoRequireChecksum,
 		}
 	case "media":
 		keysToProcess = []string{
@@ -255,6 +262,12 @@ func UpdateSettingsHandler(c *gin.Context) {
 			model.ConfigKeyProxyBangumi,
 			model.ConfigKeyProxyTMDB,
 			model.ConfigKeyProxyAniList,
+			model.ConfigKeyRepoUpdateEnabled,
+			model.ConfigKeyRepoAutoPullEnabled,
+			model.ConfigKeyRepoUpdateIntervalMinutes,
+			model.ConfigKeyRepoUpdateOwner,
+			model.ConfigKeyRepoUpdateName,
+			model.ConfigKeyRepoRequireChecksum,
 			model.ConfigKeyJellyfinUrl,
 			model.ConfigKeyJellyfinUsername,
 			model.ConfigKeyJellyfinPassword,
@@ -268,6 +281,9 @@ func UpdateSettingsHandler(c *gin.Context) {
 			model.ConfigKeyProxyTMDB,
 			model.ConfigKeyProxyAniList,
 			model.ConfigKeyProxyJellyfin,
+			model.ConfigKeyRepoUpdateEnabled,
+			model.ConfigKeyRepoAutoPullEnabled,
+			model.ConfigKeyRepoRequireChecksum,
 		}
 	}
 
@@ -298,7 +314,7 @@ func UpdateSettingsHandler(c *gin.Context) {
 	for _, key := range checkboxesToProcess {
 		if _, exists := c.GetPostForm(key); !exists {
 			// It was in the scope but not in the post body -> User unchecked it
-			db.DB.Model(&model.GlobalConfig{}).Where("key = ?", key).Update("value", "false")
+			persistGlobalConfig(key, "false")
 		} else {
 			// It exists -> User checked it (value="true")
 			// The loop above (keysToProcess) handles string values, but checkboxes need specific handling if they are mixed?
@@ -398,6 +414,10 @@ func UpdateSettingsHandler(c *gin.Context) {
 		successMsg += RenderBangumiStatusOOB()
 		successMsg += RenderTMDBStatusOOB()
 		successMsg += RenderAniListStatusOOB()
+	}
+	if scope == "network" {
+		go updater.CheckNow("settings-save")
+		successMsg += `<div hx-swap-oob="true" id="repo-update-refresh-trigger" hx-get="/api/settings/repo-update-status" hx-target="#repo-update-container" hx-trigger="load" class="hidden"></div>`
 	}
 
 	c.Header("Content-Type", "text/html")

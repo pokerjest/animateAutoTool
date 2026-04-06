@@ -13,6 +13,7 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/scheduler"
 	"github.com/pokerjest/animateAutoTool/internal/startup"
 	"github.com/pokerjest/animateAutoTool/internal/tray"
+	appversion "github.com/pokerjest/animateAutoTool/internal/version"
 )
 
 func main() {
@@ -30,6 +31,8 @@ func main() {
 }
 
 func runServer() {
+	log.Printf("AnimateAutoTool version: %s", appversion.AppVersion)
+
 	mgr := launcher.NewManager()
 
 	log.Println("Initializing environment (Checking Alist & qBittorrent)...")

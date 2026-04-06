@@ -9,6 +9,7 @@ PID_FILE="$BIN_DIR/server.pid"
 LOG_FILE="logs/server.log"
 SRC_PATH="cmd/server/main.go"
 SERVER_PORT=8306
+VERSION_FILE="./VERSION"
 
 # Colors
 GREEN='\033[0;32m'
@@ -64,7 +65,12 @@ function build() {
     go mod tidy
     
     # Added CGO_ENABLED=0 based on control.sh logic for better portability
-    CGO_ENABLED=1 go build -ldflags="-s -w" -o $BIN_PATH $SRC_PATH
+    BUILD_VERSION="dev"
+    if [ -f "$VERSION_FILE" ]; then
+        BUILD_VERSION=$(tr -d '[:space:]' < "$VERSION_FILE")
+    fi
+    LD_FLAGS="-s -w -X github.com/pokerjest/animateAutoTool/internal/version.AppVersion=${BUILD_VERSION}"
+    CGO_ENABLED=1 go build -ldflags="$LD_FLAGS" -o $BIN_PATH $SRC_PATH
     
     if [ $? -eq 0 ]; then
         echo -e "${GREEN}Build successful.${NC}"

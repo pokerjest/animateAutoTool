@@ -95,6 +95,9 @@ func InitRoutes(r *gin.Engine) {
 
 			apiGroup.POST("/settings", UpdateSettingsHandler)
 			apiGroup.GET("/settings/deployment-check", GetDeploymentCheckHandler)
+			apiGroup.GET("/settings/repo-update-status", GetRepoUpdateStatusHandler)
+			apiGroup.POST("/settings/repo-update-check", RepoUpdateCheckNowHandler)
+			apiGroup.POST("/settings/repo-update-pull", RepoUpdatePullNowHandler)
 			apiGroup.POST("/settings/qb-save-test", QBSaveAndTestHandler)
 			apiGroup.POST("/settings/bangumi-save", BangumiSaveHandler)
 			apiGroup.GET("/settings/qb-status", GetQBStatusHandler)

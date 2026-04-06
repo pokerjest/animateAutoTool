@@ -1,0 +1,106 @@
+{{ define "repo_update_status.html" }}
+<div id="repo-update-panel" class="bg-white/60 p-6 rounded-xl border border-white/70 shadow-sm relative overflow-hidden group">
+    <div class="relative z-10 space-y-4">
+        <div class="flex items-start justify-between gap-3">
+            <div>
+                <h3 class="text-lg font-semibold text-gray-800 flex items-center gap-2">
+                    <span>🔄</span> 应用更新
+                </h3>
+                <p class="mt-1 text-sm text-gray-500">检查 GitHub Release 并执行安装包自更新（Windows EXE / macOS DMG）。</p>
+            </div>
+            {{ if .Running }}
+            <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-blue-50 text-blue-700 border border-blue-100">
+                ⌛ 进行中
+            </span>
+            {{ else }}
+            <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold {{ if eq .LastResult "up_to_date" }}bg-emerald-50 text-emerald-700 border border-emerald-100{{ else if eq .LastResult "restarting" }}bg-emerald-50 text-emerald-700 border border-emerald-100{{ else if eq .LastResult "behind" }}bg-amber-50 text-amber-700 border border-amber-100{{ else if eq .LastResult "backoff" }}bg-amber-50 text-amber-700 border border-amber-100{{ else if eq .LastResult "disabled" }}bg-gray-100 text-gray-700 border border-gray-200{{ else if eq .LastResult "unsupported" }}bg-rose-50 text-rose-700 border border-rose-100{{ else if eq .LastResult "error" }}bg-rose-50 text-rose-700 border border-rose-100{{ else }}bg-gray-100 text-gray-700 border border-gray-200{{ end }}">
+                {{ if eq .LastResult "up_to_date" }}✅ 最新
+                {{ else if eq .LastResult "restarting" }}✅ 重启中
+                {{ else if eq .LastResult "behind" }}⚠️ 有新版本
+                {{ else if eq .LastResult "backoff" }}⏳ 退避中
+                {{ else if eq .LastResult "disabled" }}⏸️ 自动关闭
+                {{ else if eq .LastResult "unsupported" }}⚠️ 平台不支持
+                {{ else if eq .LastResult "error" }}❌ 异常
+                {{ else }}ℹ️ 未检查{{ end }}
+            </span>
+            {{ end }}
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+            <div class="rounded-lg border border-gray-200/70 bg-white/70 px-3 py-2">
+                <div class="text-gray-500">自动检查</div>
+                <div class="font-semibold text-gray-800">{{ if .Enabled }}已开启{{ else }}未开启{{ end }}</div>
+            </div>
+            <div class="rounded-lg border border-gray-200/70 bg-white/70 px-3 py-2">
+                <div class="text-gray-500">自动应用更新</div>
+                <div class="font-semibold text-gray-800">{{ if .AutoApplyEnable }}已开启{{ else }}未开启{{ end }}</div>
+            </div>
+            <div class="rounded-lg border border-gray-200/70 bg-white/70 px-3 py-2">
+                <div class="text-gray-500">完整性校验</div>
+                <div class="font-semibold text-gray-800">{{ if .RequireChecksum }}必须通过{{ else }}已关闭{{ end }}</div>
+            </div>
+            <div class="rounded-lg border border-gray-200/70 bg-white/70 px-3 py-2">
+                <div class="text-gray-500">检查间隔</div>
+                <div class="font-semibold text-gray-800">{{ .IntervalMinutes }} 分钟</div>
+            </div>
+            <div class="rounded-lg border border-gray-200/70 bg-white/70 px-3 py-2">
+                <div class="text-gray-500">最近检查</div>
+                <div class="font-semibold text-gray-800">{{ formatTime .LastCheckAt }}</div>
+            </div>
+        </div>
+
+        <div class="rounded-xl border border-gray-200/80 bg-white/70 px-4 py-3 text-sm text-gray-700 space-y-1">
+            <div>更新源：<span class="font-semibold">{{ .RepoOwner }}/{{ .RepoName }}</span></div>
+            <div>当前版本：<span class="font-semibold">{{ .CurrentVersion }}</span></div>
+            <div>最新版本：<span class="font-semibold">{{ if .LatestVersion }}{{ .LatestVersion }}{{ else }}未知{{ end }}</span></div>
+            <div>更新包：<span class="font-mono text-xs">{{ if .AssetName }}{{ .AssetName }}{{ else }}未匹配{{ end }}</span></div>
+            {{ if .ChecksumVerified }}
+            <div>完整性：<span class="font-semibold text-emerald-700">SHA256 校验通过</span></div>
+            {{ end }}
+            {{ if not .BackoffUntil.IsZero }}
+            <div>退避截止：<span class="font-semibold">{{ formatTime .BackoffUntil }}</span></div>
+            {{ end }}
+            {{ if .ReleaseURL }}
+            <div class="pt-1">
+                <a class="text-blue-600 hover:underline text-xs" href="{{ .ReleaseURL }}" target="_blank" rel="noopener noreferrer">查看 Release 页面</a>
+            </div>
+            {{ end }}
+        </div>
+
+        <div class="rounded-xl border border-gray-200/80 bg-white/70 px-4 py-3 text-sm text-gray-700">
+            <div class="font-semibold text-gray-800">结果</div>
+            <div class="mt-1">{{ .LastMessage }}</div>
+            {{ if .LastError }}
+            <div class="mt-2 text-xs text-rose-700 break-all">{{ .LastError }}</div>
+            {{ end }}
+        </div>
+
+        <div class="flex flex-wrap gap-2">
+            <button type="button"
+                hx-post="/api/settings/repo-update-check"
+                hx-target="#repo-update-container"
+                hx-swap="innerHTML"
+                class="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-bold hover:bg-blue-700 transition-all">
+                立即检查
+            </button>
+            <button type="button"
+                hx-post="/api/settings/repo-update-pull"
+                hx-target="#repo-update-container"
+                hx-swap="innerHTML"
+                class="px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-bold hover:bg-emerald-700 transition-all">
+                立即更新并重启
+            </button>
+            <button type="button"
+                hx-get="/api/settings/repo-update-status"
+                hx-target="#repo-update-container"
+                hx-swap="innerHTML"
+                class="px-4 py-2 rounded-lg bg-gray-600 text-white text-sm font-bold hover:bg-gray-700 transition-all">
+                刷新状态
+            </button>
+        </div>
+    </div>
+    <div class="absolute -right-6 -bottom-6 text-9xl text-blue-100 opacity-40 group-hover:scale-110 transition duration-500 select-none">
+        🔄
+    </div>
+</div>
+{{ end }}
