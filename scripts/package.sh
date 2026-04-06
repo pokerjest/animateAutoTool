@@ -34,6 +34,7 @@ PACKAGE_INCLUDE_ARCHIVES=${PACKAGE_INCLUDE_ARCHIVES:-1}
 PACKAGE_INCLUDE_WINDOWS_STANDALONE=${PACKAGE_INCLUDE_WINDOWS_STANDALONE:-1}
 PACKAGE_INCLUDE_DMG=${PACKAGE_INCLUDE_DMG:-auto}
 PACKAGE_TARGETS=${PACKAGE_TARGETS:-}
+PACKAGE_WINDOWS_GUI=${PACKAGE_WINDOWS_GUI:-1}
 
 read_platforms() {
     if [ -z "$PACKAGE_TARGETS" ]; then
@@ -49,6 +50,9 @@ build_binary() {
     local arch="$2"
     local output_path="$3"
     local ldflags="-s -w -X github.com/pokerjest/animateAutoTool/internal/version.AppVersion=${VERSION}"
+    if [ "$os" = "windows" ] && [ "$PACKAGE_WINDOWS_GUI" = "1" ]; then
+        ldflags="$ldflags -H=windowsgui"
+    fi
 
     env CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -ldflags "$ldflags" -o "$output_path" "$SRC_PATH"
 }
