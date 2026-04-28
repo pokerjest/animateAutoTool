@@ -91,21 +91,21 @@ func BackupPageHandler(c *gin.Context) {
 func AnalyzeBackupHandler(c *gin.Context) {
 	file, err := c.FormFile("backup_file")
 	if err != nil {
-		c.String(http.StatusBadRequest, "Please select a file")
+		htmlBadRequest(c, "请选择一个备份文件")
 		return
 	}
 
 	// Save to temp
 	tempFile, err := os.CreateTemp("", "restore_analyze_*.db")
 	if err != nil {
-		c.String(http.StatusInternalServerError, "Failed to create temp file")
+		htmlServerError(c, "创建临时备份文件", err)
 		return
 	}
 	// No defer remove, kept for Execute
 
 	src, err := file.Open()
 	if err != nil {
-		c.String(http.StatusInternalServerError, "Failed to open uploaded file")
+		htmlServerError(c, "打开上传的备份文件", err)
 		return
 	}
 	defer safeio.Close(src)
@@ -113,19 +113,24 @@ func AnalyzeBackupHandler(c *gin.Context) {
 	if _, err := io.Copy(tempFile, src); err != nil {
 		safeio.Close(tempFile)
 		safeio.Remove(tempFile.Name())
-		c.String(http.StatusInternalServerError, "Failed to write temp file")
+		htmlServerError(c, "写入临时备份文件", err)
 		return
 	}
 	if err := tempFile.Close(); err != nil {
 		safeio.Remove(tempFile.Name())
-		c.String(http.StatusInternalServerError, "Failed to finalize temp file")
+		htmlServerError(c, "完成临时备份文件写入", err)
+		return
+	}
+	if !isValidSQLite(tempFile.Name()) {
+		safeio.Remove(tempFile.Name())
+		htmlBadRequest(c, "无效的数据库备份文件")
 		return
 	}
 
 	stats, err := service.InspectBackup(tempFile.Name())
 	if err != nil {
 		safeio.Remove(tempFile.Name())
-		c.String(http.StatusBadRequest, "Invalid Database File")
+		htmlBadRequest(c, "无效的数据库备份文件")
 		return
 	}
 
@@ -140,20 +145,20 @@ func AnalyzeBackupHandler(c *gin.Context) {
 func ExecuteRestoreHandler(c *gin.Context) {
 	restoreToken := c.PostForm("temp_file")
 	if restoreToken == "" {
-		c.String(http.StatusBadRequest, "No restore file specified")
+		htmlBadRequest(c, "没有可恢复的备份文件")
 		return
 	}
 
 	tempPath, err := consumeRestoreArtifact(restoreToken)
 	if err != nil {
-		c.String(http.StatusBadRequest, err.Error())
+		htmlBadRequest(c, err.Error())
 		return
 	}
 	defer safeio.Remove(tempPath) // Cleanup after attempt
 
 	// Also ensure it's a valid SQLite file before passing to service
 	if !isValidSQLite(tempPath) {
-		c.String(http.StatusBadRequest, "Invalid Database File")
+		htmlBadRequest(c, "无效的数据库备份文件")
 		return
 	}
 
@@ -170,14 +175,14 @@ func ExecuteRestoreHandler(c *gin.Context) {
 
 	// Validate at least one option selected
 	if !options.Configs && !options.Metadata && !options.Subscriptions && !options.Logs && !options.Local && !options.Users {
-		c.String(http.StatusBadRequest, "Please select at least one table to restore")
+		htmlBadRequest(c, "请至少选择一类要恢复的数据")
 		return
 	}
 
 	// EXECUTE PARALLEL RESTORE
 	svc := service.NewRestoreService()
 	if err := svc.PerformRestore(tempPath, options); err != nil {
-		c.String(http.StatusInternalServerError, fmt.Sprintf("Restore Failed: %v", err))
+		htmlServerError(c, "恢复备份", err)
 		return
 	}
 
@@ -197,7 +202,7 @@ func ExecuteRestoreHandler(c *gin.Context) {
 
 	// Success response: Send HTMX trigger or redirect
 	c.Header("HX-Redirect", "/backup")
-	c.String(http.StatusOK, "Restore completed successfully!")
+	c.String(http.StatusOK, "备份恢复完成")
 }
 
 // Helper duplicated from r2.go if needed, or better export it.
@@ -223,19 +228,19 @@ func ExportBackupHandler(c *gin.Context) {
 
 	tempFile, err := os.CreateTemp("", "export_*.db")
 	if err != nil {
-		c.String(http.StatusInternalServerError, "Failed to create temp export file")
+		htmlServerError(c, "创建导出临时文件", err)
 		return
 	}
 	tempPath := tempFile.Name()
 	if err := tempFile.Close(); err != nil {
 		safeio.Remove(tempPath)
-		c.String(http.StatusInternalServerError, "Failed to finalize temp export file")
+		htmlServerError(c, "完成导出临时文件写入", err)
 		return
 	}
 	defer safeio.Remove(tempPath)
 
 	if err := service.CreateBackupFile(tempPath, mode); err != nil {
-		c.String(http.StatusInternalServerError, "Failed to create backup: "+err.Error())
+		htmlServerError(c, "创建备份文件", err)
 		return
 	}
 
@@ -243,5 +248,5 @@ func ExportBackupHandler(c *gin.Context) {
 }
 
 func ImportBackupHandler(c *gin.Context) {
-	c.String(http.StatusBadRequest, "Direct restore has been disabled. Please use the analyze/preview flow before restoring.")
+	htmlBadRequest(c, "已经禁用直接恢复，请先通过分析/预览流程确认备份内容。")
 }

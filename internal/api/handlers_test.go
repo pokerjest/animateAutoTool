@@ -541,7 +541,7 @@ func TestProtectedWriteRequiresSameOriginHeaders(t *testing.T) {
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("expected same-origin protection to block missing Origin/Referer, got %d", w.Code)
 	}
-	assert.Contains(t, w.Body.String(), "cross-site")
+	assert.Contains(t, w.Body.String(), "跨站")
 
 	w = httptest.NewRecorder()
 	req, _ = http.NewRequest("POST", "/api/setup/bootstrap", bytes.NewBuffer(body))
@@ -1243,10 +1243,16 @@ func TestDashboardTaskOverviewEndpointRendersStatuses(t *testing.T) {
 		service.GlobalRefreshStatus.SetTotal(5)
 		service.GlobalRefreshStatus.UpdateProgress(2, "Test Metadata")
 	}
+	service.GlobalDownloadLogSyncStatus.RecordSuccess(service.DownloadLogStatusSyncResult{
+		Updated:   2,
+		Completed: 4,
+		Active:    1,
+	})
 	t.Cleanup(func() {
 		scheduler.GlobalRunStatus.Skip("auto", "待命")
 		service.GlobalScanStatus.Skip("待命")
 		service.GlobalRefreshStatus.Finish("已结束")
+		service.GlobalDownloadLogSyncStatus.Reset()
 	})
 
 	cookie, _ := loginCookie(t, r, "admin")
@@ -1267,6 +1273,88 @@ func TestDashboardTaskOverviewEndpointRendersStatuses(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "扫描中")
 	assert.Contains(t, w.Body.String(), "元数据刷新")
 	assert.Contains(t, w.Body.String(), "Test Metadata")
+	assert.Contains(t, w.Body.String(), "下载状态同步")
+	assert.Contains(t, w.Body.String(), "最近同步：qB 修复 2 条")
+}
+
+func TestDashboardSyncHandlerStartsBackgroundTasksAndReturnsToast(t *testing.T) {
+	resetAuthFixtures(t)
+	r := setupRouter()
+
+	original := runDashboardSyncNow
+	triggered := make(chan struct{}, 1)
+	runDashboardSyncNow = func() error {
+		select {
+		case triggered <- struct{}{}:
+		default:
+		}
+		return nil
+	}
+	t.Cleanup(func() {
+		runDashboardSyncNow = original
+	})
+
+	cookie, _ := loginCookie(t, r, "admin")
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/sync", nil)
+	req.Header.Set("Cookie", cookie)
+	req.Header.Set("HX-Request", "true")
+	markLocalRequest(req)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected sync endpoint to succeed, got %d: %s", w.Code, w.Body.String())
+	}
+
+	select {
+	case <-triggered:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("expected dashboard sync to start background work")
+	}
+
+	assert.Contains(t, w.Body.String(), `"status":"started"`)
+	assert.Contains(t, w.Body.String(), "已在后台启动订阅检查、本地扫描和下载状态同步")
+	assert.Contains(t, w.Header().Get("HX-Trigger"), "app-toast")
+}
+
+func TestRunSubscriptionHandlerReturnsStructuredFailure(t *testing.T) {
+	resetAuthFixtures(t)
+	r := setupRouter()
+
+	sub := model.Subscription{Title: "Retry Me", RSSUrl: "https://example.com/rss", IsActive: true}
+	if err := db.DB.Create(&sub).Error; err != nil {
+		t.Fatalf("failed to create subscription: %v", err)
+	}
+
+	original := runSubscriptionCheck
+	runSubscriptionCheck = func(sub *model.Subscription, source string) error {
+		return fmt.Errorf("dial tcp 127.0.0.1:7603: connect: connection refused")
+	}
+	t.Cleanup(func() {
+		runSubscriptionCheck = original
+	})
+
+	cookie, _ := loginCookie(t, r, "admin")
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", fmt.Sprintf("/api/subscriptions/%d/run", sub.ID), nil)
+	req.Header.Set("Cookie", cookie)
+	req.Header.Set("HX-Request", "true")
+	markLocalRequest(req)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("expected subscription retry failure to return 500, got %d: %s", w.Code, w.Body.String())
+	}
+
+	assert.Contains(t, w.Body.String(), "立即检查订阅失败")
+	assert.NotContains(t, w.Body.String(), "<script>alert(")
+}
+
+func TestJoinHTMLListItemsEscapesWarnings(t *testing.T) {
+	html := joinHTMLListItems([]string{`Jellyfin 自动登录失败: <token>`})
+	assert.Contains(t, html, "Jellyfin 自动登录失败: &lt;token&gt;")
+	assert.NotContains(t, html, "<token>")
 }
 
 func TestRuntimeStatsEndpointRequiresAuthAndReturnsMetrics(t *testing.T) {
@@ -1461,6 +1549,10 @@ func TestRenderSubscriptionsTemplateUsesDynamicCurrentYear(t *testing.T) {
 
 	assert.Contains(t, html, "new Date().getFullYear() - i")
 	assert.NotContains(t, html, "(2025 - i).toString()")
+	assert.Contains(t, html, "@app-toast.window")
+	assert.Contains(t, html, "showNetworkFailure(error, fallback = '网络请求失败')")
+	assert.Contains(t, html, "showFailure(msg, fallback = '操作失败')")
+	assert.Contains(t, html, "detailsData?.air_date || '未知日期'")
 }
 
 func TestRenderLocalAnimeTemplateIncludesDiagnosticsRepairMethods(t *testing.T) {
@@ -1482,6 +1574,10 @@ func TestRenderLocalAnimeTemplateIncludesDiagnosticsRepairMethods(t *testing.T) 
 	assert.Contains(t, html, "replaceLocalAnimeCard(id, html)")
 	assert.Contains(t, html, "highlightRecoveredCard(id)")
 	assert.Contains(t, html, "handleLibraryIssueUpdate(detail)")
+	assert.Contains(t, html, "@app-toast.window")
+	assert.Contains(t, html, "showNetworkFailure(error, fallback = '网络请求失败')")
+	assert.Contains(t, html, "showFailure(msg, fallback = '操作失败')")
+	assert.Contains(t, html, "detailsData?.air_date || '未知日期'")
 }
 
 func TestRenderLocalAnimeCardUsesAnimeRefreshEndpoint(t *testing.T) {
@@ -1494,6 +1590,40 @@ func TestRenderLocalAnimeCardUsesAnimeRefreshEndpoint(t *testing.T) {
 	}
 
 	assert.Contains(t, html, `hx-post="/api/local-anime/7/refresh-metadata"`)
+}
+
+func TestRenderLocalAnimeCardIncludesRepairSection(t *testing.T) {
+	html, err := renderTemplateToString("local_anime_card.html", model.LocalAnime{
+		Model:            gorm.Model{ID: 8},
+		Title:            "Broken Metadata Show",
+		HasRepairActions: true,
+		CanRetryScrape:   true,
+		CanFixMatch:      true,
+		RepairHint:       "当前本地番剧的元数据不完整，可先刷新，再视情况手动修正匹配。",
+	})
+	if err != nil {
+		t.Fatalf("expected local anime card template to render, got error: %v", err)
+	}
+
+	assert.Contains(t, html, "智能修复建议")
+	assert.Contains(t, html, "重新抓取")
+	assert.Contains(t, html, "修正匹配")
+}
+
+func TestRepairFeedbackCatalogUsesConsistentLanguage(t *testing.T) {
+	assert.Equal(t, "已切回主 RSS，建议立即重新检查", repairPendingSummary(repairActionUseBaseRSS))
+	assert.Equal(t, "已清空过滤规则", repairActionLabel(repairActionClearFilter))
+	assert.Equal(t, "已清理陈旧下载记录，但自动重检未执行", repairAutoRecheckFailureSummary(repairActionResetStaleLog))
+}
+
+func TestRepairFeedbackCatalogProvidesToastMessages(t *testing.T) {
+	assert.Equal(t, "已执行智能修复，订阅已重新检查", repairSuccessToast(repairActionUseBaseRSS))
+	assert.Equal(t, "已清理阻塞记录并重新检查", repairSuccessToast(repairActionResetStaleLog))
+	assert.Equal(t, "本地番剧已完成重新抓取", repairSuccessToast(repairActionRetryScrape))
+	assert.Equal(t, "已完成下载状态修复，请查看任务总览", repairSuccessToast(repairActionSyncDownloads))
+	assert.Equal(t, "已尝试重新抓取，请查看卡片诊断", repairReviewToast(repairActionRetryScrape))
+	assert.Equal(t, "已尝试执行下载状态修复，请查看任务总览", repairReviewToast(repairActionSyncDownloads))
+	assert.Equal(t, "立即修复", repairActionCTA(repairActionSyncDownloads))
 }
 
 func TestRenderLocalScanStatusTemplateIncludesSummary(t *testing.T) {
@@ -1518,7 +1648,8 @@ func TestRenderLocalScanStatusTemplateIncludesSummary(t *testing.T) {
 	assert.Contains(t, html, "扫描任务摘要")
 	assert.Contains(t, html, "最近一轮扫描了 3 个目录：新增 4，更新 2，失败 1")
 	assert.Contains(t, html, "12 秒")
-	assert.Contains(t, html, "permission denied")
+	assert.Contains(t, html, "权限不足，请检查目录或文件访问权限。")
+	assert.Contains(t, html, `title="permission denied"`)
 }
 
 func TestRenderSettingsTemplateIncludesRuntimeStatsCard(t *testing.T) {
@@ -1535,4 +1666,554 @@ func TestRenderSettingsTemplateIncludesRuntimeStatsCard(t *testing.T) {
 	assert.Contains(t, html, "runtimeStatsCard()")
 	assert.Contains(t, html, "/api/runtime/stats")
 	assert.Contains(t, html, "运行时状态")
+}
+
+func TestRenderDashboardTemplateListensForAppToast(t *testing.T) {
+	html, err := renderTemplateToString("index.html", DashboardData{
+		SkipLayout:     true,
+		ActiveSubs:     3,
+		TodayDownloads: 7,
+	})
+	if err != nil {
+		t.Fatalf("expected dashboard template to render, got error: %v", err)
+	}
+
+	assert.Contains(t, html, "@app-toast.window")
+}
+
+func TestRenderLibraryTemplateIncludesUnifiedToastHelpers(t *testing.T) {
+	html, err := renderTemplateToString("library.html", gin.H{
+		"SkipLayout": true,
+		"Metadata":   []model.AnimeMetadata{},
+	})
+	if err != nil {
+		t.Fatalf("expected library template to render, got error: %v", err)
+	}
+
+	assert.Contains(t, html, "showNetworkFailure(error, fallback = '网络请求失败')")
+	assert.Contains(t, html, "showFailure(msg, fallback = '操作失败')")
+	assert.Contains(t, html, "air_date: d.air_date || this.modalRaw.air_date")
+}
+
+func TestRenderIndexTemplateIncludesUnifiedToastHelpers(t *testing.T) {
+	html, err := renderTemplateToString("index.html", DashboardData{
+		SkipLayout: true,
+	})
+	if err != nil {
+		t.Fatalf("expected dashboard template to render, got error: %v", err)
+	}
+
+	assert.Contains(t, html, "showNetworkFailure(error, fallback = '网络请求失败')")
+	assert.Contains(t, html, "showFailure(msg, fallback = '操作失败')")
+}
+
+func TestRenderBackupTemplateIncludesStatusMessageHelpers(t *testing.T) {
+	html, err := renderTemplateToString("backup.html", gin.H{
+		"SkipLayout": true,
+		"Stats":      BackupStats{},
+	})
+	if err != nil {
+		t.Fatalf("expected backup template to render, got error: %v", err)
+	}
+
+	assert.Contains(t, html, "normalizeMessage(msg, fallback = '')")
+	assert.Contains(t, html, "setStatus(target, message, isError = false, fallback = '')")
+	assert.Contains(t, html, "请先选择备份文件")
+}
+
+func TestRenderSubscriptionHistoryUsesFriendlyErrors(t *testing.T) {
+	now := time.Now()
+	html, err := renderTemplateToString("subscription_history.html", SubscriptionHistoryData{
+		Subscription: model.Subscription{
+			Title:         "History Show",
+			LastCheckAt:   &now,
+			LastRunStatus: service.SubscriptionRunStatusWarning,
+			LastError:     "qb offline",
+		},
+		Runs: []model.SubscriptionRunLog{
+			{
+				CheckedAt: time.Now(),
+				Status:    service.SubscriptionRunStatusError,
+				Error:     "rss unavailable",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected subscription history template to render, got error: %v", err)
+	}
+
+	assert.Contains(t, html, "无法连接 qBittorrent，请检查 WebUI 地址、账号或服务状态。")
+	assert.Contains(t, html, "订阅源暂时不可用，请稍后重试或检查 RSS 配置。")
+	assert.Contains(t, html, `title="qb offline"`)
+	assert.Contains(t, html, `title="rss unavailable"`)
+}
+
+func TestRenderLocalDiagnosticsUsesFriendlyErrors(t *testing.T) {
+	html, err := renderTemplateToString("local_anime_diagnostics.html", []model.LibraryIssue{
+		{
+			IssueType: service.LibraryIssueTypeScan,
+			Title:     "Broken Dir",
+			Message:   "permission denied",
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected diagnostics template to render, got error: %v", err)
+	}
+
+	assert.Contains(t, html, "权限不足，请检查目录或文件访问权限。")
+	assert.Contains(t, html, `title="permission denied"`)
+}
+
+func TestRenderSubscriptionTrendsUsesFriendlyErrors(t *testing.T) {
+	html, err := renderTemplateToString("subscription_trends.html", SubscriptionTrendReport{
+		TopIssueSubscriptions: []SubscriptionTrendItem{
+			{ID: 1, Title: "Flaky Show", Status: "error", StatusLabel: "失败", LastError: "qb offline", LastCheckLabel: "2 小时前"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected subscription trends template to render, got error: %v", err)
+	}
+
+	assert.Contains(t, html, "无法连接 qBittorrent，请检查 WebUI 地址、账号或服务状态。")
+	assert.Contains(t, html, `title="qb offline"`)
+}
+
+func TestRenderSubscriptionTrendsAvoidsConflictingEmptyState(t *testing.T) {
+	html, err := renderTemplateToString("subscription_trends.html", SubscriptionTrendReport{
+		WindowLabel:      "近 7 天",
+		DownloadLogCount: 23,
+		CompletedCount:   68,
+	})
+	if err != nil {
+		t.Fatalf("expected subscription trends template to render, got error: %v", err)
+	}
+
+	assert.Contains(t, html, "最近仍有 23 条下载日志更新、68 条完成记录")
+	assert.NotContains(t, html, "暂时没有新增下载的订阅。")
+}
+
+func TestTaskOverviewTextCatalogKeepsStatusLanguageConsistent(t *testing.T) {
+	assert.Equal(t, "还没有运行过订阅调度", taskNeverRunSummary("订阅调度"))
+	assert.Equal(t, "从本地番剧页触发扫描后，这里会展示最近一轮摘要。", taskNeverRunDetail("本地扫描"))
+	assert.Equal(t, "最近一轮扫描已结束", taskCompletedSummary("", "最近一轮扫描已结束"))
+	assert.Equal(t, "可在媒体库页再次触发全量或增量刷新。", taskFollowupDetail("元数据刷新"))
+	assert.Equal(t, "目标路径、完成状态和下载记录最近一轮同步正常。", taskFollowupDetail("下载状态同步"))
+}
+
+func TestHumanizeOperationErrorUsesFriendlyExplanations(t *testing.T) {
+	assert.Equal(t, "无法连接 qBittorrent，请检查 WebUI 地址、账号或服务状态。", humanizeOperationError("qb offline"))
+	assert.Equal(t, "订阅源暂时不可用，请稍后重试或检查 RSS 配置。", humanizeOperationError("rss unavailable"))
+	assert.Equal(t, "权限不足，请检查目录或文件访问权限。", humanizeOperationError("permission denied"))
+}
+
+func TestRenderTaskOverviewCardUsesFriendlyErrorButKeepsRawTitle(t *testing.T) {
+	html, err := renderTemplateToString("dashboard_task_overview.html", TaskOverviewData{
+		Downloads: TaskOverviewCard{
+			Title:        "下载状态同步",
+			StatusLabel:  "同步异常",
+			StatusTone:   "rose",
+			Summary:      "最近一次下载状态同步失败",
+			Error:        "qb offline",
+			DisplayError: humanizeOperationError("qb offline"),
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected dashboard task overview template to render, got error: %v", err)
+	}
+
+	assert.Contains(t, html, "无法连接 qBittorrent，请检查 WebUI 地址、账号或服务状态。")
+	assert.Contains(t, html, `title="qb offline"`)
+}
+
+func TestPopulateLocalAnimeActionHintForIncompleteMetadata(t *testing.T) {
+	anime := model.LocalAnime{
+		Model:   gorm.Model{ID: 99},
+		Title:   "Incomplete Show",
+		Image:   "",
+		Summary: "",
+	}
+
+	populateLocalAnimeActionHint(&anime)
+
+	assert.True(t, anime.HasRepairActions)
+	assert.True(t, anime.CanRetryScrape)
+	assert.True(t, anime.CanFixMatch)
+	assert.Contains(t, anime.RepairHint, "元数据不完整")
+}
+
+func TestRenderSubscriptionCardTemplateIncludesRepairSection(t *testing.T) {
+	html, err := renderTemplateToString("subscription_card.html", model.Subscription{
+		Model:            gorm.Model{ID: 12},
+		Title:            "Repairable Show",
+		LastRunStatus:    service.SubscriptionRunStatusIdle,
+		LastRunSummary:   "当前字幕组 RSS 为空（ANi），但该番剧主 RSS 还有 3 集可用",
+		HasRepairActions: true,
+		CanUseBaseRSS:    true,
+	})
+	if err != nil {
+		t.Fatalf("expected subscription card template to render, got error: %v", err)
+	}
+
+	assert.Contains(t, html, "智能修复建议")
+	assert.Contains(t, html, "切回主 RSS")
+}
+
+func TestDeriveBaseRSSURL(t *testing.T) {
+	got, ok := deriveBaseRSSURL("https://mikanani.me/RSS/Bangumi?bangumiId=3941&subgroupid=583")
+	if !ok {
+		t.Fatal("expected subgroup rss to derive base url")
+	}
+	assert.Equal(t, "https://mikanani.me/RSS/Bangumi?bangumiId=3941", got)
+}
+
+func TestApplyBaseRSSFallbackClearsGroupScopedFilter(t *testing.T) {
+	sub := &model.Subscription{
+		RSSUrl:        "https://mikanani.me/RSS/Bangumi?bangumiId=3941&subgroupid=583",
+		SubtitleGroup: "ANi",
+		FilterRule:    "ANi",
+		LastError:     "old",
+	}
+
+	applyBaseRSSFallback(sub, "https://mikanani.me/RSS/Bangumi?bangumiId=3941")
+
+	assert.Equal(t, "https://mikanani.me/RSS/Bangumi?bangumiId=3941", sub.RSSUrl)
+	assert.Equal(t, "", sub.SubtitleGroup)
+	assert.Equal(t, "", sub.FilterRule)
+	assert.Equal(t, "", sub.LastError)
+	assert.Contains(t, sub.LastRunSummary, "已切回主 RSS")
+}
+
+func TestPopulateSubscriptionActionHintsForEmptySubgroupFeed(t *testing.T) {
+	sub := &model.Subscription{
+		RSSUrl:         "https://mikanani.me/RSS/Bangumi?bangumiId=3941&subgroupid=583",
+		LastRunStatus:  service.SubscriptionRunStatusIdle,
+		LastRunSummary: "当前字幕组 RSS 为空（ANi），但该番剧主 RSS 还有 17 集可用",
+	}
+
+	populateSubscriptionActionHints(sub)
+
+	assert.True(t, sub.CanUseBaseRSS)
+	assert.Equal(t, "https://mikanani.me/RSS/Bangumi?bangumiId=3941", sub.BaseRSSURL)
+}
+
+func TestPopulateSubscriptionActionHintsForFilteredFeed(t *testing.T) {
+	sub := &model.Subscription{
+		FilterRule:     "ANi",
+		LastRunStatus:  service.SubscriptionRunStatusIdle,
+		LastRunSummary: "检查到 4 集，但都被过滤规则跳过",
+	}
+
+	populateSubscriptionActionHints(sub)
+
+	assert.True(t, sub.CanClearFilter)
+}
+
+func TestUseBaseRSSHandlerTriggersAutoRecheck(t *testing.T) {
+	if err := db.DB.Exec("DELETE FROM subscriptions").Error; err != nil {
+		t.Fatalf("failed to clear subscriptions: %v", err)
+	}
+
+	sub := model.Subscription{
+		Title:          "Fallback Show",
+		RSSUrl:         "https://mikanani.me/RSS/Bangumi?bangumiId=3941&subgroupid=583",
+		SubtitleGroup:  "ANi",
+		FilterRule:     "ANi",
+		LastRunStatus:  service.SubscriptionRunStatusIdle,
+		LastRunSummary: "当前字幕组 RSS 为空（ANi），但该番剧主 RSS 还有 17 集可用",
+		IsActive:       true,
+	}
+	if err := db.DB.Create(&sub).Error; err != nil {
+		t.Fatalf("failed to create subscription: %v", err)
+	}
+
+	prev := runSubscriptionCheck
+	called := false
+	runSubscriptionCheck = func(sub *model.Subscription, source string) error {
+		called = true
+		if source != "manual" {
+			t.Fatalf("expected manual source, got %q", source)
+		}
+		sub.LastRunStatus = service.SubscriptionRunStatusSuccess
+		sub.LastRunSummary = "新增 1 集待下载"
+		return nil
+	}
+	t.Cleanup(func() {
+		runSubscriptionCheck = prev
+	})
+
+	err := useBaseRSSAndRecheck(&sub, "https://mikanani.me/RSS/Bangumi?bangumiId=3941")
+	assert.NoError(t, err)
+	assert.True(t, called)
+
+	var updated model.Subscription
+	if err := db.DB.First(&updated, sub.ID).Error; err != nil {
+		t.Fatalf("failed to reload subscription: %v", err)
+	}
+
+	assert.Equal(t, "https://mikanani.me/RSS/Bangumi?bangumiId=3941", updated.RSSUrl)
+	assert.Equal(t, "", updated.SubtitleGroup)
+	assert.Equal(t, "", updated.FilterRule)
+}
+
+func TestUseBaseRSSAndRecheckRecordsConsistentFailureSummary(t *testing.T) {
+	if err := db.DB.Exec("DELETE FROM subscriptions").Error; err != nil {
+		t.Fatalf("failed to clear subscriptions: %v", err)
+	}
+
+	sub := model.Subscription{
+		Title:          "Fallback Show",
+		RSSUrl:         "https://mikanani.me/RSS/Bangumi?bangumiId=3941&subgroupid=583",
+		SubtitleGroup:  "ANi",
+		FilterRule:     "ANi",
+		LastRunStatus:  service.SubscriptionRunStatusIdle,
+		LastRunSummary: "当前字幕组 RSS 为空（ANi），但该番剧主 RSS 还有 17 集可用",
+		IsActive:       true,
+	}
+	if err := db.DB.Create(&sub).Error; err != nil {
+		t.Fatalf("failed to create subscription: %v", err)
+	}
+
+	prev := runSubscriptionCheck
+	runSubscriptionCheck = func(sub *model.Subscription, source string) error {
+		return fmt.Errorf("qb offline")
+	}
+	t.Cleanup(func() {
+		runSubscriptionCheck = prev
+	})
+
+	err := useBaseRSSAndRecheck(&sub, "https://mikanani.me/RSS/Bangumi?bangumiId=3941")
+	assert.NoError(t, err)
+
+	var updated model.Subscription
+	if err := db.DB.First(&updated, sub.ID).Error; err != nil {
+		t.Fatalf("failed to reload subscription: %v", err)
+	}
+
+	assert.Equal(t, service.SubscriptionRunStatusIdle, updated.LastRunStatus)
+	assert.Equal(t, "已切回主 RSS，但自动重检未执行", updated.LastRunSummary)
+	assert.Equal(t, "qb offline", updated.LastError)
+}
+
+func TestClearFilterAndRecheckClearsFilterAndTriggersRun(t *testing.T) {
+	if err := db.DB.Exec("DELETE FROM subscriptions").Error; err != nil {
+		t.Fatalf("failed to clear subscriptions: %v", err)
+	}
+
+	sub := model.Subscription{
+		Title:          "Filter Show",
+		RSSUrl:         "https://example.test/filter-show",
+		FilterRule:     "ANi",
+		LastRunStatus:  service.SubscriptionRunStatusIdle,
+		LastRunSummary: "检查到 4 集，但都被过滤规则跳过",
+		IsActive:       true,
+	}
+	if err := db.DB.Create(&sub).Error; err != nil {
+		t.Fatalf("failed to create subscription: %v", err)
+	}
+
+	prev := runSubscriptionCheck
+	called := false
+	runSubscriptionCheck = func(sub *model.Subscription, source string) error {
+		called = true
+		sub.LastRunStatus = service.SubscriptionRunStatusSuccess
+		sub.LastRunSummary = "新增 4 集待下载"
+		return nil
+	}
+	t.Cleanup(func() {
+		runSubscriptionCheck = prev
+	})
+
+	err := clearFilterAndRecheck(&sub)
+	assert.NoError(t, err)
+	assert.True(t, called)
+
+	var updated model.Subscription
+	if err := db.DB.First(&updated, sub.ID).Error; err != nil {
+		t.Fatalf("failed to reload subscription: %v", err)
+	}
+
+	assert.Equal(t, "", updated.FilterRule)
+}
+
+func TestClearFilterAndRecheckRecordsConsistentFailureSummary(t *testing.T) {
+	if err := db.DB.Exec("DELETE FROM subscriptions").Error; err != nil {
+		t.Fatalf("failed to clear subscriptions: %v", err)
+	}
+
+	sub := model.Subscription{
+		Title:          "Filter Show",
+		RSSUrl:         "https://example.test/filter-show",
+		FilterRule:     "ANi",
+		LastRunStatus:  service.SubscriptionRunStatusIdle,
+		LastRunSummary: "检查到 4 集，但都被过滤规则跳过",
+		IsActive:       true,
+	}
+	if err := db.DB.Create(&sub).Error; err != nil {
+		t.Fatalf("failed to create subscription: %v", err)
+	}
+
+	prev := runSubscriptionCheck
+	runSubscriptionCheck = func(sub *model.Subscription, source string) error {
+		return fmt.Errorf("qb offline")
+	}
+	t.Cleanup(func() {
+		runSubscriptionCheck = prev
+	})
+
+	err := clearFilterAndRecheck(&sub)
+	assert.NoError(t, err)
+
+	var updated model.Subscription
+	if err := db.DB.First(&updated, sub.ID).Error; err != nil {
+		t.Fatalf("failed to reload subscription: %v", err)
+	}
+
+	assert.Equal(t, service.SubscriptionRunStatusIdle, updated.LastRunStatus)
+	assert.Equal(t, "已清空过滤规则，但自动重检未执行", updated.LastRunSummary)
+	assert.Equal(t, "qb offline", updated.LastError)
+}
+
+func TestPopulateSubscriptionActionHintsForStaleDuplicateLogs(t *testing.T) {
+	if err := db.DB.Exec("DELETE FROM subscriptions").Error; err != nil {
+		t.Fatalf("failed to clear subscriptions: %v", err)
+	}
+	if err := db.DB.Exec("DELETE FROM download_logs").Error; err != nil {
+		t.Fatalf("failed to clear download logs: %v", err)
+	}
+
+	sub := model.Subscription{
+		Title:          "Blocked Show",
+		RSSUrl:         "https://example.test/blocked",
+		LastRunStatus:  service.SubscriptionRunStatusIdle,
+		LastRunSummary: "检查到 2 集，但都已经在下载记录中",
+		IsActive:       true,
+	}
+	if err := db.DB.Create(&sub).Error; err != nil {
+		t.Fatalf("failed to create subscription: %v", err)
+	}
+
+	logEntry := model.DownloadLog{
+		SubscriptionID: sub.ID,
+		Title:          "[Group] Blocked Show - 01",
+		Status:         "downloading",
+	}
+	if err := db.DB.Create(&logEntry).Error; err != nil {
+		t.Fatalf("failed to create log: %v", err)
+	}
+	oldCreatedAt := time.Now().Add(-48 * time.Hour)
+	if err := db.DB.Model(&model.DownloadLog{}).Where("id = ?", logEntry.ID).Update("created_at", oldCreatedAt).Error; err != nil {
+		t.Fatalf("failed to age log: %v", err)
+	}
+
+	populateSubscriptionActionHints(&sub)
+
+	assert.True(t, sub.CanResetStaleLogs)
+}
+
+func TestResetStaleLogsAndRecheckArchivesOldBlockingLogs(t *testing.T) {
+	if err := db.DB.Exec("DELETE FROM subscriptions").Error; err != nil {
+		t.Fatalf("failed to clear subscriptions: %v", err)
+	}
+	if err := db.DB.Exec("DELETE FROM download_logs").Error; err != nil {
+		t.Fatalf("failed to clear download logs: %v", err)
+	}
+
+	sub := model.Subscription{
+		Title:          "Blocked Show",
+		RSSUrl:         "https://example.test/blocked",
+		LastRunStatus:  service.SubscriptionRunStatusIdle,
+		LastRunSummary: "检查到 2 集，但都已经在下载记录中",
+		IsActive:       true,
+	}
+	if err := db.DB.Create(&sub).Error; err != nil {
+		t.Fatalf("failed to create subscription: %v", err)
+	}
+
+	logEntry := model.DownloadLog{
+		SubscriptionID: sub.ID,
+		Title:          "[Group] Blocked Show - 01",
+		Status:         "downloading",
+	}
+	if err := db.DB.Create(&logEntry).Error; err != nil {
+		t.Fatalf("failed to create log: %v", err)
+	}
+	oldCreatedAt := time.Now().Add(-48 * time.Hour)
+	if err := db.DB.Model(&model.DownloadLog{}).Where("id = ?", logEntry.ID).Update("created_at", oldCreatedAt).Error; err != nil {
+		t.Fatalf("failed to age log: %v", err)
+	}
+
+	prev := runSubscriptionCheck
+	called := false
+	runSubscriptionCheck = func(sub *model.Subscription, source string) error {
+		called = true
+		sub.LastRunStatus = service.SubscriptionRunStatusSuccess
+		sub.LastRunSummary = "新增 2 集待下载"
+		return nil
+	}
+	t.Cleanup(func() {
+		runSubscriptionCheck = prev
+	})
+
+	err := resetStaleLogsAndRecheck(&sub, 24*time.Hour)
+	assert.NoError(t, err)
+	assert.True(t, called)
+
+	var updatedLog model.DownloadLog
+	if err := db.DB.First(&updatedLog, logEntry.ID).Error; err != nil {
+		t.Fatalf("failed to reload log: %v", err)
+	}
+	assert.Equal(t, "archived", updatedLog.Status)
+}
+
+func TestResetStaleLogsAndRecheckRecordsConsistentFailureSummary(t *testing.T) {
+	if err := db.DB.Exec("DELETE FROM subscriptions").Error; err != nil {
+		t.Fatalf("failed to clear subscriptions: %v", err)
+	}
+	if err := db.DB.Exec("DELETE FROM download_logs").Error; err != nil {
+		t.Fatalf("failed to clear download logs: %v", err)
+	}
+
+	sub := model.Subscription{
+		Title:          "Blocked Show",
+		RSSUrl:         "https://example.test/blocked",
+		LastRunStatus:  service.SubscriptionRunStatusIdle,
+		LastRunSummary: "检查到 2 集，但都已经在下载记录中",
+		IsActive:       true,
+	}
+	if err := db.DB.Create(&sub).Error; err != nil {
+		t.Fatalf("failed to create subscription: %v", err)
+	}
+
+	logEntry := model.DownloadLog{
+		SubscriptionID: sub.ID,
+		Title:          "[Group] Blocked Show - 01",
+		Status:         "downloading",
+	}
+	if err := db.DB.Create(&logEntry).Error; err != nil {
+		t.Fatalf("failed to create log: %v", err)
+	}
+	oldCreatedAt := time.Now().Add(-48 * time.Hour)
+	if err := db.DB.Model(&model.DownloadLog{}).Where("id = ?", logEntry.ID).Update("created_at", oldCreatedAt).Error; err != nil {
+		t.Fatalf("failed to age log: %v", err)
+	}
+
+	prev := runSubscriptionCheck
+	runSubscriptionCheck = func(sub *model.Subscription, source string) error {
+		return fmt.Errorf("qb offline")
+	}
+	t.Cleanup(func() {
+		runSubscriptionCheck = prev
+	})
+
+	err := resetStaleLogsAndRecheck(&sub, 24*time.Hour)
+	assert.NoError(t, err)
+
+	var updated model.Subscription
+	if err := db.DB.First(&updated, sub.ID).Error; err != nil {
+		t.Fatalf("failed to reload subscription: %v", err)
+	}
+
+	assert.Equal(t, service.SubscriptionRunStatusIdle, updated.LastRunStatus)
+	assert.Equal(t, "已清理陈旧下载记录，但自动重检未执行", updated.LastRunSummary)
+	assert.Equal(t, "qb offline", updated.LastError)
 }

@@ -10,6 +10,17 @@
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
     <!-- Tailwind CSS -->
+    <script>
+        (function () {
+            const originalWarn = console.warn;
+            console.warn = function (...args) {
+                if (typeof args[0] === 'string' && args[0].includes('cdn.tailwindcss.com should not be used in production')) {
+                    return;
+                }
+                return originalWarn.apply(console, args);
+            };
+        })();
+    </script>
     <script src="/static/js/tailwindcss.js?v=3"></script>
     <!-- HTMX & Extensions -->
     <script src="https://unpkg.com/htmx.org@1.9.10"
@@ -207,7 +218,7 @@
                     });
 
                     source.onerror = () => {
-                        console.warn('SSE disconnected');
+                        console.debug('SSE disconnected');
                     };
 
                     source.addEventListener('scheduler_run', (e) => {
@@ -408,7 +419,7 @@
             </nav>
 
             <div class="text-xs text-gray-500 text-center mt-4">
-                v0.4.3 Beta
+                {{ appVersion }}
             </div>
         </div>
 

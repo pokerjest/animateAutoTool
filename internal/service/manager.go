@@ -3,7 +3,7 @@ package service
 import (
 	"fmt"
 	"log"
-	"regexp"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -73,14 +73,7 @@ func (m *SubscriptionManager) ProcessSubscriptionWithSource(sub *model.Subscript
 
 	log.Printf("DEBUG: Fetched %d episodes from RSS", len(episodes))
 
-	// 编译正则
-	var filterRe, excludeRe *regexp.Regexp
-	if sub.FilterRule != "" {
-		filterRe, _ = regexp.Compile(sub.FilterRule)
-	}
-	if sub.ExcludeRule != "" {
-		excludeRe, _ = regexp.Compile(sub.ExcludeRule)
-	}
+	rules := buildSubscriptionRuleSet(sub)
 
 	addedCount := 0
 	failedCount := 0
@@ -91,13 +84,8 @@ func (m *SubscriptionManager) ProcessSubscriptionWithSource(sub *model.Subscript
 
 	for _, ep := range episodes {
 		// 1. 规则过滤
-		if filterRe != nil && !filterRe.MatchString(ep.Title) {
-			log.Printf("DEBUG: Filter skipped: %s (Rule: %s)", ep.Title, sub.FilterRule)
-			filteredCount++
-			continue
-		}
-		if excludeRe != nil && excludeRe.MatchString(ep.Title) {
-			log.Printf("DEBUG: Exclude skipped: %s (Rule: %s)", ep.Title, sub.ExcludeRule)
+		if !rules.allows(ep) {
+			log.Printf("DEBUG: Rule skipped: %s (Filter: %s Exclude: %s SubGroup: %s)", ep.Title, sub.FilterRule, sub.ExcludeRule, ep.SubGroup)
 			filteredCount++
 			continue
 		}
@@ -186,7 +174,7 @@ func (m *SubscriptionManager) ProcessSubscriptionWithSource(sub *model.Subscript
 		state.Summary = fmt.Sprintf("本次检查有 %d 集加入下载失败", failedCount)
 	default:
 		state.Status = SubscriptionRunStatusIdle
-		state.Summary = buildIdleRunSummary(len(episodes), filteredCount, duplicateCount)
+		state.Summary = strings.TrimSpace(m.buildIdleRunSummary(sub, len(episodes), filteredCount, duplicateCount))
 	}
 
 	m.persistRunState(sub, state)
@@ -286,9 +274,20 @@ func normalizeRunSource(source string) string {
 	}
 }
 
-func buildIdleRunSummary(total, filtered, duplicate int) string {
+func (m *SubscriptionManager) buildIdleRunSummary(sub *model.Subscription, total, filtered, duplicate int) string {
+	subtitleGroup := ""
+	if sub != nil {
+		subtitleGroup = strings.TrimSpace(sub.SubtitleGroup)
+	}
+
 	switch {
 	case total == 0:
+		if diagnosed := m.diagnoseEmptySubscriptionFeed(sub); diagnosed != "" {
+			return diagnosed
+		}
+		if subtitleGroup != "" {
+			return fmt.Sprintf("RSS 当前没有可用剧集（字幕组 %s）", subtitleGroup)
+		}
 		return "RSS 当前没有可用剧集"
 	case filtered > 0 && duplicate == 0:
 		return fmt.Sprintf("检查到 %d 集，但都被过滤规则跳过", total)
@@ -299,6 +298,39 @@ func buildIdleRunSummary(total, filtered, duplicate int) string {
 	default:
 		return "未发现可下载新剧集"
 	}
+}
+
+func (m *SubscriptionManager) diagnoseEmptySubscriptionFeed(sub *model.Subscription) string {
+	if m == nil || m.RSSParser == nil || sub == nil {
+		return ""
+	}
+
+	subtitleGroup := strings.TrimSpace(sub.SubtitleGroup)
+	if subtitleGroup == "" || strings.TrimSpace(sub.RSSUrl) == "" {
+		return ""
+	}
+
+	u, err := url.Parse(sub.RSSUrl)
+	if err != nil {
+		return ""
+	}
+	query := u.Query()
+	if query.Get("subgroupid") == "" {
+		return ""
+	}
+	query.Del("subgroupid")
+	u.RawQuery = query.Encode()
+	fallbackURL := u.String()
+	if fallbackURL == "" || fallbackURL == strings.TrimSpace(sub.RSSUrl) {
+		return ""
+	}
+
+	episodes, err := m.RSSParser.Parse(fallbackURL)
+	if err != nil || len(episodes) == 0 {
+		return ""
+	}
+
+	return fmt.Sprintf("当前字幕组 RSS 为空（%s），但该番剧主 RSS 还有 %d 集可用", subtitleGroup, len(episodes))
 }
 
 func (m *SubscriptionManager) resolveSavePath(sub *model.Subscription) string {

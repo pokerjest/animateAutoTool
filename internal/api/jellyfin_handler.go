@@ -216,20 +216,20 @@ func GetPlayInfoHandler(c *gin.Context) {
 	idStr := c.Param("id")
 	epID, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid Episode ID"})
+		jsonBadRequest(c, "剧集 ID 无效")
 		return
 	}
 
 	// 1. Fetch Local Data
 	var ep model.LocalEpisode
 	if err := db.DB.First(&ep, epID).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Episode not found"})
+		jsonNotFound(c, "未找到对应的剧集")
 		return
 	}
 
 	var anime model.LocalAnime
 	if err := db.DB.Preload("Metadata").First(&anime, ep.LocalAnimeID).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Anime not found"})
+		jsonNotFound(c, "未找到对应的番剧")
 		return
 	}
 
@@ -340,7 +340,7 @@ func ReportProgressHandler(c *gin.Context) {
 		Ticks     int64  `json:"ticks"`      // Current position in ticks
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		jsonBadRequest(c, "播放进度请求格式不正确")
 		return
 	}
 
@@ -348,7 +348,7 @@ func ReportProgressHandler(c *gin.Context) {
 	var ep model.LocalEpisode
 	if err := db.DB.First(&ep, body.EpisodeID).Error; err != nil {
 		log.Printf("[DEBUG] PlayInfo: Episode %d not found in DB", body.EpisodeID)
-		c.JSON(http.StatusNotFound, gin.H{"error": "Episode not found"})
+		jsonNotFound(c, "未找到对应的剧集")
 		return
 	}
 

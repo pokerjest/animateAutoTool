@@ -8,7 +8,7 @@
     data-has-new="{{ if gt .LastNewDownloads 0 }}true{{ else }}false{{ end }}"
     data-has-error="{{ if .LastError }}true{{ else }}false{{ end }}"
     data-summary="{{ .LastRunSummary }}"
-    data-error-message="{{ .LastError }}"
+    data-error-message="{{ if .LastErrorDisplay }}{{ .LastErrorDisplay }}{{ else }}{{ .LastError }}{{ end }}"
     data-last-check="{{ timeAgo .LastCheckAt }}"
     data-status-label="{{ if eq .LastRunStatus "success" }}下载成功{{ else if eq .LastRunStatus "warning" }}部分失败{{ else if eq .LastRunStatus "error" }}检查失败{{ else if eq .LastRunStatus "idle" }}无新内容{{ else }}未运行{{ end }}"
     class="bg-white/60 backdrop-blur-md rounded-2xl shadow-sm border border-white/70 hover:shadow-xl transition-all duration-300 hover:-translate-y-1 relative group overflow-hidden flex flex-col">
@@ -148,6 +148,60 @@
             <div class="text-[11px] text-gray-400 italic">还没有执行记录</div>
             {{ end }}
 
+            {{ if .HasRepairActions }}
+            <div class="space-y-2 rounded-xl border border-sky-100 bg-sky-50/60 px-2.5 py-2.5">
+                <div class="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wide text-sky-700">
+                    <span class="inline-flex h-4 w-4 items-center justify-center rounded-md bg-white text-[9px] shadow-sm">🛠</span>
+                    <span>智能修复建议</span>
+                </div>
+
+                {{ if .CanUseBaseRSS }}
+                <div class="flex items-center justify-between gap-3 rounded-lg border border-blue-100 bg-blue-50/80 px-2.5 py-2">
+                    <div class="min-w-0 text-[10px] text-blue-700 leading-relaxed">
+                        主 RSS 仍有内容，可切回通用订阅继续抓取。
+                    </div>
+                    <button
+                        hx-post="/api/subscriptions/{{ .ID }}/use-base-rss"
+                        hx-target="#sub-card-{{.ID}}"
+                        hx-swap="outerHTML swap:120ms settle:220ms"
+                        class="shrink-0 rounded-lg border border-blue-200 bg-white px-2.5 py-1 text-[10px] font-bold text-blue-700 hover:bg-blue-50 transition">
+                        切回主 RSS
+                    </button>
+                </div>
+                {{ end }}
+
+                {{ if .CanClearFilter }}
+                <div class="flex items-center justify-between gap-3 rounded-lg border border-amber-100 bg-amber-50/80 px-2.5 py-2">
+                    <div class="min-w-0 text-[10px] text-amber-700 leading-relaxed">
+                        当前 RSS 有内容，但被过滤规则全部拦下了。
+                    </div>
+                    <button
+                        hx-post="/api/subscriptions/{{ .ID }}/clear-filter"
+                        hx-target="#sub-card-{{.ID}}"
+                        hx-swap="outerHTML swap:120ms settle:220ms"
+                        class="shrink-0 rounded-lg border border-amber-200 bg-white px-2.5 py-1 text-[10px] font-bold text-amber-700 hover:bg-amber-50 transition">
+                        清空过滤并重试
+                    </button>
+                </div>
+                {{ end }}
+
+                {{ if .CanResetStaleLogs }}
+                <div class="flex items-center justify-between gap-3 rounded-lg border border-rose-100 bg-rose-50/80 px-2.5 py-2">
+                    <div class="min-w-0 text-[10px] text-rose-700 leading-relaxed">
+                        有旧的下载记录仍在阻塞本次检查，可先清理再重试。
+                    </div>
+                    <button
+                        hx-post="/api/subscriptions/{{ .ID }}/reset-logs"
+                        hx-target="#sub-card-{{.ID}}"
+                        hx-swap="outerHTML swap:120ms settle:220ms"
+                        class="shrink-0 rounded-lg border border-rose-200 bg-white px-2.5 py-1 text-[10px] font-bold text-rose-700 hover:bg-rose-50 transition">
+                        清理阻塞并重试
+                    </button>
+                </div>
+                {{ end }}
+            </div>
+            {{ end }}
+
             {{ if .LastDownloadedTitle }}
             <div class="flex items-center gap-2 text-[10px] text-emerald-700" title="最近一次加入下载：{{ .LastDownloadedTitle }}">
                 <span class="w-4 h-4 flex items-center justify-center bg-emerald-50 rounded shadow-sm text-[8px]">⬇️</span>
@@ -158,7 +212,7 @@
             {{ if .LastError }}
             <div class="flex items-center gap-2 text-[10px] text-red-600" title="{{ .LastError }}">
                 <span class="w-4 h-4 flex items-center justify-center bg-red-50 rounded shadow-sm text-[8px]">⚠️</span>
-                <span class="truncate flex-1">{{ .LastError }}</span>
+                <span class="truncate flex-1">{{ if .LastErrorDisplay }}{{ .LastErrorDisplay }}{{ else }}{{ .LastError }}{{ end }}</span>
             </div>
             {{ end }}
 
@@ -186,7 +240,7 @@
         <!-- Status -->
         <div class="flex items-center">
             {{ if .IsActive }}
-            <button id="toggle-{{.ID}}" hx-post="/api/subscriptions/{{ .ID }}/toggle" hx-target="#sub-card-{{.ID}}" hx-swap="outerHTML"
+            <button id="toggle-{{.ID}}" hx-post="/api/subscriptions/{{ .ID }}/toggle" hx-target="#sub-card-{{.ID}}" hx-swap="outerHTML swap:120ms settle:220ms"
                 hx-indicator="#toggle-{{.ID}}"
                 class="px-3 py-1 rounded-full text-[10px] font-black tracking-tight text-emerald-600 bg-emerald-50 border border-emerald-100 hover:bg-emerald-100 transition shadow-sm flex items-center gap-1.5 cursor-pointer">
                 <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
@@ -194,7 +248,7 @@
                 <span class="htmx-indicator hidden animate-spin">⌛</span>
             </button>
             {{ else }}
-            <button id="toggle-{{.ID}}" hx-post="/api/subscriptions/{{ .ID }}/toggle" hx-target="#sub-card-{{.ID}}" hx-swap="outerHTML"
+            <button id="toggle-{{.ID}}" hx-post="/api/subscriptions/{{ .ID }}/toggle" hx-target="#sub-card-{{.ID}}" hx-swap="outerHTML swap:120ms settle:220ms"
                 hx-indicator="#toggle-{{.ID}}"
                 class="px-3 py-1 rounded-full text-[10px] font-black tracking-tight text-gray-500 bg-gray-100 border border-gray-200 hover:bg-gray-200 transition shadow-sm flex items-center gap-1.5 cursor-pointer">
                 <span class="w-1.5 h-1.5 rounded-full bg-gray-400"></span>
@@ -206,7 +260,7 @@
 
         <!-- Actions -->
         <div class="flex items-center gap-0.5">
-            <button hx-post="/api/subscriptions/{{ .ID }}/run" hx-target="#sub-card-{{.ID}}" hx-swap="outerHTML"
+            <button hx-post="/api/subscriptions/{{ .ID }}/run" hx-target="#sub-card-{{.ID}}" hx-swap="outerHTML swap:120ms settle:220ms"
                 class="min-h-9 min-w-9 p-2 text-gray-400 hover:text-blue-600 hover:bg-white rounded-xl transition-all hover:shadow-sm"
                 title="立即运行">
                 <span class="text-sm">▶️</span>
@@ -231,7 +285,7 @@
                 <span class="text-sm">✏️</span>
             </button>
 
-            <button hx-post="/api/subscriptions/{{ .ID }}/refresh-metadata" hx-swap="outerHTML"
+            <button hx-post="/api/subscriptions/{{ .ID }}/refresh-metadata" hx-swap="outerHTML swap:120ms settle:220ms"
                 hx-target="#sub-card-{{.ID}}"
                 class="min-h-9 min-w-9 p-2 text-gray-400 hover:text-purple-600 hover:bg-white rounded-xl transition-all hover:shadow-sm"
                 title="刷新元数据">

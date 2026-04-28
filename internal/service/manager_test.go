@@ -12,12 +12,24 @@ import (
 )
 
 type fakeRSSParser struct {
-	episodes []parser.Episode
-	err      error
+	episodes   []parser.Episode
+	err        error
+	episodesBy map[string][]parser.Episode
+	errByURL   map[string]error
 }
 
 func (f fakeRSSParser) Name() string { return "fake" }
 func (f fakeRSSParser) Parse(url string) ([]parser.Episode, error) {
+	if f.errByURL != nil {
+		if err, ok := f.errByURL[url]; ok {
+			return nil, err
+		}
+	}
+	if f.episodesBy != nil {
+		if episodes, ok := f.episodesBy[url]; ok {
+			return episodes, nil
+		}
+	}
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -162,6 +174,80 @@ func TestProcessSubscriptionPersistsIdleStateForDuplicates(t *testing.T) {
 	}
 	if updated.LastNewDownloads != 0 {
 		t.Fatalf("expected no new downloads, got %d", updated.LastNewDownloads)
+	}
+}
+
+func TestProcessSubscriptionPersistsIdleStateForEmptySubgroupRSS(t *testing.T) {
+	withServiceTestDB(t)
+
+	sub := model.Subscription{
+		Title:         "Empty Group Show",
+		RSSUrl:        "https://example.test/empty-group",
+		SubtitleGroup: "ANi",
+		IsActive:      true,
+	}
+	if err := db.DB.Create(&sub).Error; err != nil {
+		t.Fatalf("failed to create subscription: %v", err)
+	}
+
+	mgr := &SubscriptionManager{
+		RSSParser:  fakeRSSParser{episodes: []parser.Episode{}},
+		Downloader: &fakeDownloader{},
+		DB:         db.DB,
+	}
+
+	mgr.ProcessSubscription(&sub)
+
+	var updated model.Subscription
+	if err := db.DB.First(&updated, sub.ID).Error; err != nil {
+		t.Fatalf("failed to reload subscription: %v", err)
+	}
+
+	if updated.LastRunStatus != SubscriptionRunStatusIdle {
+		t.Fatalf("expected idle status, got %q", updated.LastRunStatus)
+	}
+	if updated.LastRunSummary != "RSS 当前没有可用剧集（字幕组 ANi）" {
+		t.Fatalf("unexpected empty subgroup summary: %q", updated.LastRunSummary)
+	}
+}
+
+func TestProcessSubscriptionDiagnosesEmptySubgroupFeedWhenBaseRSSHasEpisodes(t *testing.T) {
+	withServiceTestDB(t)
+
+	sub := model.Subscription{
+		Title:         "Diag Show",
+		RSSUrl:        "https://example.test/rss?bangumiId=1&subgroupid=583",
+		SubtitleGroup: "ANi",
+		IsActive:      true,
+	}
+	if err := db.DB.Create(&sub).Error; err != nil {
+		t.Fatalf("failed to create subscription: %v", err)
+	}
+
+	mgr := &SubscriptionManager{
+		RSSParser: fakeRSSParser{
+			episodesBy: map[string][]parser.Episode{
+				"https://example.test/rss?bangumiId=1&subgroupid=583": {},
+				"https://example.test/rss?bangumiId=1": {
+					{Title: "[Other] Diag Show - 01", EpisodeNum: "01"},
+					{Title: "[Other] Diag Show - 02", EpisodeNum: "02"},
+				},
+			},
+		},
+		Downloader: &fakeDownloader{},
+		DB:         db.DB,
+	}
+
+	mgr.ProcessSubscription(&sub)
+
+	var updated model.Subscription
+	if err := db.DB.First(&updated, sub.ID).Error; err != nil {
+		t.Fatalf("failed to reload subscription: %v", err)
+	}
+
+	want := "当前字幕组 RSS 为空（ANi），但该番剧主 RSS 还有 2 集可用"
+	if updated.LastRunSummary != want {
+		t.Fatalf("unexpected diagnostic summary: got %q want %q", updated.LastRunSummary, want)
 	}
 }
 

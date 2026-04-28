@@ -7,6 +7,22 @@
             config: { endpoint: '', access_key: '', secret_key: '', bucket: '' },
             backups: [],
             loading: true,
+            minimumActionDelay: 320,
+            normalizeMessage(msg, fallback = '') {
+                const value = String(msg || fallback || '').trim();
+                return value.replace(/^[✅❌⚠️🎉]\s*/u, '') || fallback;
+            },
+            waitMinimum(startedAt, minimum = this.minimumActionDelay) {
+                const elapsed = Date.now() - startedAt;
+                if (elapsed < minimum) {
+                    return new Promise(resolve => setTimeout(resolve, minimum - elapsed));
+                }
+                return Promise.resolve();
+            },
+            setStatus(target, message, isError = false, fallback = '') {
+                this[`${target}Error`] = isError;
+                this[`${target}Message`] = this.normalizeMessage(message, fallback);
+            },
 
             init() {
                 this.loadConfig();
@@ -24,6 +40,7 @@
             testMessage: '',
             testError: false,
             testConnection() {
+                const startedAt = Date.now();
                 this.loading = true;
                 this.testMessage = '测试中...';
                 this.testError = false;
@@ -34,26 +51,26 @@
                     body: JSON.stringify(this.config)
                 })
                     .then(r => r.json())
-                    .then(data => {
+                    .then(async data => {
+                        await this.waitMinimum(startedAt);
                         this.loading = false;
                         if (data.error) {
-                            this.testError = true;
-                            this.testMessage = '连接失败: ' + data.error;
+                            this.setStatus('test', '连接失败: ' + data.error, true, '连接失败');
                         } else {
-                            this.testError = false;
-                            this.testMessage = '连接成功: ' + data.message;
+                            this.setStatus('test', '连接成功: ' + data.message, false, '连接成功');
                         }
                         setTimeout(() => this.testMessage = '', 5000);
                     })
-                    .catch(e => {
+                    .catch(async e => {
+                        await this.waitMinimum(startedAt);
                         this.loading = false;
-                        this.testError = true;
-                        this.testMessage = '请求错误: ' + e;
+                        this.setStatus('test', '请求错误: ' + e, true, '请求错误');
                         setTimeout(() => this.testMessage = '', 5000);
                     });
             },
 
             saveConfig() {
+                const startedAt = Date.now();
                 this.testMessage = '保存中...';
                 fetch('/api/backup/r2/config', {
                     method: 'POST',
@@ -61,15 +78,15 @@
                     body: JSON.stringify(this.config)
                 })
                     .then(r => r.json())
-                    .then(() => {
-                        this.testError = false;
-                        this.testMessage = '配置已保存';
+                    .then(async () => {
+                        await this.waitMinimum(startedAt);
+                        this.setStatus('test', '配置已保存', false, '配置已保存');
                         this.loadBackups();
                         setTimeout(() => this.testMessage = '', 3000);
                     })
-                    .catch(e => {
-                        this.testError = true;
-                        this.testMessage = '保存失败: ' + e;
+                    .catch(async e => {
+                        await this.waitMinimum(startedAt);
+                        this.setStatus('test', '保存失败: ' + e, true, '保存失败');
                         setTimeout(() => this.testMessage = '', 5000);
                     });
             },
@@ -77,26 +94,26 @@
             uploadMessage: '',
             uploadError: false,
             upload() {
+                const startedAt = Date.now();
                 this.loading = true;
                 this.uploadMessage = '上传中...';
                 this.uploadError = false;
 
                 fetch('/api/backup/r2/upload', { method: 'POST' })
                     .then(r => r.json())
-                    .then(data => {
+                    .then(async data => {
+                        await this.waitMinimum(startedAt);
                         if (data.error) {
-                            this.uploadError = true;
-                            this.uploadMessage = '上传失败: ' + data.error;
+                            this.setStatus('upload', '上传失败: ' + data.error, true, '上传失败');
                         } else {
-                            this.uploadError = false;
-                            this.uploadMessage = '上传成功';
+                            this.setStatus('upload', '上传成功', false, '上传成功');
                             this.loadBackups();
                         }
                         setTimeout(() => this.uploadMessage = '', 5000);
                     })
-                    .catch(e => {
-                        this.uploadError = true;
-                        this.uploadMessage = '上传错误: ' + e;
+                    .catch(async e => {
+                        await this.waitMinimum(startedAt);
+                        this.setStatus('upload', '上传错误: ' + e, true, '上传错误');
                         setTimeout(() => this.uploadMessage = '', 5000);
                     })
                     .finally(() => this.loading = false);
@@ -229,11 +246,13 @@
             },
 
             doDelete() {
+                const startedAt = Date.now();
                 const formData = new FormData();
                 formData.append('key', this.currentKey);
                 fetch('/api/backup/r2/delete', { method: 'POST', body: formData })
                     .then(r => r.json())
-                    .then(data => {
+                    .then(async data => {
+                        await this.waitMinimum(startedAt);
                         if (data.error) {
                             this.confirmMessage = '删除失败: ' + data.error;
                             this.confirmTitle = '错误';
@@ -242,7 +261,8 @@
                             this.loadBackups();
                         }
                     })
-                    .catch(e => {
+                    .catch(async e => {
+                        await this.waitMinimum(startedAt);
                         this.confirmMessage = '删除错误: ' + e;
                         this.confirmTitle = '错误';
                     })
@@ -331,7 +351,19 @@
                 </p>
 
                 <form hx-post="/api/backup/analyze" hx-encoding="multipart/form-data" hx-target="#restore-preview"
-                    hx-indicator="#analyze-btn" class="mb-4 flex flex-col gap-4 md:flex-row md:items-end">
+                    hx-indicator="#analyze-btn" class="mb-4 flex flex-col gap-4 md:flex-row md:items-end" novalidate
+                    onsubmit="
+                        const fileInput = this.querySelector('input[name=&quot;backup_file&quot;]');
+                        if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
+                            const preview = document.getElementById('restore-preview');
+                            if (preview) {
+                                preview.innerHTML = '<div class=&quot;rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600&quot;>请先选择备份文件，再进行分析。</div>';
+                            }
+                            window.dispatchEvent(new CustomEvent('toast', { detail: { msg: '请先选择备份文件', type: 'error' } }));
+                            event.preventDefault();
+                            return false;
+                        }
+                    ">
                     <div class="flex-1">
                         <label class="block text-sm font-medium text-gray-700 mb-1">选择备份文件 (.db)</label>
                         <input type="file" name="backup_file" accept=".db" required
@@ -339,6 +371,18 @@
                     </div>
                     <div class="md:shrink-0">
                         <button type="submit" id="analyze-btn"
+                            onclick="
+                                const fileInput = this.form && this.form.querySelector('input[name=&quot;backup_file&quot;]');
+                                if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
+                                    const preview = document.getElementById('restore-preview');
+                                    if (preview) {
+                                        preview.innerHTML = '<div class=&quot;rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600&quot;>请先选择备份文件，再进行分析。</div>';
+                                    }
+                                    window.dispatchEvent(new CustomEvent('toast', { detail: { msg: '请先选择备份文件', type: 'error' } }));
+                                    event.preventDefault();
+                                    return false;
+                                }
+                            "
                             class="inline-flex w-full md:w-auto justify-center items-center gap-2 px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition shadow-lg shadow-blue-200 cursor-pointer h-[42px]">
                             <span class="[.htmx-request_&]:hidden">🔍</span>
                             <span class="hidden [.htmx-request_&]:inline animate-spin">⌛</span>

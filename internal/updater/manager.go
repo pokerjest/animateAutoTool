@@ -1,6 +1,8 @@
 package updater
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -103,6 +105,8 @@ type githubRelease struct {
 	HTMLURL     string         `json:"html_url"`
 	TagName     string         `json:"tag_name"`
 	PublishedAt string         `json:"published_at"`
+	Draft       bool           `json:"draft"`
+	Prerelease  bool           `json:"prerelease"`
 	Assets      []releaseAsset `json:"assets"`
 }
 
@@ -264,7 +268,7 @@ func (m *Manager) runCheck(source string, applyWhenBehind bool) Status {
 		return m.status
 	}
 
-	release, notModified, retryAfter, err := m.fetchLatestRelease(cfg.RepoOwner, cfg.RepoName)
+	release, notModified, retryAfter, err := m.fetchLatestRelease(cfg.RepoOwner, cfg.RepoName, currentVersionWantsPrerelease(current))
 	if err != nil {
 		backoffUntil = m.recordFailure(now, retryAfter)
 		result = resultError
@@ -423,13 +427,13 @@ func (m *Manager) recordFailure(now, explicitRetry time.Time) time.Time {
 	return m.backoffUntil
 }
 
-func (m *Manager) fetchLatestRelease(owner, repo string) (*githubRelease, bool, time.Time, error) {
+func (m *Manager) fetchLatestRelease(owner, repo string, includePrerelease bool) (*githubRelease, bool, time.Time, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), httpTimeout)
 	defer cancel()
 
 	owner = strings.TrimSpace(owner)
 	repo = strings.TrimSpace(repo)
-	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/releases/latest", owner, repo)
+	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/releases?per_page=10", owner, repo)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, false, time.Time{}, err
@@ -471,16 +475,19 @@ func (m *Manager) fetchLatestRelease(owner, repo string) (*githubRelease, bool, 
 		return nil, false, retryAfter, fmt.Errorf("github api returned %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 
-	var release githubRelease
-	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
+	var releases []githubRelease
+	if err := json.NewDecoder(resp.Body).Decode(&releases); err != nil {
 		return nil, false, time.Time{}, err
 	}
-	if strings.TrimSpace(release.TagName) == "" {
-		return nil, false, time.Time{}, errors.New("latest release tag is empty")
+	release, err := pickLatestPublishedRelease(releases, includePrerelease)
+	if err != nil {
+		return nil, false, time.Time{}, err
 	}
 
 	m.mu.Lock()
-	m.cachedRelease = &release
+	cp := *release
+	cp.Assets = append([]releaseAsset(nil), release.Assets...)
+	m.cachedRelease = &cp
 	m.cachedRepoOwner = owner
 	m.cachedRepoName = repo
 	if etag := strings.TrimSpace(resp.Header.Get("ETag")); etag != "" {
@@ -488,7 +495,28 @@ func (m *Manager) fetchLatestRelease(owner, repo string) (*githubRelease, bool, 
 	}
 	m.mu.Unlock()
 
-	return &release, false, time.Time{}, nil
+	return release, false, time.Time{}, nil
+}
+
+func pickLatestPublishedRelease(releases []githubRelease, includePrerelease bool) (*githubRelease, error) {
+	for i := range releases {
+		release := &releases[i]
+		if release.Draft {
+			continue
+		}
+		if release.Prerelease && !includePrerelease {
+			continue
+		}
+		if strings.TrimSpace(release.TagName) == "" {
+			continue
+		}
+		return release, nil
+	}
+	return nil, errors.New("latest published release tag is empty")
+}
+
+func currentVersionWantsPrerelease(v string) bool {
+	return parseSemVer(v).Prerelease != ""
 }
 
 func parseRetryAfter(resp *http.Response) time.Time {
@@ -796,29 +824,42 @@ func pickAssetForCurrentPlatform(release *githubRelease) (*releaseAsset, error) 
 		return nil, errors.New("release is nil")
 	}
 
-	suffix, ok := platformAssetSuffix()
-	if !ok {
+	exePath, err := os.Executable()
+	if err != nil {
+		return nil, err
+	}
+	candidates := platformAssetCandidates(runtime.GOOS, runtime.GOARCH, currentAppBundlePath(exePath) != "")
+	if len(candidates) == 0 {
 		return nil, fmt.Errorf("unsupported platform: %s/%s", runtime.GOOS, runtime.GOARCH)
 	}
 
-	for i := range release.Assets {
-		asset := &release.Assets[i]
-		if strings.HasSuffix(strings.ToLower(asset.Name), strings.ToLower(suffix)) && strings.TrimSpace(asset.BrowserDownloadURL) != "" {
-			return asset, nil
+	for _, suffix := range candidates {
+		for i := range release.Assets {
+			asset := &release.Assets[i]
+			if strings.HasSuffix(strings.ToLower(asset.Name), strings.ToLower(suffix)) && strings.TrimSpace(asset.BrowserDownloadURL) != "" {
+				return asset, nil
+			}
 		}
 	}
 
-	return nil, fmt.Errorf("asset suffix %q not found in release %s", suffix, release.TagName)
+	return nil, fmt.Errorf("asset candidates %q not found in release %s", strings.Join(candidates, ", "), release.TagName)
 }
 
-func platformAssetSuffix() (string, bool) {
-	switch runtime.GOOS {
+func platformAssetCandidates(goos, goarch string, inAppBundle bool) []string {
+	switch goos {
 	case "windows":
-		return fmt.Sprintf("_windows_%s.exe", runtime.GOARCH), true
+		return []string{fmt.Sprintf("_windows_%s.exe", goarch)}
 	case "darwin":
-		return fmt.Sprintf("_darwin_%s.dmg", runtime.GOARCH), true
+		dmg := fmt.Sprintf("_darwin_%s.dmg", goarch)
+		archive := fmt.Sprintf("_darwin_%s.tar.gz", goarch)
+		if inAppBundle {
+			return []string{dmg, archive}
+		}
+		return []string{archive, dmg}
+	case "linux":
+		return []string{fmt.Sprintf("_linux_%s.tar.gz", goarch)}
 	default:
-		return "", false
+		return nil
 	}
 }
 
@@ -1097,14 +1138,162 @@ func verifyFileSHA256(path, expectedLowerHex string) error {
 }
 
 func applyUpdateForPlatform(artifactPath string) error {
-	switch runtime.GOOS {
-	case "windows":
+	switch {
+	case runtime.GOOS == "windows":
 		return applyWindowsUpdate(artifactPath)
-	case "darwin":
+	case runtime.GOOS == "darwin" && strings.HasSuffix(strings.ToLower(artifactPath), ".dmg"):
 		return applyDarwinUpdate(artifactPath)
+	case (runtime.GOOS == "darwin" || runtime.GOOS == "linux") && strings.HasSuffix(strings.ToLower(artifactPath), ".tar.gz"):
+		return applyArchiveBinaryUpdate(artifactPath)
 	default:
-		return fmt.Errorf("platform %s is not supported for self-update", runtime.GOOS)
+		return fmt.Errorf("platform/artifact combination is not supported for self-update: %s %s", runtime.GOOS, filepath.Base(artifactPath))
 	}
+}
+
+func applyArchiveBinaryUpdate(downloadedArchive string) error {
+	exePath, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	if !strings.HasSuffix(strings.ToLower(downloadedArchive), ".tar.gz") {
+		return fmt.Errorf("expected .tar.gz artifact, got %s", downloadedArchive)
+	}
+
+	updateDir := filepath.Join(config.DataDir(), "updates")
+	if err := os.MkdirAll(updateDir, 0755); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(config.LogsDir(), 0755); err != nil {
+		return err
+	}
+
+	stagedBinaryPath := filepath.Join(updateDir, filepath.Base(exePath)+".new")
+	if err := extractBinaryFromTarGz(downloadedArchive, filepath.Base(exePath), stagedBinaryPath); err != nil {
+		return err
+	}
+
+	scriptPath := filepath.Join(updateDir, "apply_update.sh")
+	logPath := filepath.Join(config.LogsDir(), "updater.log")
+	script := `#!/bin/bash
+set -euo pipefail
+
+OLD_PID="$1"
+NEW_BIN="$2"
+TARGET_BIN="$3"
+LOG_FILE="$4"
+TMP_BIN="${TARGET_BIN}.new"
+BAK_BIN="${TARGET_BIN}.bak"
+
+while kill -0 "$OLD_PID" >/dev/null 2>&1; do
+  sleep 1
+done
+
+cp "$NEW_BIN" "$TMP_BIN"
+chmod +x "$TMP_BIN"
+
+if [ -f "$BAK_BIN" ]; then
+  rm -f "$BAK_BIN"
+fi
+if [ -f "$TARGET_BIN" ]; then
+  mv "$TARGET_BIN" "$BAK_BIN"
+fi
+
+if ! mv "$TMP_BIN" "$TARGET_BIN"; then
+  echo "[$(date)] promote failed, restoring backup" >> "$LOG_FILE"
+  rm -f "$TMP_BIN" || true
+  if [ -f "$BAK_BIN" ]; then
+    mv "$BAK_BIN" "$TARGET_BIN" || true
+  fi
+  exit 1
+fi
+
+rm -f "$BAK_BIN" || true
+nohup "$TARGET_BIN" >> "$LOG_FILE" 2>&1 &
+`
+	if err := os.WriteFile(scriptPath, []byte(script), 0600); err != nil {
+		return err
+	}
+	if err := os.Chmod(scriptPath, 0700); err != nil {
+		return err
+	}
+
+	cmd := exec.Command("/bin/bash", scriptPath, strconv.Itoa(os.Getpid()), stagedBinaryPath, exePath, logPath) //nolint:gosec
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+
+	time.AfterFunc(restartDelay, func() { os.Exit(0) })
+	return nil
+}
+
+func extractBinaryFromTarGz(archivePath, targetBinaryName, destinationPath string) error {
+	src, err := os.Open(archivePath) //nolint:gosec
+	if err != nil {
+		return err
+	}
+	defer safeio.Close(src)
+
+	gzReader, err := gzip.NewReader(src)
+	if err != nil {
+		return err
+	}
+	defer safeio.Close(gzReader)
+
+	tarReader := tar.NewReader(gzReader)
+	targetBinaryName = strings.TrimSpace(targetBinaryName)
+	if targetBinaryName == "" {
+		return errors.New("target binary name is empty")
+	}
+
+	tempPath := destinationPath + ".part"
+	_ = os.Remove(tempPath)
+
+	for {
+		header, err := tarReader.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			_ = os.Remove(tempPath)
+			return err
+		}
+		if header == nil || header.Typeflag != tar.TypeReg {
+			continue
+		}
+
+		name := filepath.Base(strings.TrimSpace(header.Name))
+		if !strings.EqualFold(name, targetBinaryName) {
+			continue
+		}
+		if !strings.Contains(filepath.ToSlash(header.Name), "/bin/") {
+			continue
+		}
+
+		out, err := os.OpenFile(tempPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0755)
+		if err != nil {
+			return err
+		}
+		if _, err := io.Copy(out, tarReader); err != nil {
+			_ = out.Close()
+			_ = os.Remove(tempPath)
+			return err
+		}
+		if err := out.Close(); err != nil {
+			_ = os.Remove(tempPath)
+			return err
+		}
+		if err := os.Rename(tempPath, destinationPath); err != nil {
+			_ = os.Remove(tempPath)
+			return err
+		}
+		if err := os.Chmod(destinationPath, 0755); err != nil {
+			return err
+		}
+		return nil
+	}
+
+	_ = os.Remove(tempPath)
+	return fmt.Errorf("binary %s not found in archive %s", targetBinaryName, filepath.Base(archivePath))
 }
 
 func applyWindowsUpdate(downloadedExe string) error {

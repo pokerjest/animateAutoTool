@@ -24,7 +24,7 @@ func UpdateBangumiCollectionHandler(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := strconv.Atoi(idStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid ID"})
+		jsonBadRequest(c, "Bangumi 条目 ID 无效")
 		return
 	}
 
@@ -57,7 +57,7 @@ func UpdateBangumiCollectionHandler(c *gin.Context) {
 	}
 
 	if err := client.UpdateCollection(accessToken, id, opts); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed: %v", err)})
+		jsonServerError(c, "同步 Bangumi 收藏状态", err)
 		return
 	}
 
@@ -76,7 +76,7 @@ func UpdateBangumiProgressHandler(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := strconv.Atoi(idStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid ID"})
+		jsonBadRequest(c, "Bangumi 条目 ID 无效")
 		return
 	}
 
@@ -84,7 +84,7 @@ func UpdateBangumiProgressHandler(c *gin.Context) {
 		EpisodeCount int `json:"episode_count"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid body"})
+		jsonBadRequest(c, "同步进度请求格式不正确")
 		return
 	}
 
@@ -93,7 +93,7 @@ func UpdateBangumiProgressHandler(c *gin.Context) {
 
 	if err := client.UpdateWatchedEpisodes(accessToken, id, req.EpisodeCount); err != nil {
 		log.Printf("ERROR: UpdateWatchedEpisodes failed for ID %d: %v", id, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed: %v", err)})
+		jsonServerError(c, "同步 Bangumi 观看进度", err)
 		return
 	}
 

@@ -7,6 +7,7 @@ import (
 	"html/template"
 	"time"
 
+	appversion "github.com/pokerjest/animateAutoTool/internal/version"
 	webassets "github.com/pokerjest/animateAutoTool/web"
 )
 
@@ -40,6 +41,10 @@ func templateFuncMap() template.FuncMap {
 				return "从未"
 			}
 			return humanizeTimeAgo(time.Since(t))
+		},
+		"humanizeOperationError": humanizeOperationError,
+		"appVersion": func() string {
+			return appversion.AppVersion
 		},
 	}
 }

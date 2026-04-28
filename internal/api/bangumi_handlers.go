@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pokerjest/animateAutoTool/internal/bangumi"
@@ -91,7 +90,7 @@ func BangumiLoginHandler(c *gin.Context) {
 func BangumiCallbackHandler(c *gin.Context) {
 	code := c.Query("code")
 	if code == "" {
-		c.String(http.StatusBadRequest, "No code provided")
+		htmlBadRequest(c, "缺少 Bangumi 授权码")
 		return
 	}
 
@@ -102,7 +101,7 @@ func BangumiCallbackHandler(c *gin.Context) {
 	tokenResp, err := client.ExchangeToken(code)
 	if err != nil {
 		log.Printf("Bangumi exchange token error: %v", err)
-		c.String(http.StatusInternalServerError, "Login failed: "+err.Error())
+		htmlServerError(c, "Bangumi 登录", err)
 		return
 	}
 
@@ -175,7 +174,6 @@ func RenderBangumiStatusOOB() string {
 }
 
 func BangumiProfileHandler(c *gin.Context) {
-	time.Sleep(500 * time.Millisecond) // UX Delay
 	c.Header("Content-Type", "text/html")
 	html := renderBangumiContent()
 	// Force Simple Return

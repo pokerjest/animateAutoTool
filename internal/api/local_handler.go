@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"path/filepath"
 	"strconv"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pokerjest/animateAutoTool/internal/db"
@@ -48,6 +47,7 @@ func LocalAnimePageHandler(c *gin.Context) {
 
 	var animes []model.LocalAnime
 	db.DB.Preload("Metadata").Find(&animes) // TODO: Pagination? For now fetch all
+	populateLocalAnimeActionHints(animes)
 
 	diagnostics, err := service.ListOpenLibraryIssues(12)
 	if err != nil {
@@ -112,15 +112,16 @@ func GetLocalAnimeCardHandler(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
-		c.String(http.StatusBadRequest, "Invalid anime ID")
+		htmlBadRequest(c, "本地番剧 ID 无效")
 		return
 	}
 
 	var anime model.LocalAnime
 	if err := db.DB.Preload("Metadata").First(&anime, uint(id)).Error; err != nil {
-		c.String(http.StatusNotFound, "Not Found")
+		htmlNotFound(c, "未找到本地番剧")
 		return
 	}
+	populateLocalAnimeActionHint(&anime)
 
 	c.HTML(http.StatusOK, "local_anime_card.html", anime)
 }
@@ -135,17 +136,63 @@ func LocalAnimeDiagnosticsHandler(c *gin.Context) {
 	c.HTML(http.StatusOK, "local_anime_diagnostics.html", diagnostics)
 }
 
+func populateLocalAnimeActionHints(animes []model.LocalAnime) {
+	for i := range animes {
+		populateLocalAnimeActionHint(&animes[i])
+	}
+}
+
+func populateLocalAnimeActionHint(anime *model.LocalAnime) {
+	if anime == nil {
+		return
+	}
+
+	anime.HasRepairActions = false
+	anime.CanRetryScrape = false
+	anime.CanFixMatch = false
+	anime.RepairHint = ""
+
+	var issue model.LibraryIssue
+	issueFound := false
+	if anime.ID != 0 && db.DB != nil {
+		err := db.DB.
+			Where("local_anime_id = ? AND issue_type = ? AND status = ?", anime.ID, service.LibraryIssueTypeScrape, service.LibraryIssueStatusOpen).
+			Order("updated_at DESC").
+			First(&issue).Error
+		issueFound = err == nil
+	}
+
+	if issueFound {
+		anime.HasRepairActions = true
+		anime.CanRetryScrape = true
+		anime.CanFixMatch = true
+		if issue.Hint != "" {
+			anime.RepairHint = issue.Hint
+		} else {
+			anime.RepairHint = "元数据抓取失败，可先重试；如果仍不准确，再手动修正匹配。"
+		}
+		return
+	}
+
+	if anime.Metadata == nil || anime.Image == "" || anime.Summary == "" {
+		anime.HasRepairActions = true
+		anime.CanRetryScrape = true
+		anime.CanFixMatch = true
+		anime.RepairHint = "当前本地番剧的元数据不完整，可先刷新，再视情况手动修正匹配。"
+	}
+}
+
 // AddLocalDirectoryHandler 添加新的目录
 func AddLocalDirectoryHandler(c *gin.Context) {
 	path := c.PostForm("path")
 	if path == "" {
-		c.String(http.StatusBadRequest, "路径不能为空")
+		htmlBadRequest(c, "路径不能为空")
 		return
 	}
 
 	scannerSvc := service.NewScannerService()
 	if err := scannerSvc.AddDirectory(path); err != nil {
-		c.String(http.StatusInternalServerError, fmt.Sprintf("添加失败: %v", err))
+		htmlServerError(c, "添加目录", err)
 		return
 	}
 
@@ -173,7 +220,6 @@ func AddLocalDirectoryHandler(c *gin.Context) {
 		}
 	}()
 
-	time.Sleep(500 * time.Millisecond) // Wait a bit for UI
 	c.Header("HX-Redirect", "/local-anime")
 	c.Status(http.StatusOK)
 }
@@ -183,13 +229,13 @@ func DeleteLocalDirectoryHandler(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
-		c.String(http.StatusBadRequest, "Invalid ID")
+		htmlBadRequest(c, "目录 ID 无效")
 		return
 	}
 
 	scannerSvc := service.NewScannerService()
 	if err := scannerSvc.RemoveDirectory(uint(id)); err != nil {
-		c.String(http.StatusInternalServerError, "删除失败")
+		htmlServerError(c, "删除目录", err)
 		return
 	}
 

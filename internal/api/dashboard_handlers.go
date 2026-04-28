@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -38,12 +39,16 @@ type TaskOverviewCard struct {
 	FinishedAt   *time.Time
 	ProgressText string
 	Error        string
+	DisplayError string
+	ActionLabel  string
+	ActionPath   string
 }
 
 type TaskOverviewData struct {
 	Scheduler TaskOverviewCard
 	Scanner   TaskOverviewCard
 	Metadata  TaskOverviewCard
+	Downloads TaskOverviewCard
 }
 
 const (
@@ -132,6 +137,7 @@ func DashboardTaskOverviewHandler(c *gin.Context) {
 		Scheduler: buildSchedulerTaskCard(),
 		Scanner:   buildScannerTaskCard(),
 		Metadata:  buildMetadataTaskCard(),
+		Downloads: buildDownloadSyncTaskCard(),
 	}
 	c.HTML(http.StatusOK, "dashboard_task_overview.html", data)
 }
@@ -144,37 +150,8 @@ func DashboardQBStatusHandler(c *gin.Context) {
 	}()
 
 	qbCfg := qbutil.LoadConfig()
-	if qbutil.ManagedBinaryMissing(qbCfg, config.BinDir()) {
-		c.Header("Content-Type", "text/html")
-		c.String(http.StatusOK, `<div id="qb-status-dashboard" title="Managed qBittorrent binary not found and no external WebUI is configured" class="text-amber-600 font-bold flex items-center gap-1.5 bg-amber-50 px-2 py-0.5 rounded-full text-xs"><span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span> Missing</div>`)
-		return
-	}
-	if qbutil.MissingExternalURL(qbCfg) {
-		c.Header("Content-Type", "text/html")
-		c.String(http.StatusOK, `<div id="qb-status-dashboard" title="External qBittorrent mode is enabled, but the WebUI URL is empty" class="text-amber-600 font-bold flex items-center gap-1.5 bg-amber-50 px-2 py-0.5 rounded-full text-xs"><span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span> Config</div>`)
-		return
-	}
-
-	var qbConnected bool
-	var qbVersion string
-	if qbCfg.URL != "" {
-		qbt := downloader.NewQBittorrentClient(qbCfg.URL)
-		if err := qbt.Login(qbCfg.Username, qbCfg.Password); err == nil {
-			if ver, err := qbt.GetVersion(); err == nil {
-				qbConnected = true
-				qbVersion = ver
-			}
-		}
-	}
-
-	html := ""
-	if qbConnected {
-		html = fmt.Sprintf(`<span class="text-emerald-600 font-bold flex items-center gap-1.5 bg-emerald-50 px-2 py-0.5 rounded-full text-xs" title="%s"><span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> Connected (%s)</span>`, qbVersion, qbVersion)
-	} else {
-		html = `<span class="text-red-500 font-bold flex items-center gap-1.5 bg-red-50 px-2 py-0.5 rounded-full text-xs"><span class="w-1.5 h-1.5 rounded-full bg-red-500"></span> Offline</span>`
-	}
 	c.Header("Content-Type", "text/html")
-	c.String(http.StatusOK, html)
+	c.String(http.StatusOK, renderQBDashboardBadge(qbCfg))
 }
 
 func buildSchedulerTaskCard() TaskOverviewCard {
@@ -193,20 +170,22 @@ func buildSchedulerTaskCard() TaskOverviewCard {
 	case status.LastFinishedAt != nil || status.LastStartedAt != nil:
 		card.StatusLabel = taskStatusCompleted
 		card.StatusTone = statusToneFromCounts(status.ErrorCount, status.WarningCount)
-		card.Summary = fallbackText(status.LastSummary, "最近一轮调度已结束")
+		card.Summary = taskCompletedSummary(status.LastSummary, "最近一轮调度已结束")
 		card.Detail = formatSchedulerDetail(status)
 		card.StartedAt = status.LastStartedAt
 		card.FinishedAt = status.LastFinishedAt
 		card.Error = status.LastError
+		card.DisplayError = humanizeOperationError(status.LastError)
 	default:
 		card.StatusLabel = taskStatusIdle
-		card.Summary = "还没有运行过订阅调度"
-		card.Detail = "启动后会自动轮询，也可以在订阅页手动立即运行。"
+		card.Summary = taskNeverRunSummary(card.Title)
+		card.Detail = taskNeverRunDetail(card.Title)
 	}
 
 	if status.IsRunning {
 		card.StartedAt = status.LastStartedAt
 		card.Error = status.LastError
+		card.DisplayError = humanizeOperationError(status.LastError)
 	}
 
 	return card
@@ -230,19 +209,21 @@ func buildScannerTaskCard() TaskOverviewCard {
 		}
 		card.StartedAt = status.LastStartedAt
 		card.Error = status.LastError
+		card.DisplayError = humanizeOperationError(status.LastError)
 	case status.LastFinishedAt != nil || status.LastStartedAt != nil:
 		card.StatusLabel = taskStatusCompleted
 		card.StatusTone = statusToneFromFailure(status.FailedDirectories)
-		card.Summary = fallbackText(status.LastSummary, "最近一轮扫描已结束")
+		card.Summary = taskCompletedSummary(status.LastSummary, "最近一轮扫描已结束")
 		card.Detail = fmt.Sprintf("新增 %d，更新 %d，失败 %d", status.AddedCount, status.UpdatedCount, status.FailedDirectories)
 		card.StartedAt = status.LastStartedAt
 		card.FinishedAt = status.LastFinishedAt
 		card.ProgressText = status.LastDuration
 		card.Error = status.LastError
+		card.DisplayError = humanizeOperationError(status.LastError)
 	default:
 		card.StatusLabel = taskStatusIdle
-		card.Summary = "还没有运行过本地库扫描"
-		card.Detail = "从本地番剧页触发扫描后，这里会展示最近一轮摘要。"
+		card.Summary = taskNeverRunSummary(card.Title)
+		card.Detail = taskNeverRunDetail(card.Title)
 	}
 
 	return card
@@ -266,14 +247,110 @@ func buildMetadataTaskCard() TaskOverviewCard {
 		card.StatusLabel = taskStatusCompleted
 		card.StatusTone = taskToneEmerald
 		card.Summary = status.LastResult
-		card.Detail = "可在媒体库页再次触发全量或增量刷新。"
+		card.Detail = taskFollowupDetail(card.Title)
 	default:
 		card.StatusLabel = taskStatusIdle
-		card.Summary = "还没有运行过元数据全库刷新"
-		card.Detail = "媒体库页的刷新按钮会在这里显示进度和结果。"
+		card.Summary = taskNeverRunSummary(card.Title)
+		card.Detail = taskNeverRunDetail(card.Title)
 	}
 
 	return card
+}
+
+func buildDownloadSyncTaskCard() TaskOverviewCard {
+	status := service.GlobalDownloadLogSyncStatus.Snapshot()
+	card := TaskOverviewCard{
+		Title:      "下载状态同步",
+		StatusTone: "slate",
+	}
+
+	var missingTargetCount int64
+	var staleDownloadingCount int64
+	if db.DB != nil {
+		db.DB.Model(&model.DownloadLog{}).
+			Where("status = ? AND (target_file = '' OR target_file IS NULL)", "completed").
+			Count(&missingTargetCount)
+		db.DB.Model(&model.DownloadLog{}).
+			Where("status = ? AND created_at < ?", "downloading", time.Now().Add(-6*time.Hour)).
+			Count(&staleDownloadingCount)
+	}
+
+	switch {
+	case status.LastCheckedAt == nil:
+		card.StatusLabel = taskStatusIdle
+		card.Summary = taskNeverRunSummary(card.Title)
+		card.Detail = taskNeverRunDetail(card.Title)
+	case status.LastError != "":
+		card.StatusLabel = "同步异常"
+		card.StatusTone = "rose"
+		card.Summary = "最近一次下载状态同步失败"
+		card.Detail = fmt.Sprintf("待修复记录 %d，长时间下载中 %d", missingTargetCount, staleDownloadingCount)
+		card.FinishedAt = status.LastCheckedAt
+		card.Error = status.LastError
+		card.DisplayError = humanizeOperationError(status.LastError)
+		card.ActionLabel = repairActionCTA(repairActionSyncDownloads)
+		card.ActionPath = "/api/download-logs/repair"
+	case missingTargetCount > 0 || staleDownloadingCount > 0 || status.LastUnmatched > 0:
+		card.StatusLabel = "需要关注"
+		card.StatusTone = taskToneAmber
+		card.Summary = "下载链路有待补偿的状态记录"
+		card.Detail = fmt.Sprintf("待修复记录 %d，长时间下载中 %d，未匹配 torrents %d", missingTargetCount, staleDownloadingCount, status.LastUnmatched)
+		card.FinishedAt = status.LastCheckedAt
+		card.ProgressText = fmt.Sprintf("最近同步：qB 修复 %d 条，本地回补 %d 条，归档 %d 条，完成 %d，失败 %d", status.LastUpdated, status.LastLibraryRepairs, status.LastArchived, status.LastCompleted, status.LastFailed)
+		card.ActionLabel = repairActionCTA(repairActionSyncDownloads)
+		card.ActionPath = "/api/download-logs/repair"
+	default:
+		card.StatusLabel = taskStatusCompleted
+		card.StatusTone = taskToneEmerald
+		card.Summary = "下载日志与 qB 状态保持一致"
+		card.Detail = taskFollowupDetail(card.Title)
+		card.FinishedAt = status.LastCheckedAt
+		card.ProgressText = fmt.Sprintf("最近同步：qB 修复 %d 条，本地回补 %d 条，归档 %d 条，活跃 %d，完成 %d", status.LastUpdated, status.LastLibraryRepairs, status.LastArchived, status.LastActive, status.LastCompleted)
+	}
+
+	return card
+}
+
+func RepairDownloadLogsHandler(c *gin.Context) {
+	var lastErr error
+
+	qbCfg := qbutil.LoadConfig()
+	if !qbutil.ManagedBinaryMissing(qbCfg, config.BinDir()) && !qbutil.MissingExternalURL(qbCfg) && strings.TrimSpace(qbCfg.URL) != "" {
+		client := downloader.NewQBittorrentClient(qbCfg.URL)
+		if err := client.Login(qbCfg.Username, qbCfg.Password); err != nil {
+			lastErr = err
+		} else if _, err := service.SyncDownloadLogStatusesWithQBClient(client); err != nil {
+			lastErr = err
+		}
+	}
+
+	if _, err := service.RepairDownloadLogsFromLocalLibrary(6 * time.Hour); err != nil {
+		lastErr = err
+	}
+	if archiveResult, err := service.ArchiveStaleDownloadLogs(clientOrNil(qbCfg, lastErr == nil), 30*24*time.Hour); err != nil {
+		lastErr = err
+	} else {
+		service.GlobalDownloadLogSyncStatus.RecordArchived(archiveResult.Archived)
+	}
+	if lastErr != nil {
+		service.GlobalDownloadLogSyncStatus.RecordFailure(lastErr)
+		triggerAppToast(c, repairReviewToast(repairActionSyncDownloads), "error")
+	} else {
+		triggerAppToast(c, repairSuccessToast(repairActionSyncDownloads), "success")
+	}
+
+	DashboardTaskOverviewHandler(c)
+}
+
+func clientOrNil(cfg qbutil.Config, ready bool) service.TorrentStatusSource {
+	if !ready || qbutil.ManagedBinaryMissing(cfg, config.BinDir()) || qbutil.MissingExternalURL(cfg) || strings.TrimSpace(cfg.URL) == "" {
+		return nil
+	}
+	client := downloader.NewQBittorrentClient(cfg.URL)
+	if err := client.Login(cfg.Username, cfg.Password); err != nil {
+		return nil
+	}
+	return client
 }
 
 func formatSchedulerDetail(status scheduler.RunStatus) string {

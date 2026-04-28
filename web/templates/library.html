@@ -12,6 +12,7 @@
     detailsData: null,
     activeSource: 'bangumi',
     loadingDetails: false,
+    minimumActionDelay: 320,
     libraryMetadata: {},
     // Fix Match State
     fixMatchQuery: '',
@@ -19,6 +20,33 @@
     fixMatchSource: 'bangumi',
     searchingMetadata: false,
     showFixMatch: false,
+    normalizeToastMessage(msg, fallback = '') {
+        const value = String(msg || fallback || '').trim();
+        return value.replace(/^[✅❌⚠️🎉]\s*/u, '') || fallback;
+    },
+    showSuccess(msg, fallback = '操作已完成') {
+        this.showToast(this.normalizeToastMessage(msg, fallback), 'success');
+    },
+    showFailure(msg, fallback = '操作失败') {
+        this.showToast(this.normalizeToastMessage(msg, fallback), 'error');
+    },
+    showNetworkFailure(error, fallback = '网络请求失败') {
+        const detail = error && error.message ? `${fallback}: ${error.message}` : fallback;
+        this.showFailure(detail, fallback);
+    },
+    async waitMinimum(startedAt, minimum = this.minimumActionDelay) {
+        const elapsed = Date.now() - startedAt;
+        if (elapsed < minimum) {
+            await new Promise(resolve => setTimeout(resolve, minimum - elapsed));
+        }
+    },
+    refreshCurrentView() {
+        if (window.htmx) {
+            htmx.ajax('GET', window.location.pathname + window.location.search, { target: '#main-content', pushUrl: true });
+            return;
+        }
+        window.location.reload();
+    },
     showToast(msg, type = 'success') {
         window.dispatchEvent(new CustomEvent('toast', { detail: { msg: msg, type: type } }));
     },
@@ -31,13 +59,14 @@
             const data = await resp.json();
             this.fixMatchResults = Array.isArray(data) ? data : (data ? [data] : []);
         } catch (e) {
-            this.showToast('搜索失败', 'error');
+            this.showFailure('搜索失败');
         } finally {
             this.searchingMetadata = false;
         }
     },
     async applyFixMatch(id) {
         // Confirm not needed if UI is clear
+        const startedAt = Date.now();
         try {
             const body = {
                 source: this.fixMatchSource,
@@ -61,15 +90,18 @@
             });
 
             if (resp.ok) {
-                this.showToast('✅ 关联成功，正在刷新元数据...', 'success');
+                await this.waitMinimum(startedAt);
+                this.showSuccess('关联成功，正在刷新元数据...');
                 this.showFixMatch = false;
-                setTimeout(() => window.location.reload(), 2500); 
+                this.showDetailsModal = false;
+                setTimeout(() => this.refreshCurrentView(), 600);
             } else {
                 const d = await resp.json();
-                this.showToast('❌ ' + (d.error || '关联失败'), 'error');
+                this.showFailure(d.error || '关联失败', '关联失败');
             }
         } catch (e) {
-            this.showToast('❌ 网络错误', 'error');
+            await this.waitMinimum(startedAt);
+            this.showNetworkFailure(e, '关联失败');
         }
     },
     init() {
@@ -149,7 +181,16 @@
                     const res = await fetch('/api/bangumi/subject/' + this.modalRaw.bangumi_id);
                     if (res.ok) {
                         const d = await res.json();
-                        if (!d.error) this.detailsData = d;
+                        if (!d.error) {
+                            this.detailsData = {
+                                ...d,
+                                name: d.name || this.modalRaw.title,
+                                name_cn: d.name_cn || this.modalRaw.title_cn,
+                                summary: d.summary || this.modalRaw.summary || '暂无简介',
+                                images: d.images || { large: this.modalRaw.image },
+                                air_date: d.air_date || this.modalRaw.air_date
+                            };
+                        }
                     }
                 } else {
                     this.detailsData = {
@@ -175,17 +216,21 @@
 
     async refreshSingle(id, event) {
         if (event) event.stopPropagation();
+        const startedAt = Date.now();
         window.dispatchEvent(new CustomEvent('toast', { detail: { msg: '正在刷新该条元数据...', type: 'info' } }));
         try {
             const res = await fetch(`/api/library/metadata/${id}/refresh`, { method: 'POST' });
+            await this.waitMinimum(startedAt);
             if (res.ok) {
                 window.dispatchEvent(new CustomEvent('toast', { detail: { msg: '刷新成功', type: 'success' } }));
-                // Trigger HTMX reload for the library
-                htmx.ajax('GET', window.location.pathname + window.location.search, { target: '#main-content', pushUrl: true });
+                this.refreshCurrentView();
             } else {
                 window.dispatchEvent(new CustomEvent('toast', { detail: { msg: '刷新失败', type: 'error' } }));
             }
-        } catch (e) { console.error(e); }
+        } catch (e) {
+            await this.waitMinimum(startedAt);
+            console.error(e);
+        }
     }
 }" x-init="$watch('showDetailsModal', value => document.body.style.overflow = value ? 'hidden' : '')" @keydown.escape="showDetailsModal = false">
     <!-- Header -->

@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"log"
+	"sync/atomic"
 	"time"
 
 	"github.com/pokerjest/animateAutoTool/internal/config"
@@ -17,6 +18,8 @@ type Manager struct {
 	ticker *time.Ticker
 	quit   chan struct{}
 }
+
+var schedulerRunInProgress atomic.Bool
 
 func NewManager() *Manager {
 	// 每15分钟检查一次
@@ -49,6 +52,12 @@ func (m *Manager) Stop() {
 }
 
 func (m *Manager) CheckUpdates() {
+	if !schedulerRunInProgress.CompareAndSwap(false, true) {
+		log.Println("Scheduler: Check already running, skipping duplicate trigger.")
+		return
+	}
+	defer schedulerRunInProgress.Store(false)
+
 	log.Println("Scheduler: Checking updates...")
 	var subs []model.Subscription
 	// 只查 Active 的
@@ -115,6 +124,10 @@ func (m *Manager) CheckUpdates() {
 
 	status := GlobalRunStatus.Finish(successCount, warningCount, errorCount, len(subs), "auto", lastErr)
 	publishSchedulerStatus(status)
+}
+
+func IsRunInProgress() bool {
+	return schedulerRunInProgress.Load()
 }
 
 func publishSchedulerStatus(status RunStatus) {

@@ -34,10 +34,10 @@
                     {{ if .Subscription.LastRunSummary }}{{ .Subscription.LastRunSummary }}{{ else }}还没有执行记录{{ end }}
                 </div>
             </div>
-            <div class="rounded-xl bg-gray-50 border border-gray-100 px-3 py-2">
+            <div class="rounded-xl bg-gray-50 border border-gray-100 px-3 py-2" {{ if .Subscription.LastError }}title="{{ .Subscription.LastError }}"{{ end }}>
                 <div class="text-[10px] font-bold uppercase tracking-wide text-gray-400">最近错误</div>
                 <div class="mt-1 text-sm {{ if .Subscription.LastError }}text-red-600{{ else }}text-gray-400{{ end }}">
-                    {{ if .Subscription.LastError }}{{ .Subscription.LastError }}{{ else }}没有记录到错误{{ end }}
+                    {{ if .Subscription.LastError }}{{ humanizeOperationError .Subscription.LastError }}{{ else }}没有记录到错误{{ end }}
                 </div>
             </div>
         </div>
@@ -94,7 +94,7 @@
                 </div>
 
                 {{ if .Error }}
-                <div class="mt-2 text-[11px] text-red-600 break-all">{{ .Error }}</div>
+                <div class="mt-2 text-[11px] text-red-600 break-all" title="{{ .Error }}">{{ humanizeOperationError .Error }}</div>
                 {{ end }}
                 {{ if .LastDownloadedTitle }}
                 <div class="mt-2 text-[11px] text-gray-500 break-all">最近加入下载：{{ .LastDownloadedTitle }}</div>

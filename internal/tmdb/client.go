@@ -163,6 +163,9 @@ func (c *Client) fixImage(path string) string {
 	if path == "" {
 		return ""
 	}
+	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
+		return path
+	}
 	return ImageBaseURL + path
 }
 

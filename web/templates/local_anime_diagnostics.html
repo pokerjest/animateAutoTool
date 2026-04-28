@@ -27,7 +27,7 @@
                         </span>
                         {{ end }}
                     </div>
-                    <div class="mt-2 text-sm text-gray-700 break-all">{{ .Message }}</div>
+                    <div class="mt-2 text-sm text-gray-700 break-all" title="{{ .Message }}">{{ humanizeOperationError .Message }}</div>
                     {{ if .Hint }}
                     <div class="mt-2 text-xs text-gray-500">{{ .Hint }}</div>
                     {{ end }}

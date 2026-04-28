@@ -23,7 +23,7 @@ func GetMikanEpisodesHandler(c *gin.Context) {
 	subgroupID := c.Query("subgroupId") // Optional
 
 	if bangumiID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing bangumiId"})
+		jsonBadRequest(c, "缺少 bangumiId")
 		return
 	}
 
@@ -46,7 +46,7 @@ func GetMikanEpisodesHandler(c *gin.Context) {
 	}
 	episodes, err := p.Parse(rssURL)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch RSS: " + err.Error()})
+		jsonServerError(c, "获取 RSS 剧集列表", err)
 		return
 	}
 
@@ -96,12 +96,12 @@ type PlayRequest struct {
 func PlayMagnetHandler(c *gin.Context) {
 	var req PlayRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		jsonBadRequest(c, "秒播请求格式不正确")
 		return
 	}
 
 	if req.Magnet == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Magnet link is required"})
+		jsonBadRequest(c, "Magnet 链接不能为空")
 		return
 	}
 
@@ -132,7 +132,7 @@ func PlayMagnetHandler(c *gin.Context) {
 
 		// Verify if error is "task already exists" - if so, we can proceed
 		if !strings.Contains(err.Error(), "already exists") && !strings.Contains(err.Error(), "duplicate") {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to add offline task: " + err.Error()})
+			jsonServerError(c, "添加离线任务", err)
 			return
 		}
 	}
@@ -156,7 +156,7 @@ func PlayMagnetHandler(c *gin.Context) {
 	// Redirect to internal player instead of AList
 	playURL := fmt.Sprintf("/player?path=%s", targetPath)
 	c.JSON(http.StatusOK, gin.H{
-		"message":      "Task added",
+		"message":      "任务已添加",
 		"folderUrl":    targetPath,
 		"alistViewUrl": playURL,
 	})
@@ -197,7 +197,7 @@ func GetPlayerHandler(c *gin.Context) {
 		// Get Sign URL
 		signUrl, err := alist.GetSignUrl(pathParam)
 		if err != nil {
-			c.HTML(http.StatusInternalServerError, "player.html", gin.H{"Error": "Failed to get video link: " + err.Error()})
+			c.HTML(http.StatusInternalServerError, "player.html", gin.H{"Error": "获取视频播放链接失败: " + err.Error()})
 			return
 		}
 
@@ -214,7 +214,7 @@ func GetPlayerHandler(c *gin.Context) {
 	// List Files
 	objs, err := alist.ListFiles(pathParam)
 	if err != nil {
-		c.HTML(http.StatusInternalServerError, "player.html", gin.H{"Error": "Failed to list files: " + err.Error()})
+		c.HTML(http.StatusInternalServerError, "player.html", gin.H{"Error": "读取文件列表失败: " + err.Error()})
 		return
 	}
 
@@ -247,7 +247,7 @@ func GetPlayerHandler(c *gin.Context) {
 	}
 	var alistObjs []AListObj
 	if err := json.Unmarshal(jsonData, &alistObjs); err != nil {
-		c.HTML(http.StatusInternalServerError, "player.html", gin.H{"Error": "Failed to parse file list"})
+		c.HTML(http.StatusInternalServerError, "player.html", gin.H{"Error": "解析文件列表失败"})
 		return
 	}
 

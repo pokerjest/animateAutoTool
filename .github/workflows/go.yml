@@ -227,7 +227,7 @@ jobs:
           tag_name: ${{ env.APP_VERSION }}
           name: ${{ env.APP_VERSION }}
           generate_release_notes: true
-          prerelease: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
           files: |
             dist/*.tar.gz
             dist/*.zip

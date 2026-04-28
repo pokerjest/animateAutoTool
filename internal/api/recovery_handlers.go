@@ -35,7 +35,7 @@ func LocalResetAdminPasswordHandler(c *gin.Context) {
 
 	var req LocalRecoveryRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		jsonBadRequest(c, "本地重置密码请求格式不正确")
 		return
 	}
 
@@ -45,13 +45,13 @@ func LocalResetAdminPasswordHandler(c *gin.Context) {
 
 	switch {
 	case req.Username == "":
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Username is required"})
+		jsonBadRequest(c, "用户名不能为空")
 		return
 	case len(req.Password) < 8:
-		c.JSON(http.StatusBadRequest, gin.H{"error": "New password must be at least 8 characters long"})
+		jsonBadRequest(c, "新密码至少需要 8 个字符")
 		return
 	case req.Password != req.Confirm:
-		c.JSON(http.StatusBadRequest, gin.H{"error": "The new passwords do not match"})
+		jsonBadRequest(c, "两次输入的新密码不一致")
 		return
 	}
 
@@ -64,7 +64,7 @@ func LocalResetAdminPasswordHandler(c *gin.Context) {
 	clearFailedLoginAttempts(requestClientIP(c))
 
 	c.JSON(http.StatusOK, gin.H{
-		"message":  "Password reset successfully",
+		"message":  "密码重置成功",
 		"redirect": "/login",
 	})
 }

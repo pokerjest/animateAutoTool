@@ -7,6 +7,7 @@ VERSION_FILE="${VERSION_FILE:-./VERSION}"
 DIST_DIR="${DIST_DIR:-./dist}"
 WINDOWS_ARCHES="${WINDOWS_ARCHES:-amd64}"
 DARWIN_ARCHES="${DARWIN_ARCHES:-amd64,arm64}"
+LINUX_ARCHES="${LINUX_ARCHES:-amd64,arm64}"
 
 GREEN='\033[0;32m'
 RED='\033[0;31m'
@@ -61,7 +62,12 @@ while IFS= read -r arch; do
 done < <(trim_csv_items "$WINDOWS_ARCHES")
 
 while IFS= read -r arch; do
+    expected_assets+=("${APP_NAME}_${VERSION}_linux_${arch}.tar.gz")
+done < <(trim_csv_items "$LINUX_ARCHES")
+
+while IFS= read -r arch; do
     expected_assets+=("${APP_NAME}_${VERSION}_darwin_${arch}.dmg")
+    expected_assets+=("${APP_NAME}_${VERSION}_darwin_${arch}.tar.gz")
 done < <(trim_csv_items "$DARWIN_ARCHES")
 
 echo -e "${GREEN}Release update-assets checklist${NC}"

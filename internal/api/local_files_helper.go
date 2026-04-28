@@ -179,8 +179,9 @@ func fetchBangumiProgress(anime *model.LocalAnime, effectiveSource string) (int,
 	return bangumiWatchedCount, bangumiCollectionStatus
 }
 
-func fetchAniListProgress(anime *model.LocalAnime, effectiveSource string) int {
+func fetchAniListProgress(anime *model.LocalAnime, effectiveSource string) (int, string) {
 	anilistWatchedCount := -1
+	anilistStatus := ""
 	if anime.Metadata != nil && effectiveSource == "anilist" && anime.Metadata.AniListID != 0 {
 		log.Printf("DEBUG: Attempting to fetch AniList progress for AniListID=%d", anime.Metadata.AniListID)
 		var alTokenCfg model.GlobalConfig
@@ -198,6 +199,7 @@ func fetchAniListProgress(anime *model.LocalAnime, effectiveSource string) int {
 			} else {
 				// Success - user has this in their list
 				anilistWatchedCount = entry.Progress
+				anilistStatus = entry.Status
 				log.Printf("DEBUG: ✅ Fetched AniList Progress for ID %d: %d eps watched", anime.Metadata.AniListID, anilistWatchedCount)
 				// Update Cached Progress
 				if anime.Metadata.AniListWatchedEps != entry.Progress {
@@ -207,7 +209,7 @@ func fetchAniListProgress(anime *model.LocalAnime, effectiveSource string) int {
 			}
 		}
 	}
-	return anilistWatchedCount
+	return anilistWatchedCount, anilistStatus
 }
 
 func buildEpisodeList(episodes []model.LocalEpisode, anime *model.LocalAnime, jfMap map[string]JfEpisodeData, jellyfinUrl string, bangumiWatchedCount int, anilistWatchedCount int) []EpisodeDisplay {

@@ -24,7 +24,9 @@
    - Linux `tar.gz`
    - Windows standalone `exe`
    - Windows `zip`
+   - macOS `tar.gz`
    - macOS `dmg`
+   - Stable tags publish as normal releases; tags containing `-` publish as prereleases
 3. Download at least one packaged artifact and verify it opens correctly.
 4. Record any upgrade notes if the release introduced a new schema migration or data repair step.
 
@@ -33,13 +35,19 @@
 The app updater currently recognizes these release asset suffixes:
 
 1. Windows: `_windows_<arch>.exe`
-2. macOS: `_darwin_<arch>.dmg`
+2. Linux: `_linux_<arch>.tar.gz`
+3. macOS app bundle installs: `_darwin_<arch>.dmg`
+4. macOS unpacked binary installs: `_darwin_<arch>.tar.gz`
 
 Recommended filenames:
 
 1. `animate-server_<version>_windows_amd64.exe`
-2. `animate-server_<version>_darwin_amd64.dmg`
-3. `animate-server_<version>_darwin_arm64.dmg`
-4. `SHA256SUMS.txt`
+2. `animate-server_<version>_linux_amd64.tar.gz`
+3. `animate-server_<version>_linux_arm64.tar.gz`
+4. `animate-server_<version>_darwin_amd64.tar.gz`
+5. `animate-server_<version>_darwin_arm64.tar.gz`
+6. `animate-server_<version>_darwin_amd64.dmg`
+7. `animate-server_<version>_darwin_arm64.dmg`
+8. `SHA256SUMS.txt`
 
 `SHA256SUMS.txt` should include checksum lines for all updater assets above.

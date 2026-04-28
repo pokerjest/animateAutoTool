@@ -50,7 +50,7 @@ func LoginPageHandler(c *gin.Context) {
 func LoginPostHandler(c *gin.Context) {
 	var req LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		jsonBadRequest(c, "登录请求格式不正确")
 		return
 	}
 
@@ -62,7 +62,7 @@ func LoginPostHandler(c *gin.Context) {
 		}
 		c.Header("Retry-After", strconv.Itoa(retrySeconds))
 		c.JSON(http.StatusTooManyRequests, gin.H{
-			"error":               "Too many login attempts, please wait before trying again",
+			"error":               "登录尝试过于频繁，请稍后再试",
 			"retry_after_seconds": retrySeconds,
 		})
 		return
@@ -72,7 +72,7 @@ func LoginPostHandler(c *gin.Context) {
 	user, err := authService.Login(req.Username, req.Password)
 	if err != nil {
 		registerFailedLoginAttempt(clientIP)
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid username or password"})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "用户名或密码不正确"})
 		return
 	}
 
@@ -88,7 +88,7 @@ func LoginPostHandler(c *gin.Context) {
 	session.Options(sessionCookieOptions(c, maxAge))
 
 	if err := session.Save(); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save session"})
+		jsonServerError(c, "保存登录状态", err)
 		return
 	}
 
@@ -98,7 +98,7 @@ func LoginPostHandler(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"message":  "Login successful",
+		"message":  "登录成功",
 		"redirect": redirect,
 	})
 }
@@ -108,7 +108,7 @@ func LogoutHandler(c *gin.Context) {
 	session.Clear()
 	session.Options(sessionCookieOptions(c, -1))
 	if err := session.Save(); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save session"})
+		jsonServerError(c, "保存退出状态", err)
 		return
 	}
 	c.Redirect(http.StatusFound, "/login")
@@ -122,27 +122,27 @@ type ChangePasswordRequest struct {
 func ChangePasswordHandler(c *gin.Context) {
 	var req ChangePasswordRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		jsonBadRequest(c, "修改密码请求格式不正确")
 		return
 	}
 
 	req.NewPassword = strings.TrimSpace(req.NewPassword)
 	if len(req.NewPassword) < 8 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "New password must be at least 8 characters long"})
+		jsonBadRequest(c, "新密码至少需要 8 个字符")
 		return
 	}
 
 	uid, err := currentSessionUserID(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "当前登录状态已失效，请重新登录"})
 		return
 	}
 
 	authService := service.NewAuthService()
 	if err := authService.ChangePassword(uid, req.OldPassword, req.NewPassword); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		jsonBadRequest(c, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Password changed successfully"})
+	c.JSON(http.StatusOK, gin.H{"message": "密码修改成功"})
 }

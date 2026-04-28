@@ -1,6 +1,7 @@
 package service
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -107,5 +108,16 @@ func TestCloudflareBackupRestoreMergesConfigs(t *testing.T) {
 	db.DB.Model(&model.GlobalConfig{}).Where("key = ?", model.ConfigKeyR2Bucket).Select("value").Scan(&bucket)
 	if bucket != backupValues[model.ConfigKeyR2Bucket] {
 		t.Fatalf("expected R2 bucket to be restored from backup, got %q", bucket)
+	}
+}
+
+func TestInspectBackupRejectsNonSQLiteFile(t *testing.T) {
+	tempPath := t.TempDir() + "/not-a-db.txt"
+	if err := os.WriteFile(tempPath, []byte("definitely not sqlite"), 0o644); err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+
+	if _, err := InspectBackup(tempPath); err == nil {
+		t.Fatal("expected InspectBackup to reject non-sqlite file")
 	}
 }

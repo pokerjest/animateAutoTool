@@ -28,3 +28,25 @@ func TestStatusTrackerBeginAndFinish(t *testing.T) {
 		t.Fatalf("unexpected last error: %q", final.LastError)
 	}
 }
+
+func TestSchedulerRunGuard(t *testing.T) {
+	schedulerRunInProgress.Store(false)
+	t.Cleanup(func() {
+		schedulerRunInProgress.Store(false)
+	})
+
+	if !schedulerRunInProgress.CompareAndSwap(false, true) {
+		t.Fatal("expected first scheduler run guard acquisition to succeed")
+	}
+	if schedulerRunInProgress.CompareAndSwap(false, true) {
+		t.Fatal("expected second scheduler run guard acquisition to fail while running")
+	}
+	if !IsRunInProgress() {
+		t.Fatal("expected scheduler run to report in progress")
+	}
+
+	schedulerRunInProgress.Store(false)
+	if !schedulerRunInProgress.CompareAndSwap(false, true) {
+		t.Fatal("expected scheduler run guard to be acquirable again after release")
+	}
+}

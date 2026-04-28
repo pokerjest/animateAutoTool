@@ -117,7 +117,9 @@ func (s *MetadataService) EnrichAnime(anime *model.LocalAnime) error {
 			log.Printf("Enrich: Found existing metadata link for '%s' -> ID %d", anime.Title, existing.ID)
 			anime.Metadata = &existing
 			anime.MetadataID = &existing.ID
-			db.DB.Save(anime)
+			if err := db.DB.Save(anime).Error; err != nil {
+				return fmt.Errorf("save anime metadata link: %w", err)
+			}
 		} else {
 			anime.Metadata = &model.AnimeMetadata{Title: queryTitle}
 		}
@@ -125,6 +127,9 @@ func (s *MetadataService) EnrichAnime(anime *model.LocalAnime) error {
 
 	// 2. Full Enrichment
 	s.EnrichMetadata(anime.Metadata, anime.Title)
+	if anime.Metadata == nil {
+		return fmt.Errorf("metadata enrichment returned nil metadata for %s", anime.Title)
+	}
 
 	// 3. Link and Save
 	if anime.Metadata != nil && anime.Metadata.ID != 0 {
@@ -135,7 +140,9 @@ func (s *MetadataService) EnrichAnime(anime *model.LocalAnime) error {
 	anime.Image = anime.Metadata.Image
 	anime.Summary = anime.Metadata.Summary
 
-	db.DB.Save(anime)
+	if err := db.DB.Save(anime).Error; err != nil {
+		return fmt.Errorf("save enriched anime: %w", err)
+	}
 
 	// 4. Align Episodes and Sync Metadata (Phase 4)
 	if anime.Metadata.TMDBID != 0 {
@@ -235,7 +242,9 @@ func (s *MetadataService) AlignEpisodesWithTMDB(anime *model.LocalAnime) {
 						log.Printf("Align: %s - S%dE%d -> S%dE%d (Abs %d)", anime.Title, ep.SeasonNum, ep.EpisodeNum, r.SeasonNum, newEpNum, targetAbs)
 						ep.SeasonNum = r.SeasonNum
 						ep.EpisodeNum = newEpNum
-						db.DB.Save(ep)
+						if err := db.DB.Save(ep).Error; err != nil {
+							log.Printf("Align: failed to save episode alignment for %s S%dE%d: %v", anime.Title, r.SeasonNum, newEpNum, err)
+						}
 					}
 					break
 				}
@@ -310,7 +319,9 @@ func (s *MetadataService) SyncEpisodesWithTMDB(anime *model.LocalAnime) {
 					}
 					if updated {
 						log.Printf("MetadataService: Updating Ep %d with image from TMDB for %s", lep.EpisodeNum, anime.Title)
-						db.DB.Save(lep)
+						if err := db.DB.Save(lep).Error; err != nil {
+							log.Printf("MetadataService: failed to save TMDB episode metadata for %s S%dE%d: %v", anime.Title, lep.SeasonNum, lep.EpisodeNum, err)
+						}
 					}
 				} else {
 					log.Printf("MetadataService: No TMDB match for S%dE%d for %s", sNum, lep.EpisodeNum, anime.Title)
@@ -378,7 +389,9 @@ func (s *MetadataService) EnrichMetadata(m *model.AnimeMetadata, query string) {
 	// 6. Set Active Fields
 	s.setActiveFields(m, rawQueryTitle)
 
-	db.DB.Save(m)
+	if err := db.DB.Save(m).Error; err != nil {
+		log.Printf("MetadataService: failed to save consolidated metadata for %q: %v", rawQueryTitle, err)
+	}
 	s.SyncMetadataToModels(m)
 }
 
@@ -455,6 +468,13 @@ func (s *MetadataService) enrichBangumi(m *model.AnimeMetadata, bgmClient *bangu
 	}
 
 	if bgmSubject != nil {
+		if !shouldApplyBangumiSubject(m, bgmSubject, queryTitle) {
+			log.Printf("MetadataService: skipping mismatched Bangumi subject %d for query=%q (subject=%q/%q)", bgmSubject.ID, queryTitle, bgmSubject.NameCN, bgmSubject.Name)
+			if m.ID == 0 {
+				m.BangumiID = 0
+			}
+			return
+		}
 		s.applyBangumiSubject(m, bgmSubject)
 	}
 }
@@ -464,13 +484,13 @@ func (s *MetadataService) applyBangumiSubject(m *model.AnimeMetadata, bgmSubject
 	m.BangumiImage = bgmSubject.Images.Large
 	m.BangumiSummary = bgmSubject.Summary
 	m.BangumiRating = bgmSubject.Rating.Score
-	if m.AirDate == "" {
+	if bgmSubject.Date != "" {
 		m.AirDate = bgmSubject.Date
 	}
-	if m.TitleJP == "" {
+	if bgmSubject.Name != "" {
 		m.TitleJP = bgmSubject.Name
 	}
-	if m.TitleCN == "" {
+	if bgmSubject.NameCN != "" {
 		m.TitleCN = bgmSubject.NameCN
 	}
 	if bgmSubject.NameCN != "" {
@@ -610,29 +630,27 @@ func (s *MetadataService) saveAndConsolidate(m *model.AnimeMetadata) {
 			}
 			*m = existing
 		} else {
-			db.DB.Create(m)
+			if err := db.DB.Create(m).Error; err != nil {
+				log.Printf("MetadataService: failed to create metadata for %q: %v", m.Title, err)
+			}
 		}
 	} else {
-		db.DB.Save(m)
+		if err := db.DB.Save(m).Error; err != nil {
+			log.Printf("MetadataService: failed to persist metadata %d: %v", m.ID, err)
+		}
 	}
 }
 
 func (s *MetadataService) setActiveFields(m *model.AnimeMetadata, rawQueryTitle string) {
-	if m.BangumiID != 0 {
-		m.Title = m.BangumiTitle
-		m.Image = m.BangumiImage
-		m.Summary = m.BangumiSummary
-		if m.Summary == "" && m.TMDBSummary != "" {
-			m.Summary = m.TMDBSummary
+	selected := selectMetadataSource(rawQueryTitle, m)
+	if selected != nil {
+		m.Title = selected.title
+		m.Image = selected.image
+		m.Summary = selected.summary
+		m.DataSource = selected.name
+		if m.Summary == "" {
+			m.Summary = fallbackSummaryForSource(selected.name, m)
 		}
-	} else if m.TMDBID != 0 {
-		m.Title = m.TMDBTitle
-		m.Image = m.TMDBImage
-		m.Summary = m.TMDBSummary
-	} else if m.AniListID != 0 {
-		m.Title = m.AniListTitle
-		m.Image = m.AniListImage
-		m.Summary = m.AniListSummary
 	}
 
 	if m.ID != 0 {
@@ -682,6 +700,44 @@ func getCandidateTitles(m *model.AnimeMetadata, query string) []string {
 	}
 	add(m.Title)
 	return candidates
+}
+
+func shouldApplyBangumiSubject(m *model.AnimeMetadata, subject *bangumi.Subject, queryTitle string) bool {
+	if subject == nil {
+		return false
+	}
+	if m == nil {
+		return true
+	}
+	if m.TMDBID == 0 && m.AniListID == 0 {
+		return true
+	}
+
+	bangumiTitles := []string{subject.NameCN, subject.Name}
+	referenceTitles := []string{queryTitle, m.TMDBTitle, m.AniListTitle, m.TitleCN, m.TitleJP, m.TitleEN, m.Title}
+	for _, bgmTitle := range bangumiTitles {
+		for _, ref := range referenceTitles {
+			if titlesLookRelated(bgmTitle, ref) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func sourceMatchScore(rawQueryTitle string, m *model.AnimeMetadata, candidateTitle string) int {
+	references := []string{rawQueryTitle}
+	if m != nil {
+		references = append(references, m.TitleCN, m.TitleJP, m.TitleEN, m.Title)
+	}
+	best := 0
+	for _, ref := range references {
+		score := titleMatchScore(candidateTitle, ref)
+		if score > best {
+			best = score
+		}
+	}
+	return best
 }
 
 // StartMetadataMigration background task to cache images for existing records

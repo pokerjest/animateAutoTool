@@ -50,6 +50,19 @@ func syncDownloadLogStatuses() {
 		return
 	}
 
+	if repairResult, err := service.RepairDownloadLogsFromLocalLibrary(6 * time.Hour); err != nil {
+		log.Printf("Worker: download log library repair failed: %v", err)
+	} else if repairResult.Repaired > 0 {
+		log.Printf("Worker: repaired %d stale download logs from local library matches (scanned=%d matched=%d)",
+			repairResult.Repaired, repairResult.Scanned, repairResult.Matched)
+	}
+	if archiveResult, err := service.ArchiveStaleDownloadLogs(client, 30*24*time.Hour); err != nil {
+		log.Printf("Worker: stale download log archive failed: %v", err)
+	} else if archiveResult.Archived > 0 {
+		log.Printf("Worker: archived %d stale download logs (scanned=%d protected=%d)",
+			archiveResult.Archived, archiveResult.Scanned, archiveResult.Protected)
+	}
+
 	autoScanCompletedDownloads(result.CompletedTargets)
 }
 

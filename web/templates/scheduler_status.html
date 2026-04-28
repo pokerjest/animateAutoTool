@@ -5,7 +5,7 @@
         <div>
             <div class="text-xs font-bold uppercase tracking-wider text-gray-400">自动检查概览</div>
             <div class="mt-1 text-sm font-semibold text-gray-700">
-                {{ if .LastSummary }}{{ .LastSummary }}{{ else }}调度器还没有产生检查结果{{ end }}
+                {{ if .LastSummary }}{{ .LastSummary }}{{ else if .IsRunning }}正在检查 {{ .TotalSubscriptions }} 个订阅{{ else if or .LastFinishedAt .LastStartedAt }}最近一轮调度已结束{{ else }}调度器还没有产生检查结果{{ end }}
             </div>
         </div>
         <div>

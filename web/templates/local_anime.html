@@ -56,6 +56,7 @@
     updatingComplete: false,
     updatingProgress: false,
     scanning: false, // New scanning state
+    minimumActionDelay: 320,
     highlightAnimeId: {{ .HighlightAnimeID }},
     autoOpenAnimeId: {{ .AutoOpenAnimeID }},
     autoFocusEpisodePath: {{ .AutoFocusEpisode | json }},
@@ -75,6 +76,72 @@
     fixMatchSource: 'bangumi', // Default
     searchingMetadata: false,
     showFixMatch: false,
+    normalizeToastMessage(msg, fallback = '') {
+        const value = String(msg || fallback || '').trim();
+        return value.replace(/^[✅❌⚠️🎉]\s*/u, '') || fallback;
+    },
+    showSuccess(msg, fallback = '操作已完成') {
+        this.showToast(this.normalizeToastMessage(msg, fallback), 'success');
+    },
+    showFailure(msg, fallback = '操作失败') {
+        this.showToast(this.normalizeToastMessage(msg, fallback), 'error');
+    },
+    showNetworkFailure(error, fallback = '网络请求失败') {
+        const detail = error && error.message ? `${fallback}: ${error.message}` : fallback;
+        this.showFailure(detail, fallback);
+    },
+    async waitMinimum(startedAt, minimum = this.minimumActionDelay) {
+        const elapsed = Date.now() - startedAt;
+        if (elapsed < minimum) {
+            await new Promise(resolve => setTimeout(resolve, minimum - elapsed));
+        }
+    },
+    refreshCurrentView() {
+        if (window.htmx) {
+            htmx.ajax('GET', window.location.pathname + window.location.search, { target: '#main-content', pushUrl: true });
+            return;
+        }
+        window.location.reload();
+    },
+    animateCardIn(element) {
+        if (!element) return;
+        element.style.opacity = '0';
+        element.style.transform = 'translateY(8px) scale(0.985)';
+        element.style.transition = 'opacity 260ms ease, transform 260ms ease';
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                element.style.opacity = '1';
+                element.style.transform = 'translateY(0) scale(1)';
+            });
+        });
+    },
+    async smoothReplaceLocalCard(id, html) {
+        const currentCard = document.getElementById(`local-card-${id}`);
+        if (!currentCard) return false;
+
+        currentCard.style.transition = 'opacity 180ms ease, transform 180ms ease';
+        currentCard.style.opacity = '0';
+        currentCard.style.transform = 'translateY(8px) scale(0.985)';
+        await new Promise(resolve => setTimeout(resolve, 180));
+
+        const container = document.createElement('div');
+        container.innerHTML = html.trim();
+        const nextCard = container.firstElementChild;
+        if (!nextCard) return false;
+        currentCard.replaceWith(nextCard);
+        this.$nextTick(() => this.animateCardIn(document.getElementById(`local-card-${id}`)));
+        return true;
+    },
+    resolveAppToastMessage(detail, fallback = '') {
+        if (detail?.message_encoded) {
+            try {
+                return decodeURIComponent(detail.message_encoded);
+            } catch (e) {
+                console.debug('decode app-toast message failed', e);
+            }
+        }
+        return String(detail?.message || fallback || '');
+    },
     showToast(msg, type = 'success') {
         this.toast.message = msg;
         this.toast.type = type;
@@ -101,9 +168,9 @@
                 return;
             }
             this.newDirectoryPath = data.path || '';
-            this.showToast('已选择目录: ' + (data.path || ''), 'success');
+            this.showSuccess('已选择目录: ' + (data.path || ''));
         } catch (e) {
-            this.showToast(e.message || '目录选择失败', 'error');
+            this.showFailure(e.message || '目录选择失败', '目录选择失败');
         } finally {
             this.pickingDirectory = false;
         }
@@ -111,7 +178,7 @@
     showPlaybackFailure(error, diagnostic = null) {
         this.playbackDiagnostic = diagnostic || null;
         const hint = diagnostic?.hint ? ` ${diagnostic.hint}` : '';
-        this.showToast(`❌ 播放失败: ${error}.${hint}`.trim(), 'error');
+        this.showFailure(`播放失败: ${error}.${hint}`.trim(), '播放失败');
     },
     async refreshDiagnostics() {
         const panel = document.getElementById('local-diagnostics-container');
@@ -194,31 +261,34 @@
     },
     async retryScrapeIssue(localAnimeId, title) {
         if (!localAnimeId) {
-            this.showToast('缺少可重试的本地番剧 ID', 'error');
+            this.showFailure('缺少可重试的本地番剧 ID');
             return;
         }
+        const startedAt = Date.now();
         try {
             const resp = await fetch(`/api/local-anime/${localAnimeId}/refresh-metadata`, {
                 method: 'POST'
             });
+            await this.waitMinimum(startedAt);
             if (!resp.ok) {
-                this.showToast(`❌ ${title || '该番剧'} 重新刮削失败`, 'error');
+                this.showFailure(`${title || '该番剧'} 重新刮削失败`, '重新抓取失败');
                 await this.refreshDiagnostics();
                 return;
             }
             const html = await resp.text();
-            this.replaceLocalAnimeCard(localAnimeId, html);
+            await this.smoothReplaceLocalCard(localAnimeId, html);
             await this.refreshDiagnostics();
             this.highlightRecoveredCard(localAnimeId);
-            this.showToast(`✅ ${title || '该番剧'} 已完成重新刮削`, 'success');
+            this.showSuccess(`${title || '该番剧'} 已完成重新抓取`);
         } catch (e) {
             console.error('Retry scrape failed', e);
-            this.showToast('❌ 重新刮削失败', 'error');
+            await this.waitMinimum(startedAt);
+            this.showNetworkFailure(e, '重新抓取失败');
         }
     },
     openFixMatchForIssue(localAnimeId, title) {
         if (!localAnimeId) {
-            this.showToast('缺少可修正的本地番剧 ID', 'error');
+            this.showFailure('缺少可修正的本地番剧 ID');
             return;
         }
         this.openDetailsById(localAnimeId);
@@ -267,7 +337,7 @@
         target.scrollIntoView({ behavior: 'smooth', block: 'center' });
         target.classList.add('ring-4', 'ring-emerald-300', 'ring-offset-2', 'ring-offset-white');
         this.autoFocusedEpisode = true;
-        this.showToast('已定位到刚下载完成的剧集', 'success');
+        this.showSuccess('已定位到刚下载完成的剧集');
         setTimeout(() => {
             target.classList.remove('ring-4', 'ring-emerald-300', 'ring-offset-2', 'ring-offset-white');
         }, 2600);
@@ -276,7 +346,7 @@
         console.log('openDetailsById called with:', id);
         if (!window.animeMap) {
              console.error('window.animeMap is missing');
-             this.showToast('数据未加载，请刷新重试', 'error');
+             this.showFailure('数据未加载，请刷新重试');
              return;
         }
         // Try both number and string key
@@ -285,7 +355,7 @@
              this.openDetails(data);
         } else {
              console.error('Data key not found for id:', id, 'Keys:', Object.keys(window.animeMap));
-             this.showToast('无法找到番剧数据', 'error');
+             this.showFailure('无法找到番剧数据');
         }
     },
     async openDetails(data) {
@@ -390,7 +460,7 @@
                 })
                 .catch(err => {
                     console.error(err);
-                    this.showToast('获取 Bangumi 详情失败，仅显示本地信息', 'error');
+                    this.showFailure('获取 Bangumi 详情失败，仅显示本地信息');
                 })
                 .finally(() => {
                     this.loadingDetails = false;
@@ -399,18 +469,21 @@
     },
     async applyCurrentSource() {
         // if (!confirm('确定将当前数据源应用为封面和标题吗？')) return;
+        const startedAt = Date.now();
         try {
             const res = await fetch(`/api/local-anime/${this.currentLocalId}/switch-source?source=${this.activeSource}`, { 
                 method: 'POST' 
             });
+            await this.waitMinimum(startedAt);
             if (res.ok) {
-                this.showToast('✅ 切换成功！页面即将刷新');
-                setTimeout(() => window.location.reload(), 1000);
+                this.showSuccess('切换成功，正在刷新内容');
+                setTimeout(() => this.refreshCurrentView(), 450);
             } else {
-                this.showToast('❌ 切换失败', 'error');
+                this.showFailure('切换失败');
             }
             } catch(e) {
-                 this.showToast('❌ 切换失败', 'error');
+                 await this.waitMinimum(startedAt);
+                 this.showNetworkFailure(e, '切换失败');
             }
         },
         shouldShowApplyButton() {
@@ -445,7 +518,7 @@
             // Data might be a single object or list depending on API
             this.fixMatchResults = Array.isArray(data) ? data : (data ? [data] : []);
         } catch (e) {
-            this.showToast('搜索失败', 'error');
+            this.showFailure('搜索失败');
         } finally {
             this.searchingMetadata = false;
         }
@@ -463,7 +536,7 @@
                 })
             });
             if (resp.ok) {
-                this.showToast('✅ 关联成功，已刷新本地库卡片', 'success');
+                this.showSuccess('关联成功，已刷新本地库卡片');
                 this.showFixMatch = false;
                 this.showDetailsModal = false;
                 await this.refreshLocalAnimeCard(this.currentLocalId);
@@ -471,42 +544,48 @@
                 this.highlightRecoveredCard(this.currentLocalId);
             } else {
                 const d = await resp.json();
-                this.showToast('❌ ' + (d.error || '关联失败'), 'error');
+                this.showFailure(d.error || '关联失败', '关联失败');
             }
         } catch (e) {
-            this.showToast('❌ 网络错误', 'error');
+            this.showNetworkFailure(e, '关联失败');
         }
     },
 
     async deleteDirectory(id) {
         // if (!confirm('确定要移除该目录吗？')) return;
+        const startedAt = Date.now();
         try {
             const resp = await fetch('/api/local-directories/' + id, { method: 'DELETE' });
+            await this.waitMinimum(startedAt);
             if (resp.ok) {
-                this.showToast('✅ 目录已移除');
-                setTimeout(() => window.location.reload(), 500);
+                this.showSuccess('目录已移除');
+                setTimeout(() => this.refreshCurrentView(), 350);
             } else {
-                this.showToast('❌ 移除失败', 'error');
+                this.showFailure('移除失败');
             }
         } catch (e) {
-            this.showToast('❌ 网络错误', 'error');
+            await this.waitMinimum(startedAt);
+            this.showNetworkFailure(e, '移除失败');
         }
     },
     async scanDirectory() {
         if (this.scanning) return;
         this.scanning = true;
+        const startedAt = Date.now();
         try {
             const resp = await fetch('/api/local-directories/scan', { method: 'POST' });
+            await this.waitMinimum(startedAt);
             if (resp.ok) {
-                this.showToast('✅ 扫描任务已后台启动，稍后请刷新');
+                this.showSuccess('扫描任务已后台启动，稍后请刷新');
                 // Don't reload immediately, let user know it's background
                 setTimeout(() => { this.scanning = false; }, 2000); 
             } else {
-                this.showToast('❌ 启动扫描失败', 'error');
+                this.showFailure('启动扫描失败');
                 this.scanning = false;
             }
         } catch (e) {
-            this.showToast('❌ 网络错误', 'error');
+            await this.waitMinimum(startedAt);
+            this.showNetworkFailure(e, '启动扫描失败');
             this.scanning = false;
         }
     },
@@ -783,11 +862,13 @@ openDetailsById($event.detail);
 $event.stopPropagation();
 openDetails($event.detail);
 " @scan-complete.window="
-if (($event.detail && $event.detail.scope) === 'run') { window.location.reload(); }
+if (($event.detail && $event.detail.scope) === 'run') { refreshCurrentView(); }
 " @scan-run-updated.window="
 refreshScanStatus();
 " @library-issue-updated.window="
 handleLibraryIssueUpdate($event.detail);
+" @app-toast.window="
+showToast(resolveAppToastMessage($event.detail), $event.detail.type || 'success');
 ">
     <!-- Header Section -->
     <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
@@ -818,7 +899,7 @@ handleLibraryIssueUpdate($event.detail);
                 <label class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">默认规则模板</label>
                 <div class="relative">
                     <span
-                        class="absolute inset-y-0 left-0 pl-3 flex items-center text-gray-400 font-mono text-sm">Example:</span>
+                        class="absolute inset-y-0 left-0 pl-3 flex items-center text-gray-400 font-mono text-sm">示例:</span>
                     <input type="text" x-model="renameState.pattern"
                         class="w-full pl-20 pr-4 py-2 rounded-lg bg-gray-50 border border-gray-200 focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none font-mono text-sm transition-all shadow-inner"
                         placeholder="{Title} - S{Season}E{Ep}">
@@ -927,7 +1008,8 @@ handleLibraryIssueUpdate($event.detail);
                 </h3>
 
                 <form hx-post="/api/local-directories" hx-swap="none"
-                    @htmx:after-request="if(event.detail.successful) { showAddModal = false; newDirectoryPath = ''; window.location.reload() }">
+                    @htmx:before-request="$el.dataset.startedAt = String(Date.now())"
+                    @htmx:after-request="(async () => { if(!event.detail.successful) return; const startedAt = Number($el.dataset.startedAt || Date.now()); await waitMinimum(startedAt); showAddModal = false; newDirectoryPath = ''; refreshCurrentView(); })()">
                     <div class="mb-4">
                         <label class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">目录路径</label>
                         <div class="flex items-center gap-2">
@@ -1108,7 +1190,7 @@ handleLibraryIssueUpdate($event.detail);
                                 <span x-text="detailsData?.rating?.score || 'N/A'"></span>
                             </div>
                             <!-- Date -->
-                            <span class="text-gray-400" x-text="detailsData?.air_date || 'Unknown Date'"></span>
+                            <span class="text-gray-400" x-text="detailsData?.air_date || '未知日期'"></span>
                             <!-- Tags -->
                             <div class="flex flex-wrap gap-2">
                                 <template x-for="tag in (detailsData?.tags || []).slice(0, 5)">

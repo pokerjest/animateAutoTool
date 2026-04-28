@@ -2,15 +2,16 @@
     <div class="flex items-center justify-between gap-3">
         <div>
             <h3 class="text-lg md:text-xl font-black text-gray-800">后台任务总览</h3>
-            <p class="text-xs md:text-sm text-gray-500 mt-1">统一查看订阅调度、本地扫描和元数据刷新状态。</p>
+            <p class="text-xs md:text-sm text-gray-500 mt-1">统一查看订阅调度、本地扫描、元数据刷新和下载状态同步。</p>
         </div>
         <span class="text-[11px] font-bold uppercase tracking-[0.18em] text-gray-400">自动刷新</span>
     </div>
 
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+    <div class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-4 gap-4">
         {{ template "task_card" .Scheduler }}
         {{ template "task_card" .Scanner }}
         {{ template "task_card" .Metadata }}
+        {{ template "task_card" .Downloads }}
     </div>
 </div>
 
@@ -55,10 +56,20 @@
     </div>
 
     {{ if .Error }}
-    <div class="rounded-2xl bg-rose-50 border border-rose-100 px-4 py-3">
+    <div class="rounded-2xl bg-rose-50 border border-rose-100 px-4 py-3" title="{{ .Error }}">
         <div class="text-[11px] font-bold uppercase tracking-[0.18em] text-rose-400">最近错误</div>
-        <div class="mt-1 text-sm text-rose-700 break-all">{{ .Error }}</div>
+        <div class="mt-1 text-sm text-rose-700 break-all">{{ if .DisplayError }}{{ .DisplayError }}{{ else }}{{ .Error }}{{ end }}</div>
     </div>
+    {{ end }}
+
+    {{ if .ActionPath }}
+    <button
+        class="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-100 transition"
+        hx-post="{{ .ActionPath }}"
+        hx-target="#task-overview"
+        hx-swap="innerHTML">
+        {{ .ActionLabel }}
+    </button>
     {{ end }}
 </div>
 {{ end }}

@@ -87,12 +87,78 @@
     issueStats: { error: 0, warning: 0 },
     issueReasonGroups: [],
     retryingSubscriptionId: null,
+    minimumActionDelay: 320,
     addForm: { title: '', rss: '', image: '', subtitle_group: '', season: '' },
     subgroups: [],
     selectedAnime: null,
     showSubgroupList: false,
     loadingSubgroups: false,
     fromDashboard: false,
+    normalizeToastMessage(msg, fallback = '') {
+        const value = String(msg || fallback || '').trim();
+        return value.replace(/^[✅❌⚠️🎉]\s*/u, '') || fallback;
+    },
+    showSuccess(msg, fallback = '操作已完成') {
+        this.showToast(this.normalizeToastMessage(msg, fallback), 'success');
+    },
+    showFailure(msg, fallback = '操作失败') {
+        this.showToast(this.normalizeToastMessage(msg, fallback), 'error');
+    },
+    showNetworkFailure(error, fallback = '网络请求失败') {
+        const detail = error && error.message ? `${fallback}: ${error.message}` : fallback;
+        this.showFailure(detail, fallback);
+    },
+    async waitMinimum(startedAt, minimum = this.minimumActionDelay) {
+        const elapsed = Date.now() - startedAt;
+        if (elapsed < minimum) {
+            await new Promise(resolve => setTimeout(resolve, minimum - elapsed));
+        }
+    },
+    refreshCurrentView() {
+        if (window.htmx) {
+            htmx.ajax('GET', window.location.pathname + window.location.search, { target: '#main-content', pushUrl: true });
+            return;
+        }
+        window.location.reload();
+    },
+    animateCardIn(element) {
+        if (!element) return;
+        element.style.opacity = '0';
+        element.style.transform = 'translateY(8px) scale(0.985)';
+        element.style.transition = 'opacity 260ms ease, transform 260ms ease';
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                element.style.opacity = '1';
+                element.style.transform = 'translateY(0) scale(1)';
+            });
+        });
+    },
+    async smoothReplaceCard(id, html) {
+        const currentCard = document.getElementById(`sub-card-${id}`);
+        if (!currentCard) return false;
+
+        currentCard.style.transition = 'opacity 180ms ease, transform 180ms ease';
+        currentCard.style.opacity = '0';
+        currentCard.style.transform = 'translateY(8px) scale(0.985)';
+        await new Promise(resolve => setTimeout(resolve, 180));
+        currentCard.outerHTML = html;
+        this.$nextTick(() => {
+            const nextCard = document.getElementById(`sub-card-${id}`);
+            this.animateCardIn(nextCard);
+            this.syncSubscriptionFilters();
+        });
+        return true;
+    },
+    resolveAppToastMessage(detail, fallback = '') {
+        if (detail?.message_encoded) {
+            try {
+                return decodeURIComponent(detail.message_encoded);
+            } catch (e) {
+                console.debug('decode app-toast message failed', e);
+            }
+        }
+        return String(detail?.message || fallback || '');
+    },
     // Search & Select Logic
     async selectAnime(title, mikanId, image, season) {
         this.fromDashboard = this.showDashboardModal;
@@ -108,11 +174,11 @@
             if (resp.ok) {
                 this.subgroups = await resp.json();
             } else {
-                this.showToast('❌ 获取字幕组失败', 'error');
+                this.showFailure('获取字幕组失败');
             }
         } catch (e) {
             console.error('Fetch subgroups failed', e);
-            this.showToast('❌ 网络错误', 'error');
+            this.showNetworkFailure(e, '获取字幕组失败');
         } finally {
             this.loadingSubgroups = false;
         }
@@ -135,7 +201,7 @@
         this.showAddModal = true;
         const previewArea = document.getElementById('add-preview-results');
         if (previewArea) previewArea.innerHTML = '';
-        this.showToast('✅ 已选择: ' + subgroup.Name);
+        this.showSuccess('已选择: ' + subgroup.Name);
     },
     showToast(msg, type = 'success') {
         this.toast.message = msg;
@@ -145,16 +211,18 @@
     },
     async deleteSubscription() {
         if (!this.deleteId) return;
+        const startedAt = Date.now();
         
         try {
             const response = await fetch('/api/subscriptions/' + this.deleteId, {
                 method: 'DELETE'
             });
+            await this.waitMinimum(startedAt);
 
             if (response.ok) {
                 // Success: Remove UI element and show toast
                 this.showDeleteModal = false;
-                this.showToast('✅ 删除成功', 'success');
+                this.showSuccess('删除成功');
                 
                 // Find and remove the card with animation
                 const card = document.getElementById('sub-card-' + this.deleteId);
@@ -170,15 +238,16 @@
             } else {
                 // Failure
                 const text = await response.text();
-                this.showToast('❌ 删除失败: ' + text, 'error');
+                this.showFailure('删除失败: ' + text, '删除失败');
             }
         } catch (error) {
-            this.showToast('❌ 网络错误: ' + error.message, 'error');
+            await this.waitMinimum(startedAt);
+            this.showNetworkFailure(error, '删除失败');
         }
     },
     async submitBatch() {
         if (!this.batchInput.trim()) {
-            this.showToast('⚠️ 请输入内容', 'error');
+            this.showFailure('请输入内容');
             return;
         }
 
@@ -194,7 +263,7 @@
         }).filter(s => s !== null);
 
         if (subs.length === 0) {
-            this.showToast('⚠️ 格式不正确，请使用: 标题 | RSS链接', 'error');
+            this.showFailure('格式不正确，请使用: 标题 | RSS链接');
             return;
         }
 
@@ -208,17 +277,17 @@
 
             if (response.ok) {
                 const result = await response.json();
-                this.showToast(`✅ 批量处理完成: 成功 ${result.added}, 失败 ${result.failed}`);
+                this.showSuccess(`批量处理完成: 成功 ${result.added}, 失败 ${result.failed}`);
                 this.showBatchAddModal = false;
                 this.batchInput = '';
                 // Silky smooth reload
-                setTimeout(() => window.location.reload(), 1500);
+                setTimeout(() => this.refreshCurrentView(), 600);
             } else {
-                this.showToast('❌ 批量处理请求失败', 'error');
+                this.showFailure('批量处理请求失败');
             }
         } catch (e) {
             console.error('Batch add failed', e);
-            this.showToast('❌ 网络错误', 'error');
+            this.showNetworkFailure(e, '批量处理请求失败');
         } finally {
             this.isSubmittingBatch = false;
         }
@@ -235,7 +304,7 @@
             this.batchInput = line;
         }
         
-        this.showToast(`✅ 已添加到批量列表: ${subgroup.Name}`);
+        this.showSuccess(`已添加到批量列表: ${subgroup.Name}`);
     },
     async previewBatch() {
         if (!this.batchInput.trim()) return;
@@ -264,10 +333,10 @@
             if (response.ok) {
                 this.batchPreviewData = await response.json();
             } else {
-                this.showToast('❌ 预览失败', 'error');
+                this.showFailure('预览失败');
             }
         } catch (e) {
-            this.showToast('❌ 网络错误', 'error');
+            this.showNetworkFailure(e, '预览失败');
         } finally {
             this.isPreviewingBatch = false;
         }
@@ -457,6 +526,7 @@
     async retrySubscription(id, title = '') {
         if (!id || this.retryingSubscriptionId) return;
         this.retryingSubscriptionId = String(id);
+        const startedAt = Date.now();
 
         try {
             const response = await fetch(`/api/subscriptions/${id}/run`, {
@@ -464,38 +534,19 @@
                 headers: { 'HX-Request': 'true' }
             });
             const html = await response.text();
+            await this.waitMinimum(startedAt);
 
             if (!response.ok) {
-                this.showToast(`❌ 重试失败: ${title || id}`, 'error');
+                this.showFailure(html || `重试失败: ${title || id}`, '重试失败');
                 return;
             }
 
-            if (html.includes('<script>alert(')) {
-                const alertPrefix = '<script>alert(';
-                const alertSuffix = ')<\/script>';
-                const startIndex = html.indexOf(alertPrefix);
-                const endIndex = html.indexOf(alertSuffix, startIndex + alertPrefix.length);
-                let message = '重试失败';
-                if (startIndex !== -1 && endIndex !== -1) {
-                    const singleQuote = String.fromCharCode(39);
-                    message = html.slice(startIndex + alertPrefix.length, endIndex).trim();
-                    if ((message.startsWith(singleQuote) && message.endsWith(singleQuote)) || (message.startsWith('\x22') && message.endsWith('\x22'))) {
-                        message = message.slice(1, -1);
-                    }
-                }
-                this.showToast(`❌ ${message}`, 'error');
-                return;
-            }
-
-            const currentCard = document.getElementById(`sub-card-${id}`);
-            if (currentCard) {
-                currentCard.outerHTML = html;
-                this.$nextTick(() => this.syncSubscriptionFilters());
-            }
-            this.showToast(`✅ 已重新运行: ${title || id}`, 'success');
+            await this.smoothReplaceCard(id, html);
+            this.showSuccess(`已重新运行: ${title || id}`);
         } catch (e) {
             console.error('Retry subscription failed', e);
-            this.showToast(`❌ 重试失败: ${title || id}`, 'error');
+            await this.waitMinimum(startedAt);
+            this.showNetworkFailure(e, `重试失败: ${title || id}`);
         } finally {
             this.retryingSubscriptionId = null;
         }
@@ -581,26 +632,26 @@
     },
     async applyCurrentSource() {
         // if (!confirm('确定将当前数据源应用为封面和标题吗？')) return;
+        const startedAt = Date.now();
         try {
             const res = await fetch(`/api/subscriptions/${this.currentSubId}/switch-source?source=${this.activeSource}`, { 
                 method: 'POST' 
             });
+            await this.waitMinimum(startedAt);
             if (res.ok) {
-                this.showToast('✅ 切换成功！页面即将刷新');
-                setTimeout(() => window.location.reload(), 1000);
+                this.showSuccess('切换成功，正在刷新内容');
+                setTimeout(() => this.refreshCurrentView(), 450);
             } else {
-                this.showToast('❌ 切换失败', 'error');
+                this.showFailure('切换失败');
             }
         } catch(e) {
-             this.showToast('❌ 切换失败', 'error');
+             await this.waitMinimum(startedAt);
+             this.showNetworkFailure(e, '切换失败');
         }
     },
     async refreshSubscriptionCard(payload) {
         const id = payload?.subscription_id;
         if (!id) return;
-
-        const currentCard = document.getElementById(`sub-card-${id}`);
-        if (!currentCard) return;
 
         try {
             const response = await fetch(`/api/subscriptions/${id}/card`, {
@@ -609,8 +660,7 @@
             if (!response.ok) return;
 
             const html = await response.text();
-            currentCard.outerHTML = html;
-            this.$nextTick(() => this.syncSubscriptionFilters());
+            await this.smoothReplaceCard(id, html);
         } catch (e) {
             console.error('Refresh subscription card failed', e);
         }
@@ -666,6 +716,8 @@
 " @scheduler-updated.window="
     refreshSchedulerStatus();
     refreshSubscriptionTrends();
+" @app-toast.window="
+    showToast(resolveAppToastMessage($event.detail), $event.detail.type || 'success');
 ">
     <div
         class="flex flex-col gap-4 bg-white/40 backdrop-blur-md p-4 rounded-2xl border border-white/60 shadow-sm lg:flex-row lg:items-center lg:justify-between">
@@ -689,7 +741,8 @@
                     class="absolute -top-1.5 -right-1.5 bg-red-500 text-white text-[10px] font-black px-1.5 py-0.5 rounded-full shadow-lg border-2 border-white animate-bounce"></span>
             </button>
             <button hx-post="/api/subscriptions/refresh" hx-swap="none" hx-indicator="#refresh-indicator"
-                @htmx:after-request="if(event.detail.successful) { showToast(JSON.parse(event.detail.xhr.response).message); setTimeout(() => window.location.reload(), 1500); }"
+                @htmx:before-request="$el.dataset.startedAt = String(Date.now())"
+                @htmx:after-request="(async () => { if (!event.detail.successful) return; const startedAt = Number($el.dataset.startedAt || Date.now()); await waitMinimum(startedAt); showToast(JSON.parse(event.detail.xhr.response).message); setTimeout(() => refreshCurrentView(), 450); })()"
                 class="justify-center bg-emerald-500 text-white px-4 py-2 rounded-xl hover:bg-emerald-600 transition-all shadow-[0_4px_12px_rgba(16,185,129,0.3)] hover:shadow-emerald-500/40 flex items-center gap-2 active:scale-95 font-bold disabled:opacity-50">
                 <span id="refresh-indicator" class="htmx-indicator animate-spin text-sm">⌛</span>
                 <span class="text-sm">🔄</span> 刷新
@@ -899,7 +952,7 @@
 
                 <!-- Apply Source -->
                 <div class="mt-auto"
-                    x-show="detailsData?.name !== modalRaw?.title || activeSource === (modalRaw.title === modalRaw.tmdbTitle ? 'bangumi' : 'tmdb')"
+                    x-show="detailsData?.name !== modalRaw?.title || activeSource === ((modalRaw?.title === modalRaw?.tmdbTitle) ? 'bangumi' : 'tmdb')"
                     x-transition>
                     <button @click="applyCurrentSource()"
                         class="w-full py-2.5 rounded-xl border border-gray-200 text-gray-600 hover:border-green-300 hover:bg-green-50 hover:text-green-700 font-bold text-sm transition flex items-center justify-center gap-2">
@@ -931,7 +984,7 @@
                             <span class="text-xs">★</span>
                             <span x-text="detailsData?.rating?.score || 'N/A'"></span>
                         </div>
-                        <span class="text-gray-400" x-text="detailsData?.air_date || 'Unknown Date'"></span>
+                        <span class="text-gray-400" x-text="detailsData?.air_date || '未知日期'"></span>
                         <div class="flex flex-wrap gap-2">
                             <template x-for="tag in (detailsData?.tags || []).slice(0, 5)">
                                 <span x-text="tag.name"
@@ -1070,7 +1123,8 @@
             </h3>
 
             <form hx-post="/api/subscriptions" hx-swap="none" class="space-y-6"
-                @htmx:after-request="if(event.detail.successful && event.detail.elt.tagName === 'FORM') { showAddModal = false; window.location.reload() }"
+                @htmx:before-request="$el.dataset.startedAt = String(Date.now())"
+                @htmx:after-request="(async () => { if(!(event.detail.successful && event.detail.elt.tagName === 'FORM')) return; const startedAt = Number($el.dataset.startedAt || Date.now()); await waitMinimum(startedAt); showAddModal = false; refreshCurrentView(); })()"
                 @htmx:response-error="showToast('❌ 添加失败: ' + ((event.detail.xhr && event.detail.xhr.responseText) ? event.detail.xhr.responseText : '请求失败'), 'error')">
                 <div class="space-y-5">
                     <input type="hidden" name="Image" x-model="addForm.image">
@@ -1518,7 +1572,9 @@
 
             <!-- Dynamic attributes using x-bind and Alpine data -->
             <form :hx-put="'/api/subscriptions/' + editForm.id" :hx-target="'#sub-card-' + editForm.id"
-                hx-swap="outerHTML" @htmx:after-request="if(event.detail.successful) { showEditModal = false; }"
+                hx-swap="outerHTML swap:120ms settle:220ms"
+                @htmx:before-request="$el.dataset.startedAt = String(Date.now())"
+                @htmx:after-request="(async () => { if(!event.detail.successful) return; const startedAt = Number($el.dataset.startedAt || Date.now()); await waitMinimum(startedAt); showEditModal = false; })()"
                 x-effect="htmx.process($el)">
                 <!-- Crucial: Reprocess HTMX attributes when bound data changes -->
 
@@ -1600,19 +1656,16 @@
         </div>
     </div>
     </template>
-</div>
-<!-- Toast Notification -->
-<div x-show="toast.show" x-transition:enter="transition ease-out duration-300"
-    x-transition:enter-start="opacity-0 translate-y-2" x-transition:enter-end="opacity-100 translate-y-0"
-    x-transition:leave="transition ease-in duration-200" x-transition:leave-start="opacity-100 translate-y-0"
-    x-transition:leave-end="opacity-0 translate-y-2"
-    class="fixed bottom-6 right-6 px-6 py-3 rounded-lg shadow-lg text-white font-medium z-50 flex items-center gap-2 max-w-sm break-all"
-    :class="toast.type === 'success' ? 'bg-green-500' : 'bg-red-500'" style="display: none;">
-    <span x-text="toast.type === 'success' ? '✅' : '❌'"></span>
-    <span x-text="toast.message"></span>
-</div>
-
-
+    <!-- Toast Notification -->
+    <div x-show="toast.show" x-transition:enter="transition ease-out duration-300"
+        x-transition:enter-start="opacity-0 translate-y-2" x-transition:enter-end="opacity-100 translate-y-0"
+        x-transition:leave="transition ease-in duration-200" x-transition:leave-start="opacity-100 translate-y-0"
+        x-transition:leave-end="opacity-0 translate-y-2"
+        class="fixed bottom-6 right-6 px-6 py-3 rounded-lg shadow-lg text-white font-medium z-50 flex items-center gap-2 max-w-sm break-all"
+        :class="toast.type === 'success' ? 'bg-green-500' : 'bg-red-500'" style="display: none;">
+        <span x-text="toast.type === 'success' ? '✅' : '❌'"></span>
+        <span x-text="toast.message"></span>
+    </div>
 </div>
 
 {{ if not .SkipLayout }}{{ template "footer.html" . }}{{ end }}

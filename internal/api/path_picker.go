@@ -31,7 +31,7 @@ func PickDirectoryHandler(c *gin.Context) {
 
 	var req pickDirectoryRequest
 	if err := c.ShouldBind(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		jsonBadRequest(c, "目录选择请求格式不正确")
 		return
 	}
 

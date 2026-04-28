@@ -4,8 +4,6 @@
 package api
 
 import (
-	"time"
-
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-contrib/sessions/cookie"
 	"github.com/gin-gonic/gin"
@@ -66,12 +64,7 @@ func initRoutesLegacy(r *gin.Engine) {
 		// API
 		apiGroup := authorized.Group("/api")
 		{
-			apiGroup.POST("/sync", func(c *gin.Context) {
-				// Trigger Sync (TODO: Implement actual sync logic if needed, currently just UI feedback)
-				// User requested 1s delay for transition
-				time.Sleep(1 * time.Second)
-				c.JSON(200, gin.H{"status": "ok"})
-			})
+			apiGroup.POST("/sync", DashboardSyncHandler)
 
 			// Subscriptions
 			apiGroup.POST("/subscriptions", CreateSubscriptionHandler)
@@ -79,6 +72,9 @@ func initRoutesLegacy(r *gin.Engine) {
 			apiGroup.POST("/subscriptions/batch-preview", BatchPreviewHandler)
 			apiGroup.POST("/subscriptions/:id/toggle", ToggleSubscriptionHandler)
 			apiGroup.POST("/subscriptions/:id/run", RunSubscriptionHandler)
+			apiGroup.POST("/subscriptions/:id/use-base-rss", UseBaseRSSHandler)
+			apiGroup.POST("/subscriptions/:id/clear-filter", ClearSubscriptionFilterHandler)
+			apiGroup.POST("/subscriptions/:id/reset-logs", ResetSubscriptionLogsHandler)
 			apiGroup.GET("/subscriptions/:id/card", GetSubscriptionCardHandler)
 			apiGroup.GET("/subscriptions/:id/history", GetSubscriptionHistoryHandler)
 			apiGroup.GET("/subscriptions/trends", GetSubscriptionTrendsHandler)
@@ -175,6 +171,7 @@ func initRoutesLegacy(r *gin.Engine) {
 			apiGroup.GET("/dashboard/bangumi-data", DashboardBangumiDataHandler)
 			apiGroup.GET("/dashboard/qb-status", DashboardQBStatusHandler)
 			apiGroup.GET("/dashboard/task-overview", DashboardTaskOverviewHandler)
+			apiGroup.POST("/download-logs/repair", RepairDownloadLogsHandler)
 			apiGroup.GET("/runtime/stats", RuntimeStatsHandler)
 
 			// SSE

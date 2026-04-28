@@ -41,7 +41,7 @@ func GetLibraryHandler(c *gin.Context) {
 
 	// Order by updated_at desc usually makes sense to see new stuff
 	if err := dbCtx.Order("updated_at desc").Find(&metadata).Error; err != nil {
-		c.String(http.StatusInternalServerError, "Database Error")
+		htmlServerError(c, "读取媒体库数据", err)
 		return
 	}
 
@@ -169,7 +169,7 @@ type FixMatchRequest struct {
 func FixMatchHandler(c *gin.Context) {
 	var req FixMatchRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid JSON"})
+		jsonBadRequest(c, "修正匹配请求格式不正确")
 		return
 	}
 
@@ -187,18 +187,18 @@ func FixMatchHandler(c *gin.Context) {
 			id = req.AnimeID
 		}
 		if err := metaSvc.MatchSeries(id, req.Source, req.SourceID); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			jsonServerError(c, "修正本地番剧匹配", err)
 			return
 		}
 	} else {
 		// Metadata only fix
 		if err := metaSvc.MatchMetadata(req.ID, req.Source, req.SourceID); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			jsonServerError(c, "修正元数据匹配", err)
 			return
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Match updated successfully"})
+	c.JSON(http.StatusOK, gin.H{"message": "匹配关系已更新"})
 }
 
 type SearchResult struct {
@@ -220,7 +220,7 @@ func SearchMetadataHandler(c *gin.Context) {
 	keyword := c.Query("q")
 	source := c.Query("source")
 	if keyword == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Keyword required"})
+		jsonBadRequest(c, "请输入搜索关键词")
 		return
 	}
 
@@ -238,7 +238,7 @@ func SearchMetadataHandler(c *gin.Context) {
 	case SourceTMDB:
 		var token model.GlobalConfig
 		if err := db.DB.Where("key = ?", model.ConfigKeyTMDBToken).First(&token).Error; err != nil || token.Value == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "TMDB Token not configured"})
+			jsonBadRequest(c, "还没有配置 TMDB Token")
 			return
 		}
 
@@ -256,7 +256,7 @@ func SearchMetadataHandler(c *gin.Context) {
 
 		results, err := tmdbClient.SearchTV(keyword)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			jsonServerError(c, "搜索 TMDB 元数据", err)
 			return
 		}
 
@@ -267,7 +267,7 @@ func SearchMetadataHandler(c *gin.Context) {
 			r.Name = show.OriginalName
 			r.NameCN = show.Name
 			if show.PosterPath != "" {
-				r.Images.Large = "https://image.tmdb.org/t/p/w500" + show.PosterPath
+				r.Images.Large = show.PosterPath
 			}
 			r.Summary = show.Overview
 			r.AirDate = show.FirstAirDate
@@ -278,7 +278,7 @@ func SearchMetadataHandler(c *gin.Context) {
 	case SourceAniList:
 		var token model.GlobalConfig
 		if err := db.DB.Where("key = ?", model.ConfigKeyAniListToken).First(&token).Error; err != nil || token.Value == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "AniList Token not configured"})
+			jsonBadRequest(c, "还没有配置 AniList Token")
 			return
 		}
 
@@ -295,7 +295,7 @@ func SearchMetadataHandler(c *gin.Context) {
 
 		result, err := client.SearchAnime(keyword)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			jsonServerError(c, "搜索 AniList 元数据", err)
 			return
 		}
 
@@ -345,7 +345,7 @@ func SearchMetadataHandler(c *gin.Context) {
 
 		results, err := client.SearchSubject(keyword)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			jsonServerError(c, "搜索 Bangumi 元数据", err)
 			return
 		}
 		if results != nil {
@@ -497,12 +497,12 @@ func GetRandomBackgroundHandler(c *gin.Context) {
 	// Prioritize items with Bangumi/TMDB images which are likely high quality
 	// Use ORDER BY RANDOM() LIMIT 1
 	// Check for non-empty blobs.
-	result := db.DB.Where("length(bangumi_image_raw) > 0 OR length(tmdb_image_raw) > 0 OR length(anilist_image_raw) > 0").
+	result := db.DB.Where("length(bangumi_image_raw) > 0 OR length(tmdb_image_raw) > 0 OR length(ani_list_image_raw) > 0").
 		Order("RANDOM()").
 		First(&m)
 
 	if result.Error != nil {
-		c.JSON(http.StatusOK, gin.H{"success": false, "message": "No covers found"})
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "暂时没有找到可用封面"})
 		return
 	}
 

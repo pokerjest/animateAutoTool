@@ -3,6 +3,7 @@
 
 <div class="min-h-screen text-gray-800 font-sans selection:bg-pink-200 selection:text-pink-900" x-data="{
     currentTab: {{ if .Today }}{{ .Today }}{{ else }}new Date().getDay() || 7{{ end }},
+    minimumActionDelay: 320,
 
     init() {
         console.log('Calendar initialized. Today:', this.currentTab);
@@ -27,6 +28,19 @@
     loadingDetailSummary: false,
     errorMessage: '',
     copyMessage: '',
+    async waitMinimum(startedAt, minimum = this.minimumActionDelay) {
+        const elapsed = Date.now() - startedAt;
+        if (elapsed < minimum) {
+            await new Promise(resolve => setTimeout(resolve, minimum - elapsed));
+        }
+    },
+    refreshCurrentView() {
+        if (window.htmx) {
+            htmx.ajax('GET', window.location.pathname + window.location.search, { target: '#main-content', pushUrl: true });
+            return;
+        }
+        window.location.reload();
+    },
 
     openDetail(anime) {
         console.log('Open Detail:', anime);
@@ -617,7 +631,8 @@
 
                         <div class="p-5 sm:p-8 bg-white overflow-y-auto">
                             <form hx-post="/api/subscriptions" hx-swap="none"
-                                @htmx:after-request="showSubscribeModal = false; window.location.reload()">
+                                @htmx:before-request="$el.dataset.startedAt = String(Date.now())"
+                                @htmx:after-request="(async () => { const startedAt = Number($el.dataset.startedAt || Date.now()); await waitMinimum(startedAt); showSubscribeModal = false; refreshCurrentView(); })()">
                                 <div class="space-y-6">
                                     <div class="space-y-2">
                                         <label

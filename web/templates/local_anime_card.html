@@ -53,13 +53,40 @@
             </h3>
         </div>
 
+        {{ if .HasRepairActions }}
+        <div class="mb-3 space-y-2 rounded-xl border border-sky-100 bg-sky-50/60 px-2.5 py-2.5">
+            <div class="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wide text-sky-700">
+                <span class="inline-flex h-4 w-4 items-center justify-center rounded-md bg-white text-[9px] shadow-sm">🛠</span>
+                <span>智能修复建议</span>
+            </div>
+            <div class="text-[10px] leading-relaxed text-sky-700">
+                {{ .RepairHint }}
+            </div>
+            <div class="flex flex-wrap gap-2">
+                {{ if .CanRetryScrape }}
+                <button hx-post="/api/local-anime/{{ .ID }}/refresh-metadata" hx-swap="outerHTML"
+                    hx-target="#local-card-{{.ID}}" hx-swap="outerHTML swap:120ms settle:220ms" @click.stop
+                    class="h-7 px-2.5 rounded-lg border border-sky-200 bg-white text-[10px] font-bold text-sky-700 hover:bg-sky-50 transition">
+                    重新抓取
+                </button>
+                {{ end }}
+                {{ if .CanFixMatch }}
+                <button type="button" @click.stop="openFixMatchForIssue({{ .ID }}, {{ .Title | json }})"
+                    class="h-7 px-2.5 rounded-lg border border-indigo-200 bg-white text-[10px] font-bold text-indigo-700 hover:bg-indigo-50 transition">
+                    修正匹配
+                </button>
+                {{ end }}
+            </div>
+        </div>
+        {{ end }}
+
         <!-- Source Toggles and Actions -->
         <div class="mt-auto flex items-center justify-between gap-2 pt-2 border-t border-gray-50">
             <div class="flex items-center gap-1">
                 <!-- Bangumi Toggle -->
                 {{ if and .Metadata (gt .Metadata.BangumiID 0) }}
                 <button hx-post="/api/local-anime/{{.ID}}/switch-source?source=bangumi" hx-swap="outerHTML"
-                    hx-target="#local-card-{{.ID}}" @click.stop
+                    hx-target="#local-card-{{.ID}}" hx-swap="outerHTML swap:120ms settle:220ms" @click.stop
                     class="h-6 px-2 rounded flex items-center justify-center text-[10px] font-bold transition-all border
                     {{ if eq .Title .Metadata.BangumiTitle }}bg-pink-50 text-pink-600 border-pink-200 shadow-sm{{ else }}bg-white text-gray-400 border-gray-200 hover:border-pink-300 hover:text-pink-500{{ end }}"
                     title="切换到 Bangumi">
@@ -70,7 +97,7 @@
                 <!-- TMDB Toggle -->
                 {{ if and .Metadata (gt .Metadata.TMDBID 0) }}
                 <button hx-post="/api/local-anime/{{.ID}}/switch-source?source=tmdb" hx-swap="outerHTML"
-                    hx-target="#local-card-{{.ID}}" @click.stop
+                    hx-target="#local-card-{{.ID}}" hx-swap="outerHTML swap:120ms settle:220ms" @click.stop
                     class="h-6 px-2 rounded flex items-center justify-center text-[10px] font-bold transition-all border
                     {{ if eq .Title .Metadata.TMDBTitle }}bg-blue-50 text-blue-600 border-blue-200 shadow-sm{{ else }}bg-white text-gray-400 border-gray-200 hover:border-blue-300 hover:text-blue-500{{ end }}"
                     title="切换到 TMDB">
@@ -81,7 +108,7 @@
                 <!-- AniList Toggle -->
                 {{ if and .Metadata (gt .Metadata.AniListID 0) }}
                 <button hx-post="/api/local-anime/{{.ID}}/switch-source?source=anilist" hx-swap="outerHTML"
-                    hx-target="#local-card-{{.ID}}" @click.stop
+                    hx-target="#local-card-{{.ID}}" hx-swap="outerHTML swap:120ms settle:220ms" @click.stop
                     class="h-6 px-2 rounded flex items-center justify-center text-[10px] font-bold transition-all border
                     {{ if eq .Title .Metadata.AniListTitle }}bg-indigo-50 text-indigo-600 border-indigo-200 shadow-sm{{ else }}bg-white text-gray-400 border-gray-200 hover:border-indigo-300 hover:text-indigo-500{{ end }}"
                     title="切换到 AniList">
@@ -120,7 +147,7 @@
 
                 <!-- Refresh Button -->
                 <button hx-post="/api/local-anime/{{ .ID }}/refresh-metadata" hx-swap="outerHTML"
-                    hx-target="#local-card-{{.ID}}"
+                    hx-target="#local-card-{{.ID}}" hx-swap="outerHTML swap:120ms settle:220ms"
                     class="w-8 h-8 md:w-6 md:h-6 flex items-center justify-center text-gray-400 hover:text-primary hover:bg-primary/10 rounded transition-colors"
                     title="刷新元数据" @click.stop>
                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

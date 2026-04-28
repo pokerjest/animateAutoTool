@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -167,4 +168,32 @@ func (q *QBittorrentClient) ListTorrents() ([]TorrentInfo, error) {
 		return nil, fmt.Errorf("list torrents failed: unexpected response payload")
 	}
 	return *result, nil
+}
+
+func (q *QBittorrentClient) RenameFile(hash, oldPath, newPath string) error {
+	if strings.TrimSpace(hash) == "" {
+		return errors.New("rename file failed: missing torrent hash")
+	}
+	if strings.TrimSpace(oldPath) == "" || strings.TrimSpace(newPath) == "" {
+		return errors.New("rename file failed: missing old or new path")
+	}
+
+	req := q.client.R().
+		SetFormData(map[string]string{
+			"hash":    strings.TrimSpace(hash),
+			"oldPath": filepath.ToSlash(strings.TrimSpace(oldPath)),
+			"newPath": filepath.ToSlash(strings.TrimSpace(newPath)),
+		})
+	if len(q.cookies) > 0 {
+		req.SetCookies(q.cookies)
+	}
+
+	resp, err := req.Post("/api/v2/torrents/renameFile")
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode() != http.StatusOK {
+		return fmt.Errorf("rename file failed: %s, body: %s", resp.Status(), resp.String())
+	}
+	return nil
 }

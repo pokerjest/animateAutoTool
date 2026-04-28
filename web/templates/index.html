@@ -8,7 +8,45 @@
     comment: '',
     tags: '',
     updating: false,
+    minimumActionDelay: 320,
     toast: { show: false, message: '', type: 'success' },
+    normalizeToastMessage(msg, fallback = '') {
+        const value = String(msg || fallback || '').trim();
+        return value.replace(/^[✅❌⚠️🎉]\s*/u, '') || fallback;
+    },
+    showSuccess(msg, fallback = '操作已完成') {
+        this.showToast(this.normalizeToastMessage(msg, fallback), 'success');
+    },
+    showFailure(msg, fallback = '操作失败') {
+        this.showToast(this.normalizeToastMessage(msg, fallback), 'error');
+    },
+    showNetworkFailure(error, fallback = '网络请求失败') {
+        const detail = error && error.message ? `${fallback}: ${error.message}` : fallback;
+        this.showFailure(detail, fallback);
+    },
+    async waitMinimum(startedAt, minimum = this.minimumActionDelay) {
+        const elapsed = Date.now() - startedAt;
+        if (elapsed < minimum) {
+            await new Promise(resolve => setTimeout(resolve, minimum - elapsed));
+        }
+    },
+    refreshCurrentView() {
+        if (window.htmx) {
+            htmx.ajax('GET', window.location.pathname + window.location.search, { target: '#main-content', pushUrl: true });
+            return;
+        }
+        window.location.reload();
+    },
+    resolveAppToastMessage(detail, fallback = '') {
+        if (detail?.message_encoded) {
+            try {
+                return decodeURIComponent(detail.message_encoded);
+            } catch (e) {
+                console.debug('decode app-toast message failed', e);
+            }
+        }
+        return String(detail?.message || fallback || '');
+    },
     
     showToast(msg, type = 'success') {
         this.toast.message = msg;
@@ -28,6 +66,7 @@
     saveChanges() {
         if (!this.editingAnime) return;
         this.updating = true;
+        const startedAt = Date.now();
         
         const payload = {
             status: this.editingAnime.type, // Keep current status
@@ -42,26 +81,27 @@
             body: JSON.stringify(payload)
         })
         .then(r => r.json())
-        .then(d => {
+        .then(async d => {
+            await this.waitMinimum(startedAt);
             if(d.error) {
-                this.showToast('❌ ' + d.error, 'error');
+                this.showFailure(d.error, '保存失败');
             } else {
                 // Optimistic UI Update (Partial)
                 this.editingAnime.rate = payload.rating;
                 this.editingAnime.comment = payload.comment;
                 this.editingAnime.tags = payload.tags;
                 this.showModal = false;
-                this.showToast('✅ ' + d.message, 'success');
-                // Reload page to reflect changes fully (lazy way)
-                 setTimeout(() => window.location.reload(), 1000);
+                this.showSuccess(d.message, '保存成功');
+                setTimeout(() => this.refreshCurrentView(), 450);
             }
         })
-        .catch(err => {
-             this.showToast('❌ 网络请求失败', 'error');
+        .catch(async err => {
+             await this.waitMinimum(startedAt);
+             this.showNetworkFailure(err, '保存失败');
         })
         .finally(() => this.updating = false);
     }
-}" class="space-y-8 relative">
+}" @app-toast.window="showToast(resolveAppToastMessage($event.detail), $event.detail.type || 'success')" class="space-y-8 relative">
 
     <!-- Toast Notification -->
     <div x-show="toast.show" x-transition:enter="transition ease-out duration-300"

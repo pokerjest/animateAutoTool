@@ -85,7 +85,7 @@ func CompleteBootstrapSetupHandler(c *gin.Context) {
 	bootstrapInfo, pending := bootstrap.PendingAdminBootstrapInfo()
 	if !pending {
 		c.JSON(http.StatusOK, gin.H{
-			"message":  "Setup already completed",
+			"message":  "初始化已经完成",
 			"redirect": "/",
 		})
 		return
@@ -93,19 +93,19 @@ func CompleteBootstrapSetupHandler(c *gin.Context) {
 
 	currentUser, err := currentSessionUser(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "当前登录状态已失效，请重新登录"})
 		return
 	}
 	if currentUser.Username != bootstrapInfo.Username {
 		c.JSON(http.StatusForbidden, gin.H{
-			"error": "Please sign in with the bootstrap admin account to finish setup",
+			"error": "请使用初始化生成的管理员账号登录后，再完成首次设置",
 		})
 		return
 	}
 
 	var req BootstrapSetupRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		jsonBadRequest(c, "初始化请求格式不正确")
 		return
 	}
 
@@ -114,19 +114,19 @@ func CompleteBootstrapSetupHandler(c *gin.Context) {
 
 	switch {
 	case len(req.NewPassword) < 8:
-		c.JSON(http.StatusBadRequest, gin.H{"error": "New password must be at least 8 characters long"})
+		jsonBadRequest(c, "新密码至少需要 8 个字符")
 		return
 	case req.NewPassword != req.Confirm:
-		c.JSON(http.StatusBadRequest, gin.H{"error": "The new passwords do not match"})
+		jsonBadRequest(c, "两次输入的新密码不一致")
 		return
 	case req.NewPassword == bootstrapInfo.Password:
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Please choose a new password instead of reusing the bootstrap password"})
+		jsonBadRequest(c, "请不要继续使用初始化密码，换一个新的密码吧")
 		return
 	}
 
 	qbValues := normalizedQBValues(req.QBMode, req.QBURL, req.QBUsername, req.QBPassword)
 	if qbValues[model.ConfigKeyQBMode] == qbutil.ModeExternal && qbValues[model.ConfigKeyQBUrl] == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "External qBittorrent mode requires a WebUI URL"})
+		jsonBadRequest(c, "外部 qBittorrent 模式需要填写 WebUI 地址")
 		return
 	}
 
@@ -136,15 +136,20 @@ func CompleteBootstrapSetupHandler(c *gin.Context) {
 		return
 	}
 
-	persistGlobalConfig(model.ConfigKeyQBMode, qbValues[model.ConfigKeyQBMode])
-	persistGlobalConfig(model.ConfigKeyQBUrl, qbValues[model.ConfigKeyQBUrl])
-	persistGlobalConfig(model.ConfigKeyQBUsername, qbValues[model.ConfigKeyQBUsername])
-	persistGlobalConfig(model.ConfigKeyQBPassword, qbValues[model.ConfigKeyQBPassword])
-	persistGlobalConfig(model.ConfigKeyBaseDir, strings.TrimSpace(req.BaseDir))
+	if err := persistGlobalConfigs(map[string]string{
+		model.ConfigKeyQBMode:     qbValues[model.ConfigKeyQBMode],
+		model.ConfigKeyQBUrl:      qbValues[model.ConfigKeyQBUrl],
+		model.ConfigKeyQBUsername: qbValues[model.ConfigKeyQBUsername],
+		model.ConfigKeyQBPassword: qbValues[model.ConfigKeyQBPassword],
+		model.ConfigKeyBaseDir:    strings.TrimSpace(req.BaseDir),
+	}); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("保存初始化下载配置失败: %v", err)})
+		return
+	}
 	statusCache.Delete("qb")
 
 	c.JSON(http.StatusOK, gin.H{
-		"message":  "Setup completed successfully",
+		"message":  "初始化完成",
 		"redirect": "/",
 	})
 }

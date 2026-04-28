@@ -145,27 +145,27 @@ func GetR2ConfigHandler(c *gin.Context) {
 func UpdateR2ConfigHandler(c *gin.Context) {
 	var req R2Config
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		jsonBadRequest(c, "R2 配置格式不正确")
 		return
 	}
 
 	if err := db.SaveGlobalConfig(model.ConfigKeyR2Endpoint, req.Endpoint); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save endpoint: " + err.Error()})
+		jsonServerError(c, "保存 R2 Endpoint", err)
 		return
 	}
 	if err := db.SaveGlobalConfig(model.ConfigKeyR2AccessKey, req.AccessKey); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save access key: " + err.Error()})
+		jsonServerError(c, "保存 R2 Access Key", err)
 		return
 	}
 	if err := db.SaveGlobalConfig(model.ConfigKeyR2Bucket, req.Bucket); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save bucket: " + err.Error()})
+		jsonServerError(c, "保存 R2 Bucket", err)
 		return
 	}
 
 	// Only update secret key if provided (not empty or masked)
 	if req.SecretKey != "" && !isMasked(req.SecretKey) {
 		if err := db.SaveGlobalConfig(model.ConfigKeyR2SecretKey, req.SecretKey); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save secret key: " + err.Error()})
+			jsonServerError(c, "保存 R2 Secret Key", err)
 			return
 		}
 	}
@@ -192,20 +192,20 @@ func UploadToR2Handler(c *gin.Context) {
 	tempFile, err := os.CreateTemp("", "backup_r2_*.db")
 	if err != nil {
 		debugLog("DEBUG: CreateTemp error: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create temp file"})
+		jsonServerError(c, "创建临时备份文件", err)
 		return
 	}
 	tempPath := tempFile.Name()
 	if err := tempFile.Close(); err != nil {
 		safeio.Remove(tempPath)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to finalize temp file"})
+		jsonServerError(c, "完成临时备份文件写入", err)
 		return
 	}
 	defer safeio.Remove(tempPath)
 
 	if err := service.CreateBackupFile(tempPath, service.BackupModeFull); err != nil {
 		debugLog("DEBUG: createBackupFile error: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create backup: " + err.Error()})
+		jsonServerError(c, "创建备份文件", err)
 		return
 	}
 
@@ -213,14 +213,14 @@ func UploadToR2Handler(c *gin.Context) {
 	client, bucket, err := getR2Client(c.Request.Context())
 	if err != nil {
 		debugLog("DEBUG: getR2Client error: %v", err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": "R2 Config Error: " + err.Error()})
+		jsonBadRequest(c, "R2 配置有误: "+err.Error())
 		return
 	}
 
 	file, err := os.Open(filepath.Clean(tempPath)) //nolint:gosec // tempPath is created by this handler before upload.
 	if err != nil {
 		debugLog("DEBUG: os.Open backup file error: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to open backup file"})
+		jsonServerError(c, "打开备份文件", err)
 		return
 	}
 	defer safeio.Close(file)
@@ -235,7 +235,7 @@ func UploadToR2Handler(c *gin.Context) {
 	})
 	if err != nil {
 		debugLog("DEBUG: PutObject error: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to upload to R2: " + err.Error()})
+		jsonServerError(c, "上传备份到 R2", err)
 		return
 	}
 
@@ -344,7 +344,7 @@ func ListR2BackupsHandler(c *gin.Context) {
 
 	client, bucket, err := getR2Client(ctx)
 	if err != nil {
-		c.JSON(http.StatusOK, gin.H{"backups": []R2BackupFile{}, "error": "R2 Config Error: " + err.Error()})
+		c.JSON(http.StatusOK, gin.H{"backups": []R2BackupFile{}, "error": "R2 配置有误: " + err.Error()})
 		return
 	}
 
@@ -353,7 +353,7 @@ func ListR2BackupsHandler(c *gin.Context) {
 		Prefix: aws.String("animate_backup_"), // optional filter
 	})
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list backups: " + err.Error()})
+		jsonServerError(c, "读取 R2 备份列表", err)
 		return
 	}
 
@@ -387,20 +387,20 @@ func GetR2ProgressHandler(c *gin.Context) {
 		c.JSON(http.StatusOK, progress)
 		return
 	}
-	c.JSON(http.StatusNotFound, gin.H{"error": "Task not found"})
+	jsonNotFound(c, "未找到对应的任务")
 }
 
 // StageR2BackupHandler (Async Version)
 func StageR2BackupHandler(c *gin.Context) {
 	key := c.PostForm("key")
 	if key == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "No backup identifier provided"})
+		jsonBadRequest(c, "没有提供备份标识")
 		return
 	}
 
 	client, bucket, err := getR2Client(c.Request.Context())
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "R2 Config Error: " + err.Error()})
+		jsonBadRequest(c, "R2 配置有误: "+err.Error())
 		return
 	}
 
@@ -575,19 +575,19 @@ func cleanupStaleR2Progress(now time.Time) {
 // We can remove the old RestoreFromR2Handler or keep it as a legacy direct handler (if user skips preview).
 // Let's replace it with a redirect or error to force preview.
 func RestoreFromR2Handler(c *gin.Context) {
-	c.JSON(http.StatusBadRequest, gin.H{"error": "Please use the Preview/Stage flow."})
+	jsonBadRequest(c, "请先使用预览/暂存流程，再执行恢复。")
 }
 
 func DeleteR2BackupHandler(c *gin.Context) {
 	key := c.PostForm("key")
 	if key == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "No backup identifier provided"})
+		jsonBadRequest(c, "没有提供备份标识")
 		return
 	}
 
 	client, bucket, err := getR2Client(c.Request.Context())
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "R2 Config Error: " + err.Error()})
+		jsonBadRequest(c, "R2 配置有误: "+err.Error())
 		return
 	}
 
@@ -598,7 +598,7 @@ func DeleteR2BackupHandler(c *gin.Context) {
 	})
 	if err != nil {
 		debugLog("DEBUG: DeleteObject error: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete backup: " + err.Error()})
+		jsonServerError(c, "删除 R2 备份", err)
 		return
 	}
 
@@ -636,7 +636,7 @@ func TestR2ConnectionHandler(c *gin.Context) {
 	var req R2Config
 	if err := c.ShouldBindJSON(&req); err != nil {
 		debugLog("DEBUG: BindJSON error: %v", err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request: " + err.Error()})
+		jsonBadRequest(c, "R2 连通性测试请求格式不正确: "+err.Error())
 		return
 	}
 	debugLog("DEBUG: Testing R2 Config: Endpoint=%s, Bucket=%s, AccessKey=%s", req.Endpoint, req.Bucket, maskSecret(req.AccessKey))
@@ -644,7 +644,7 @@ func TestR2ConnectionHandler(c *gin.Context) {
 	// Validate inputs
 	if req.Endpoint == "" || req.AccessKey == "" || req.Bucket == "" {
 		debugLog("DEBUG: Validation failed - missing fields")
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Endpoint, AccessKey, and Bucket are required"})
+		jsonBadRequest(c, "Endpoint、AccessKey 和 Bucket 都是必填项")
 		return
 	}
 
@@ -654,7 +654,7 @@ func TestR2ConnectionHandler(c *gin.Context) {
 		db.DB.Model(&model.GlobalConfig{}).Where("key = ?", model.ConfigKeyR2SecretKey).Select("value").Scan(&secretKey)
 		if secretKey == "" {
 			debugLog("DEBUG: Secret Key missing from DB")
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Secret Key is missing"})
+			jsonBadRequest(c, "缺少 Secret Key")
 			return
 		}
 	}
@@ -666,7 +666,7 @@ func TestR2ConnectionHandler(c *gin.Context) {
 	)
 	if err != nil {
 		debugLog("DEBUG: LoadDefaultConfig error: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load config: " + err.Error()})
+		jsonServerError(c, "加载 R2 配置", err)
 		return
 	}
 
@@ -683,7 +683,7 @@ func TestR2ConnectionHandler(c *gin.Context) {
 
 	if err != nil {
 		debugLog("DEBUG: ListObjectsV2 error: %v", err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Read Check Failed: " + err.Error()})
+		jsonBadRequest(c, "读取校验失败: "+err.Error())
 		return
 	}
 
@@ -697,7 +697,7 @@ func TestR2ConnectionHandler(c *gin.Context) {
 	})
 	if err != nil {
 		debugLog("DEBUG: PutObject error: %v", err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Write Check Failed: " + err.Error()})
+		jsonBadRequest(c, "写入校验失败: "+err.Error())
 		return
 	}
 
@@ -716,5 +716,5 @@ func TestR2ConnectionHandler(c *gin.Context) {
 	}
 
 	debugLog("DEBUG: Connection successful (Read/Write/Delete verified)")
-	c.JSON(http.StatusOK, gin.H{"status": "ok", "message": "Connection successful (Read/Write Verified)"})
+	c.JSON(http.StatusOK, gin.H{"status": "ok", "message": "连接成功（读写校验通过）"})
 }

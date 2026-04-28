@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -22,6 +23,43 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/service"
 	"gorm.io/gorm"
 )
+
+const emptySubgroupFeedHint = "当前字幕组 RSS 为空"
+const filteredAllHint = "都被过滤规则跳过"
+const duplicateOnlyHint = "都已经在下载记录中"
+const staleLogResetAge = 24 * time.Hour
+
+func subscriptionNotFound(c *gin.Context) {
+	c.String(http.StatusNotFound, "未找到对应的订阅")
+}
+
+func subscriptionBadRequest(c *gin.Context, message string) {
+	c.String(http.StatusBadRequest, message)
+}
+
+func subscriptionSaveError(c *gin.Context, action string, err error) {
+	if err == nil {
+		c.String(http.StatusInternalServerError, action+"失败")
+		return
+	}
+	c.String(http.StatusInternalServerError, action+"失败: "+err.Error())
+}
+
+func subscriptionReloadError(c *gin.Context, err error) {
+	subscriptionSaveError(c, "刷新订阅卡片", err)
+}
+
+func subscriptionJSONBadRequest(c *gin.Context, message string) {
+	c.JSON(http.StatusBadRequest, gin.H{"error": message})
+}
+
+func subscriptionJSONServerError(c *gin.Context, action string, err error) {
+	message := action + "失败"
+	if err != nil {
+		message += ": " + err.Error()
+	}
+	c.JSON(http.StatusInternalServerError, gin.H{"error": message})
+}
 
 type SubscriptionsData struct {
 	SkipLayout      bool
@@ -61,6 +99,29 @@ type SubscriptionTrendItem struct {
 	LastCheckLabel   string
 }
 
+var runSubscriptionCheck = func(sub *model.Subscription, source string) error {
+	if sub == nil {
+		return fmt.Errorf("subscription is nil")
+	}
+
+	qbCfg := qbutil.LoadConfig()
+	if qbutil.ManagedBinaryMissing(qbCfg, config.BinDir()) {
+		return fmt.Errorf("未检测到 qBittorrent。请先安装托管版本，或在设置中填写外部 qBittorrent WebUI 地址")
+	}
+	if qbutil.MissingExternalURL(qbCfg) {
+		return fmt.Errorf("已启用外部 qBittorrent 模式，但 WebUI 地址还是空的")
+	}
+
+	qbt := downloader.NewQBittorrentClient(qbCfg.URL)
+	if err := qbt.Login(qbCfg.Username, qbCfg.Password); err != nil {
+		return err
+	}
+
+	mgr := service.NewSubscriptionManager(qbt)
+	mgr.ProcessSubscriptionWithSource(sub, source)
+	return nil
+}
+
 func SubscriptionsHandler(c *gin.Context) {
 	skip := IsHTMX(c)
 	var subs []model.Subscription
@@ -82,21 +143,18 @@ func SubscriptionsHandler(c *gin.Context) {
 func CreateSubscriptionHandler(c *gin.Context) {
 	var sub model.Subscription
 	if err := c.ShouldBind(&sub); err != nil {
-		c.String(http.StatusBadRequest, "Invalid Data: %v", err)
+		c.String(http.StatusBadRequest, "提交的数据格式不正确: "+err.Error())
 		return
 	}
 
 	if err := createSubscriptionInternal(&sub); err != nil {
 		if err.Error() == "exists" {
-			c.String(http.StatusConflict, "Subscription with this RSS URL already exists")
+			c.String(http.StatusConflict, "该 RSS 订阅已经存在")
 		} else {
-			c.String(http.StatusInternalServerError, err.Error())
+			subscriptionSaveError(c, "创建订阅", err)
 		}
 		return
 	}
-
-	// User requested "silky smooth" transition, wait 1s
-	time.Sleep(1 * time.Second)
 
 	c.Header("HX-Redirect", "/subscriptions")
 	c.Status(http.StatusOK)
@@ -161,23 +219,9 @@ func createSubscriptionInternal(sub *model.Subscription) error {
 	// Trigger run asynchronously
 	go func() {
 		log.Printf("DEBUG: Async ProcessSubscription started for %s", sub.Title)
-		qbCfg := qbutil.LoadConfig()
-		if qbutil.ManagedBinaryMissing(qbCfg, config.BinDir()) {
-			log.Printf("WARN: Skipping async subscription run for %s because qBittorrent is not installed and no external WebUI is configured", sub.Title)
-			return
+		if err := runSubscriptionCheck(sub, "create"); err != nil {
+			log.Printf("WARN: Skipping async subscription run for %s: %v", sub.Title, err)
 		}
-		if qbutil.MissingExternalURL(qbCfg) {
-			log.Printf("WARN: Skipping async subscription run for %s because external qBittorrent mode has no WebUI URL configured", sub.Title)
-			return
-		}
-
-		qbt := downloader.NewQBittorrentClient(qbCfg.URL)
-		if err := qbt.Login(qbCfg.Username, qbCfg.Password); err != nil {
-			log.Printf("ERROR: Async QB Login failed: %v", err)
-			return
-		}
-		mgr := service.NewSubscriptionManager(qbt)
-		mgr.ProcessSubscriptionWithSource(sub, "create")
 	}()
 
 	return nil
@@ -186,7 +230,7 @@ func createSubscriptionInternal(sub *model.Subscription) error {
 func CreateBatchSubscriptionHandler(c *gin.Context) {
 	var subs []model.Subscription
 	if err := c.ShouldBindJSON(&subs); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid JSON format"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "批量导入的数据格式不正确"})
 		return
 	}
 
@@ -202,7 +246,7 @@ func CreateBatchSubscriptionHandler(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"message": "Batch process completed",
+		"message": "批量处理完成",
 		"added":   added,
 		"failed":  failed,
 	})
@@ -212,7 +256,7 @@ func CreateBatchSubscriptionHandler(c *gin.Context) {
 func BatchPreviewHandler(c *gin.Context) {
 	var subs []model.Subscription
 	if err := c.ShouldBindJSON(&subs); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid Data"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "批量预览的数据格式不正确"})
 		return
 	}
 
@@ -259,21 +303,19 @@ func ToggleSubscriptionHandler(c *gin.Context) {
 	id := c.Param("id")
 	var sub model.Subscription
 	if err := db.DB.First(&sub, id).Error; err != nil {
-		c.String(http.StatusNotFound, "Not Found")
+		subscriptionNotFound(c)
 		return
 	}
 
 	sub.IsActive = !sub.IsActive
 	if err := db.DB.Save(&sub).Error; err != nil {
-		c.String(http.StatusInternalServerError, "Failed to update subscription: "+err.Error())
+		subscriptionSaveError(c, "更新订阅状态", err)
 		return
 	}
 
-	time.Sleep(300 * time.Millisecond)
-
 	cardSub, err := loadSubscriptionCard(sub.ID)
 	if err != nil {
-		c.String(http.StatusInternalServerError, "Failed to reload subscription card: "+err.Error())
+		subscriptionReloadError(c, err)
 		return
 	}
 
@@ -284,7 +326,7 @@ func DeleteSubscriptionHandler(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
-		c.String(http.StatusBadRequest, "无效的 ID")
+		subscriptionBadRequest(c, "订阅 ID 无效")
 		return
 	}
 
@@ -297,7 +339,7 @@ func DeleteSubscriptionHandler(c *gin.Context) {
 	if err := tx.Unscoped().Where("subscription_id = ?", id).Delete(&model.DownloadLog{}).Error; err != nil {
 		tx.Rollback()
 		log.Printf("ERROR: Delete logs failed for subID %d: %v", id, err)
-		c.String(http.StatusInternalServerError, "删除关联日志失败: "+err.Error())
+		subscriptionSaveError(c, "删除关联日志", err)
 		return
 	}
 
@@ -305,17 +347,15 @@ func DeleteSubscriptionHandler(c *gin.Context) {
 	if err := tx.Unscoped().Delete(&model.Subscription{}, id).Error; err != nil {
 		tx.Rollback()
 		log.Printf("ERROR: Delete sub failed for ID %d: %v", id, err)
-		c.String(http.StatusInternalServerError, "删除订阅失败: "+err.Error())
+		subscriptionSaveError(c, "删除订阅", err)
 		return
 	}
 
 	if err := tx.Commit().Error; err != nil {
 		log.Printf("ERROR: Commit failed: %v", err)
-		c.String(http.StatusInternalServerError, "事务提交失败")
+		subscriptionSaveError(c, "提交删除操作", err)
 		return
 	}
-
-	time.Sleep(200 * time.Millisecond) // Slight delay for UI feel
 	c.Status(http.StatusOK)
 }
 
@@ -323,41 +363,19 @@ func RunSubscriptionHandler(c *gin.Context) {
 	id := c.Param("id")
 	var sub model.Subscription
 	if err := db.DB.First(&sub, id).Error; err != nil {
-		c.String(http.StatusNotFound, "Not Found")
+		subscriptionNotFound(c)
 		return
 	}
 
-	// Fetch QB Config
-	qbCfg := qbutil.LoadConfig()
-	if qbutil.ManagedBinaryMissing(qbCfg, config.BinDir()) {
-		c.Header("Content-Type", "text/html")
-		c.String(http.StatusOK, `<script>alert("未检测到 qBittorrent。请先安装托管版本，或在设置中填写外部 qBittorrent WebUI 地址。")</script>`)
-		return
-	}
-	if qbutil.MissingExternalURL(qbCfg) {
-		c.Header("Content-Type", "text/html")
-		c.String(http.StatusOK, `<script>alert("External qBittorrent mode is enabled, but the WebUI URL is still empty.")</script>`)
-		return
-	}
-
-	// Init Downloader
-	qbt := downloader.NewQBittorrentClient(qbCfg.URL)
-	if err := qbt.Login(qbCfg.Username, qbCfg.Password); err != nil {
+	if err := runSubscriptionCheck(&sub, "manual"); err != nil {
 		log.Printf("RunSubscription: QB Login failed: %v", err)
-		c.Header("Content-Type", "text/html")
-		c.String(http.StatusOK, `<script>alert("QBittorrent 连接失败: `+err.Error()+`")</script>`)
+		subscriptionSaveError(c, "立即检查订阅", fmt.Errorf("QBittorrent 连接失败: %w", err))
 		return
 	}
 
-	// Init Manager and Run
-	mgr := service.NewSubscriptionManager(qbt)
-	// Let's do Sync for now as it shouldn't be too long for RSS parse.
-	mgr.ProcessSubscriptionWithSource(&sub, "manual")
-
-	time.Sleep(1 * time.Second) // Smooth transition
 	cardSub, err := loadSubscriptionCard(sub.ID)
 	if err != nil {
-		c.String(http.StatusInternalServerError, "Failed to reload subscription card: "+err.Error())
+		subscriptionReloadError(c, err)
 		return
 	}
 
@@ -368,13 +386,13 @@ func GetSubscriptionCardHandler(c *gin.Context) {
 	idStr := c.Param("id")
 	idUint64, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
-		c.String(http.StatusBadRequest, "Invalid subscription ID")
+		subscriptionBadRequest(c, "订阅 ID 无效")
 		return
 	}
 
 	sub, err := loadSubscriptionCard(uint(idUint64))
 	if err != nil {
-		c.String(http.StatusNotFound, "Not Found")
+		subscriptionNotFound(c)
 		return
 	}
 
@@ -393,13 +411,13 @@ func GetSubscriptionHistoryHandler(c *gin.Context) {
 	idStr := c.Param("id")
 	idUint64, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
-		c.String(http.StatusBadRequest, "Invalid subscription ID")
+		subscriptionBadRequest(c, "订阅 ID 无效")
 		return
 	}
 
 	data, err := loadSubscriptionHistory(uint(idUint64))
 	if err != nil {
-		c.String(http.StatusNotFound, "Not Found")
+		subscriptionNotFound(c)
 		return
 	}
 
@@ -410,7 +428,7 @@ func UpdateSubscriptionHandler(c *gin.Context) {
 	id := c.Param("id")
 	var sub model.Subscription
 	if err := db.DB.First(&sub, id).Error; err != nil {
-		c.String(http.StatusNotFound, "Not Found")
+		subscriptionNotFound(c)
 		return
 	}
 
@@ -422,7 +440,7 @@ func UpdateSubscriptionHandler(c *gin.Context) {
 	}
 
 	if err := c.ShouldBind(&input); err != nil {
-		c.String(http.StatusBadRequest, "Invalid Data")
+		subscriptionBadRequest(c, "提交的数据格式不正确")
 		return
 	}
 
@@ -445,21 +463,96 @@ func UpdateSubscriptionHandler(c *gin.Context) {
 	sub.ExcludeRule = input.ExcludeRule
 
 	if err := db.DB.Save(&sub).Error; err != nil {
-		c.String(http.StatusInternalServerError, "Error saving: "+err.Error())
+		subscriptionSaveError(c, "保存订阅", err)
 		return
 	}
 
 	populateSubscriptionStat(&sub)
 
-	// Sleep for smooth UI feel
-	time.Sleep(500 * time.Millisecond)
-
 	cardSub, err := loadSubscriptionCard(sub.ID)
 	if err != nil {
-		c.String(http.StatusInternalServerError, "Error loading updated card: "+err.Error())
+		subscriptionReloadError(c, err)
 		return
 	}
 
+	c.HTML(http.StatusOK, "subscription_card.html", cardSub)
+}
+
+func UseBaseRSSHandler(c *gin.Context) {
+	id := c.Param("id")
+	var sub model.Subscription
+	if err := db.DB.First(&sub, id).Error; err != nil {
+		subscriptionNotFound(c)
+		return
+	}
+
+	baseRSS, ok := deriveBaseRSSURL(sub.RSSUrl)
+	if !ok {
+		subscriptionBadRequest(c, "当前订阅已经是主 RSS")
+		return
+	}
+
+	if err := useBaseRSSAndRecheck(&sub, baseRSS); err != nil {
+		subscriptionSaveError(c, "执行主 RSS 修复", err)
+		return
+	}
+
+	populateSubscriptionStat(&sub)
+	cardSub, err := loadSubscriptionCard(sub.ID)
+	if err != nil {
+		subscriptionReloadError(c, err)
+		return
+	}
+
+	triggerAppToast(c, repairSuccessToast(repairActionUseBaseRSS), "success")
+	c.HTML(http.StatusOK, "subscription_card.html", cardSub)
+}
+
+func ClearSubscriptionFilterHandler(c *gin.Context) {
+	id := c.Param("id")
+	var sub model.Subscription
+	if err := db.DB.First(&sub, id).Error; err != nil {
+		subscriptionNotFound(c)
+		return
+	}
+
+	if err := clearFilterAndRecheck(&sub); err != nil {
+		subscriptionSaveError(c, "清空过滤规则", err)
+		return
+	}
+
+	populateSubscriptionStat(&sub)
+	cardSub, err := loadSubscriptionCard(sub.ID)
+	if err != nil {
+		subscriptionReloadError(c, err)
+		return
+	}
+
+	triggerAppToast(c, repairSuccessToast(repairActionClearFilter), "success")
+	c.HTML(http.StatusOK, "subscription_card.html", cardSub)
+}
+
+func ResetSubscriptionLogsHandler(c *gin.Context) {
+	id := c.Param("id")
+	var sub model.Subscription
+	if err := db.DB.First(&sub, id).Error; err != nil {
+		subscriptionNotFound(c)
+		return
+	}
+
+	if err := resetStaleLogsAndRecheck(&sub, staleLogResetAge); err != nil {
+		subscriptionSaveError(c, "清理阻塞下载记录", err)
+		return
+	}
+
+	populateSubscriptionStat(&sub)
+	cardSub, err := loadSubscriptionCard(sub.ID)
+	if err != nil {
+		subscriptionReloadError(c, err)
+		return
+	}
+
+	triggerAppToast(c, repairSuccessToast(repairActionResetStaleLog), "success")
 	c.HTML(http.StatusOK, "subscription_card.html", cardSub)
 }
 
@@ -467,7 +560,7 @@ func RefreshSubscriptionMetadataHandler(c *gin.Context) {
 	id := c.Param("id")
 	var sub model.Subscription
 	if err := db.DB.First(&sub, id).Error; err != nil {
-		c.String(http.StatusNotFound, "Not Found")
+		subscriptionNotFound(c)
 		return
 	}
 
@@ -476,16 +569,13 @@ func RefreshSubscriptionMetadataHandler(c *gin.Context) {
 	metaSvc.EnrichMetadata(sub.Metadata, sub.Title)
 
 	if err := db.DB.Save(&sub).Error; err != nil {
-		c.String(http.StatusInternalServerError, "Failed to save: "+err.Error())
+		subscriptionSaveError(c, "刷新订阅元数据", err)
 		return
 	}
 
-	// Sleep for smooth UI feel
-	time.Sleep(500 * time.Millisecond)
-
 	cardSub, err := loadSubscriptionCard(sub.ID)
 	if err != nil {
-		c.String(http.StatusInternalServerError, "Failed to reload card: "+err.Error())
+		subscriptionReloadError(c, err)
 		return
 	}
 
@@ -499,12 +589,12 @@ func SwitchSubscriptionSourceHandler(c *gin.Context) {
 
 	var sub model.Subscription
 	if err := db.DB.Preload("Metadata").First(&sub, id).Error; err != nil {
-		c.String(http.StatusNotFound, "Not Found")
+		subscriptionNotFound(c)
 		return
 	}
 
 	if sub.Metadata == nil {
-		c.String(http.StatusBadRequest, "No metadata associated")
+		subscriptionBadRequest(c, "当前订阅还没有关联元数据")
 		return
 	}
 
@@ -531,7 +621,7 @@ func SwitchSubscriptionSourceHandler(c *gin.Context) {
 	}
 
 	if err := db.DB.Save(m).Error; err != nil {
-		c.String(http.StatusInternalServerError, "Failed to save metadata")
+		subscriptionSaveError(c, "切换数据源", err)
 		return
 	}
 
@@ -541,7 +631,7 @@ func SwitchSubscriptionSourceHandler(c *gin.Context) {
 
 	cardSub, err := loadSubscriptionCard(sub.ID)
 	if err != nil {
-		c.String(http.StatusInternalServerError, "Failed to reload card: "+err.Error())
+		subscriptionReloadError(c, err)
 		return
 	}
 
@@ -669,6 +759,7 @@ func populateSubscriptionStat(sub *model.Subscription) {
 	var count int64
 	db.DB.Model(&model.DownloadLog{}).Where("subscription_id = ?", sub.ID).Count(&count)
 	sub.DownloadedCount = count
+	populateSubscriptionActionHints(sub)
 }
 
 func loadSubscriptionCard(id uint) (model.Subscription, error) {
@@ -679,6 +770,142 @@ func loadSubscriptionCard(id uint) (model.Subscription, error) {
 
 	populateSubscriptionStat(&sub)
 	return sub, nil
+}
+
+func populateSubscriptionActionHints(sub *model.Subscription) {
+	if sub == nil {
+		return
+	}
+
+	sub.CanUseBaseRSS = false
+	sub.BaseRSSURL = ""
+	sub.CanClearFilter = false
+	sub.CanResetStaleLogs = false
+	sub.HasRepairActions = false
+	sub.LastErrorDisplay = humanizeOperationError(sub.LastError)
+	if sub.LastRunStatus != service.SubscriptionRunStatusIdle {
+		return
+	}
+	if strings.Contains(sub.LastRunSummary, emptySubgroupFeedHint) {
+		baseRSS, ok := deriveBaseRSSURL(sub.RSSUrl)
+		if ok {
+			sub.CanUseBaseRSS = true
+			sub.BaseRSSURL = baseRSS
+		}
+	}
+	if strings.Contains(sub.LastRunSummary, filteredAllHint) && strings.TrimSpace(sub.FilterRule) != "" {
+		sub.CanClearFilter = true
+	}
+	if strings.Contains(sub.LastRunSummary, duplicateOnlyHint) && hasResettableSubscriptionLogs(sub.ID, staleLogResetAge) {
+		sub.CanResetStaleLogs = true
+	}
+	sub.HasRepairActions = sub.CanUseBaseRSS || sub.CanClearFilter || sub.CanResetStaleLogs
+}
+
+func deriveBaseRSSURL(raw string) (string, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", false
+	}
+
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", false
+	}
+
+	query := u.Query()
+	if query.Get("subgroupid") == "" {
+		return "", false
+	}
+	query.Del("subgroupid")
+	u.RawQuery = query.Encode()
+	return u.String(), true
+}
+
+func applyBaseRSSFallback(sub *model.Subscription, baseRSS string) {
+	if sub == nil {
+		return
+	}
+
+	previousGroup := strings.TrimSpace(sub.SubtitleGroup)
+	sub.RSSUrl = baseRSS
+	sub.SubtitleGroup = ""
+	if previousGroup != "" && strings.TrimSpace(sub.FilterRule) == previousGroup {
+		sub.FilterRule = ""
+	}
+	sub.LastRunSummary = repairPendingSummary(repairActionUseBaseRSS)
+	sub.LastError = ""
+}
+
+func useBaseRSSAndRecheck(sub *model.Subscription, baseRSS string) error {
+	if sub == nil {
+		return fmt.Errorf("subscription is nil")
+	}
+
+	applyBaseRSSFallback(sub, baseRSS)
+	return persistRepairAndRecheck(sub, repairActionUseBaseRSS)
+}
+
+func clearFilterAndRecheck(sub *model.Subscription) error {
+	if sub == nil {
+		return fmt.Errorf("subscription is nil")
+	}
+
+	sub.FilterRule = ""
+	sub.LastRunSummary = repairPendingSummary(repairActionClearFilter)
+	sub.LastError = ""
+	return persistRepairAndRecheck(sub, repairActionClearFilter)
+}
+
+func hasResettableSubscriptionLogs(subscriptionID uint, maxAge time.Duration) bool {
+	if subscriptionID == 0 || db.DB == nil {
+		return false
+	}
+
+	var count int64
+	cutoff := time.Now().Add(-maxAge)
+	db.DB.Model(&model.DownloadLog{}).
+		Where("subscription_id = ? AND status IN ? AND created_at < ?", subscriptionID, []string{"downloading", "failed"}, cutoff).
+		Count(&count)
+	return count > 0
+}
+
+func resetStaleLogsAndRecheck(sub *model.Subscription, maxAge time.Duration) error {
+	if sub == nil {
+		return fmt.Errorf("subscription is nil")
+	}
+
+	cutoff := time.Now().Add(-maxAge)
+	if err := db.DB.Model(&model.DownloadLog{}).
+		Where("subscription_id = ? AND status IN ? AND created_at < ?", sub.ID, []string{"downloading", "failed"}, cutoff).
+		Update("status", "archived").Error; err != nil {
+		return err
+	}
+
+	sub.LastRunSummary = repairPendingSummary(repairActionResetStaleLog)
+	sub.LastError = ""
+	return persistRepairAndRecheck(sub, repairActionResetStaleLog)
+}
+
+func persistRepairAndRecheck(sub *model.Subscription, action repairAction) error {
+	if sub == nil {
+		return fmt.Errorf("subscription is nil")
+	}
+
+	if err := db.DB.Save(sub).Error; err != nil {
+		return err
+	}
+
+	if err := runSubscriptionCheck(sub, "manual"); err != nil {
+		log.Printf("Subscription repair auto recheck skipped for %s: %v", sub.Title, err)
+		sub.LastRunStatus = service.SubscriptionRunStatusIdle
+		sub.LastRunSummary = repairAutoRecheckFailureSummary(action)
+		sub.LastError = err.Error()
+		if saveErr := db.DB.Save(sub).Error; saveErr != nil {
+			return saveErr
+		}
+	}
+	return nil
 }
 
 func loadSubscriptionHistory(id uint) (SubscriptionHistoryData, error) {
@@ -735,7 +962,7 @@ func SearchAnimeHandler(c *gin.Context) {
 func GetSubgroupsHandler(c *gin.Context) {
 	bangumiID := c.Query("id")
 	if bangumiID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "id is required"})
+		subscriptionJSONBadRequest(c, "缺少番剧 ID")
 		return
 	}
 
@@ -743,7 +970,7 @@ func GetSubgroupsHandler(c *gin.Context) {
 	subgroups, err := p.GetSubgroups(bangumiID)
 	if err != nil {
 		log.Printf("GetSubgroups error: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		subscriptionJSONServerError(c, "获取字幕组列表", err)
 		return
 	}
 
@@ -780,7 +1007,7 @@ func GetMikanDashboardHandler(c *gin.Context) {
 	dashboard, err := p.GetDashboard(year, season)
 	if err != nil {
 		log.Printf("GetMikanDashboard error: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		subscriptionJSONServerError(c, "获取 Mikan 仪表盘", err)
 		return
 	}
 
@@ -790,7 +1017,7 @@ func GetMikanDashboardHandler(c *gin.Context) {
 func RefreshSubscriptionsHandler(c *gin.Context) {
 	var subs []model.Subscription
 	if err := db.DB.Preload("Metadata").Find(&subs).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch subscriptions"})
+		subscriptionJSONServerError(c, "读取订阅列表", err)
 		return
 	}
 

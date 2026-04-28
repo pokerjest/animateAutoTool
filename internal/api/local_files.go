@@ -10,10 +10,10 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pokerjest/animateAutoTool/internal/db"
+	"github.com/pokerjest/animateAutoTool/internal/downloader"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/parser"
 
@@ -98,7 +98,7 @@ func handleDBEpisodeList(c *gin.Context, id string, episodes []model.LocalEpisod
 	var anime model.LocalAnime
 	if err := db.DB.Preload("Metadata").First(&anime, id).Error; err != nil {
 		log.Printf("ERROR: Found episodes but failed to load parent anime %s: %v", id, err)
-		c.JSON(http.StatusNotFound, gin.H{"error": "Parent anime not found"})
+		jsonNotFound(c, "未找到关联的本地番剧")
 		return
 	}
 
@@ -119,7 +119,7 @@ func handleDBEpisodeList(c *gin.Context, id string, episodes []model.LocalEpisod
 		anime.ID, sourceParam, effectiveSource, anime.Metadata != nil)
 
 	bangumiWatchedCount, bangumiCollectionStatus := fetchBangumiProgress(&anime, effectiveSource)
-	anilistWatchedCount := fetchAniListProgress(&anime, effectiveSource)
+	anilistWatchedCount, anilistStatus := fetchAniListProgress(&anime, effectiveSource)
 
 	display := buildEpisodeList(episodes, &anime, jfMap, jellyfinUrl, bangumiWatchedCount, anilistWatchedCount)
 
@@ -130,7 +130,7 @@ func handleDBEpisodeList(c *gin.Context, id string, episodes []model.LocalEpisod
 		BangumiWatchedCount: max(0, bangumiWatchedCount),
 		AniListWatchedCount: max(0, anilistWatchedCount),
 		BangumiStatus:       bangumiCollectionStatus,
-		AniListStatus:       "", // TODO: Add AniList status when implementing
+		AniListStatus:       anilistStatus,
 	}
 
 	// Return enhanced response
@@ -150,7 +150,7 @@ func handleFileSystemFileList(c *gin.Context, id string) {
 	animeIDInt, _ := strconv.Atoi(id)
 	files, err := listAnimeFiles(anime.Path, uint(animeIDInt))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		jsonServerError(c, "读取本地文件列表", err)
 		return
 	}
 
@@ -172,7 +172,7 @@ func RefreshLocalAnimeMetadataHandler(c *gin.Context) {
 	id := c.Param("id")
 	var anime model.LocalAnime
 	if err := db.DB.First(&anime, id).Error; err != nil {
-		c.String(http.StatusNotFound, "Not Found")
+		htmlNotFound(c, "未找到本地番剧")
 		return
 	}
 
@@ -189,7 +189,9 @@ func RefreshLocalAnimeMetadataHandler(c *gin.Context) {
 		"title":   anime.Title,
 	})
 
+	refreshSucceeded := true
 	if err := metaSvc.EnrichAnime(&anime); err != nil {
+		refreshSucceeded = false
 		log.Printf("Failed to enrich anime %s: %v", anime.Title, err)
 		_ = service.ReportLibraryIssue(service.LibraryIssueInput{
 			IssueKey:      "scrape:" + strconv.FormatUint(uint64(anime.ID), 10),
@@ -211,12 +213,16 @@ func RefreshLocalAnimeMetadataHandler(c *gin.Context) {
 	})
 
 	if err := db.DB.Save(&anime).Error; err != nil {
-		c.String(http.StatusInternalServerError, "Failed to save: "+err.Error())
+		htmlServerError(c, "保存本地番剧信息", err)
 		return
 	}
 
-	// Sleep for smooth UI feel
-	time.Sleep(500 * time.Millisecond)
+	populateLocalAnimeActionHint(&anime)
+	if refreshSucceeded {
+		triggerAppToast(c, repairSuccessToast(repairActionRetryScrape), "success")
+	} else {
+		triggerAppToast(c, repairReviewToast(repairActionRetryScrape), "error")
+	}
 
 	c.HTML(http.StatusOK, "local_anime_card.html", anime)
 }
@@ -229,12 +235,12 @@ func SwitchLocalAnimeSourceHandler(c *gin.Context) {
 
 	var anime model.LocalAnime
 	if err := db.DB.Preload("Metadata").First(&anime, id).Error; err != nil {
-		c.String(http.StatusNotFound, "Not Found")
+		htmlNotFound(c, "未找到本地番剧")
 		return
 	}
 
 	if anime.Metadata == nil {
-		c.String(http.StatusBadRequest, "No metadata associated")
+		htmlBadRequest(c, "当前本地番剧还没有关联元数据")
 		return
 	}
 
@@ -264,13 +270,14 @@ func SwitchLocalAnimeSourceHandler(c *gin.Context) {
 	}
 
 	if err := db.DB.Save(m).Error; err != nil {
-		c.String(http.StatusInternalServerError, "Failed to save metadata")
+		htmlServerError(c, "切换数据源", err)
 		return
 	}
 
 	// Trigger global sync (this will update 'anime' results too)
 	metaSvc := service.NewMetadataService()
 	metaSvc.SyncMetadataToModels(m)
+	populateLocalAnimeActionHint(&anime)
 
 	c.HTML(http.StatusOK, "local_anime_card.html", anime)
 }
@@ -280,7 +287,7 @@ func PreviewDirectoryRenameHandler(c *gin.Context) {
 	id := c.Param("id")
 	var req RenameRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		jsonBadRequest(c, "重命名预览请求格式不正确")
 		return
 	}
 
@@ -295,7 +302,7 @@ func PreviewDirectoryRenameHandler(c *gin.Context) {
 	// 2. Get All Anime in this Directory
 	var animeList []model.LocalAnime
 	if err := db.DB.Where("directory_id = ?", dir.ID).Find(&animeList).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Query failed"})
+		jsonServerError(c, "读取目录下的番剧列表", err)
 		return
 	}
 
@@ -323,7 +330,7 @@ func ApplyDirectoryRenameHandler(c *gin.Context) {
 	id := c.Param("id")
 	var req RenameRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		jsonBadRequest(c, "批量重命名请求格式不正确")
 		return
 	}
 
@@ -335,7 +342,7 @@ func ApplyDirectoryRenameHandler(c *gin.Context) {
 
 	var animeList []model.LocalAnime
 	if err := db.DB.Where("directory_id = ?", dir.ID).Find(&animeList).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Query failed"})
+		jsonServerError(c, "读取目录下的番剧列表", err)
 		return
 	}
 
@@ -356,6 +363,8 @@ func ApplyDirectoryRenameHandler(c *gin.Context) {
 			}
 
 			oldPath := item.Path
+			var episode model.LocalEpisode
+			episodeFound := db.DB.Where("path = ?", oldPath).First(&episode).Error == nil
 			newPath, err := buildSafeRenamePath(anime.Path, item.New)
 			if err != nil {
 				log.Printf("Rename skipped for %s: %v", oldPath, err)
@@ -367,27 +376,156 @@ func ApplyDirectoryRenameHandler(c *gin.Context) {
 				continue
 			}
 
-			// Ensure parent directory exists (for Season folders)
-			newDir := filepath.Dir(newPath)
-			if err := os.MkdirAll(newDir, 0755); err != nil {
-				fmt.Printf("Failed to create directory %s: %v\n", newDir, err)
-				failCount++
-				continue
+			renamedByQB := false
+			if ok, err := renameManagedQBFile(oldPath, newPath); err != nil {
+				log.Printf("qB rename failed for %s -> %s: %v", oldPath, newPath, err)
+			} else {
+				renamedByQB = ok
 			}
 
-			if err := os.Rename(oldPath, newPath); err != nil {
-				fmt.Printf("Rename failed: %s -> %s (%v)\n", oldPath, newPath, err)
-				failCount++
-			} else {
-				successCount++
-				// Update DB path if it was a tracked episode
-				db.DB.Model(&model.LocalEpisode{}).Where("path = ?", oldPath).Update("path", newPath)
+			if !renamedByQB {
+				// Ensure parent directory exists (for Season folders)
+				newDir := filepath.Dir(newPath)
+				if err := os.MkdirAll(newDir, 0755); err != nil {
+					fmt.Printf("Failed to create directory %s: %v\n", newDir, err)
+					failCount++
+					continue
+				}
+
+				if err := os.Rename(oldPath, newPath); err != nil {
+					fmt.Printf("Rename failed: %s -> %s (%v)\n", oldPath, newPath, err)
+					failCount++
+					continue
+				}
 			}
+
+			successCount++
+			if episodeFound {
+				_ = db.DB.Model(&model.LocalEpisode{}).Where("id = ?", episode.ID).Update("path", newPath).Error
+				episode.Path = newPath
+			} else {
+				_ = db.DB.Model(&model.LocalEpisode{}).Where("path = ?", oldPath).Update("path", newPath).Error
+			}
+			_ = db.DB.Model(&model.DownloadLog{}).Where("target_file = ?", oldPath).Update("target_file", newPath).Error
+			backfillRenamedDownloadLog(anime, episode, oldPath, newPath)
 		}
 	}
+	syncDownloadLogsFromQB()
 
 	msg := fmt.Sprintf("批量整理完成: 成功 %d, 失败 %d", successCount, failCount)
 	c.JSON(http.StatusOK, gin.H{"message": msg, "success": successCount, "failed": failCount})
+}
+
+func backfillRenamedDownloadLog(anime model.LocalAnime, episode model.LocalEpisode, oldPath, newPath string) {
+	if db.DB == nil || episode.EpisodeNum <= 0 {
+		return
+	}
+
+	var subscriptionIDs []uint
+	query := db.DB.Model(&model.Subscription{})
+	if anime.MetadataID != nil {
+		query = query.Where("metadata_id = ?", *anime.MetadataID)
+	} else {
+		query = query.Where("title = ?", anime.Title)
+	}
+	if err := query.Pluck("id", &subscriptionIDs).Error; err != nil || len(subscriptionIDs) == 0 {
+		return
+	}
+
+	updates := map[string]interface{}{
+		"target_file": newPath,
+		"status":      "completed",
+	}
+	episodeVal := fmt.Sprintf("%02d", episode.EpisodeNum)
+	seasonVal := fmt.Sprintf("S%02d", max(1, episode.SeasonNum))
+
+	tx := db.DB.Model(&model.DownloadLog{}).
+		Where("subscription_id IN ?", subscriptionIDs).
+		Where("episode = ?", episodeVal).
+		Where("(season_val = ? OR season_val = '' OR season_val IS NULL)", seasonVal).
+		Where("(target_file = ? OR target_file = '' OR target_file IS NULL)", oldPath).
+		Updates(updates)
+	if tx.Error != nil {
+		log.Printf("Download log backfill failed for %s -> %s: %v", oldPath, newPath, tx.Error)
+		return
+	}
+	if tx.RowsAffected > 0 {
+		log.Printf("Backfilled %d download logs for %s -> %s", tx.RowsAffected, oldPath, newPath)
+	}
+}
+
+func syncDownloadLogsFromQB() {
+	qbURL, qbUsername, qbPassword := FetchQBConfig()
+	if strings.TrimSpace(qbURL) == "" {
+		return
+	}
+
+	client := downloader.NewQBittorrentClient(qbURL)
+	if err := client.Login(qbUsername, qbPassword); err != nil {
+		log.Printf("Download log sync skipped: qB login failed: %v", err)
+		return
+	}
+
+	if _, err := service.SyncDownloadLogStatusesWithQBClient(client); err != nil {
+		log.Printf("Download log sync skipped: %v", err)
+	}
+}
+
+func renameManagedQBFile(oldPath, newPath string) (bool, error) {
+	qbURL, qbUsername, qbPassword := FetchQBConfig()
+	if strings.TrimSpace(qbURL) == "" {
+		return false, nil
+	}
+
+	client := downloader.NewQBittorrentClient(qbURL)
+	if err := client.Login(qbUsername, qbPassword); err != nil {
+		return false, err
+	}
+
+	torrents, err := client.ListTorrents()
+	if err != nil {
+		return false, err
+	}
+
+	for _, torrent := range torrents {
+		if !sameFilesystemPath(torrent.ContentPath, oldPath) {
+			continue
+		}
+		oldRelative, err := torrentRelativePath(torrent, oldPath)
+		if err != nil {
+			return false, err
+		}
+		newRelative := filepath.ToSlash(filepath.Join(filepath.Dir(oldRelative), filepath.Base(newPath)))
+		if filepath.ToSlash(oldRelative) == filepath.ToSlash(newRelative) {
+			return true, nil
+		}
+		if err := client.RenameFile(torrent.Hash, oldRelative, newRelative); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
+
+	return false, nil
+}
+
+func sameFilesystemPath(a, b string) bool {
+	cleanA := filepath.Clean(strings.TrimSpace(a))
+	cleanB := filepath.Clean(strings.TrimSpace(b))
+	return cleanA != "" && cleanA == cleanB
+}
+
+func torrentRelativePath(torrent downloader.TorrentInfo, fullPath string) (string, error) {
+	savePath := strings.TrimSpace(torrent.SavePath)
+	if savePath != "" {
+		if rel, err := filepath.Rel(savePath, fullPath); err == nil && rel != "." && !strings.HasPrefix(rel, "..") {
+			return filepath.ToSlash(rel), nil
+		}
+	}
+	base := filepath.Base(fullPath)
+	if strings.TrimSpace(base) == "" || base == "." || base == string(filepath.Separator) {
+		return "", fmt.Errorf("cannot derive qB relative path for %s", fullPath)
+	}
+	return filepath.ToSlash(base), nil
 }
 
 // Helpers

@@ -29,8 +29,14 @@ type Subscription struct {
 	LastRunStatus       string     `json:"last_run_status"`
 	LastRunSummary      string     `json:"last_run_summary"`
 	LastError           string     `json:"last_error"`
+	LastErrorDisplay    string     `json:"last_error_display" gorm:"-"`
 	LastNewDownloads    int        `json:"last_new_downloads"`
 	LastDownloadedTitle string     `json:"last_downloaded_title"`
+	CanUseBaseRSS       bool       `json:"can_use_base_rss" gorm:"-"`
+	BaseRSSURL          string     `json:"base_rss_url" gorm:"-"`
+	CanClearFilter      bool       `json:"can_clear_filter" gorm:"-"`
+	CanResetStaleLogs   bool       `json:"can_reset_stale_logs" gorm:"-"`
+	HasRepairActions    bool       `json:"has_repair_actions" gorm:"-"`
 
 	// Refactored Metadata
 	MetadataID *uint          `json:"metadata_id"`
@@ -199,6 +205,10 @@ type LocalAnime struct {
 	// Refactored Metadata
 	MetadataID *uint          `json:"metadata_id"`
 	Metadata   *AnimeMetadata `json:"metadata" gorm:"foreignKey:MetadataID"`
+	HasRepairActions bool   `json:"has_repair_actions" gorm:"-"`
+	CanRetryScrape   bool   `json:"can_retry_scrape" gorm:"-"`
+	CanFixMatch      bool   `json:"can_fix_match" gorm:"-"`
+	RepairHint       string `json:"repair_hint" gorm:"-"`
 
 	Episodes []LocalEpisode `json:"episodes" gorm:"foreignKey:LocalAnimeID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE;"`
 }

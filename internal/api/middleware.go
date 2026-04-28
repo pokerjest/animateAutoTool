@@ -40,7 +40,7 @@ func DirectLocalOnlyMiddleware() gin.HandlerFunc {
 
 		if isAPIRequestPath(c.Request.URL.Path) {
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
-				"error": "this endpoint is only available from a direct localhost connection",
+				"error": "这个接口仅允许在本机通过 localhost 直接访问。",
 			})
 			return
 		}
@@ -65,7 +65,7 @@ func BootstrapLocalOnlyMiddleware() gin.HandlerFunc {
 
 		if isAPIRequestPath(c.Request.URL.Path) {
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
-				"error": "initial setup is only available from a direct localhost connection",
+				"error": "首次初始化仅允许在本机通过 localhost 直接访问。",
 			})
 			return
 		}
@@ -99,7 +99,7 @@ func SameOriginMiddleware() gin.HandlerFunc {
 
 		if isAPIRequestPath(c.Request.URL.Path) {
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
-				"error": "cross-site write requests are not allowed",
+				"error": "不允许跨站发起写操作请求。",
 			})
 			return
 		}
@@ -129,7 +129,7 @@ func AuthMiddleware() gin.HandlerFunc {
 
 		if userID == nil {
 			if isAPIRequestPath(path) {
-				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "请先登录"})
 				return
 			}
 
@@ -141,7 +141,7 @@ func AuthMiddleware() gin.HandlerFunc {
 		if bootstrap.BootstrapSetupPending() && !setupEnforcementExempt(path) {
 			if isAPIRequestPath(path) {
 				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
-					"error":    "setup required",
+					"error":    "需要先完成初始化设置",
 					"redirect": "/setup",
 				})
 				return

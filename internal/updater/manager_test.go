@@ -1,6 +1,13 @@
 package updater
 
-import "testing"
+import (
+	"archive/tar"
+	"compress/gzip"
+	"os"
+	"path/filepath"
+	"runtime"
+	"testing"
+)
 
 const updaterVersionZero = "v0.0.0"
 
@@ -42,8 +49,8 @@ func TestNormalizeVersion(t *testing.T) {
 func TestPickAssetForCurrentPlatform(t *testing.T) {
 	t.Parallel()
 
-	suffix, ok := platformAssetSuffix()
-	if !ok {
+	candidates := platformAssetCandidates(runtime.GOOS, runtime.GOARCH, false)
+	if len(candidates) == 0 {
 		t.Skip("current platform not supported by updater")
 	}
 
@@ -51,7 +58,7 @@ func TestPickAssetForCurrentPlatform(t *testing.T) {
 		TagName: "v0.4.4",
 		Assets: []releaseAsset{
 			{Name: "unrelated_asset.zip", BrowserDownloadURL: "https://example.com/unrelated"},
-			{Name: "animate-server_v0.4.4" + suffix, BrowserDownloadURL: "https://example.com/matched"},
+			{Name: "animate-server_v0.4.4" + candidates[0], BrowserDownloadURL: "https://example.com/matched"},
 		},
 	}
 
@@ -61,6 +68,113 @@ func TestPickAssetForCurrentPlatform(t *testing.T) {
 	}
 	if asset == nil || asset.BrowserDownloadURL != "https://example.com/matched" {
 		t.Fatalf("unexpected selected asset: %#v", asset)
+	}
+}
+
+func TestPlatformAssetCandidates(t *testing.T) {
+	t.Parallel()
+
+	if got := platformAssetCandidates("linux", "amd64", false); len(got) != 1 || got[0] != "_linux_amd64.tar.gz" {
+		t.Fatalf("unexpected linux candidates: %#v", got)
+	}
+	if got := platformAssetCandidates("windows", "amd64", false); len(got) != 1 || got[0] != "_windows_amd64.exe" {
+		t.Fatalf("unexpected windows candidates: %#v", got)
+	}
+	if got := platformAssetCandidates("darwin", "arm64", false); len(got) != 2 || got[0] != "_darwin_arm64.tar.gz" || got[1] != "_darwin_arm64.dmg" {
+		t.Fatalf("unexpected darwin archive-first candidates: %#v", got)
+	}
+	if got := platformAssetCandidates("darwin", "arm64", true); len(got) != 2 || got[0] != "_darwin_arm64.dmg" || got[1] != "_darwin_arm64.tar.gz" {
+		t.Fatalf("unexpected darwin app-bundle candidates: %#v", got)
+	}
+}
+
+func TestPickLatestPublishedRelease(t *testing.T) {
+	t.Parallel()
+
+	release, err := pickLatestPublishedRelease([]githubRelease{
+		{TagName: "v1.2.0-beta.1", Draft: true},
+		{TagName: "v1.2.0-beta.2", Prerelease: true},
+		{TagName: "v1.1.9"},
+	}, false)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if release == nil || release.TagName != "v1.1.9" {
+		t.Fatalf("unexpected release picked: %#v", release)
+	}
+}
+
+func TestPickLatestPublishedReleaseIncludePrerelease(t *testing.T) {
+	t.Parallel()
+
+	release, err := pickLatestPublishedRelease([]githubRelease{
+		{TagName: "v1.2.0-beta.2", Prerelease: true},
+		{TagName: "v1.1.9"},
+	}, true)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if release == nil || release.TagName != "v1.2.0-beta.2" {
+		t.Fatalf("unexpected release picked: %#v", release)
+	}
+}
+
+func TestCurrentVersionWantsPrerelease(t *testing.T) {
+	t.Parallel()
+
+	if !currentVersionWantsPrerelease("v1.2.0-beta.2") {
+		t.Fatal("expected prerelease version to opt into prerelease updates")
+	}
+	if currentVersionWantsPrerelease("v1.2.0") {
+		t.Fatal("did not expect stable version to opt into prerelease updates")
+	}
+}
+
+func TestExtractBinaryFromTarGz(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	archivePath := filepath.Join(dir, "artifact.tar.gz")
+	destPath := filepath.Join(dir, "animate-server")
+	payload := []byte("binary-content")
+
+	file, err := os.Create(archivePath)
+	if err != nil {
+		t.Fatalf("create archive: %v", err)
+	}
+	gz := gzip.NewWriter(file)
+	tw := tar.NewWriter(gz)
+	header := &tar.Header{
+		Name: "animate-server_v0.5.0_linux_amd64/bin/animate-server",
+		Mode: 0o755,
+		Size: int64(len(payload)),
+	}
+	if err := tw.WriteHeader(header); err != nil {
+		t.Fatalf("write header: %v", err)
+	}
+	if _, err := tw.Write(payload); err != nil {
+		t.Fatalf("write payload: %v", err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatalf("close tar writer: %v", err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatalf("close gzip writer: %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("close archive: %v", err)
+	}
+
+	if err := extractBinaryFromTarGz(archivePath, "animate-server", destPath); err != nil {
+		t.Fatalf("extractBinaryFromTarGz: %v", err)
+	}
+
+	got, err := os.ReadFile(destPath)
+	if err != nil {
+		t.Fatalf("read extracted binary: %v", err)
+	}
+	if string(got) != string(payload) {
+		t.Fatalf("unexpected extracted content: %q", string(got))
 	}
 }
 

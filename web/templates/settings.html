@@ -3,6 +3,7 @@
 <div class="space-y-6" x-data="{ 
     activeTab: 'download',
     pickingDirectory: false,
+    minimumActionDelay: 320,
     tabs: [
         { id: 'download', name: '下载管理', icon: '📥' },
         { id: 'metadata', name: '数据源', icon: '🏷️' },
@@ -11,6 +12,20 @@
         { id: 'backup', name: '备份还原', icon: '📦' },
         { id: 'security', name: '账户安全', icon: '🔐' }
     ],
+    async waitMinimum(startedAt, minimum = this.minimumActionDelay) {
+        const elapsed = Date.now() - startedAt;
+        if (elapsed < minimum) {
+            await new Promise(resolve => setTimeout(resolve, minimum - elapsed));
+        }
+    },
+    beginFormAction(form) {
+        if (!form) return;
+        form.dataset.startedAt = String(Date.now());
+    },
+    async finishFormAction(form) {
+        const startedAt = Number(form?.dataset?.startedAt || Date.now());
+        await this.waitMinimum(startedAt);
+    },
     async pickDirectoryForInput(inputName, title = '选择目录') {
         if (this.pickingDirectory) return;
         this.pickingDirectory = true;
@@ -64,7 +79,7 @@
 
     <!-- Download Tab -->
     <div x-show="activeTab === 'download'" x-transition class="space-y-6">
-        <form hx-post="/api/settings" hx-target="#save-result" hx-swap="innerHTML">
+        <form hx-post="/api/settings" hx-target="#save-result" hx-swap="innerHTML" @htmx:before-request="beginFormAction($el)" @htmx:after-request="(async () => { await finishFormAction($el); })()">
             <input type="hidden" name="settings_scope" value="download">
             <div class="glass-panel p-5 md:p-8">
                 <h3 class="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2">
@@ -165,7 +180,7 @@
 
     <!-- Metadata Tab -->
     <div x-show="activeTab === 'metadata'" x-transition x-cloak class="space-y-6">
-        <form hx-post="/api/settings" hx-target="#save-result" hx-swap="innerHTML">
+        <form hx-post="/api/settings" hx-target="#save-result" hx-swap="innerHTML" @htmx:before-request="beginFormAction($el)" @htmx:after-request="(async () => { await finishFormAction($el); })()">
             <input type="hidden" name="settings_scope" value="data-sources">
             <div class="glass-panel p-5 md:p-8 space-y-8">
 
@@ -205,7 +220,7 @@
 
                         <div class="flex flex-col items-stretch gap-4 md:flex-row md:items-center">
                             <div id="bangumi-status" hx-get="/api/bangumi/profile"
-                                hx-trigger="intersect once, tab-metadata from:body" hx-target="#bangumi-status"
+                                hx-trigger="load delay:500ms, tab-metadata from:window" hx-target="#bangumi-status"
                                 hx-swap="innerHTML"
                                 class="flex-grow p-4 rounded-xl bg-pink-50/30 border border-pink-100/50 min-h-[50px] relative group px-4">
                                 <span class="text-xs text-gray-400 flex items-center gap-2">
@@ -251,7 +266,7 @@
                             </div>
                         </div>
                         <div id="tmdb-status" hx-get="/api/settings/tmdb-status"
-                            hx-trigger="intersect once, tab-metadata from:body" hx-target="#tmdb-status"
+                            hx-trigger="load delay:500ms, tab-metadata from:window" hx-target="#tmdb-status"
                             hx-swap="innerHTML"
                             class="p-4 rounded-xl bg-blue-50/30 border border-blue-100/50 min-h-[50px] relative group">
                             <span class="text-xs text-gray-400 flex items-center gap-2">
@@ -291,7 +306,7 @@
                             </div>
                         </div>
                         <div id="anilist-status" hx-get="/api/settings/anilist-status"
-                            hx-trigger="intersect once, tab-metadata from:body" hx-target="#anilist-status"
+                            hx-trigger="load delay:500ms, tab-metadata from:window" hx-target="#anilist-status"
                             hx-swap="innerHTML"
                             class="p-4 rounded-xl bg-cyan-50/30 border border-cyan-100/50 min-h-[50px] relative group">
                             <span class="text-xs text-gray-400 flex items-center gap-2">
@@ -324,7 +339,7 @@
     <div x-show="activeTab === 'media'" x-transition x-cloak class="space-y-6">
 
         <!-- Jellyfin Config Form -->
-        <form hx-post="/api/settings" hx-target="#save-result" hx-swap="innerHTML">
+        <form hx-post="/api/settings" hx-target="#save-result" hx-swap="innerHTML" @htmx:before-request="beginFormAction($el)" @htmx:after-request="(async () => { await finishFormAction($el); })()">
             <input type="hidden" name="settings_scope" value="media">
             <div class="glass-panel p-5 md:p-8">
                 <h3 class="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2">
@@ -398,7 +413,7 @@
         </form>
 
         <!-- PikPak Config Form -->
-        <form hx-post="/api/settings" hx-target="#save-result" hx-swap="innerHTML">
+        <form hx-post="/api/settings" hx-target="#save-result" hx-swap="innerHTML" @htmx:before-request="beginFormAction($el)" @htmx:after-request="(async () => { await finishFormAction($el); })()">
             <input type="hidden" name="settings_scope" value="pikpak">
             <div class="glass-panel p-5 md:p-8">
                 <h3 class="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2">
@@ -519,7 +534,7 @@
         x-transition:enter-start="opacity-0 translate-y-4" x-transition:enter-end="opacity-100 translate-y-0"
         class="space-y-6">
 
-        <form hx-post="/api/settings" hx-target="#save-result" hx-swap="innerHTML">
+        <form hx-post="/api/settings" hx-target="#save-result" hx-swap="innerHTML" @htmx:before-request="beginFormAction($el)" @htmx:after-request="(async () => { await finishFormAction($el); })()">
             <input type="hidden" name="settings_scope" value="network">
             <div class="bg-white/60 p-6 rounded-xl border border-white/70 shadow-sm relative overflow-hidden group">
                 <div class="relative z-10">
@@ -1449,4 +1464,3 @@
     }
 </style>
 {{ if not .SkipLayout }}{{ template "footer.html" . }}{{ end }}
-```

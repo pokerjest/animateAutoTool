@@ -123,6 +123,10 @@ func CreateBackupFile(destPath string, mode string) error {
 }
 
 func InspectBackup(path string) (BackupDescriptor, error) {
+	if !isSQLiteBackupFile(path) {
+		return BackupDescriptor{}, fmt.Errorf("invalid sqlite backup file")
+	}
+
 	targetDB, err := gorm.Open(sqlite.Open(path), &gorm.Config{})
 	if err != nil {
 		return BackupDescriptor{}, err
@@ -190,6 +194,21 @@ func InspectBackup(path string) (BackupDescriptor, error) {
 	desc.Description = BackupModeDescription(desc.Mode)
 	desc.ConfigStrategy = backupConfigStrategyForMode(desc.Mode)
 	return desc, nil
+}
+
+func isSQLiteBackupFile(path string) bool {
+	f, err := os.Open(filepath.Clean(path))
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+
+	header := make([]byte, 16)
+	if _, err := f.Read(header); err != nil {
+		return false
+	}
+
+	return string(header) == "SQLite format 3\x00"
 }
 
 func BackupConfigMerges(mode string) bool {
