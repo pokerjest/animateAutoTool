@@ -201,7 +201,9 @@ func isSQLiteBackupFile(path string) bool {
 	if err != nil {
 		return false
 	}
-	defer f.Close()
+	defer func() {
+		_ = f.Close()
+	}()
 
 	header := make([]byte, 16)
 	if _, err := f.Read(header); err != nil {

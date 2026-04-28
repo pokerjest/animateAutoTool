@@ -34,6 +34,12 @@ type refreshStatusTracker struct {
 	status RefreshStatus
 }
 
+const (
+	metadataSourceBangumi = "bangumi"
+	metadataSourceTMDB    = "tmdb"
+	metadataSourceAniList = "anilist"
+)
+
 func (t *refreshStatusTracker) TryStart() bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -859,11 +865,11 @@ func (s *MetadataService) MatchSeries(animeID uint, source string, sourceID int)
 	}
 
 	switch source {
-	case "bangumi":
+	case metadataSourceBangumi:
 		m.BangumiID = sourceID
-	case "tmdb":
+	case metadataSourceTMDB:
 		m.TMDBID = sourceID
-	case "anilist":
+	case metadataSourceAniList:
 		m.AniListID = sourceID
 	}
 
@@ -998,11 +1004,11 @@ func (s *MetadataService) MatchMetadata(metadataID uint, source string, sourceID
 	}
 
 	switch source {
-	case "bangumi":
+	case metadataSourceBangumi:
 		m.BangumiID = sourceID
-	case "tmdb":
+	case metadataSourceTMDB:
 		m.TMDBID = sourceID
-	case "anilist":
+	case metadataSourceAniList:
 		m.AniListID = sourceID
 	}
 

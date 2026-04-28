@@ -43,6 +43,8 @@ const (
 	defaultUserAgent = "AnimateAutoTool-Updater/1.0"
 	resultError      = "error"
 	versionZero      = "v0.0.0"
+	goosDarwin       = "darwin"
+	goosLinux        = "linux"
 )
 
 type settings struct {
@@ -849,14 +851,14 @@ func platformAssetCandidates(goos, goarch string, inAppBundle bool) []string {
 	switch goos {
 	case "windows":
 		return []string{fmt.Sprintf("_windows_%s.exe", goarch)}
-	case "darwin":
+	case goosDarwin:
 		dmg := fmt.Sprintf("_darwin_%s.dmg", goarch)
 		archive := fmt.Sprintf("_darwin_%s.tar.gz", goarch)
 		if inAppBundle {
 			return []string{dmg, archive}
 		}
 		return []string{archive, dmg}
-	case "linux":
+	case goosLinux:
 		return []string{fmt.Sprintf("_linux_%s.tar.gz", goarch)}
 	default:
 		return nil
@@ -1141,9 +1143,9 @@ func applyUpdateForPlatform(artifactPath string) error {
 	switch {
 	case runtime.GOOS == "windows":
 		return applyWindowsUpdate(artifactPath)
-	case runtime.GOOS == "darwin" && strings.HasSuffix(strings.ToLower(artifactPath), ".dmg"):
+	case runtime.GOOS == goosDarwin && strings.HasSuffix(strings.ToLower(artifactPath), ".dmg"):
 		return applyDarwinUpdate(artifactPath)
-	case (runtime.GOOS == "darwin" || runtime.GOOS == "linux") && strings.HasSuffix(strings.ToLower(artifactPath), ".tar.gz"):
+	case (runtime.GOOS == goosDarwin || runtime.GOOS == goosLinux) && strings.HasSuffix(strings.ToLower(artifactPath), ".tar.gz"):
 		return applyArchiveBinaryUpdate(artifactPath)
 	default:
 		return fmt.Errorf("platform/artifact combination is not supported for self-update: %s %s", runtime.GOOS, filepath.Base(artifactPath))

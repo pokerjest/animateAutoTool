@@ -203,12 +203,12 @@ type LocalAnime struct {
 	JellyfinSeriesID string `json:"jellyfin_series_id" gorm:"index"` // Cached Jellyfin Series ID
 
 	// Refactored Metadata
-	MetadataID *uint          `json:"metadata_id"`
-	Metadata   *AnimeMetadata `json:"metadata" gorm:"foreignKey:MetadataID"`
-	HasRepairActions bool   `json:"has_repair_actions" gorm:"-"`
-	CanRetryScrape   bool   `json:"can_retry_scrape" gorm:"-"`
-	CanFixMatch      bool   `json:"can_fix_match" gorm:"-"`
-	RepairHint       string `json:"repair_hint" gorm:"-"`
+	MetadataID       *uint          `json:"metadata_id"`
+	Metadata         *AnimeMetadata `json:"metadata" gorm:"foreignKey:MetadataID"`
+	HasRepairActions bool           `json:"has_repair_actions" gorm:"-"`
+	CanRetryScrape   bool           `json:"can_retry_scrape" gorm:"-"`
+	CanFixMatch      bool           `json:"can_fix_match" gorm:"-"`
+	RepairHint       string         `json:"repair_hint" gorm:"-"`
 
 	Episodes []LocalEpisode `json:"episodes" gorm:"foreignKey:LocalAnimeID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE;"`
 }

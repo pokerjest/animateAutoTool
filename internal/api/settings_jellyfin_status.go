@@ -109,6 +109,7 @@ func JellyfinLoginHandler(c *gin.Context) {
 }
 
 func jellyfinConnectionStatusView(meta string) connectionStatusView {
+	//nolint:gosec // UI labels mention API Key, but no credential literal is embedded here.
 	return connectionStatusView{
 		ID:             "jellyfin-status",
 		ConnectedLabel: "已连接 Jellyfin",

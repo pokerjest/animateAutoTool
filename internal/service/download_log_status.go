@@ -28,14 +28,14 @@ type DownloadLogStatusSyncResult struct {
 }
 
 type DownloadLogSyncSnapshot struct {
-	LastCheckedAt *time.Time
-	LastSuccessAt *time.Time
-	LastError     string
-	LastUpdated   int
-	LastCompleted int
-	LastFailed    int
-	LastActive    int
-	LastUnmatched int
+	LastCheckedAt      *time.Time
+	LastSuccessAt      *time.Time
+	LastError          string
+	LastUpdated        int
+	LastCompleted      int
+	LastFailed         int
+	LastActive         int
+	LastUnmatched      int
 	LastLibraryRepairs int
 	LastRepairScanned  int
 	LastArchived       int
