@@ -133,7 +133,7 @@ func sharedMeaningfulRuneCount(a, b string) int {
 
 	seen := make(map[rune]bool)
 	shared := 0
-	for _, r := range []rune(b) {
+	for _, r := range b {
 		if unicode.IsDigit(r) || seen[r] || counts[r] == 0 {
 			continue
 		}
