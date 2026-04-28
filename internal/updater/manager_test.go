@@ -138,7 +138,7 @@ func TestExtractBinaryFromTarGz(t *testing.T) {
 	destPath := filepath.Join(dir, "animate-server")
 	payload := []byte("binary-content")
 
-	file, err := os.Create(archivePath)
+	file, err := os.Create(filepath.Clean(archivePath)) //nolint:gosec // archivePath is created under t.TempDir().
 	if err != nil {
 		t.Fatalf("create archive: %v", err)
 	}
@@ -169,7 +169,7 @@ func TestExtractBinaryFromTarGz(t *testing.T) {
 		t.Fatalf("extractBinaryFromTarGz: %v", err)
 	}
 
-	got, err := os.ReadFile(destPath)
+	got, err := os.ReadFile(filepath.Clean(destPath)) //nolint:gosec // destPath is extracted under t.TempDir().
 	if err != nil {
 		t.Fatalf("read extracted binary: %v", err)
 	}

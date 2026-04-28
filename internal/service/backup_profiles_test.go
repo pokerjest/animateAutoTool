@@ -113,7 +113,7 @@ func TestCloudflareBackupRestoreMergesConfigs(t *testing.T) {
 
 func TestInspectBackupRejectsNonSQLiteFile(t *testing.T) {
 	tempPath := t.TempDir() + "/not-a-db.txt"
-	if err := os.WriteFile(tempPath, []byte("definitely not sqlite"), 0o644); err != nil {
+	if err := os.WriteFile(tempPath, []byte("definitely not sqlite"), 0o600); err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
 	}
 

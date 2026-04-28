@@ -124,7 +124,7 @@ func compareNormalizedRuleTitles(na, nb string) int {
 
 func sharedMeaningfulRuneCount(a, b string) int {
 	counts := make(map[rune]int)
-	for _, r := range []rune(a) {
+	for _, r := range a {
 		if unicode.IsDigit(r) {
 			continue
 		}

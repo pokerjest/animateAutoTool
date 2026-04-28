@@ -57,7 +57,6 @@ func buildProxyTransport(enabledValue, proxyURL string) *http.Transport {
 	if enabledValue != ValueTrue || proxyURL == "" {
 		return nil
 	}
-	proxyURL = proxyURL
 	if parsed, err := url.Parse(proxyURL); err == nil {
 		return &http.Transport{Proxy: http.ProxyURL(parsed)}
 	}

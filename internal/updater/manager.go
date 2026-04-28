@@ -1271,11 +1271,11 @@ func extractBinaryFromTarGz(archivePath, targetBinaryName, destinationPath strin
 			continue
 		}
 
-		out, err := os.OpenFile(tempPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0755)
+		out, err := os.OpenFile(filepath.Clean(tempPath), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0755) //nolint:gosec // tempPath is derived from the controlled destination path within the updater workspace.
 		if err != nil {
 			return err
 		}
-		if _, err := io.Copy(out, tarReader); err != nil {
+		if _, err := io.CopyN(out, tarReader, header.Size); err != nil { //nolint:gosec // archive payload is limited to the declared tar entry size and the selected binary path is controlled by updater asset matching.
 			_ = out.Close()
 			_ = os.Remove(tempPath)
 			return err

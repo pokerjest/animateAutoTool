@@ -28,7 +28,7 @@ func TestSyncDownloadLogStatusesMarksCompletedAndStoresMetadata(t *testing.T) {
 
 	targetDir := t.TempDir()
 	targetFile := filepath.Join(targetDir, "01.mkv")
-	if err := os.WriteFile(targetFile, []byte("video"), 0o644); err != nil {
+	if err := os.WriteFile(targetFile, []byte("video"), 0o600); err != nil {
 		t.Fatalf("failed to create target file: %v", err)
 	}
 
@@ -126,7 +126,7 @@ func TestSyncDownloadLogStatusesBackfillsCompletedTargetForExistingCompletedLog(
 
 	targetDir := t.TempDir()
 	targetFile := filepath.Join(targetDir, "01.mkv")
-	if err := os.WriteFile(targetFile, []byte("video"), 0o644); err != nil {
+	if err := os.WriteFile(targetFile, []byte("video"), 0o600); err != nil {
 		t.Fatalf("failed to create target file: %v", err)
 	}
 

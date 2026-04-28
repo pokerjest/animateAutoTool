@@ -68,17 +68,17 @@ func fallbackSummaryForSource(source string, m *model.AnimeMetadata) string {
 		return ""
 	}
 	switch source {
-	case "bangumi":
+	case metadataSourceBangumi:
 		if m.TMDBSummary != "" {
 			return m.TMDBSummary
 		}
 		return m.AniListSummary
-	case "tmdb":
+	case metadataSourceTMDB:
 		if m.AniListSummary != "" {
 			return m.AniListSummary
 		}
 		return m.BangumiSummary
-	case "anilist":
+	case metadataSourceAniList:
 		if m.TMDBSummary != "" {
 			return m.TMDBSummary
 		}
