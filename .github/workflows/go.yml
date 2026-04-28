@@ -24,7 +24,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.25.8'
+          go-version: '1.25.9'
           cache: true
 
       - name: Read build version
@@ -71,7 +71,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.25.8'
+          go-version: '1.25.9'
           cache: true
 
       - name: Read build version
@@ -125,7 +125,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.25.8'
+          go-version: '1.25.9'
           cache: true
 
       - name: Read package version
@@ -161,7 +161,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.25.8'
+          go-version: '1.25.9'
           cache: true
 
       - name: Read package version
