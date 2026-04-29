@@ -45,31 +45,29 @@ func buildHealthReport() HealthReport {
 		},
 		HealthTone: "emerald",
 	}
-	if db.DB == nil {
+	subStore := subscriptionStore()
+	logStore := downloadLogStore()
+	laStore := localAnimeStore()
+	if subStore == nil || logStore == nil || laStore == nil {
 		report.HealthTone = "rose"
 		report.Summary = "数据库尚未初始化"
 		report.Recommendations = []string{"请先启动服务并完成数据库初始化。"}
 		return report
 	}
 
-	db.DB.Model(&model.Subscription{}).Count(&report.SubscriptionTotal)
-	db.DB.Model(&model.Subscription{}).Where("is_active = ?", true).Count(&report.SubscriptionActive)
-	db.DB.Model(&model.Subscription{}).
-		Where("is_active = ? AND auto_disable_on_done = ? AND expected_episodes > 0 AND last_ep >= expected_episodes", false, true).
-		Count(&report.AutoDisabledOnDone)
-	db.DB.Model(&model.DownloadLog{}).Where("status = ?", "completed").Count(&report.DownloadCompleted)
-	db.DB.Model(&model.DownloadLog{}).Where("status = ?", "downloading").Count(&report.DownloadDownloading)
-	db.DB.Model(&model.DownloadLog{}).Where("status = ?", "failed").Count(&report.DownloadFailed)
-	db.DB.Model(&model.DownloadLog{}).Where("status = ?", "archived").Count(&report.DownloadArchived)
-	db.DB.Model(&model.LocalAnime{}).Count(&report.LocalAnimeCount)
-	db.DB.Model(&model.LocalEpisode{}).Count(&report.LocalEpisodeCount)
+	report.SubscriptionTotal, _ = subStore.Count()
+	report.SubscriptionActive, _ = subStore.CountActive()
+	report.AutoDisabledOnDone, _ = subStore.CountAutoDisabledOnDone()
+	report.DownloadCompleted, _ = logStore.CountByStatus("completed")
+	report.DownloadDownloading, _ = logStore.CountByStatus("downloading")
+	report.DownloadFailed, _ = logStore.CountByStatus("failed")
+	report.DownloadArchived, _ = logStore.CountByStatus("archived")
+	report.LocalAnimeCount, _ = laStore.CountAnimes()
+	report.LocalEpisodeCount, _ = laStore.CountEpisodes()
 	db.DB.Model(&model.LibraryIssue{}).Where("status = ?", "open").Count(&report.OpenLibraryIssues)
-	db.DB.Model(&model.LocalAnime{}).Where("jellyfin_series_id <> ''").Count(&report.JellyfinSeriesCount)
-	db.DB.Model(&model.LocalEpisode{}).Where("jellyfin_item_id <> ''").Count(&report.JellyfinEpisodeCount)
-	db.DB.Model(&model.Subscription{}).
-		Where("is_active = ? AND stale_after_hours > 0 AND last_success_at IS NOT NULL AND last_success_at < ?",
-			true, time.Now().Add(-72*time.Hour)).
-		Count(&report.StaleSubscriptions72H)
+	report.JellyfinSeriesCount, _ = laStore.CountAnimesWithJellyfin()
+	report.JellyfinEpisodeCount, _ = laStore.CountEpisodesWithJellyfin()
+	report.StaleSubscriptions72H, _ = subStore.CountStaleSince(time.Now().Add(-72 * time.Hour))
 	db.DB.Raw(`
 		SELECT COUNT(DISTINCT subscriptions.id)
 		FROM subscriptions

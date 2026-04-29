@@ -85,10 +85,12 @@ func GetLocalAnimeFilesHandler(c *gin.Context) {
 	id := c.Param("id")
 
 	// 1. Try fetching from LocalEpisodes (DB)
-	var episodes []model.LocalEpisode
-	if err := db.DB.Where("local_anime_id = ?", id).Order("season_num, episode_num").Find(&episodes).Error; err == nil && len(episodes) > 0 {
-		handleDBEpisodeList(c, id, episodes)
-		return
+	idUint, _ := strconv.ParseUint(id, 10, 64)
+	if laStore := localAnimeStore(); laStore != nil {
+		if episodes, err := laStore.ListEpisodesByAnimeIDOrdered(uint(idUint)); err == nil && len(episodes) > 0 {
+			handleDBEpisodeList(c, id, episodes)
+			return
+		}
 	}
 
 	// 2. Fallback to file system
@@ -97,15 +99,20 @@ func GetLocalAnimeFilesHandler(c *gin.Context) {
 
 func handleDBEpisodeList(c *gin.Context, id string, episodes []model.LocalEpisode) {
 	// Preload anime for metadata fallback
-	var anime model.LocalAnime
-	if err := db.DB.Preload("Metadata").First(&anime, id).Error; err != nil {
+	laStore := localAnimeStore()
+	if laStore == nil {
+		jsonNotFound(c, "数据库未初始化")
+		return
+	}
+	anime, err := laStore.GetWithMetadata(id)
+	if err != nil {
 		log.Printf("ERROR: Found episodes but failed to load parent anime %s: %v", id, err)
 		jsonNotFound(c, "未找到关联的本地番剧")
 		return
 	}
 
 	// Fetch Jellyfin Status (Best Effort)
-	jfMap, jellyfinUrl := fetchJellyfinProgress(&anime)
+	jfMap, jellyfinUrl := fetchJellyfinProgress(anime)
 
 	// --- Source Progress Logic Overlay ---
 	sourceParam := c.Query("source") // Optional: source being previewed in modal
@@ -120,10 +127,10 @@ func handleDBEpisodeList(c *gin.Context, id string, episodes []model.LocalEpisod
 	log.Printf("DEBUG: GetLocalAnimeFilesHandler for AnimeID=%d | sourceParam='%s' | effectiveSource='%s' | hasMetadata=%v",
 		anime.ID, sourceParam, effectiveSource, anime.Metadata != nil)
 
-	bangumiWatchedCount, bangumiCollectionStatus := fetchBangumiProgress(&anime, effectiveSource)
-	anilistWatchedCount, anilistStatus := fetchAniListProgress(&anime, effectiveSource)
+	bangumiWatchedCount, bangumiCollectionStatus := fetchBangumiProgress(anime, effectiveSource)
+	anilistWatchedCount, anilistStatus := fetchAniListProgress(anime, effectiveSource)
 
-	display := buildEpisodeList(episodes, &anime, jfMap, jellyfinUrl, bangumiWatchedCount, anilistWatchedCount)
+	display := buildEpisodeList(episodes, anime, jfMap, jellyfinUrl, bangumiWatchedCount, anilistWatchedCount)
 
 	// Build collection status
 	collStatus := &CollectionStatus{
@@ -143,11 +150,17 @@ func handleDBEpisodeList(c *gin.Context, id string, episodes []model.LocalEpisod
 }
 
 func handleFileSystemFileList(c *gin.Context, id string) {
-	var anime model.LocalAnime
-	if err := db.DB.First(&anime, id).Error; err != nil {
+	laStore := localAnimeStore()
+	if laStore == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "数据库未初始化"})
+		return
+	}
+	animePtr, err := laStore.GetAnime(id)
+	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "未找到番剧记录"})
 		return
 	}
+	anime := *animePtr
 
 	animeIDInt, _ := strconv.Atoi(id)
 	files, err := listAnimeFiles(anime.Path, uint(animeIDInt))
@@ -172,16 +185,19 @@ func handleFileSystemFileList(c *gin.Context, id string) {
 
 func RefreshLocalAnimeMetadataHandler(c *gin.Context) {
 	id := c.Param("id")
-	var anime model.LocalAnime
-	if err := db.DB.First(&anime, id).Error; err != nil {
+	laStore := localAnimeStore()
+	if laStore == nil {
+		htmlNotFound(c, "数据库未初始化")
+		return
+	}
+	animePtr, err := laStore.GetWithMetadata(id)
+	if err != nil {
 		htmlNotFound(c, "未找到本地番剧")
 		return
 	}
+	anime := *animePtr
 
-	// Use Service logic
 	metaSvc := service.NewMetadataService()
-	// Preload metadata to ensure we have it
-	db.DB.Preload("Metadata").First(&anime, id)
 
 	// Emit Start Event
 	event.GlobalBus.Publish(event.EventMetadataUpdated, map[string]interface{}{
@@ -235,11 +251,17 @@ func SwitchLocalAnimeSourceHandler(c *gin.Context) {
 	source := c.Query("source")
 	log.Printf("DEBUG: Switch Source Request for ID %s to '%s'", id, source)
 
-	var anime model.LocalAnime
-	if err := db.DB.Preload("Metadata").First(&anime, id).Error; err != nil {
+	laStore := localAnimeStore()
+	if laStore == nil {
+		htmlNotFound(c, "数据库未初始化")
+		return
+	}
+	animePtr, err := laStore.GetWithMetadata(id)
+	if err != nil {
 		htmlNotFound(c, "未找到本地番剧")
 		return
 	}
+	anime := *animePtr
 
 	if anime.Metadata == nil {
 		htmlBadRequest(c, "当前本地番剧还没有关联元数据")
@@ -295,15 +317,20 @@ func PreviewDirectoryRenameHandler(c *gin.Context) {
 
 	// 1. Get Directory
 	log.Printf("DEBUG: Preview Rename Request: Pattern='%s', Season='%s', Manual=%v", req.Pattern, req.Season, req.IsManual)
-	var dir model.LocalAnimeDirectory
-	if err := db.DB.First(&dir, id).Error; err != nil {
+	laStore := localAnimeStore()
+	if laStore == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "数据库未初始化"})
+		return
+	}
+	dir, err := laStore.GetDirectory(id)
+	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "未找到目录记录"})
 		return
 	}
 
 	// 2. Get All Anime in this Directory
-	var animeList []model.LocalAnime
-	if err := db.DB.Where("directory_id = ?", dir.ID).Find(&animeList).Error; err != nil {
+	animeList, err := laStore.ListAnimesByDirectory(dir.ID)
+	if err != nil {
 		jsonServerError(c, "读取目录下的番剧列表", err)
 		return
 	}
@@ -336,14 +363,19 @@ func ApplyDirectoryRenameHandler(c *gin.Context) {
 		return
 	}
 
-	var dir model.LocalAnimeDirectory
-	if err := db.DB.First(&dir, id).Error; err != nil {
+	laStore := localAnimeStore()
+	if laStore == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "数据库未初始化"})
+		return
+	}
+	dir, err := laStore.GetDirectory(id)
+	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "未找到目录记录"})
 		return
 	}
 
-	var animeList []model.LocalAnime
-	if err := db.DB.Where("directory_id = ?", dir.ID).Find(&animeList).Error; err != nil {
+	animeList, err := laStore.ListAnimesByDirectory(dir.ID)
+	if err != nil {
 		jsonServerError(c, "读取目录下的番剧列表", err)
 		return
 	}
@@ -367,7 +399,11 @@ func ApplyDirectoryRenameHandler(c *gin.Context) {
 
 			oldPath := item.Path
 			var episode model.LocalEpisode
-			episodeFound := db.DB.Where("path = ?", oldPath).First(&episode).Error == nil
+			episodePtr, episodeErr := laStore.FindEpisodeByPath(oldPath)
+			episodeFound := episodeErr == nil && episodePtr != nil
+			if episodeFound {
+				episode = *episodePtr
+			}
 			newPath, err := buildSafeRenamePath(anime.Path, item.New)
 			if err != nil {
 				log.Printf("Rename skipped for %s: %v", oldPath, err)
@@ -404,12 +440,14 @@ func ApplyDirectoryRenameHandler(c *gin.Context) {
 
 			successCount++
 			if episodeFound {
-				_ = db.DB.Model(&model.LocalEpisode{}).Where("id = ?", episode.ID).Update("path", newPath).Error
+				_ = laStore.UpdateEpisodePathByID(episode.ID, newPath)
 				episode.Path = newPath
 			} else {
-				_ = db.DB.Model(&model.LocalEpisode{}).Where("path = ?", oldPath).Update("path", newPath).Error
+				_ = laStore.UpdateEpisodePathByOldPath(oldPath, newPath)
 			}
-			_ = db.DB.Model(&model.DownloadLog{}).Where("target_file = ?", oldPath).Update("target_file", newPath).Error
+			if logStore := downloadLogStore(); logStore != nil {
+				_ = logStore.UpdateTargetFileByOld(oldPath, newPath)
+			}
 			backfillRenamedDownloadLog(anime, episode, oldPath, newPath)
 			if anime.JellyfinSeriesID != "" {
 				refreshedSeries[anime.JellyfinSeriesID] = struct{}{}

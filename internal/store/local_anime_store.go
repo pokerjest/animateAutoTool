@@ -69,6 +69,50 @@ func (s *LocalAnimeStore) RemoveDirectoryWithAnimes(id uint) error {
 	})
 }
 
+func (s *LocalAnimeStore) CountAnimes() (int64, error) {
+	if s == nil || s.db == nil {
+		return 0, gorm.ErrInvalidDB
+	}
+	var n int64
+	if err := s.db.Model(&model.LocalAnime{}).Count(&n).Error; err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
+func (s *LocalAnimeStore) CountEpisodes() (int64, error) {
+	if s == nil || s.db == nil {
+		return 0, gorm.ErrInvalidDB
+	}
+	var n int64
+	if err := s.db.Model(&model.LocalEpisode{}).Count(&n).Error; err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
+func (s *LocalAnimeStore) CountAnimesWithJellyfin() (int64, error) {
+	if s == nil || s.db == nil {
+		return 0, gorm.ErrInvalidDB
+	}
+	var n int64
+	if err := s.db.Model(&model.LocalAnime{}).Where("jellyfin_series_id <> ''").Count(&n).Error; err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
+func (s *LocalAnimeStore) CountEpisodesWithJellyfin() (int64, error) {
+	if s == nil || s.db == nil {
+		return 0, gorm.ErrInvalidDB
+	}
+	var n int64
+	if err := s.db.Model(&model.LocalEpisode{}).Where("jellyfin_item_id <> ''").Count(&n).Error; err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
 func (s *LocalAnimeStore) ListAll() ([]model.LocalAnime, error) {
 	if s == nil || s.db == nil {
 		return nil, gorm.ErrInvalidDB
@@ -100,6 +144,67 @@ func (s *LocalAnimeStore) GetWithMetadata(id any) (*model.LocalAnime, error) {
 		return nil, err
 	}
 	return &anime, nil
+}
+
+func (s *LocalAnimeStore) GetAnime(id any) (*model.LocalAnime, error) {
+	if s == nil || s.db == nil {
+		return nil, gorm.ErrInvalidDB
+	}
+	var anime model.LocalAnime
+	if err := s.db.First(&anime, id).Error; err != nil {
+		return nil, err
+	}
+	return &anime, nil
+}
+
+func (s *LocalAnimeStore) GetDirectory(id any) (*model.LocalAnimeDirectory, error) {
+	if s == nil || s.db == nil {
+		return nil, gorm.ErrInvalidDB
+	}
+	var dir model.LocalAnimeDirectory
+	if err := s.db.First(&dir, id).Error; err != nil {
+		return nil, err
+	}
+	return &dir, nil
+}
+
+func (s *LocalAnimeStore) ListAnimesByDirectory(directoryID uint) ([]model.LocalAnime, error) {
+	if s == nil || s.db == nil {
+		return nil, gorm.ErrInvalidDB
+	}
+	var animes []model.LocalAnime
+	if err := s.db.Where("directory_id = ?", directoryID).Find(&animes).Error; err != nil {
+		return nil, err
+	}
+	return animes, nil
+}
+
+// ListEpisodesByAnimeIDOrdered returns episodes ordered by season then episode.
+func (s *LocalAnimeStore) ListEpisodesByAnimeIDOrdered(animeID uint) ([]model.LocalEpisode, error) {
+	if s == nil || s.db == nil {
+		return nil, gorm.ErrInvalidDB
+	}
+	var eps []model.LocalEpisode
+	if err := s.db.Where("local_anime_id = ?", animeID).Order("season_num, episode_num").Find(&eps).Error; err != nil {
+		return nil, err
+	}
+	return eps, nil
+}
+
+// UpdateEpisodePathByID sets the path on a single episode by primary key.
+func (s *LocalAnimeStore) UpdateEpisodePathByID(id uint, newPath string) error {
+	if s == nil || s.db == nil {
+		return gorm.ErrInvalidDB
+	}
+	return s.db.Model(&model.LocalEpisode{}).Where("id = ?", id).Update("path", newPath).Error
+}
+
+// UpdateEpisodePathByOldPath updates an episode's path by matching the old path.
+func (s *LocalAnimeStore) UpdateEpisodePathByOldPath(oldPath, newPath string) error {
+	if s == nil || s.db == nil {
+		return gorm.ErrInvalidDB
+	}
+	return s.db.Model(&model.LocalEpisode{}).Where("path = ?", oldPath).Update("path", newPath).Error
 }
 
 func (s *LocalAnimeStore) ListEpisodesByAnimeID(animeID uint) ([]model.LocalEpisode, error) {

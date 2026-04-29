@@ -45,3 +45,17 @@ func listSubscriptionsWithMetadata() ([]model.Subscription, error) {
 	}
 	return s.ListWithMetadata()
 }
+
+func downloadLogStore() *store.DownloadLogStore {
+	if db.DB == nil {
+		return nil
+	}
+	return store.NewDownloadLogStore(db.DB)
+}
+
+func localAnimeStore() *store.LocalAnimeStore {
+	if db.DB == nil {
+		return nil
+	}
+	return store.NewLocalAnimeStore(db.DB)
+}

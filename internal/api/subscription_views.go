@@ -15,6 +15,7 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/parser"
 	"github.com/pokerjest/animateAutoTool/internal/service"
+	"gorm.io/gorm"
 )
 
 func populateSubscriptionStats(subs []model.Subscription) {
@@ -131,12 +132,15 @@ func subscriptionStatusLabel(status string) string {
 }
 
 func populateSubscriptionStat(sub *model.Subscription) {
-	if sub == nil || db.DB == nil {
+	if sub == nil {
+		return
+	}
+	logStore := downloadLogStore()
+	if logStore == nil {
 		return
 	}
 
-	var count int64
-	db.DB.Model(&model.DownloadLog{}).Where("subscription_id = ?", sub.ID).Count(&count)
+	count, _ := logStore.CountBySubscription(sub.ID)
 	sub.DownloadedCount = count
 	populateSubscriptionActionHints(sub)
 }
@@ -454,27 +458,29 @@ func hasResettableSubscriptionLogs(subscriptionID uint, maxAge time.Duration) bo
 }
 
 func countResettableSubscriptionLogs(subscriptionID uint, maxAge time.Duration) int64 {
-	if subscriptionID == 0 || db.DB == nil {
+	if subscriptionID == 0 {
 		return 0
 	}
-
-	var count int64
+	logStore := downloadLogStore()
+	if logStore == nil {
+		return 0
+	}
 	cutoff := time.Now().Add(-maxAge)
-	db.DB.Model(&model.DownloadLog{}).
-		Where("subscription_id = ? AND status IN ? AND created_at < ?", subscriptionID, []string{"downloading", "failed"}, cutoff).
-		Count(&count)
+	count, _ := logStore.CountResettable(subscriptionID, []string{"downloading", "failed"}, cutoff)
 	return count
 }
 
 func missingEpisodeSummary(sub *model.Subscription) string {
-	if sub == nil || sub.ID == 0 || sub.ExpectedEpisodes <= 1 || db.DB == nil {
+	if sub == nil || sub.ID == 0 || sub.ExpectedEpisodes <= 1 {
+		return ""
+	}
+	logStore := downloadLogStore()
+	if logStore == nil {
 		return ""
 	}
 
-	var logs []model.DownloadLog
-	if err := db.DB.
-		Where("subscription_id = ? AND status IN ?", sub.ID, []string{"downloading", "completed", "renamed"}).
-		Find(&logs).Error; err != nil {
+	logs, err := logStore.ListBySubscriptionAndStatuses(sub.ID, []string{"downloading", "completed", "renamed"})
+	if err != nil {
 		return ""
 	}
 
@@ -519,11 +525,13 @@ func resetStaleLogsAndRecheck(sub *model.Subscription, maxAge time.Duration) err
 	if sub == nil {
 		return fmt.Errorf("subscription is nil")
 	}
+	logStore := downloadLogStore()
+	if logStore == nil {
+		return gorm.ErrInvalidDB
+	}
 
 	cutoff := time.Now().Add(-maxAge)
-	if err := db.DB.Model(&model.DownloadLog{}).
-		Where("subscription_id = ? AND status IN ? AND created_at < ?", sub.ID, []string{"downloading", "failed"}, cutoff).
-		Update("status", "archived").Error; err != nil {
+	if err := logStore.MarkResettableArchived(sub.ID, []string{"downloading", "failed"}, cutoff, "archived"); err != nil {
 		return err
 	}
 
@@ -559,11 +567,12 @@ func loadSubscriptionHistory(id uint) (SubscriptionHistoryData, error) {
 		return SubscriptionHistoryData{}, err
 	}
 
-	var logs []model.DownloadLog
-	if err := db.DB.Where("subscription_id = ?", sub.ID).
-		Order("created_at DESC").
-		Limit(12).
-		Find(&logs).Error; err != nil {
+	logStore := downloadLogStore()
+	if logStore == nil {
+		return SubscriptionHistoryData{}, gorm.ErrInvalidDB
+	}
+	logs, err := logStore.ListBySubscription(sub.ID, 12)
+	if err != nil {
 		return SubscriptionHistoryData{}, err
 	}
 
