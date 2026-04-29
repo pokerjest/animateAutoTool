@@ -40,6 +40,9 @@ server*.log
 *.swo
 *~
 
+# Claude Code project metadata
+.claude/
+
 # OS
 .DS_Store
 Thumbs.db
