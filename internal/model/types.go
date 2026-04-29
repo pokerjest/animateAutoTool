@@ -193,6 +193,11 @@ const (
 	ConfigKeyR2AccessKey = "r2_access_key"
 	ConfigKeyR2SecretKey = "r2_secret_key" //nolint:gosec
 	ConfigKeyR2Bucket    = "r2_bucket"
+
+	// AI Assistant
+	ConfigKeyAIBaseURL = "ai_base_url"
+	ConfigKeyAIApiKey  = "ai_api_key" //nolint:gosec
+	ConfigKeyAIModel   = "ai_model"
 )
 
 // LocalAnimeDirectory 用户配置的本地番剧目录根路径

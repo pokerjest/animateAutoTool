@@ -181,6 +181,12 @@ func initRoutesLegacy(r *gin.Engine) {
 			apiGroup.GET("/health/report", HealthReportHandler)
 			apiGroup.GET("/runtime/stats", RuntimeStatsHandler)
 
+			// AI Assistant
+			apiGroup.POST("/ai/chat", AIChatHandler)
+			apiGroup.POST("/ai/clear", AIClearHistoryHandler)
+			apiGroup.GET("/ai/config", GetAIStatusHandler)
+			apiGroup.POST("/ai/config", AIConfigHandler)
+
 			// SSE
 		}
 	}

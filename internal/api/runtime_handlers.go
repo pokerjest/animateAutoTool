@@ -12,7 +12,8 @@ var runtimeStatsStartedAt = time.Now()
 
 func HealthPageHandler(c *gin.Context) {
 	c.HTML(http.StatusOK, "health.html", gin.H{
-		"Report": buildHealthReport(),
+		"SkipLayout": IsHTMX(c),
+		"Report":     buildHealthReport(),
 	})
 }
 

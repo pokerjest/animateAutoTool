@@ -2541,6 +2541,17 @@ func TestHealthPageAndReportHandlers(t *testing.T) {
 	assert.Contains(t, pageRecorder.Body.String(), "系统健康")
 	assert.Contains(t, pageRecorder.Body.String(), "下载链路仍有阻塞或失败记录")
 
+	partialRecorder := httptest.NewRecorder()
+	partialReq, _ := http.NewRequest("GET", "/health", nil)
+	partialReq.Header.Set("HX-Request", "true")
+	partialReq.Header.Set("Cookie", cookie)
+	markLocalRequest(partialReq)
+	r.ServeHTTP(partialRecorder, partialReq)
+	assert.Equal(t, http.StatusOK, partialRecorder.Code)
+	assert.Contains(t, partialRecorder.Body.String(), "系统健康")
+	assert.NotContains(t, partialRecorder.Body.String(), "🚪 退出登录")
+	assert.NotContains(t, partialRecorder.Body.String(), "AnimateTool")
+
 	reportRecorder := httptest.NewRecorder()
 	reportReq, _ := http.NewRequest("GET", "/api/health/report", nil)
 	reportReq.Header.Set("Cookie", cookie)
