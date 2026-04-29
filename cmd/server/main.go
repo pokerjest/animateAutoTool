@@ -25,6 +25,11 @@ import (
 	appversion "github.com/pokerjest/animateAutoTool/internal/version"
 )
 
+const (
+	maxServerLogSize = 10 * 1024 * 1024
+	maxServerBackups = 5
+)
+
 func main() {
 	if err := config.LoadConfig(""); err != nil {
 		log.Fatalf("Failed to load config: %v", err)
@@ -122,6 +127,9 @@ func configureLogging() func() {
 	}
 
 	logPath := filepath.Join(logDir, "server.log")
+	if err := rotateLogFile(logPath, maxServerLogSize, maxServerBackups); err != nil {
+		log.Printf("Failed to rotate log file %s: %v", logPath, err)
+	}
 	//nolint:gosec // log path is derived from app-controlled config directories.
 	file, err := os.OpenFile(filepath.Clean(logPath), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
@@ -147,4 +155,35 @@ func configureLogging() func() {
 	return func() {
 		_ = file.Close()
 	}
+}
+
+func rotateLogFile(path string, maxBytes int64, backups int) error {
+	if backups <= 0 || maxBytes <= 0 {
+		return nil
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	if info.Size() < maxBytes {
+		return nil
+	}
+
+	for i := backups - 1; i >= 1; i-- {
+		src := fmt.Sprintf("%s.%d", path, i)
+		dst := fmt.Sprintf("%s.%d", path, i+1)
+		if _, err := os.Stat(src); err == nil {
+			_ = os.Remove(dst)
+			if err := os.Rename(src, dst); err != nil {
+				return err
+			}
+		}
+	}
+
+	firstBackup := path + ".1"
+	_ = os.Remove(firstBackup)
+	return os.Rename(path, firstBackup)
 }

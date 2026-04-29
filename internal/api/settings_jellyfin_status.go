@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/jellyfin"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/safeio"
@@ -30,29 +29,28 @@ func RenderJellyfinStatus(style string) string {
 }
 
 func CheckJellyfinConnection() (bool, string) {
-	var urlCfg, keyCfg model.GlobalConfig
-	db.DB.Where("key = ?", model.ConfigKeyJellyfinUrl).First(&urlCfg)
-	db.DB.Where("key = ?", model.ConfigKeyJellyfinApiKey).First(&keyCfg)
+	urlValue := configValue(model.ConfigKeyJellyfinUrl)
+	apiKey := configValue(model.ConfigKeyJellyfinApiKey)
 
-	if urlCfg.Value == "" || keyCfg.Value == "" {
-		log.Printf("DEBUG: Jellyfin connection check failed: Config missing (hasURL=%t, hasKey=%t)", urlCfg.Value != "", keyCfg.Value != "")
+	if urlValue == "" || apiKey == "" {
+		log.Printf("DEBUG: Jellyfin connection check failed: Config missing (hasURL=%t, hasKey=%t)", urlValue != "", apiKey != "")
 		return false, "配置缺失"
 	}
 
 	proxyEnabled, proxyURL := loadProxySettings(model.ConfigKeyProxyJellyfin)
-	probe := newConnectionProbe("jellyfin", urlCfg.Value, keyCfg.Value, proxyEnabled, proxyURL)
+	probe := newConnectionProbe("jellyfin", urlValue, apiKey, proxyEnabled, proxyURL)
 	if stat, ok := probe.load(); ok {
 		return stat.Success, stat.Msg
 	}
 
-	apiURL := fmt.Sprintf("%s/System/Info", strings.TrimRight(urlCfg.Value, "/"))
+	apiURL := fmt.Sprintf("%s/System/Info", strings.TrimRight(urlValue, "/"))
 	log.Printf("DEBUG: Testing Jellyfin connection to: %s", apiURL)
 
 	req, err := http.NewRequest("GET", apiURL, nil)
 	if err != nil {
 		return false, fmt.Sprintf("内部请求创建失败: %v", err)
 	}
-	req.Header.Set("X-Emby-Token", keyCfg.Value)
+	req.Header.Set("X-Emby-Token", apiKey)
 	req.Header.Set("Accept", "application/json")
 
 	client := &http.Client{Timeout: 5 * time.Second}

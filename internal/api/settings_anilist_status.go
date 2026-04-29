@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/safeio"
 )
@@ -44,12 +43,12 @@ func RenderAniListStatus(style string) string {
 }
 
 func CheckAniListConnection() (bool, string, string) {
-	var config model.GlobalConfig
-	if err := db.DB.Where("key = ?", model.ConfigKeyAniListToken).First(&config).Error; err != nil || config.Value == "" {
+	token := configValue(model.ConfigKeyAniListToken)
+	if token == "" {
 		return false, "", ErrTokenMissing
 	}
 
-	token := strings.TrimSpace(config.Value)
+	token = strings.TrimSpace(token)
 	if lowerToken := strings.ToLower(token); strings.HasPrefix(lowerToken, "bearer ") {
 		token = strings.TrimSpace(token[7:])
 	}

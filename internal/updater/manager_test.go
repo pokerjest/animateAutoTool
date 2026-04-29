@@ -21,7 +21,7 @@ func TestCompareVersions(t *testing.T) {
 	}{
 		{a: "v0.4.4", b: "v0.4.4", want: 0},
 		{a: "0.4.3", b: "v0.4.4", want: -1},
-		{a: "v0.5.1", b: "v0.5.0", want: 1},
+		{a: "v0.5.2", b: "v0.5.1", want: 1},
 		{a: "v1.0.0-beta.1", b: "v1.0.0", want: -1},
 		{a: "v1.0.0", b: "v1.0.0-beta.1", want: 1},
 		{a: "v2.1", b: "v2.1.0", want: 0},
@@ -145,7 +145,7 @@ func TestExtractBinaryFromTarGz(t *testing.T) {
 	gz := gzip.NewWriter(file)
 	tw := tar.NewWriter(gz)
 	header := &tar.Header{
-		Name: "animate-server_v0.5.1_linux_amd64/bin/animate-server",
+		Name: "animate-server_v0.5.2_linux_amd64/bin/animate-server",
 		Mode: 0o755,
 		Size: int64(len(payload)),
 	}

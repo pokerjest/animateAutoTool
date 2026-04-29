@@ -275,6 +275,10 @@ func applyDarwinUpdate(downloadedDMG string) error {
 	logPath := filepath.Join(config.LogsDir(), "updater.log")
 	targetDir := filepath.Dir(bundlePath)
 	appName := filepath.Base(bundlePath)
+	mountPoint, err := os.MkdirTemp("", "animate_update_mount.")
+	if err != nil {
+		return err
+	}
 
 	script := `#!/bin/bash
 set -euo pipefail
@@ -284,12 +288,12 @@ DMG_PATH="$2"
 TARGET_DIR="$3"
 APP_NAME="$4"
 LOG_FILE="$5"
+MOUNT_POINT="$6"
 
 while kill -0 "$OLD_PID" >/dev/null 2>&1; do
   sleep 1
 done
 
-MOUNT_POINT="$(mktemp -d /tmp/animate_update_mount.XXXXXX)"
 cleanup() {
   hdiutil detach "$MOUNT_POINT" -quiet >/dev/null 2>&1 || true
   rm -rf "$MOUNT_POINT"
@@ -337,8 +341,9 @@ open "$TARGET_APP"
 		return err
 	}
 
-	cmd := exec.Command("/bin/bash", scriptPath, strconv.Itoa(os.Getpid()), downloadedDMG, targetDir, appName, logPath) //nolint:gosec
+	cmd := exec.Command("/bin/bash", scriptPath, strconv.Itoa(os.Getpid()), downloadedDMG, targetDir, appName, logPath, mountPoint) //nolint:gosec
 	if err := cmd.Start(); err != nil {
+		_ = os.RemoveAll(mountPoint)
 		return err
 	}
 

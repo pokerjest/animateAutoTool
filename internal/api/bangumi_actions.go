@@ -8,15 +8,14 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/pokerjest/animateAutoTool/internal/bangumi"
-	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 )
 
 // UpdateBangumiCollectionHandler 更新 Bangumi 收藏状态 (订阅)
 func UpdateBangumiCollectionHandler(c *gin.Context) {
 	// Check Login
-	var accessToken string
-	if err := db.DB.Model(&model.GlobalConfig{}).Where("key = ?", model.ConfigKeyBangumiAccessToken).Select("value").Scan(&accessToken).Error; err != nil || accessToken == "" {
+	accessToken := configValue(model.ConfigKeyBangumiAccessToken)
+	if accessToken == "" {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "请先登录 Bangumi"})
 		return
 	}
@@ -67,8 +66,8 @@ func UpdateBangumiCollectionHandler(c *gin.Context) {
 // UpdateBangumiProgressHandler 同步观看进度
 func UpdateBangumiProgressHandler(c *gin.Context) {
 	// Check Login
-	var accessToken string
-	if err := db.DB.Model(&model.GlobalConfig{}).Where("key = ?", model.ConfigKeyBangumiAccessToken).Select("value").Scan(&accessToken).Error; err != nil || accessToken == "" {
+	accessToken := configValue(model.ConfigKeyBangumiAccessToken)
+	if accessToken == "" {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "请先登录 Bangumi"})
 		return
 	}

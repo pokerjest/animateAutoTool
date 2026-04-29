@@ -86,10 +86,10 @@ func getR2Client(ctx context.Context) (*s3.Client, string, error) {
 	debugLog("DEBUG: getR2Client called")
 	var endpoint, accessKey, secretKey, bucket string
 
-	db.DB.Model(&model.GlobalConfig{}).Where("key = ?", model.ConfigKeyR2Endpoint).Select("value").Scan(&endpoint)
-	db.DB.Model(&model.GlobalConfig{}).Where("key = ?", model.ConfigKeyR2AccessKey).Select("value").Scan(&accessKey)
-	db.DB.Model(&model.GlobalConfig{}).Where("key = ?", model.ConfigKeyR2SecretKey).Select("value").Scan(&secretKey)
-	db.DB.Model(&model.GlobalConfig{}).Where("key = ?", model.ConfigKeyR2Bucket).Select("value").Scan(&bucket)
+	endpoint = configValue(model.ConfigKeyR2Endpoint)
+	accessKey = configValue(model.ConfigKeyR2AccessKey)
+	secretKey = configValue(model.ConfigKeyR2SecretKey)
+	bucket = configValue(model.ConfigKeyR2Bucket)
 
 	debugLog("DEBUG: getR2Client Config Loaded: IsEndpointEmpty=%v, IsAccessKeyEmpty=%v, IsSecretKeyEmpty=%v, Bucket=%s",
 		endpoint == "", accessKey == "", secretKey == "", bucket)
@@ -121,10 +121,10 @@ func getR2Client(ctx context.Context) (*s3.Client, string, error) {
 func GetR2ConfigHandler(c *gin.Context) {
 	var endpoint, accessKey, secretKey, bucket string
 
-	db.DB.Model(&model.GlobalConfig{}).Where("key = ?", model.ConfigKeyR2Endpoint).Select("value").Scan(&endpoint)
-	db.DB.Model(&model.GlobalConfig{}).Where("key = ?", model.ConfigKeyR2AccessKey).Select("value").Scan(&accessKey)
-	db.DB.Model(&model.GlobalConfig{}).Where("key = ?", model.ConfigKeyR2SecretKey).Select("value").Scan(&secretKey)
-	db.DB.Model(&model.GlobalConfig{}).Where("key = ?", model.ConfigKeyR2Bucket).Select("value").Scan(&bucket)
+	endpoint = configValue(model.ConfigKeyR2Endpoint)
+	accessKey = configValue(model.ConfigKeyR2AccessKey)
+	secretKey = configValue(model.ConfigKeyR2SecretKey)
+	bucket = configValue(model.ConfigKeyR2Bucket)
 
 	debugLog("DEBUG: GetR2ConfigHandler - Loaded: Endpoint=%s, AccessKey=%s, HasSecret=%v, Bucket=%s",
 		endpoint, maskSecret(accessKey), secretKey != "", bucket)
@@ -651,7 +651,7 @@ func TestR2ConnectionHandler(c *gin.Context) {
 	// For secret key, if it's masked or empty, try to load from DB
 	secretKey := req.SecretKey
 	if secretKey == "" || isMasked(secretKey) {
-		db.DB.Model(&model.GlobalConfig{}).Where("key = ?", model.ConfigKeyR2SecretKey).Select("value").Scan(&secretKey)
+		secretKey = configValue(model.ConfigKeyR2SecretKey)
 		if secretKey == "" {
 			debugLog("DEBUG: Secret Key missing from DB")
 			jsonBadRequest(c, "缺少 Secret Key")

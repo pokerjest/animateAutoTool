@@ -244,3 +244,31 @@ func (c *Client) CreateLibrary(name, path, collectionType string) error {
 	_, err := c.do("POST", endpoint, body)
 	return err
 }
+
+func (c *Client) RequestLibraryRefresh() error {
+	return c.RequestLibraryRefreshContext(context.Background())
+}
+
+func (c *Client) RequestLibraryRefreshContext(ctx context.Context) error {
+	_, err := c.doContext(ctx, "POST", "/Library/Refresh", map[string]any{})
+	return err
+}
+
+func (c *Client) RefreshItem(itemID string) error {
+	return c.RefreshItemContext(context.Background(), itemID)
+}
+
+func (c *Client) RefreshItemContext(ctx context.Context, itemID string) error {
+	itemID = strings.TrimSpace(itemID)
+	if itemID == "" {
+		return nil
+	}
+	params := url.Values{}
+	params.Set("Recursive", "true")
+	params.Set("MetadataRefreshMode", "Default")
+	params.Set("ImageRefreshMode", "Default")
+	params.Set("ReplaceAllMetadata", "false")
+	params.Set("ReplaceAllImages", "false")
+	_, err := c.doContext(ctx, "POST", "/Items/"+itemID+"/Refresh?"+params.Encode(), map[string]any{})
+	return err
+}

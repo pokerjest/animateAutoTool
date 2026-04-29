@@ -5,7 +5,6 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 )
 
@@ -44,13 +43,12 @@ func (p connectionProbe) store(success bool, msg, msg2 string, ttl time.Duration
 }
 
 func loadProxySettings(flagKey string) (string, string) {
-	var proxyEnabled model.GlobalConfig
-	var proxyConfig model.GlobalConfig
-	db.DB.Where("key = ?", flagKey).First(&proxyEnabled)
-	if proxyEnabled.Value == ValueTrue {
-		db.DB.Where("key = ?", model.ConfigKeyProxyURL).First(&proxyConfig)
+	enabled := configValue(flagKey)
+	proxyURL := ""
+	if enabled == ValueTrue {
+		proxyURL = configValue(model.ConfigKeyProxyURL)
 	}
-	return proxyEnabled.Value, proxyConfig.Value
+	return enabled, proxyURL
 }
 
 func buildProxyTransport(enabledValue, proxyURL string) *http.Transport {

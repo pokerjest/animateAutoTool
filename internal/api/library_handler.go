@@ -229,30 +229,27 @@ func SearchMetadataHandler(c *gin.Context) {
 	}
 
 	fetchProxy := func() (string, bool) {
-		var proxyUrl model.GlobalConfig
-		db.DB.Where("key = ?", model.ConfigKeyProxyURL).First(&proxyUrl)
-		return proxyUrl.Value, proxyUrl.Value != ""
+		value := configValue(model.ConfigKeyProxyURL)
+		return value, value != ""
 	}
 
 	switch source {
 	case SourceTMDB:
-		var token model.GlobalConfig
-		if err := db.DB.Where("key = ?", model.ConfigKeyTMDBToken).First(&token).Error; err != nil || token.Value == "" {
+		token := configValue(model.ConfigKeyTMDBToken)
+		if token == "" {
 			jsonBadRequest(c, "还没有配置 TMDB Token")
 			return
 		}
 
 		// Check proxy for TMDB
-		var proxyEnabled model.GlobalConfig
 		var proxyURL string
-		db.DB.Where("key = ?", model.ConfigKeyProxyTMDB).First(&proxyEnabled)
-		if proxyEnabled.Value == ValueTrue {
+		if configValue(model.ConfigKeyProxyTMDB) == ValueTrue {
 			if purl, ok := fetchProxy(); ok {
 				proxyURL = purl
 			}
 		}
 
-		tmdbClient := tmdb.NewClient(token.Value, proxyURL)
+		tmdbClient := tmdb.NewClient(token, proxyURL)
 
 		results, err := tmdbClient.SearchTVContext(c.Request.Context(), keyword)
 		if err != nil {
@@ -276,22 +273,20 @@ func SearchMetadataHandler(c *gin.Context) {
 		c.JSON(http.StatusOK, genericResults)
 
 	case SourceAniList:
-		var token model.GlobalConfig
-		if err := db.DB.Where("key = ?", model.ConfigKeyAniListToken).First(&token).Error; err != nil || token.Value == "" {
+		token := configValue(model.ConfigKeyAniListToken)
+		if token == "" {
 			jsonBadRequest(c, "还没有配置 AniList Token")
 			return
 		}
 
-		var proxyEnabled model.GlobalConfig
 		var proxyURL string
-		db.DB.Where("key = ?", model.ConfigKeyProxyAniList).First(&proxyEnabled)
-		if proxyEnabled.Value == ValueTrue {
+		if configValue(model.ConfigKeyProxyAniList) == ValueTrue {
 			if purl, ok := fetchProxy(); ok {
 				proxyURL = purl
 			}
 		}
 
-		client := anilist.NewClient(token.Value, proxyURL)
+		client := anilist.NewClient(token, proxyURL)
 
 		result, err := client.SearchAnimeContext(c.Request.Context(), keyword)
 		if err != nil {
@@ -321,9 +316,7 @@ func SearchMetadataHandler(c *gin.Context) {
 
 	default: // Bangumi
 		client := bangumi.NewClient("", "", "")
-		var proxyEnabled model.GlobalConfig
-		db.DB.Where("key = ?", model.ConfigKeyProxyBangumi).First(&proxyEnabled)
-		if proxyEnabled.Value == ValueTrue {
+		if configValue(model.ConfigKeyProxyBangumi) == ValueTrue {
 			if purl, ok := fetchProxy(); ok {
 				client.SetProxy(purl)
 			}
@@ -378,12 +371,9 @@ func GetBangumiSubjectHandler(c *gin.Context) {
 	client := bangumi.NewClient("", "", "")
 
 	// Proxy
-	var proxyUrl, proxyEnabled model.GlobalConfig
-	db.DB.Where("key = ?", model.ConfigKeyProxyURL).First(&proxyUrl)
-	db.DB.Where("key = ?", model.ConfigKeyProxyBangumi).First(&proxyEnabled)
-
-	if proxyEnabled.Value == ValueTrue && proxyUrl.Value != "" {
-		client.SetProxy(proxyUrl.Value)
+	proxyURL := configValue(model.ConfigKeyProxyURL)
+	if configValue(model.ConfigKeyProxyBangumi) == ValueTrue && proxyURL != "" {
+		client.SetProxy(proxyURL)
 	}
 
 	subject, err := client.GetSubjectContext(c.Request.Context(), id)

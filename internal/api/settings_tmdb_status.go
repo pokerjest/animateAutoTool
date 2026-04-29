@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/safeio"
 )
@@ -27,12 +26,11 @@ func RenderTMDBStatus(style string) string {
 }
 
 func CheckTMDBConnection() (bool, string) {
-	var config model.GlobalConfig
-	if err := db.DB.Where("key = ?", model.ConfigKeyTMDBToken).First(&config).Error; err != nil || config.Value == "" {
+	token := configValue(model.ConfigKeyTMDBToken)
+	if token == "" {
 		return false, ErrTokenMissing
 	}
 
-	token := config.Value
 	proxyEnabled, proxyURL := loadProxySettings(model.ConfigKeyProxyTMDB)
 	probe := newConnectionProbe("tmdb", token, proxyEnabled, proxyURL)
 	if stat, ok := probe.load(); ok {

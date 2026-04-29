@@ -69,12 +69,11 @@ func LocalAnimePageHandler(c *gin.Context) {
 		log.Printf("ERROR: failed to load library diagnostics: %v", err)
 	}
 
-	var urlCfg, keyCfg model.GlobalConfig
-	db.DB.Where("key = ?", model.ConfigKeyJellyfinUrl).First(&urlCfg)
-	db.DB.Where("key = ?", model.ConfigKeyJellyfinApiKey).First(&keyCfg)
+	jellyfinURL := configValue(model.ConfigKeyJellyfinUrl)
+	jellyfinAPIKey := configValue(model.ConfigKeyJellyfinApiKey)
 
 	serverId := ""
-	if urlCfg.Value != "" && keyCfg.Value != "" {
+	if jellyfinURL != "" && jellyfinAPIKey != "" {
 		// Best effort fetch of Server ID
 		// We could cache this, but fetching here ensures freshness if server changes
 		// Or we can rely on cached status if we had one. Simple fetch is safe enough for page load.
@@ -93,7 +92,7 @@ func LocalAnimePageHandler(c *gin.Context) {
 		// NOTE: To avoid blocking page load if Jellyfin is down, we should probably fetch this async or use a cached value.
 		// However, for this specific "fix mismatch" user request, let's fetch it.
 		// Optimization: We could reuse the client from elsewhere?
-		client := jellyfin.NewClient(urlCfg.Value, keyCfg.Value)
+		client := jellyfin.NewClient(jellyfinURL, jellyfinAPIKey)
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 3*time.Second)
 		defer cancel()
 		info, err := client.GetPublicInfoContext(ctx)
@@ -111,7 +110,7 @@ func LocalAnimePageHandler(c *gin.Context) {
 		AnimeList:        animes,
 		ScanStatus:       service.GlobalScanStatus.Snapshot(),
 		Diagnostics:      diagnostics,
-		JellyfinURL:      urlCfg.Value,
+		JellyfinURL:      jellyfinURL,
 		JellyfinServerID: serverId,
 		HighlightAnimeID: highlightID,
 		AutoOpenAnimeID:  autoOpenID,
@@ -216,12 +215,11 @@ func AddLocalDirectoryHandler(c *gin.Context) {
 	// Trigger immediate scan and Jellyfin sync
 	go func() {
 		// Sync to Jellyfin
-		var urlCfg, keyCfg model.GlobalConfig
-		db.DB.Where("key = ?", model.ConfigKeyJellyfinUrl).First(&urlCfg)
-		db.DB.Where("key = ?", model.ConfigKeyJellyfinApiKey).First(&keyCfg)
+		jellyfinURL := configValue(model.ConfigKeyJellyfinUrl)
+		jellyfinAPIKey := configValue(model.ConfigKeyJellyfinApiKey)
 
-		if urlCfg.Value != "" && keyCfg.Value != "" {
-			client := jellyfin.NewClient(urlCfg.Value, keyCfg.Value)
+		if jellyfinURL != "" && jellyfinAPIKey != "" {
+			client := jellyfin.NewClient(jellyfinURL, jellyfinAPIKey)
 			libName := filepath.Base(path)
 			// Use "tvshows" as default for Anime
 			if err := client.CreateLibrary(libName, path, "tvshows"); err != nil {
@@ -234,7 +232,9 @@ func AddLocalDirectoryHandler(c *gin.Context) {
 		scanner := service.NewScannerService()
 		if err := scanner.ScanAll(); err != nil {
 			fmt.Printf("Error scanning all directories: %v\n", err)
+			return
 		}
+		triggerJellyfinLibraryRefresh(context.Background())
 	}()
 
 	c.Header("HX-Redirect", "/local-anime")
@@ -272,9 +272,23 @@ func ScanLocalDirectoryHandler(c *gin.Context) {
 		// Phase 2: Agent (Should also be triggered via EventBus in future, but explicit here for now)
 		agent := service.NewAgentService()
 		agent.RunAgentForLibrary()
+		triggerJellyfinLibraryRefresh(context.Background())
 	}()
 
 	c.JSON(http.StatusOK, gin.H{"status": "started", "message": "扫描已在后台启动"})
+}
+
+func triggerJellyfinLibraryRefresh(ctx context.Context) {
+	jellyfinURL := configValue(model.ConfigKeyJellyfinUrl)
+	jellyfinAPIKey := configValue(model.ConfigKeyJellyfinApiKey)
+	if jellyfinURL == "" || jellyfinAPIKey == "" {
+		return
+	}
+
+	client := jellyfin.NewClient(jellyfinURL, jellyfinAPIKey)
+	if err := client.RequestLibraryRefreshContext(ctx); err != nil {
+		log.Printf("Jellyfin library refresh failed: %v", err)
+	}
 }
 
 // RegenerateNFOHandler 手动触发 NFO 重建

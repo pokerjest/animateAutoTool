@@ -77,20 +77,17 @@ func DashboardHandler(c *gin.Context) {
 	var qbVersion string
 
 	var bangumiLogin bool
-	var tokenConfig model.GlobalConfig
-	if err := db.DB.Where("key = ?", model.ConfigKeyBangumiAccessToken).First(&tokenConfig).Error; err == nil && tokenConfig.Value != "" {
+	if configValue(model.ConfigKeyBangumiAccessToken) != "" {
 		bangumiLogin = true
 	}
 
 	var tmdbConnected bool
-	var tmdbConfig model.GlobalConfig
-	if err := db.DB.Where("key = ?", model.ConfigKeyTMDBToken).First(&tmdbConfig).Error; err == nil && tmdbConfig.Value != "" {
+	if configValue(model.ConfigKeyTMDBToken) != "" {
 		tmdbConnected = true
 	}
 
 	var jellyfinConnected bool
-	var jellyfinConfig model.GlobalConfig
-	if err := db.DB.Where("key = ?", model.ConfigKeyJellyfinUrl).First(&jellyfinConfig).Error; err == nil && jellyfinConfig.Value != "" {
+	if configValue(model.ConfigKeyJellyfinUrl) != "" {
 		jellyfinConnected = true
 	}
 
@@ -111,12 +108,11 @@ func DashboardHandler(c *gin.Context) {
 func DashboardBangumiDataHandler(c *gin.Context) {
 	var watchingList []bangumi.UserCollectionItem
 
-	var tokenConfig model.GlobalConfig
-	if err := db.DB.Where("key = ?", model.ConfigKeyBangumiAccessToken).First(&tokenConfig).Error; err == nil && tokenConfig.Value != "" {
+	if token := configValue(model.ConfigKeyBangumiAccessToken); token != "" {
 		client := bangumi.NewClient("", "", "")
-		user, err := client.GetCurrentUser(tokenConfig.Value)
+		user, err := client.GetCurrentUser(token)
 		if err == nil {
-			watching, err1 := client.GetUserCollection(tokenConfig.Value, user.Username, 3, 12, 0)
+			watching, err1 := client.GetUserCollection(token, user.Username, 3, 12, 0)
 			if err1 != nil {
 				log.Printf("Error fetching watching collection: %v", err1)
 			} else {

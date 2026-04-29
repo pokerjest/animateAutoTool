@@ -68,9 +68,7 @@ func GetCalendarHandler(c *gin.Context) {
 	}
 
 	// 2. Fetch Bangumi Collection Status (If authenticated)
-	var tokenCfg model.GlobalConfig
-	if err := db.DB.Where("key = ?", model.ConfigKeyBangumiAccessToken).First(&tokenCfg).Error; err == nil && tokenCfg.Value != "" {
-		token := tokenCfg.Value
+	if token := configValue(model.ConfigKeyBangumiAccessToken); token != "" {
 		var wg sync.WaitGroup
 
 		// Fetch types 1 (Wish), 2 (Collect), 3 (Doing), 4 (OnHold), 5 (Dropped)

@@ -12,25 +12,11 @@ import (
 )
 
 func getBangumiConfig() (string, string) {
-	var configs []model.GlobalConfig
-	db.DB.Where("key IN ?", []string{model.ConfigKeyBangumiAppID, model.ConfigKeyBangumiAppSecret}).Find(&configs)
-
-	mp := make(map[string]string)
-	for _, c := range configs {
-		mp[c.Key] = c.Value
-	}
-	return mp[model.ConfigKeyBangumiAppID], mp[model.ConfigKeyBangumiAppSecret]
+	return configValue(model.ConfigKeyBangumiAppID), configValue(model.ConfigKeyBangumiAppSecret)
 }
 
 func getBangumiTokens() (string, string) {
-	var configs []model.GlobalConfig
-	db.DB.Where("key IN ?", []string{model.ConfigKeyBangumiAccessToken, model.ConfigKeyBangumiRefreshToken}).Find(&configs)
-
-	mp := make(map[string]string)
-	for _, c := range configs {
-		mp[c.Key] = c.Value
-	}
-	return mp[model.ConfigKeyBangumiAccessToken], mp[model.ConfigKeyBangumiRefreshToken]
+	return configValue(model.ConfigKeyBangumiAccessToken), configValue(model.ConfigKeyBangumiRefreshToken)
 }
 
 func saveBangumiTokens(accessToken, refreshToken string) {
@@ -54,22 +40,16 @@ func saveBangumiTokens(accessToken, refreshToken string) {
 }
 
 func applyProxyToBangumiClient(client *bangumi.Client) {
-	var config model.GlobalConfig
-	var enabledConfig model.GlobalConfig
-
-	// Check if proxy is set
-	if err := db.DB.Where("key = ?", model.ConfigKeyProxyURL).First(&config).Error; err != nil || config.Value == "" {
+	proxyURL := configValue(model.ConfigKeyProxyURL)
+	if proxyURL == "" {
 		return
 	}
 
-	// Check if enabled for Bangumi (default to false if not set, or true? User says "checkbox", so explicit enable)
-	// But traditionally if not set, maybe we want it off.
-	// We check if "proxy_bangumi_enabled" == "true"
-	if err := db.DB.Where("key = ?", model.ConfigKeyProxyBangumi).First(&enabledConfig).Error; err != nil || enabledConfig.Value != model.ConfigValueTrue {
+	if configValue(model.ConfigKeyProxyBangumi) != model.ConfigValueTrue {
 		return
 	}
 
-	client.SetProxy(config.Value)
+	client.SetProxy(proxyURL)
 }
 
 func BangumiLoginHandler(c *gin.Context) {

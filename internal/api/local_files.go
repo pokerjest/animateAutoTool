@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -14,6 +15,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/downloader"
+	"github.com/pokerjest/animateAutoTool/internal/jellyfin"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/parser"
 
@@ -348,6 +350,7 @@ func ApplyDirectoryRenameHandler(c *gin.Context) {
 
 	successCount := 0
 	failCount := 0
+	refreshedSeries := make(map[string]struct{})
 
 	for _, anime := range animeList {
 		files, err := listAnimeFiles(anime.Path, anime.ID)
@@ -408,12 +411,34 @@ func ApplyDirectoryRenameHandler(c *gin.Context) {
 			}
 			_ = db.DB.Model(&model.DownloadLog{}).Where("target_file = ?", oldPath).Update("target_file", newPath).Error
 			backfillRenamedDownloadLog(anime, episode, oldPath, newPath)
+			if anime.JellyfinSeriesID != "" {
+				refreshedSeries[anime.JellyfinSeriesID] = struct{}{}
+			}
 		}
 	}
 	syncDownloadLogsFromQB()
+	triggerJellyfinRefreshForSeries(c.Request.Context(), refreshedSeries)
 
 	msg := fmt.Sprintf("批量整理完成: 成功 %d, 失败 %d", successCount, failCount)
 	c.JSON(http.StatusOK, gin.H{"message": msg, "success": successCount, "failed": failCount})
+}
+
+func triggerJellyfinRefreshForSeries(ctx context.Context, seriesIDs map[string]struct{}) {
+	if len(seriesIDs) == 0 {
+		return
+	}
+	urlValue := configValue(model.ConfigKeyJellyfinUrl)
+	apiKey := configValue(model.ConfigKeyJellyfinApiKey)
+	if strings.TrimSpace(urlValue) == "" || strings.TrimSpace(apiKey) == "" {
+		return
+	}
+
+	client := jellyfin.NewClient(urlValue, apiKey)
+	for seriesID := range seriesIDs {
+		if err := client.RefreshItemContext(ctx, seriesID); err != nil {
+			log.Printf("Jellyfin series refresh failed for %s: %v", seriesID, err)
+		}
+	}
 }
 
 func backfillRenamedDownloadLog(anime model.LocalAnime, episode model.LocalEpisode, oldPath, newPath string) {

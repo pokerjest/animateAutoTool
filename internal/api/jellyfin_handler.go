@@ -154,15 +154,13 @@ func localMediaMissingDiagnostic(anime model.LocalAnime, ep model.LocalEpisode) 
 }
 
 func resolveJellyfinPlaybackClient() (*jellyfin.Client, error) {
-	var urlCfg, keyCfg model.GlobalConfig
-	db.DB.Where("key = ?", model.ConfigKeyJellyfinUrl).First(&urlCfg)
-	db.DB.Where("key = ?", model.ConfigKeyJellyfinApiKey).First(&keyCfg)
-
-	if urlCfg.Value == "" || keyCfg.Value == "" {
+	urlValue := configValue(model.ConfigKeyJellyfinUrl)
+	apiKey := configValue(model.ConfigKeyJellyfinApiKey)
+	if urlValue == "" || apiKey == "" {
 		return nil, errors.New("missing jellyfin url or api key")
 	}
 
-	client := jellyfin.NewClient(urlCfg.Value, keyCfg.Value)
+	client := jellyfin.NewClient(urlValue, apiKey)
 	users, err := client.GetUsers()
 	if err != nil {
 		return nil, err
@@ -239,11 +237,9 @@ func GetPlayInfoHandler(c *gin.Context) {
 	}
 
 	// 2. Refresh Jellyfin Config
-	var urlCfg model.GlobalConfig
-	db.DB.Where("key = ?", model.ConfigKeyJellyfinUrl).First(&urlCfg)
-	var keyCfg model.GlobalConfig
-	db.DB.Where("key = ?", model.ConfigKeyJellyfinApiKey).First(&keyCfg)
-	if urlCfg.Value == "" || keyCfg.Value == "" {
+	urlValue := configValue(model.ConfigKeyJellyfinUrl)
+	apiKey := configValue(model.ConfigKeyJellyfinApiKey)
+	if urlValue == "" || apiKey == "" {
 		playbackError(c, http.StatusServiceUnavailable, "Jellyfin 暂时不可用", jellyfinConfigDiagnostic("missing jellyfin config"))
 		return
 	}
@@ -363,14 +359,13 @@ func ReportProgressHandler(c *gin.Context) {
 	log.Printf("[DEBUG] PlayInfo: Requesting playback for Ep %d (Order: %d, Path: %s)", ep.ID, ep.EpisodeNum, ep.Path)
 
 	// 2. Setup Jellyfin Client
-	var urlCfg, keyCfg model.GlobalConfig
-	db.DB.Where("key = ?", model.ConfigKeyJellyfinUrl).First(&urlCfg)
-	db.DB.Where("key = ?", model.ConfigKeyJellyfinApiKey).First(&keyCfg)
-	if urlCfg.Value == "" || keyCfg.Value == "" {
+	urlValue := configValue(model.ConfigKeyJellyfinUrl)
+	apiKey := configValue(model.ConfigKeyJellyfinApiKey)
+	if urlValue == "" || apiKey == "" {
 		c.Status(http.StatusServiceUnavailable) // Not configured
 		return
 	}
-	client := jellyfin.NewClient(urlCfg.Value, keyCfg.Value)
+	client := jellyfin.NewClient(urlValue, apiKey)
 
 	users, _ := client.GetUsers()
 	if len(users) > 0 {
@@ -426,15 +421,12 @@ func ReportProgressHandler(c *gin.Context) {
 		// Sync to Bangumi (Async)
 		if anime.Metadata.BangumiID != 0 {
 			go func(bgmID int, epNum int) {
-				var token string
-				db.DB.Model(&model.GlobalConfig{}).Where("key = ?", model.ConfigKeyBangumiAccessToken).Select("value").Scan(&token)
+				token := configValue(model.ConfigKeyBangumiAccessToken)
 				if token != "" {
 					bgmClient := bangumi.NewClient("", "", "")
 
-					// Apply Proxy Logic
-					var proxyUrl, proxyEnabled string
-					db.DB.Model(&model.GlobalConfig{}).Where("key = ?", model.ConfigKeyProxyURL).Select("value").Scan(&proxyUrl)
-					db.DB.Model(&model.GlobalConfig{}).Where("key = ?", model.ConfigKeyProxyBangumi).Select("value").Scan(&proxyEnabled)
+					proxyUrl := configValue(model.ConfigKeyProxyURL)
+					proxyEnabled := configValue(model.ConfigKeyProxyBangumi)
 
 					if proxyEnabled == ValueTrue && proxyUrl != "" {
 						bgmClient.SetProxy(proxyUrl)
@@ -486,16 +478,15 @@ func ProxyVideoHandler(c *gin.Context) {
 	}
 
 	// 2. Setup Jellyfin Client (Need URL and Key)
-	var urlCfg, keyCfg model.GlobalConfig
-	db.DB.Where("key = ?", model.ConfigKeyJellyfinUrl).First(&urlCfg)
-	db.DB.Where("key = ?", model.ConfigKeyJellyfinApiKey).First(&keyCfg)
-	if urlCfg.Value == "" || keyCfg.Value == "" {
+	urlValue := configValue(model.ConfigKeyJellyfinUrl)
+	apiKey := configValue(model.ConfigKeyJellyfinApiKey)
+	if urlValue == "" || apiKey == "" {
 		c.Status(http.StatusServiceUnavailable)
 		return
 	}
 
 	// 3. Construct Reverse Proxy
-	target, err := url.Parse(urlCfg.Value)
+	target, err := url.Parse(urlValue)
 	if err != nil {
 		log.Printf("[Proxy] Invalid Jellyfin URL: %v", err)
 		c.Status(http.StatusInternalServerError)
@@ -516,7 +507,7 @@ func ProxyVideoHandler(c *gin.Context) {
 		// Set Query Params
 		q := req.URL.Query()
 		q.Set("static", "true")
-		q.Set("api_key", keyCfg.Value)
+		q.Set("api_key", apiKey)
 		req.URL.RawQuery = q.Encode()
 
 		// Update Host Header to match target

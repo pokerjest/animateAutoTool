@@ -33,16 +33,15 @@ func fetchJellyfinProgress(anime *model.LocalAnime) (map[string]JfEpisodeData, s
 		return jfMap, ""
 	}
 
-	var urlCfg, keyCfg model.GlobalConfig
-	db.DB.Where("key = ?", model.ConfigKeyJellyfinUrl).First(&urlCfg)
-	db.DB.Where("key = ?", model.ConfigKeyJellyfinApiKey).First(&keyCfg)
-	if urlCfg.Value == "" || keyCfg.Value == "" {
+	jellyfinURLValue := configValue(model.ConfigKeyJellyfinUrl)
+	jellyfinAPIKey := configValue(model.ConfigKeyJellyfinApiKey)
+	if jellyfinURLValue == "" || jellyfinAPIKey == "" {
 		return jfMap, ""
 	}
 
-	jellyfinUrl = strings.TrimSuffix(urlCfg.Value, "/")
+	jellyfinUrl = strings.TrimSuffix(jellyfinURLValue, "/")
 
-	client := jellyfin.NewClient(urlCfg.Value, keyCfg.Value)
+	client := jellyfin.NewClient(jellyfinURLValue, jellyfinAPIKey)
 	users, _ := client.GetUsers()
 	if len(users) > 0 {
 		client.UserID = users[0].Id
@@ -136,16 +135,13 @@ func fetchBangumiProgress(anime *model.LocalAnime, effectiveSource string) (int,
 
 	if anime.Metadata != nil && effectiveSource == "bangumi" && anime.Metadata.BangumiID != 0 {
 		log.Printf("DEBUG: Attempting to fetch Bangumi progress for BangumiID=%d", anime.Metadata.BangumiID)
-		var bgmTokenCfg model.GlobalConfig
-		db.DB.Where("key = ?", model.ConfigKeyBangumiAccessToken).First(&bgmTokenCfg)
+		bgmToken := configValue(model.ConfigKeyBangumiAccessToken)
+		appID := configValue(model.ConfigKeyBangumiAppID)
+		appSecret := configValue(model.ConfigKeyBangumiAppSecret)
 
-		var appID, appSecret model.GlobalConfig
-		db.DB.Where("key = ?", model.ConfigKeyBangumiAppID).First(&appID)
-		db.DB.Where("key = ?", model.ConfigKeyBangumiAppSecret).First(&appSecret)
-
-		if bgmTokenCfg.Value != "" {
-			bgmClient := bangumi.NewClient(appID.Value, appSecret.Value, "")
-			col, err := bgmClient.GetSubjectCollection(bgmTokenCfg.Value, "me", anime.Metadata.BangumiID)
+		if bgmToken != "" {
+			bgmClient := bangumi.NewClient(appID, appSecret, "")
+			col, err := bgmClient.GetSubjectCollection(bgmToken, "me", anime.Metadata.BangumiID)
 			if err != nil {
 				log.Printf("DEBUG: ❌ Failed to fetch Bangumi collection for ID %d: %v", anime.Metadata.BangumiID, err)
 			} else if col == nil {
@@ -184,11 +180,9 @@ func fetchAniListProgress(anime *model.LocalAnime, effectiveSource string) (int,
 	anilistStatus := ""
 	if anime.Metadata != nil && effectiveSource == "anilist" && anime.Metadata.AniListID != 0 {
 		log.Printf("DEBUG: Attempting to fetch AniList progress for AniListID=%d", anime.Metadata.AniListID)
-		var alTokenCfg model.GlobalConfig
-		db.DB.Where("key = ?", model.ConfigKeyAniListToken).First(&alTokenCfg)
-
-		if alTokenCfg.Value != "" {
-			alClient := anilist.NewClient(alTokenCfg.Value, "")
+		alToken := configValue(model.ConfigKeyAniListToken)
+		if alToken != "" {
+			alClient := anilist.NewClient(alToken, "")
 			entry, err := alClient.GetMediaListEntry(anime.Metadata.AniListID)
 			if err != nil {
 				log.Printf("DEBUG: ❌ Failed to fetch AniList entry for ID %d: %v", anime.Metadata.AniListID, err)
