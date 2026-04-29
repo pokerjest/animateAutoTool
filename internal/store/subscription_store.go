@@ -24,6 +24,17 @@ func (s *SubscriptionStore) ListActive() ([]model.Subscription, error) {
 	return subs, nil
 }
 
+func (s *SubscriptionStore) ListAll() ([]model.Subscription, error) {
+	if s == nil || s.db == nil {
+		return nil, gorm.ErrInvalidDB
+	}
+	var subs []model.Subscription
+	if err := s.db.Find(&subs).Error; err != nil {
+		return nil, err
+	}
+	return subs, nil
+}
+
 func (s *SubscriptionStore) ListWithMetadata() ([]model.Subscription, error) {
 	if s == nil || s.db == nil {
 		return nil, gorm.ErrInvalidDB

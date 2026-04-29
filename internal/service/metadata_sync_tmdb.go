@@ -3,7 +3,6 @@ package service
 import (
 	"log"
 
-	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/tmdb"
 )
@@ -47,8 +46,15 @@ func (s *MetadataService) AlignEpisodesWithTMDB(anime *model.LocalAnime) {
 		currentTotal = end
 	}
 
-	var episodes []model.LocalEpisode
-	db.DB.Where("local_anime_id = ?", anime.ID).Find(&episodes)
+	laStore := localAnimeStore()
+	if laStore == nil {
+		return
+	}
+	episodes, err := laStore.ListEpisodesByAnimeID(anime.ID)
+	if err != nil {
+		log.Printf("Align: failed to list episodes for %s: %v", anime.Title, err)
+		return
+	}
 
 	for i := range episodes {
 		ep := &episodes[i]
@@ -80,7 +86,7 @@ func (s *MetadataService) AlignEpisodesWithTMDB(anime *model.LocalAnime) {
 						log.Printf("Align: %s - S%dE%d -> S%dE%d (Abs %d)", anime.Title, ep.SeasonNum, ep.EpisodeNum, currentRange.SeasonNum, newEpNum, targetAbs)
 						ep.SeasonNum = currentRange.SeasonNum
 						ep.EpisodeNum = newEpNum
-						if err := db.DB.Save(ep).Error; err != nil {
+						if err := laStore.SaveEpisode(ep); err != nil {
 							log.Printf("Align: failed to save episode alignment for %s S%dE%d: %v", anime.Title, currentRange.SeasonNum, newEpNum, err)
 						}
 					}
@@ -107,8 +113,15 @@ func (s *MetadataService) SyncEpisodesWithTMDB(anime *model.LocalAnime) {
 		return
 	}
 
-	var localEps []model.LocalEpisode
-	db.DB.Where("local_anime_id = ?", anime.ID).Find(&localEps)
+	laStore := localAnimeStore()
+	if laStore == nil {
+		return
+	}
+	localEps, err := laStore.ListEpisodesByAnimeID(anime.ID)
+	if err != nil {
+		log.Printf("MetadataService: list episodes failed for %s: %v", anime.Title, err)
+		return
+	}
 	if len(localEps) == 0 {
 		log.Printf("MetadataService: No local episodes found for %s", anime.Title)
 		return
@@ -155,7 +168,7 @@ func (s *MetadataService) SyncEpisodesWithTMDB(anime *model.LocalAnime) {
 				}
 				if updated {
 					log.Printf("MetadataService: Updating Ep %d with image from TMDB for %s", lep.EpisodeNum, anime.Title)
-					if err := db.DB.Save(lep).Error; err != nil {
+					if err := laStore.SaveEpisode(lep); err != nil {
 						log.Printf("MetadataService: failed to save TMDB episode metadata for %s S%dE%d: %v", anime.Title, lep.SeasonNum, lep.EpisodeNum, err)
 					}
 				}

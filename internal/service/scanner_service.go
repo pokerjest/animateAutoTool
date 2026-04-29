@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"log"
@@ -8,7 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/event"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/parser"
@@ -32,8 +32,12 @@ type ScanResult struct {
 
 // ScanAll scans all configured directories
 func (s *ScannerService) ScanAll() error {
-	var dirs []model.LocalAnimeDirectory
-	if err := db.DB.Find(&dirs).Error; err != nil {
+	st := localAnimeStore()
+	if st == nil {
+		return gorm.ErrInvalidDB
+	}
+	dirs, err := st.ListDirectories()
+	if err != nil {
 		return err
 	}
 
@@ -90,6 +94,11 @@ func (s *ScannerService) ScanDirectory(dir *model.LocalAnimeDirectory) (*ScanRes
 	}
 	_ = ResolveLibraryIssue(issueKey)
 
+	st := localAnimeStore()
+	if st == nil {
+		return nil, gorm.ErrInvalidDB
+	}
+
 	res := &ScanResult{DirectoryID: dir.ID}
 	total := len(entries)
 
@@ -120,14 +129,14 @@ func (s *ScannerService) ScanDirectory(dir *model.LocalAnimeDirectory) (*ScanRes
 		fileCount, totalSize := s.syncEpisodes(dir.ID, animePath)
 
 		if fileCount > 0 {
-			// Check DB
-			var anime model.LocalAnime
-			if err := db.DB.Where("path = ?", animePath).First(&anime).Error; err == nil {
-				// Update
+			anime, findErr := st.FindAnimeByPath(animePath)
+			if findErr == nil && anime != nil {
 				if anime.FileCount != fileCount || anime.TotalSize != totalSize {
 					anime.FileCount = fileCount
 					anime.TotalSize = totalSize
-					db.DB.Save(&anime)
+					if err := st.SaveAnime(anime); err != nil {
+						log.Printf("Scanner: Save anime failed for %s: %v", animePath, err)
+					}
 					res.Updated++
 				}
 				// Trigger Episode Sync for existing anime as well
@@ -142,24 +151,27 @@ func (s *ScannerService) ScanDirectory(dir *model.LocalAnimeDirectory) (*ScanRes
 					}
 				}
 
-				anime = model.LocalAnime{
+				newAnime := &model.LocalAnime{
 					DirectoryID: dir.ID,
 					Title:       title,
 					Path:        animePath,
 					FileCount:   fileCount,
 					TotalSize:   totalSize,
 				}
-				db.DB.Create(&anime)
+				if err := st.CreateAnime(newAnime); err != nil {
+					log.Printf("Scanner: Create anime failed for %s: %v", animePath, err)
+					continue
+				}
 				res.Added++
 
 				// Double check episodes are linked to new anime ID
-				s.syncEpisodesForAnime(&anime)
+				s.syncEpisodesForAnime(newAnime)
 
 				// Publish New Anime Event (can trigger Metadata Fetch)
 				event.GlobalBus.Publish(event.EventMetadataUpdated, map[string]interface{}{
 					"type":  "new_anime",
-					"id":    anime.ID,
-					"title": anime.Title,
+					"id":    newAnime.ID,
+					"title": newAnime.Title,
 				})
 			}
 		}
@@ -180,18 +192,12 @@ func (s *ScannerService) ScanDirectory(dir *model.LocalAnimeDirectory) (*ScanRes
 
 // CleanupGarbage 清理数据库中的无效数据
 func (s *ScannerService) CleanupGarbage() {
-	// 1. 删除没有关联剧集的“垃圾”记录
-	if err := db.DB.Unscoped().Where("id NOT IN (?)", db.DB.Model(&model.LocalEpisode{}).Select("DISTINCT local_anime_id")).Delete(&model.LocalAnime{}).Error; err != nil {
-		log.Printf("Cleanup: Failed to remove empty anime entries: %v", err)
+	st := localAnimeStore()
+	if st == nil {
+		return
 	}
-
-	// 2. 删除孤儿记录 - 当目录被删但番剧没删掉时
-	var dirIDs []uint
-	db.DB.Model(&model.LocalAnimeDirectory{}).Pluck("id", &dirIDs)
-	if len(dirIDs) > 0 {
-		db.DB.Unscoped().Where("directory_id NOT IN ?", dirIDs).Delete(&model.LocalAnime{})
-	} else {
-		db.DB.Unscoped().Where("1 = 1").Delete(&model.LocalAnime{})
+	if err := st.CleanupOrphans(); err != nil {
+		log.Printf("Cleanup: CleanupOrphans failed: %v", err)
 	}
 }
 
@@ -199,55 +205,60 @@ func (s *ScannerService) CleanupGarbage() {
 func (s *ScannerService) AddDirectory(path string) error {
 	log.Printf("Adding directory: %s (Skipping strict existence check for cross-platform support)", path)
 
-	// Check if exists (including soft-deleted)
-	var existing model.LocalAnimeDirectory
-	if err := db.DB.Unscoped().Where("path = ?", path).First(&existing).Error; err == nil {
+	st := localAnimeStore()
+	if st == nil {
+		return gorm.ErrInvalidDB
+	}
+
+	existing, err := st.FindDirectoryByPath(path, true)
+	if err == nil && existing != nil {
 		if existing.DeletedAt.Valid {
 			log.Printf("Removing stale soft-deleted directory to allow fresh add: %s", path)
-			if err := db.DB.Unscoped().Delete(&existing).Error; err != nil {
+			if err := st.HardDeleteDirectory(existing); err != nil {
 				return err
 			}
 		} else {
 			return nil
 		}
+	} else if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
 	}
 
-	dir := model.LocalAnimeDirectory{
-		Path: path,
-	}
-	return db.DB.Create(&dir).Error
+	dir := &model.LocalAnimeDirectory{Path: path}
+	return st.CreateDirectory(dir)
 }
 
 // RemoveDirectory 删除目录
 func (s *ScannerService) RemoveDirectory(id uint) error {
-	return db.DB.Transaction(func(tx *gorm.DB) error {
-		// 删除关联的 Anime (Hard Delete)
-		if err := tx.Unscoped().Where("directory_id = ?", id).Delete(&model.LocalAnime{}).Error; err != nil {
-			return err
-		}
-		// 删除目录 (Hard Delete)
-		if err := tx.Unscoped().Delete(&model.LocalAnimeDirectory{}, id).Error; err != nil {
-			return err
-		}
-		return nil
-	})
+	st := localAnimeStore()
+	if st == nil {
+		return gorm.ErrInvalidDB
+	}
+	return st.RemoveDirectoryWithAnimes(id)
 }
 
 func (s *ScannerService) syncEpisodes(dirID uint, animePath string) (int, int64) {
-	var anime model.LocalAnime
-	if err := db.DB.Where("path = ?", animePath).First(&anime).Error; err != nil {
-		// Not found in DB, use temp object for counting
-		anime = model.LocalAnime{Path: animePath}
+	st := localAnimeStore()
+	var anime *model.LocalAnime
+	if st != nil {
+		if found, err := st.FindAnimeByPath(animePath); err == nil {
+			anime = found
+		}
+	}
+	if anime == nil {
+		anime = &model.LocalAnime{Path: animePath}
 	}
 	// If anime not found, we still return counts but episodes won't be linked yet.
 	// We call syncEpisodesForAnime after creation.
-	return s.syncEpisodesForAnime(&anime)
+	return s.syncEpisodesForAnime(anime)
 }
 
 func (s *ScannerService) syncEpisodesForAnime(anime *model.LocalAnime) (int, int64) {
 	if anime == nil || anime.Path == "" {
 		return 0, 0
 	}
+
+	st := localAnimeStore()
 
 	count := 0
 	var size int64
@@ -273,14 +284,11 @@ func (s *ScannerService) syncEpisodesForAnime(anime *model.LocalAnime) (int, int
 				size += info.Size()
 				foundPaths = append(foundPaths, path)
 
-				if anime.ID != 0 {
-					// Sync to DB
-					var ep model.LocalEpisode
-					err := db.DB.Where("path = ?", path).First(&ep).Error
-					if err != nil {
-						// Create
+				if anime.ID != 0 && st != nil {
+					ep, findErr := st.FindEpisodeByPath(path)
+					if findErr != nil {
 						parsed := parser.ParseFilename(path)
-						ep = model.LocalEpisode{
+						newEp := &model.LocalEpisode{
 							LocalAnimeID: anime.ID,
 							Title:        parsed.Extension, // Fallback
 							EpisodeNum:   parsed.Episode,
@@ -291,12 +299,13 @@ func (s *ScannerService) syncEpisodesForAnime(anime *model.LocalAnime) (int, int
 							ParsedTitle:  parsed.Title,
 							ParsedSeason: fmt.Sprintf("S%02d", parsed.Season),
 						}
-						db.DB.Create(&ep)
-					} else {
-						// Update if needed (idempotent)
-						if ep.LocalAnimeID != anime.ID {
-							ep.LocalAnimeID = anime.ID
-							db.DB.Save(&ep)
+						if err := st.CreateEpisode(newEp); err != nil {
+							log.Printf("Scanner: Create episode failed for %s: %v", path, err)
+						}
+					} else if ep.LocalAnimeID != anime.ID {
+						ep.LocalAnimeID = anime.ID
+						if err := st.SaveEpisode(ep); err != nil {
+							log.Printf("Scanner: Save episode failed for %s: %v", path, err)
 						}
 					}
 				}
@@ -309,11 +318,9 @@ func (s *ScannerService) syncEpisodesForAnime(anime *model.LocalAnime) (int, int
 	_ = ResolveLibraryIssue("scan-entry:" + filepath.Clean(anime.Path))
 
 	// Cleanup episodes no longer on disk
-	if anime.ID != 0 {
-		if len(foundPaths) > 0 {
-			db.DB.Where("local_anime_id = ? AND path NOT IN ?", anime.ID, foundPaths).Delete(&model.LocalEpisode{})
-		} else {
-			db.DB.Where("local_anime_id = ?", anime.ID).Delete(&model.LocalEpisode{})
+	if anime.ID != 0 && st != nil {
+		if err := st.DeleteEpisodesNotInPaths(anime.ID, foundPaths); err != nil {
+			log.Printf("Scanner: cleanup orphan episodes failed for %s: %v", anime.Path, err)
 		}
 	}
 

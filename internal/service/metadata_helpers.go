@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/pokerjest/animateAutoTool/internal/bangumi"
-	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 )
 
@@ -76,13 +75,17 @@ func (s *MetadataService) SyncMetadataToModels(m *model.AnimeMetadata) {
 		return
 	}
 
+	mStore := metadataStore()
+	if mStore == nil {
+		return
+	}
+
 	updates := map[string]interface{}{
 		"image":   m.Image,
 		"title":   m.Title,
 		"summary": m.Summary,
 	}
-
-	db.DB.Model(&model.Subscription{}).Where("metadata_id = ?", m.ID).Updates(updates)
+	_ = mStore.PropagateToSubscriptions(m.ID, updates)
 
 	localUpdates := map[string]interface{}{
 		"image":    m.Image,
@@ -90,7 +93,7 @@ func (s *MetadataService) SyncMetadataToModels(m *model.AnimeMetadata) {
 		"summary":  m.Summary,
 		"air_date": m.AirDate,
 	}
-	db.DB.Model(&model.LocalAnime{}).Where("metadata_id = ?", m.ID).Updates(localUpdates)
+	_ = mStore.PropagateToLocalAnimes(m.ID, localUpdates)
 }
 
 func performWithRetry[T any](op func() (T, error)) (T, error) {

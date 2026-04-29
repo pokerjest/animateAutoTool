@@ -9,7 +9,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/downloader"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 )
@@ -132,15 +131,13 @@ func SyncDownloadLogStatuses(source TorrentStatusSource) (DownloadLogStatusSyncR
 		return DownloadLogStatusSyncResult{}, err
 	}
 
-	if db.DB == nil {
+	logStore := downloadLogStore()
+	if logStore == nil {
 		return DownloadLogStatusSyncResult{}, nil
 	}
 
-	var logs []model.DownloadLog
-	if err := db.DB.Where("status IN ?", []string{downloadLogStatusDownloading, downloadLogStatusFailed}).
-		Or("status = ? AND (target_file = '' OR target_file IS NULL)", downloadLogStatusCompleted).
-		Order("created_at DESC").
-		Find(&logs).Error; err != nil {
+	logs, err := logStore.ListActiveOrIncompleteCompleted(downloadLogStatusDownloading, downloadLogStatusFailed, downloadLogStatusCompleted)
+	if err != nil {
 		return DownloadLogStatusSyncResult{}, err
 	}
 
@@ -194,7 +191,7 @@ func SyncDownloadLogStatuses(source TorrentStatusSource) (DownloadLogStatusSyncR
 		if len(updates) == 0 {
 			continue
 		}
-		if err := db.DB.Model(&model.DownloadLog{}).Where("id = ?", logEntry.ID).Updates(updates).Error; err != nil {
+		if err := logStore.UpdateByID(logEntry.ID, updates); err != nil {
 			return result, err
 		}
 		result.Updated++
@@ -283,23 +280,21 @@ func SyncDownloadLogStatusesWithQBClient(client *downloader.QBittorrentClient) (
 }
 
 func RepairDownloadLogsFromLocalLibrary(_ time.Duration) (DownloadLogRepairResult, error) {
-	if db.DB == nil {
+	logStore := downloadLogStore()
+	if logStore == nil {
 		return DownloadLogRepairResult{}, nil
 	}
 
-	var logs []model.DownloadLog
-	if err := db.DB.
-		Where("status IN ?", []string{downloadLogStatusDownloading, downloadLogStatusFailed, downloadLogStatusCompleted}).
-		Order("created_at DESC").
-		Find(&logs).Error; err != nil {
+	logs, err := logStore.ListByStatuses([]string{downloadLogStatusDownloading, downloadLogStatusFailed, downloadLogStatusCompleted})
+	if err != nil {
 		return DownloadLogRepairResult{}, err
 	}
 
-	subscriptions := make(map[uint]model.Subscription)
-	var subs []model.Subscription
-	if err := db.DB.Find(&subs).Error; err != nil {
+	subs, err := loadAllSubscriptions()
+	if err != nil {
 		return DownloadLogRepairResult{}, err
 	}
+	subscriptions := make(map[uint]model.Subscription, len(subs))
 	for _, sub := range subs {
 		subscriptions[sub.ID] = sub
 	}
@@ -333,7 +328,7 @@ func RepairDownloadLogsFromLocalLibrary(_ time.Duration) (DownloadLogRepairResul
 			continue
 		}
 
-		if err := db.DB.Model(&model.DownloadLog{}).Where("id = ?", logEntry.ID).Updates(updates).Error; err != nil {
+		if err := logStore.UpdateByID(logEntry.ID, updates); err != nil {
 			return result, err
 		}
 		result.Repaired++
@@ -377,16 +372,12 @@ func resolveLogTargetFromLibrary(logEntry model.DownloadLog, sub model.Subscript
 }
 
 func findEpisodePathByMetadata(metadataID uint, episodeNum int) (string, bool) {
-	type row struct {
-		Path string
+	st := localAnimeStore()
+	if st == nil {
+		return "", false
 	}
-	var rows []row
-	if err := db.DB.Table("local_episodes").
-		Select("local_episodes.path").
-		Joins("JOIN local_animes ON local_animes.id = local_episodes.local_anime_id").
-		Where("local_animes.metadata_id = ? AND local_episodes.episode_num = ?", metadataID, episodeNum).
-		Order("local_episodes.updated_at DESC").
-		Scan(&rows).Error; err != nil {
+	rows, err := st.EpisodePathsByMetadata(metadataID, episodeNum)
+	if err != nil {
 		return "", false
 	}
 	for _, candidate := range rows {
@@ -403,17 +394,12 @@ func findEpisodePathByTitle(title string, episodeNum int) (string, bool) {
 		return "", false
 	}
 
-	type row struct {
-		Path       string
-		AnimeTitle string
+	st := localAnimeStore()
+	if st == nil {
+		return "", false
 	}
-	var rows []row
-	if err := db.DB.Table("local_episodes").
-		Select("local_episodes.path, local_animes.title AS anime_title").
-		Joins("JOIN local_animes ON local_animes.id = local_episodes.local_anime_id").
-		Where("local_episodes.episode_num = ?", episodeNum).
-		Order("local_episodes.updated_at DESC").
-		Scan(&rows).Error; err != nil {
+	rows, err := st.EpisodePathsByEpisodeNum(episodeNum)
+	if err != nil {
 		return "", false
 	}
 	for _, candidate := range rows {
@@ -440,7 +426,8 @@ func fileExists(path string) bool {
 }
 
 func ArchiveStaleDownloadLogs(source TorrentStatusSource, maxAge time.Duration) (DownloadLogArchiveResult, error) {
-	if db.DB == nil {
+	logStore := downloadLogStore()
+	if logStore == nil {
 		return DownloadLogArchiveResult{}, nil
 	}
 
@@ -461,19 +448,16 @@ func ArchiveStaleDownloadLogs(source TorrentStatusSource, maxAge time.Duration) 
 		}
 	}
 
-	var logs []model.DownloadLog
-	if err := db.DB.
-		Where("status IN ?", []string{downloadLogStatusDownloading, downloadLogStatusFailed}).
-		Order("created_at ASC").
-		Find(&logs).Error; err != nil {
+	logs, err := logStore.ListByStatusesAsc([]string{downloadLogStatusDownloading, downloadLogStatusFailed})
+	if err != nil {
 		return DownloadLogArchiveResult{}, err
 	}
 
-	subscriptions := make(map[uint]model.Subscription)
-	var subs []model.Subscription
-	if err := db.DB.Find(&subs).Error; err != nil {
+	subs, err := loadAllSubscriptions()
+	if err != nil {
 		return DownloadLogArchiveResult{}, err
 	}
+	subscriptions := make(map[uint]model.Subscription, len(subs))
 	for _, sub := range subs {
 		subscriptions[sub.ID] = sub
 	}
@@ -501,7 +485,7 @@ func ArchiveStaleDownloadLogs(source TorrentStatusSource, maxAge time.Duration) 
 		}
 
 		if hasCompletedSibling(logEntry) {
-			if err := db.DB.Model(&model.DownloadLog{}).Where("id = ?", logEntry.ID).Update("status", downloadLogStatusArchived).Error; err != nil {
+			if err := logStore.MarkArchived(logEntry.ID, downloadLogStatusArchived); err != nil {
 				return result, err
 			}
 			result.Archived++
@@ -511,7 +495,7 @@ func ArchiveStaleDownloadLogs(source TorrentStatusSource, maxAge time.Duration) 
 			continue
 		}
 
-		if err := db.DB.Model(&model.DownloadLog{}).Where("id = ?", logEntry.ID).Update("status", downloadLogStatusArchived).Error; err != nil {
+		if err := logStore.MarkArchived(logEntry.ID, downloadLogStatusArchived); err != nil {
 			return result, err
 		}
 		result.Archived++
@@ -528,15 +512,9 @@ func ArchiveStaleDownloadLogs(source TorrentStatusSource, maxAge time.Duration) 
 }
 
 func hasCompletedSibling(logEntry model.DownloadLog) bool {
-	query := db.DB.Model(&model.DownloadLog{}).
-		Where("subscription_id = ? AND status = ?", logEntry.SubscriptionID, downloadLogStatusCompleted)
-	if strings.TrimSpace(logEntry.Episode) != "" {
-		query = query.Where("episode = ?", logEntry.Episode)
-	}
-
-	var count int64
-	if err := query.Count(&count).Error; err != nil {
+	s := downloadLogStore()
+	if s == nil {
 		return false
 	}
-	return count > 0
+	return s.HasCompletedSibling(logEntry.SubscriptionID, logEntry.Episode, downloadLogStatusCompleted)
 }

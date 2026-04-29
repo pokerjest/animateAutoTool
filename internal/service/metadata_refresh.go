@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/event"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 )
@@ -18,10 +17,15 @@ func (s *MetadataService) StartMetadataMigration() {
 	go func() {
 		time.Sleep(5 * time.Second)
 		log.Println("Migration: Starting background metadata image migration...")
-		var list []model.AnimeMetadata
-		db.DB.Where("(bangumi_image != '' AND (bangumi_image_raw IS NULL OR bangumi_image_raw = '')) OR " +
-			"(tmdb_image != '' AND (tmdb_image_raw IS NULL OR tmdb_image_raw = '')) OR " +
-			"(ani_list_image != '' AND (ani_list_image_raw IS NULL OR ani_list_image_raw = ''))").Find(&list)
+		mStore := metadataStore()
+		if mStore == nil {
+			return
+		}
+		list, err := mStore.ListWithImageRawMissing()
+		if err != nil {
+			log.Printf("Migration: failed to list metadata for image caching: %v", err)
+			return
+		}
 
 		log.Printf("Migration: Found %d records needing image caching", len(list))
 
@@ -42,7 +46,7 @@ func (s *MetadataService) StartMetadataMigration() {
 
 			if updated {
 				m.Image = fmt.Sprintf("/api/posters/%d", m.ID)
-				if err := db.DB.Save(&m).Error; err == nil {
+				if err := mStore.Save(&m); err == nil {
 					s.SyncMetadataToModels(&m)
 				}
 			}
@@ -54,8 +58,12 @@ func (s *MetadataService) StartMetadataMigration() {
 
 // RegenerateAllNFOs triggers NFO generation for ALL local animes.
 func (s *MetadataService) RegenerateAllNFOs() (int, error) {
-	var list []model.LocalAnime
-	if err := db.DB.Preload("Metadata").Preload("Episodes").Find(&list).Error; err != nil {
+	laStore := localAnimeStore()
+	if laStore == nil {
+		return 0, nil
+	}
+	list, err := laStore.ListWithMetadataAndEpisodes()
+	if err != nil {
 		return 0, err
 	}
 
@@ -81,8 +89,12 @@ func (s *MetadataService) RegenerateAllNFOs() (int, error) {
 
 // MatchSeries manually links a series to a specific metadata record from a source
 func (s *MetadataService) MatchSeries(animeID uint, source string, sourceID int) error {
-	var anime model.LocalAnime
-	if err := db.DB.Preload("Metadata").First(&anime, animeID).Error; err != nil {
+	laStore := localAnimeStore()
+	if laStore == nil {
+		return nil
+	}
+	anime, err := laStore.GetWithMetadata(animeID)
+	if err != nil {
 		return err
 	}
 
@@ -106,15 +118,17 @@ func (s *MetadataService) MatchSeries(animeID uint, source string, sourceID int)
 	anime.MetadataID = &m.ID
 	anime.Image = m.Image
 	anime.Summary = m.Summary
-	db.DB.Save(&anime)
+	if err := laStore.SaveAnime(anime); err != nil {
+		log.Printf("MatchSeries: save anime failed: %v", err)
+	}
 
 	if m.TMDBID != 0 {
-		s.SyncEpisodesWithTMDB(&anime)
-		s.AlignEpisodesWithTMDB(&anime)
+		s.SyncEpisodesWithTMDB(anime)
+		s.AlignEpisodesWithTMDB(anime)
 	}
 	nfoGen := NewNFOGeneratorService()
-	_ = nfoGen.SaveLocalImages(&anime)
-	_ = nfoGen.GenerateTVShowNFO(&anime)
+	_ = nfoGen.SaveLocalImages(anime)
+	_ = nfoGen.GenerateTVShowNFO(anime)
 	_ = ResolveLibraryIssue("scrape:" + strconv.FormatUint(uint64(anime.ID), 10))
 
 	return nil
@@ -133,8 +147,17 @@ func (s *MetadataService) StartRefreshAllMetadata(force bool) bool {
 // RefreshAllMetadata updates metadata records.
 func (s *MetadataService) RefreshAllMetadata(force bool) int {
 	log.Printf("Refresh: Starting metadata refresh (force=%v)...", force)
-	var allList []model.AnimeMetadata
-	db.DB.Find(&allList)
+	mStore := metadataStore()
+	if mStore == nil {
+		GlobalRefreshStatus.Finish("数据库未就绪")
+		return 0
+	}
+	allList, err := listAllMetadata()
+	if err != nil {
+		log.Printf("Refresh: failed to list metadata: %v", err)
+		GlobalRefreshStatus.Finish("加载元数据失败")
+		return 0
+	}
 
 	var list []model.AnimeMetadata
 	if force {
@@ -178,13 +201,12 @@ func (s *MetadataService) RefreshAllMetadata(force bool) int {
 				"title":   meta.Title,
 			})
 
-			var freshM model.AnimeMetadata
-			if err := db.DB.First(&freshM, meta.ID).Error; err == nil {
+			if freshM, err := mStore.GetByID(meta.ID); err == nil {
 				queryTitle := freshM.Title
 				if freshM.TitleCN != "" {
 					queryTitle = freshM.TitleCN
 				}
-				s.EnrichMetadata(&freshM, queryTitle)
+				s.EnrichMetadata(freshM, queryTitle)
 				updateMu.Lock()
 				updatedCount++
 				updateMu.Unlock()
@@ -206,23 +228,31 @@ func (s *MetadataService) RefreshAllMetadata(force bool) int {
 
 // RefreshSingleMetadata forces a refresh of a single metadata record
 func (s *MetadataService) RefreshSingleMetadata(id uint) error {
-	var m model.AnimeMetadata
-	if err := db.DB.First(&m, id).Error; err != nil {
+	mStore := metadataStore()
+	if mStore == nil {
+		return nil
+	}
+	m, err := mStore.GetByID(id)
+	if err != nil {
 		return err
 	}
 	queryTitle := m.Title
 	if m.TitleCN != "" {
 		queryTitle = m.TitleCN
 	}
-	s.EnrichMetadata(&m, queryTitle)
+	s.EnrichMetadata(m, queryTitle)
 	return nil
 }
 
 // MatchMetadata links a metadata record directly to a source ID
 // This is used for Library items that might not be LocalAnime (e.g. Subscriptions)
 func (s *MetadataService) MatchMetadata(metadataID uint, source string, sourceID int) error {
-	var m model.AnimeMetadata
-	if err := db.DB.First(&m, metadataID).Error; err != nil {
+	mStore := metadataStore()
+	if mStore == nil {
+		return nil
+	}
+	m, err := mStore.GetByID(metadataID)
+	if err != nil {
 		return err
 	}
 
@@ -235,9 +265,11 @@ func (s *MetadataService) MatchMetadata(metadataID uint, source string, sourceID
 		m.AniListID = sourceID
 	}
 
-	s.EnrichMetadata(&m, m.Title)
-	db.DB.Save(&m)
-	s.SyncMetadataToModels(&m)
+	s.EnrichMetadata(m, m.Title)
+	if err := mStore.Save(m); err != nil {
+		log.Printf("MatchMetadata: save metadata failed: %v", err)
+	}
+	s.SyncMetadataToModels(m)
 
 	return nil
 }

@@ -11,7 +11,6 @@ import (
 
 	"github.com/pokerjest/animateAutoTool/internal/anilist"
 	"github.com/pokerjest/animateAutoTool/internal/bangumi"
-	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/parser"
 	"github.com/pokerjest/animateAutoTool/internal/safeio"
@@ -44,16 +43,16 @@ func (s *MetadataService) EnrichAnime(anime *model.LocalAnime) error {
 		queryTitle := parser.CleanTitle(anime.Title)
 		log.Printf("Enrich: Attempting to link '%s' to existing metadata...", queryTitle)
 
-		var existing model.AnimeMetadata
-		err := db.DB.Where("title = ? OR title_cn = ? OR title_jp = ? OR title_en = ?",
-			queryTitle, queryTitle, queryTitle, queryTitle).First(&existing).Error
-
-		if err == nil && existing.ID != 0 {
+		laStore := localAnimeStore()
+		existing, err := findMetadataByTitleVariants(queryTitle)
+		if err == nil && existing != nil && existing.ID != 0 {
 			log.Printf("Enrich: Found existing metadata link for '%s' -> ID %d", anime.Title, existing.ID)
-			anime.Metadata = &existing
+			anime.Metadata = existing
 			anime.MetadataID = &existing.ID
-			if err := db.DB.Save(anime).Error; err != nil {
-				return fmt.Errorf("save anime metadata link: %w", err)
+			if laStore != nil {
+				if err := laStore.SaveAnime(anime); err != nil {
+					return fmt.Errorf("save anime metadata link: %w", err)
+				}
 			}
 		} else {
 			anime.Metadata = &model.AnimeMetadata{Title: queryTitle}
@@ -75,8 +74,10 @@ func (s *MetadataService) EnrichAnime(anime *model.LocalAnime) error {
 	anime.Image = anime.Metadata.Image
 	anime.Summary = anime.Metadata.Summary
 
-	if err := db.DB.Save(anime).Error; err != nil {
-		return fmt.Errorf("save enriched anime: %w", err)
+	if laStore := localAnimeStore(); laStore != nil {
+		if err := laStore.SaveAnime(anime); err != nil {
+			return fmt.Errorf("save enriched anime: %w", err)
+		}
 	}
 
 	// 4. Align Episodes and Sync Metadata (Phase 4)
@@ -151,51 +152,41 @@ func (s *MetadataService) EnrichMetadata(m *model.AnimeMetadata, query string) {
 	// 6. Set Active Fields
 	s.setActiveFields(m, rawQueryTitle)
 
-	if err := db.DB.Save(m).Error; err != nil {
-		log.Printf("MetadataService: failed to save consolidated metadata for %q: %v", rawQueryTitle, err)
+	if mStore := metadataStore(); mStore != nil {
+		if err := mStore.Save(m); err != nil {
+			log.Printf("MetadataService: failed to save consolidated metadata for %q: %v", rawQueryTitle, err)
+		}
 	}
 	s.SyncMetadataToModels(m)
 }
 
 func (s *MetadataService) initClients() (*bangumi.Client, *tmdb.Client, *anilist.Client) {
+	proxyURL := configValue(model.ConfigKeyProxyURL)
+
 	// Bangumi
 	bgmClient := bangumi.NewClient("", "", "")
-	var bgmProxyConfig model.GlobalConfig
-	if err := db.DB.Where("key = ?", model.ConfigKeyProxyBangumi).First(&bgmProxyConfig).Error; err == nil && bgmProxyConfig.Value == model.ConfigValueTrue {
-		var p model.GlobalConfig
-		if err := db.DB.Where("key = ?", model.ConfigKeyProxyURL).First(&p).Error; err == nil && p.Value != "" {
-			bgmClient.SetProxy(p.Value)
-		}
+	if configValue(model.ConfigKeyProxyBangumi) == model.ConfigValueTrue && proxyURL != "" {
+		bgmClient.SetProxy(proxyURL)
 	}
 
 	// TMDB
-	var tmdbToken model.GlobalConfig
 	var tmdbClient *tmdb.Client
-	if err := db.DB.Where("key = ?", model.ConfigKeyTMDBToken).First(&tmdbToken).Error; err == nil && tmdbToken.Value != "" {
-		proxyURL := ""
-		var proxyEnabled model.GlobalConfig
-		if err := db.DB.Where("key = ?", model.ConfigKeyProxyTMDB).First(&proxyEnabled).Error; err == nil && proxyEnabled.Value == model.ConfigValueTrue {
-			var p model.GlobalConfig
-			if err := db.DB.Where("key = ?", model.ConfigKeyProxyURL).First(&p).Error; err == nil {
-				proxyURL = p.Value
-			}
+	if token := configValue(model.ConfigKeyTMDBToken); token != "" {
+		clientProxy := ""
+		if configValue(model.ConfigKeyProxyTMDB) == model.ConfigValueTrue {
+			clientProxy = proxyURL
 		}
-		tmdbClient = tmdb.NewClient(tmdbToken.Value, proxyURL)
+		tmdbClient = tmdb.NewClient(token, clientProxy)
 	}
 
 	// AniList
-	var anilistToken model.GlobalConfig
 	var anilistClient *anilist.Client
-	if err := db.DB.Where("key = ?", model.ConfigKeyAniListToken).First(&anilistToken).Error; err == nil && anilistToken.Value != "" {
-		proxyURL := ""
-		var proxyEnabled model.GlobalConfig
-		if err := db.DB.Where("key = ?", model.ConfigKeyProxyAniList).First(&proxyEnabled).Error; err == nil && proxyEnabled.Value == model.ConfigValueTrue {
-			var p model.GlobalConfig
-			if err := db.DB.Where("key = ?", model.ConfigKeyProxyURL).First(&p).Error; err == nil {
-				proxyURL = p.Value
-			}
+	if token := configValue(model.ConfigKeyAniListToken); token != "" {
+		clientProxy := ""
+		if configValue(model.ConfigKeyProxyAniList) == model.ConfigValueTrue {
+			clientProxy = proxyURL
 		}
-		anilistClient = anilist.NewClient(anilistToken.Value, proxyURL)
+		anilistClient = anilist.NewClient(token, clientProxy)
 	}
 
 	return bgmClient, tmdbClient, anilistClient
@@ -361,26 +352,29 @@ func (s *MetadataService) processAniList(m *model.AnimeMetadata, client *anilist
 }
 
 func (s *MetadataService) saveAndConsolidate(m *model.AnimeMetadata) {
+	mStore := metadataStore()
+	if mStore == nil {
+		return
+	}
 	if m.ID == 0 {
-		var existing model.AnimeMetadata
-		found := false
+		var existing *model.AnimeMetadata
 		if m.BangumiID != 0 {
-			if err := db.DB.Where("bangumi_id = ?", m.BangumiID).First(&existing).Error; err == nil {
-				found = true
+			if found, err := mStore.FindByBangumiID(m.BangumiID); err == nil {
+				existing = found
 			}
 		}
-		if !found && m.TMDBID != 0 {
-			if err := db.DB.Where("tmdb_id = ?", m.TMDBID).First(&existing).Error; err == nil {
-				found = true
+		if existing == nil && m.TMDBID != 0 {
+			if found, err := mStore.FindByTMDBID(m.TMDBID); err == nil {
+				existing = found
 			}
 		}
-		if !found && m.AniListID != 0 {
-			if err := db.DB.Where("anilist_id = ?", m.AniListID).First(&existing).Error; err == nil {
-				found = true
+		if existing == nil && m.AniListID != 0 {
+			if found, err := mStore.FindByAniListID(m.AniListID); err == nil {
+				existing = found
 			}
 		}
 
-		if found {
+		if existing != nil {
 			if m.BangumiID != 0 {
 				existing.BangumiID = m.BangumiID
 			}
@@ -390,14 +384,14 @@ func (s *MetadataService) saveAndConsolidate(m *model.AnimeMetadata) {
 			if m.AniListID != 0 {
 				existing.AniListID = m.AniListID
 			}
-			*m = existing
+			*m = *existing
 		} else {
-			if err := db.DB.Create(m).Error; err != nil {
+			if err := mStore.Create(m); err != nil {
 				log.Printf("MetadataService: failed to create metadata for %q: %v", m.Title, err)
 			}
 		}
 	} else {
-		if err := db.DB.Save(m).Error; err != nil {
+		if err := mStore.Save(m); err != nil {
 			log.Printf("MetadataService: failed to persist metadata %d: %v", m.ID, err)
 		}
 	}
