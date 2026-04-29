@@ -84,6 +84,12 @@ func TestRunMigrationsUpgradesLegacySubscriptionSchema(t *testing.T) {
 	if !target.Migrator().HasColumn(&model.Subscription{}, "last_run_summary") {
 		t.Fatal("expected last_run_summary column to be added to subscriptions")
 	}
+	if !target.Migrator().HasColumn(&model.Subscription{}, "backup_rss_url") {
+		t.Fatal("expected backup_rss_url column to be added to subscriptions")
+	}
+	if !target.Migrator().HasColumn(&model.Subscription{}, "expected_episodes") {
+		t.Fatal("expected expected_episodes column to be added to subscriptions")
+	}
 	if !target.Migrator().HasTable(&model.LibraryIssue{}) {
 		t.Fatal("expected library_issues table to be created for legacy databases")
 	}

@@ -1,11 +1,13 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -97,6 +99,15 @@ type SubscriptionTrendItem struct {
 	LastCheckLabel   string
 }
 
+type RSSValidationResponse struct {
+	PrimaryCount    int      `json:"primary_count"`
+	BackupCount     int      `json:"backup_count,omitempty"`
+	MatchingCount   int      `json:"matching_count"`
+	Warnings        []string `json:"warnings,omitempty"`
+	PreviewTitles   []string `json:"preview_titles,omitempty"`
+	UsingBackupHint string   `json:"using_backup_hint,omitempty"`
+}
+
 var runSubscriptionCheck = func(sub *model.Subscription, source string) error {
 	if sub == nil {
 		return fmt.Errorf("subscription is nil")
@@ -122,8 +133,8 @@ var runSubscriptionCheck = func(sub *model.Subscription, source string) error {
 
 func SubscriptionsHandler(c *gin.Context) {
 	skip := IsHTMX(c)
-	var subs []model.Subscription
-	if err := db.DB.Preload("Metadata").Find(&subs).Error; err != nil {
+	subs, err := listSubscriptionsWithMetadata()
+	if err != nil {
 		log.Printf("Error fetching subscriptions: %v", err)
 	}
 
@@ -159,6 +170,8 @@ func CreateSubscriptionHandler(c *gin.Context) {
 }
 
 func createSubscriptionInternal(sub *model.Subscription) error {
+	normalizeSubscriptionStrategy(sub)
+
 	if sub.Metadata == nil {
 		sub.Metadata = &model.AnimeMetadata{}
 	}
@@ -179,7 +192,7 @@ func createSubscriptionInternal(sub *model.Subscription) error {
 	}
 
 	// Auto-fill FilterRule from SubtitleGroup if FilterRule is empty
-	if sub.FilterRule == "" && sub.SubtitleGroup != "" {
+	if sub.FilterRule == "" && sub.SubtitleGroup != "" && !sub.AllowMultiSubgroup {
 		sub.FilterRule = sub.SubtitleGroup
 	}
 
@@ -199,6 +212,11 @@ func createSubscriptionInternal(sub *model.Subscription) error {
 			existing.Title = sub.Title
 			existing.FilterRule = sub.FilterRule
 			existing.ExcludeRule = sub.ExcludeRule
+			existing.BackupRSSUrl = sub.BackupRSSUrl
+			existing.ExpectedEpisodes = sub.ExpectedEpisodes
+			existing.AutoDisableOnDone = sub.AutoDisableOnDone
+			existing.AllowMultiSubgroup = sub.AllowMultiSubgroup
+			existing.StaleAfterHours = sub.StaleAfterHours
 			existing.IsActive = true
 			if err := db.DB.Save(&existing).Error; err != nil {
 				return fmt.Errorf("failed to restore: %v", err)
@@ -223,6 +241,27 @@ func createSubscriptionInternal(sub *model.Subscription) error {
 	}()
 
 	return nil
+}
+
+func normalizeSubscriptionStrategy(sub *model.Subscription) {
+	if sub == nil {
+		return
+	}
+	if strings.TrimSpace(sub.BackupRSSUrl) == "" {
+		if baseRSS, ok := deriveBaseRSSURL(sub.RSSUrl); ok {
+			sub.BackupRSSUrl = baseRSS
+		}
+	}
+	sub.BackupRSSUrl = strings.TrimSpace(sub.BackupRSSUrl)
+	if sub.ExpectedEpisodes < 0 {
+		sub.ExpectedEpisodes = 0
+	}
+	if sub.StaleAfterHours < 0 {
+		sub.StaleAfterHours = 0
+	}
+	if sub.StaleAfterHours == 0 {
+		sub.StaleAfterHours = 168
+	}
 }
 
 func CreateBatchSubscriptionHandler(c *gin.Context) {
@@ -299,14 +338,14 @@ func BatchPreviewHandler(c *gin.Context) {
 
 func ToggleSubscriptionHandler(c *gin.Context) {
 	id := c.Param("id")
-	var sub model.Subscription
-	if err := db.DB.First(&sub, id).Error; err != nil {
+	sub, err := subscriptionByID(id)
+	if err != nil {
 		subscriptionNotFound(c)
 		return
 	}
 
 	sub.IsActive = !sub.IsActive
-	if err := db.DB.Save(&sub).Error; err != nil {
+	if err := saveSubscription(sub); err != nil {
 		subscriptionSaveError(c, "更新订阅状态", err)
 		return
 	}
@@ -359,13 +398,13 @@ func DeleteSubscriptionHandler(c *gin.Context) {
 
 func RunSubscriptionHandler(c *gin.Context) {
 	id := c.Param("id")
-	var sub model.Subscription
-	if err := db.DB.First(&sub, id).Error; err != nil {
+	sub, err := subscriptionByID(id)
+	if err != nil {
 		subscriptionNotFound(c)
 		return
 	}
 
-	if err := runSubscriptionCheck(&sub, "manual"); err != nil {
+	if err := runSubscriptionCheck(sub, "manual"); err != nil {
 		log.Printf("RunSubscription: QB Login failed: %v", err)
 		subscriptionSaveError(c, "立即检查订阅", fmt.Errorf("QBittorrent 连接失败: %w", err))
 		return
@@ -424,17 +463,22 @@ func GetSubscriptionHistoryHandler(c *gin.Context) {
 
 func UpdateSubscriptionHandler(c *gin.Context) {
 	id := c.Param("id")
-	var sub model.Subscription
-	if err := db.DB.First(&sub, id).Error; err != nil {
+	sub, err := subscriptionByID(id)
+	if err != nil {
 		subscriptionNotFound(c)
 		return
 	}
 
 	var input struct {
-		Title       string `form:"Title" binding:"required"`
-		RSSUrl      string `form:"RSSUrl" binding:"required"`
-		FilterRule  string `form:"FilterRule"`
-		ExcludeRule string `form:"ExcludeRule"`
+		Title              string `form:"Title" binding:"required"`
+		RSSUrl             string `form:"RSSUrl" binding:"required"`
+		FilterRule         string `form:"FilterRule"`
+		ExcludeRule        string `form:"ExcludeRule"`
+		BackupRSSUrl       string `form:"BackupRSSUrl"`
+		ExpectedEpisodes   int    `form:"ExpectedEpisodes"`
+		AllowMultiSubgroup bool   `form:"AllowMultiSubgroup"`
+		AutoDisableOnDone  bool   `form:"AutoDisableOnDone"`
+		StaleAfterHours    int    `form:"StaleAfterHours"`
 	}
 
 	if err := c.ShouldBind(&input); err != nil {
@@ -459,13 +503,19 @@ func UpdateSubscriptionHandler(c *gin.Context) {
 	sub.RSSUrl = input.RSSUrl
 	sub.FilterRule = input.FilterRule
 	sub.ExcludeRule = input.ExcludeRule
+	sub.BackupRSSUrl = input.BackupRSSUrl
+	sub.ExpectedEpisodes = input.ExpectedEpisodes
+	sub.AllowMultiSubgroup = input.AllowMultiSubgroup
+	sub.AutoDisableOnDone = input.AutoDisableOnDone
+	sub.StaleAfterHours = input.StaleAfterHours
+	normalizeSubscriptionStrategy(sub)
 
-	if err := db.DB.Save(&sub).Error; err != nil {
+	if err := saveSubscription(sub); err != nil {
 		subscriptionSaveError(c, "保存订阅", err)
 		return
 	}
 
-	populateSubscriptionStat(&sub)
+	populateSubscriptionStat(sub)
 
 	cardSub, err := loadSubscriptionCard(sub.ID)
 	if err != nil {
@@ -476,10 +526,92 @@ func UpdateSubscriptionHandler(c *gin.Context) {
 	c.HTML(http.StatusOK, "subscription_card.html", cardSub)
 }
 
+func ValidateSubscriptionRSSHandler(c *gin.Context) {
+	sub := model.Subscription{
+		Title:              strings.TrimSpace(c.Query("title")),
+		RSSUrl:             strings.TrimSpace(c.Query("rss")),
+		BackupRSSUrl:       strings.TrimSpace(c.Query("backup_rss")),
+		FilterRule:         strings.TrimSpace(c.Query("filter")),
+		ExcludeRule:        strings.TrimSpace(c.Query("exclude")),
+		SubtitleGroup:      strings.TrimSpace(c.Query("subtitle_group")),
+		AllowMultiSubgroup: c.Query("allow_multi_subgroup") == ValueTrue,
+	}
+
+	if sub.RSSUrl == "" {
+		subscriptionJSONBadRequest(c, "请先输入 RSS 链接")
+		return
+	}
+
+	parserClient := parser.NewMikanParser()
+	primaryEpisodes, primaryErr := parserClient.ParseContext(context.Background(), sub.RSSUrl)
+	response := RSSValidationResponse{}
+	if primaryErr == nil {
+		response.PrimaryCount = len(primaryEpisodes)
+		response.PreviewTitles = previewEpisodeTitles(primaryEpisodes, 5)
+	}
+
+	rules := service.BuildSubscriptionRuleSetForValidation(&sub)
+	if primaryErr == nil {
+		for _, ep := range primaryEpisodes {
+			if rules.Allows(ep) {
+				response.MatchingCount++
+			}
+		}
+	}
+
+	if primaryErr != nil {
+		response.Warnings = append(response.Warnings, "主 RSS 当前无法解析，请检查地址或稍后再试。")
+	}
+	if primaryErr == nil && len(primaryEpisodes) == 0 {
+		response.Warnings = append(response.Warnings, "主 RSS 当前为空，可能是该字幕组暂时还没有可用资源。")
+	}
+	if primaryErr == nil && len(primaryEpisodes) > 0 && response.MatchingCount == 0 && (sub.FilterRule != "" || sub.ExcludeRule != "") {
+		response.Warnings = append(response.Warnings, "当前过滤/排除规则会把本次 RSS 结果全部筛空。")
+	}
+
+	if sub.BackupRSSUrl != "" && sub.BackupRSSUrl != sub.RSSUrl {
+		backupEpisodes, backupErr := parserClient.ParseContext(context.Background(), sub.BackupRSSUrl)
+		if backupErr != nil {
+			response.Warnings = append(response.Warnings, "备用 RSS 当前也不可用。")
+		} else {
+			response.BackupCount = len(backupEpisodes)
+			if len(backupEpisodes) > 0 {
+				response.UsingBackupHint = "如果主 RSS 后续失效，系统可以自动回退到备用 RSS。"
+			}
+		}
+	}
+
+	if sub.AllowMultiSubgroup {
+		response.Warnings = append(response.Warnings, "已启用多字幕组共存：不会自动把过滤规则锁定到单一字幕组。")
+	}
+
+	if primaryErr != nil {
+		c.JSON(http.StatusBadGateway, response)
+		return
+	}
+	c.JSON(http.StatusOK, response)
+}
+
+func previewEpisodeTitles(episodes []parser.Episode, limit int) []string {
+	if limit <= 0 || len(episodes) == 0 {
+		return nil
+	}
+	if len(episodes) < limit {
+		limit = len(episodes)
+	}
+	titles := make([]string, 0, limit)
+	for i := 0; i < limit; i++ {
+		if title := strings.TrimSpace(episodes[i].Title); title != "" {
+			titles = append(titles, title)
+		}
+	}
+	return titles
+}
+
 func UseBaseRSSHandler(c *gin.Context) {
 	id := c.Param("id")
-	var sub model.Subscription
-	if err := db.DB.First(&sub, id).Error; err != nil {
+	sub, err := subscriptionByID(id)
+	if err != nil {
 		subscriptionNotFound(c)
 		return
 	}
@@ -490,12 +622,12 @@ func UseBaseRSSHandler(c *gin.Context) {
 		return
 	}
 
-	if err := useBaseRSSAndRecheck(&sub, baseRSS); err != nil {
+	if err := useBaseRSSAndRecheck(sub, baseRSS); err != nil {
 		subscriptionSaveError(c, "执行主 RSS 修复", err)
 		return
 	}
 
-	populateSubscriptionStat(&sub)
+	populateSubscriptionStat(sub)
 	cardSub, err := loadSubscriptionCard(sub.ID)
 	if err != nil {
 		subscriptionReloadError(c, err)
@@ -508,18 +640,18 @@ func UseBaseRSSHandler(c *gin.Context) {
 
 func ClearSubscriptionFilterHandler(c *gin.Context) {
 	id := c.Param("id")
-	var sub model.Subscription
-	if err := db.DB.First(&sub, id).Error; err != nil {
+	sub, err := subscriptionByID(id)
+	if err != nil {
 		subscriptionNotFound(c)
 		return
 	}
 
-	if err := clearFilterAndRecheck(&sub); err != nil {
+	if err := clearFilterAndRecheck(sub); err != nil {
 		subscriptionSaveError(c, "清空过滤规则", err)
 		return
 	}
 
-	populateSubscriptionStat(&sub)
+	populateSubscriptionStat(sub)
 	cardSub, err := loadSubscriptionCard(sub.ID)
 	if err != nil {
 		subscriptionReloadError(c, err)
@@ -532,18 +664,18 @@ func ClearSubscriptionFilterHandler(c *gin.Context) {
 
 func ResetSubscriptionLogsHandler(c *gin.Context) {
 	id := c.Param("id")
-	var sub model.Subscription
-	if err := db.DB.First(&sub, id).Error; err != nil {
+	sub, err := subscriptionByID(id)
+	if err != nil {
 		subscriptionNotFound(c)
 		return
 	}
 
-	if err := resetStaleLogsAndRecheck(&sub, staleLogResetAge); err != nil {
+	if err := resetStaleLogsAndRecheck(sub, staleLogResetAge); err != nil {
 		subscriptionSaveError(c, "清理阻塞下载记录", err)
 		return
 	}
 
-	populateSubscriptionStat(&sub)
+	populateSubscriptionStat(sub)
 	cardSub, err := loadSubscriptionCard(sub.ID)
 	if err != nil {
 		subscriptionReloadError(c, err)
@@ -554,10 +686,75 @@ func ResetSubscriptionLogsHandler(c *gin.Context) {
 	c.HTML(http.StatusOK, "subscription_card.html", cardSub)
 }
 
+func RetryMissingEpisodesHandler(c *gin.Context) {
+	recheckSubscriptionRepairAction(c, repairActionRetryMissing, "执行缺集重检")
+}
+
+func RecheckStaleSubscriptionHandler(c *gin.Context) {
+	recheckSubscriptionRepairAction(c, repairActionRetryStale, "重新检查长期无进展的订阅")
+}
+
+func RetryUpgradeSubscriptionHandler(c *gin.Context) {
+	recheckSubscriptionRepairAction(c, repairActionRetryUpgrade, "执行洗版检查")
+}
+
+func RefreshSubscriptionLibraryHandler(c *gin.Context) {
+	id := c.Param("id")
+	sub, err := subscriptionByID(id)
+	if err != nil {
+		subscriptionNotFound(c)
+		return
+	}
+
+	triggerJellyfinLibraryRefresh(context.Background())
+
+	cardSub, err := loadSubscriptionCard(sub.ID)
+	if err != nil {
+		subscriptionReloadError(c, err)
+		return
+	}
+
+	triggerAppToast(c, repairSuccessToast(repairActionRefreshLibrary), "success")
+	c.HTML(http.StatusOK, "subscription_card.html", cardSub)
+}
+
+func recheckSubscriptionRepairAction(c *gin.Context, action repairAction, operation string) {
+	id := c.Param("id")
+	sub, err := subscriptionByID(id)
+	if err != nil {
+		subscriptionNotFound(c)
+		return
+	}
+
+	sub.LastRunSummary = repairPendingSummary(action)
+	sub.LastError = ""
+	if err := saveSubscription(sub); err != nil {
+		subscriptionSaveError(c, operation, err)
+		return
+	}
+
+	if err := runSubscriptionCheck(sub, "manual"); err != nil {
+		sub.LastRunSummary = repairAutoRecheckFailureSummary(action)
+		sub.LastError = err.Error()
+		_ = saveSubscription(sub)
+		subscriptionSaveError(c, operation, err)
+		return
+	}
+
+	cardSub, err := loadSubscriptionCard(sub.ID)
+	if err != nil {
+		subscriptionReloadError(c, err)
+		return
+	}
+
+	triggerAppToast(c, repairSuccessToast(action), "success")
+	c.HTML(http.StatusOK, "subscription_card.html", cardSub)
+}
+
 func RefreshSubscriptionMetadataHandler(c *gin.Context) {
 	id := c.Param("id")
-	var sub model.Subscription
-	if err := db.DB.First(&sub, id).Error; err != nil {
+	sub, err := subscriptionByID(id)
+	if err != nil {
 		subscriptionNotFound(c)
 		return
 	}
@@ -566,7 +763,7 @@ func RefreshSubscriptionMetadataHandler(c *gin.Context) {
 	metaSvc := service.NewMetadataService()
 	metaSvc.EnrichMetadata(sub.Metadata, sub.Title)
 
-	if err := db.DB.Save(&sub).Error; err != nil {
+	if err := saveSubscription(sub); err != nil {
 		subscriptionSaveError(c, "刷新订阅元数据", err)
 		return
 	}
@@ -585,8 +782,8 @@ func SwitchSubscriptionSourceHandler(c *gin.Context) {
 	id := c.Param("id")
 	source := c.Query("source")
 
-	var sub model.Subscription
-	if err := db.DB.Preload("Metadata").First(&sub, id).Error; err != nil {
+	sub, err := subscriptionWithMetadataByID(id)
+	if err != nil {
 		subscriptionNotFound(c)
 		return
 	}

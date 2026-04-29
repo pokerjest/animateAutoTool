@@ -58,6 +58,7 @@ func InitRoutes(r *gin.Engine) {
 		authorized.GET("/calendar", GetCalendarHandler)
 		authorized.GET("/backup", BackupPageHandler)
 		authorized.GET("/player", GetPlayerHandler)
+		authorized.GET("/health", HealthPageHandler)
 		authorized.GET("/api/events", SSEHandler)
 
 		apiGroup := authorized.Group("/api")
@@ -69,11 +70,16 @@ func InitRoutes(r *gin.Engine) {
 			apiGroup.POST("/subscriptions", CreateSubscriptionHandler)
 			apiGroup.POST("/subscriptions/batch", CreateBatchSubscriptionHandler)
 			apiGroup.POST("/subscriptions/batch-preview", BatchPreviewHandler)
+			apiGroup.GET("/subscriptions/validate-rss", ValidateSubscriptionRSSHandler)
 			apiGroup.POST("/subscriptions/:id/toggle", ToggleSubscriptionHandler)
 			apiGroup.POST("/subscriptions/:id/run", RunSubscriptionHandler)
 			apiGroup.POST("/subscriptions/:id/use-base-rss", UseBaseRSSHandler)
 			apiGroup.POST("/subscriptions/:id/clear-filter", ClearSubscriptionFilterHandler)
 			apiGroup.POST("/subscriptions/:id/reset-logs", ResetSubscriptionLogsHandler)
+			apiGroup.POST("/subscriptions/:id/retry-missing", RetryMissingEpisodesHandler)
+			apiGroup.POST("/subscriptions/:id/recheck-stale", RecheckStaleSubscriptionHandler)
+			apiGroup.POST("/subscriptions/:id/retry-upgrade", RetryUpgradeSubscriptionHandler)
+			apiGroup.POST("/subscriptions/:id/refresh-library", RefreshSubscriptionLibraryHandler)
 			apiGroup.GET("/subscriptions/:id/card", GetSubscriptionCardHandler)
 			apiGroup.GET("/subscriptions/:id/history", GetSubscriptionHistoryHandler)
 			apiGroup.GET("/subscriptions/trends", GetSubscriptionTrendsHandler)
@@ -160,6 +166,7 @@ func InitRoutes(r *gin.Engine) {
 			apiGroup.GET("/dashboard/qb-status", DashboardQBStatusHandler)
 			apiGroup.GET("/dashboard/task-overview", DashboardTaskOverviewHandler)
 			apiGroup.POST("/download-logs/repair", RepairDownloadLogsHandler)
+			apiGroup.GET("/health/report", HealthReportHandler)
 			apiGroup.GET("/runtime/stats", RuntimeStatsHandler)
 		}
 	}

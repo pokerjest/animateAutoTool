@@ -61,7 +61,12 @@
         title: '',
         rss: '',
         filter: '',
-        exclude: ''
+        exclude: '',
+        backup_rss: '',
+        expected_episodes: 0,
+        allow_multi_subgroup: false,
+        auto_disable_on_done: false,
+        stale_after_hours: 168
     },
     showDeleteModal: false,
     showBatchAddModal: false,
@@ -88,7 +93,13 @@
     issueReasonGroups: [],
     retryingSubscriptionId: null,
     minimumActionDelay: 320,
-    addForm: { title: '', rss: '', image: '', subtitle_group: '', season: '' },
+    addForm: { 
+        title: '', rss: '', image: '', subtitle_group: '', season: '',
+        filter: '', exclude: '', backup_rss: '', expected_episodes: 0,
+        allow_multi_subgroup: false, auto_disable_on_done: false, stale_after_hours: 168
+    },
+    addValidation: null,
+    editValidation: null,
     subgroups: [],
     selectedAnime: null,
     showSubgroupList: false,
@@ -108,6 +119,60 @@
         const detail = error && error.message ? `${fallback}: ${error.message}` : fallback;
         this.showFailure(detail, fallback);
     },
+    resetAddForm() {
+        this.addForm = {
+            title: '', rss: '', image: '', subtitle_group: '', season: '',
+            filter: '', exclude: '', backup_rss: '', expected_episodes: 0,
+            allow_multi_subgroup: false, auto_disable_on_done: false, stale_after_hours: 168
+        };
+        this.addValidation = null;
+        const previewArea = document.getElementById('add-preview-results');
+        if (previewArea) previewArea.innerHTML = '';
+    },
+    async validateRSSStrategy(form, mode = 'add') {
+        const rss = String(form?.rss || '').trim();
+        if (!rss) {
+            this.showFailure('请先输入 RSS 链接');
+            return;
+        }
+        const startedAt = Date.now();
+        try {
+            const params = new URLSearchParams({
+                title: form.title || '',
+                rss,
+                backup_rss: form.backup_rss || '',
+                filter: form.filter || '',
+                exclude: form.exclude || '',
+                subtitle_group: form.subtitle_group || '',
+                allow_multi_subgroup: form.allow_multi_subgroup ? 'true' : 'false'
+            });
+            const response = await fetch('/api/subscriptions/validate-rss?' + params.toString(), {
+                headers: { 'Accept': 'application/json' }
+            });
+            const validation = await response.json();
+            await this.waitMinimum(startedAt, 380);
+            if (mode === 'edit') {
+                this.editValidation = validation;
+            } else {
+                this.addValidation = validation;
+            }
+            if (!response.ok) {
+                this.showFailure('RSS 策略测试失败');
+                return;
+            }
+            const primaryCount = Number(validation.primary_count || 0);
+            const matchingCount = Number(validation.matching_count || 0);
+            const backupCount = Number(validation.backup_count || 0);
+            let summary = `主 RSS ${primaryCount} 集，可命中 ${matchingCount} 集`;
+            if (backupCount > 0) {
+                summary += `，备用 RSS ${backupCount} 集`;
+            }
+            this.showSuccess(summary);
+        } catch (e) {
+            await this.waitMinimum(startedAt, 380);
+            this.showNetworkFailure(e, 'RSS 策略测试失败');
+        }
+    },
     async testAddRSSSource() {
         const rss = String(this.addForm.rss || '').trim();
         if (!rss) {
@@ -117,19 +182,46 @@
         const previewArea = document.getElementById('add-preview-results');
         const startedAt = Date.now();
         try {
-            const resp = await fetch('/api/preview?RSSUrl=' + encodeURIComponent(rss), {
-                headers: { 'HX-Request': 'true' }
+            const params = new URLSearchParams({
+                title: this.addForm.title || '',
+                rss,
+                backup_rss: this.addForm.backup_rss || '',
+                filter: this.addForm.filter || '',
+                exclude: this.addForm.exclude || '',
+                subtitle_group: this.addForm.subtitle_group || '',
+                allow_multi_subgroup: this.addForm.allow_multi_subgroup ? 'true' : 'false'
             });
-            const html = await resp.text();
+            const [previewResp, validateResp] = await Promise.all([
+                fetch('/api/preview?RSSUrl=' + encodeURIComponent(rss), {
+                    headers: { 'HX-Request': 'true' }
+                }),
+                fetch('/api/subscriptions/validate-rss?' + params.toString(), {
+                    headers: { 'Accept': 'application/json' }
+                })
+            ]);
+            const html = await previewResp.text();
+            let validation = null;
+            try {
+                validation = await validateResp.json();
+            } catch (e) {
+                validation = null;
+            }
             await this.waitMinimum(startedAt, 380);
             if (previewArea) previewArea.innerHTML = html;
-            if (!resp.ok) {
+            this.addValidation = validation;
+            if (!previewResp.ok && !validateResp.ok) {
                 this.showFailure('RSS 源测试失败');
                 return;
             }
-            const match = html.match(/共\s*(\d+)\s*集/);
-            if (match) {
-                this.showSuccess(`RSS 源可用，预览到 ${match[1]} 集`);
+            if (validation && typeof validation.matching_count === 'number') {
+                const primaryCount = Number(validation.primary_count || 0);
+                const matchingCount = Number(validation.matching_count || 0);
+                const backupCount = Number(validation.backup_count || 0);
+                let summary = `主 RSS ${primaryCount} 集，可命中 ${matchingCount} 集`;
+                if (backupCount > 0) {
+                    summary += `，备用 RSS ${backupCount} 集`;
+                }
+                this.showSuccess(summary);
                 return;
             }
             if (html.includes('请输入有效 RSS 链接')) {
@@ -145,6 +237,9 @@
             await this.waitMinimum(startedAt, 380);
             this.showNetworkFailure(e, 'RSS 源测试失败');
         }
+    },
+    async testEditRSSSource() {
+        return this.validateRSSStrategy(this.editForm, 'edit');
     },
     async waitMinimum(startedAt, minimum = this.minimumActionDelay) {
         const elapsed = Date.now() - startedAt;
@@ -172,13 +267,20 @@
         });
     },
     async smoothReplaceCard(id, html) {
-        const currentCard = document.getElementById(`sub-card-${id}`);
+        let currentCard = document.getElementById(`sub-card-${id}`);
         if (!currentCard) return false;
 
         currentCard.style.transition = 'opacity 180ms ease, transform 180ms ease';
         currentCard.style.opacity = '0';
         currentCard.style.transform = 'translateY(8px) scale(0.985)';
         await new Promise(resolve => setTimeout(resolve, 180));
+
+        // The card may already have been swapped by HTMX while we were waiting
+        // for the fade-out to finish. Re-resolve it before replacing to avoid
+        // writing outerHTML on a detached node.
+        currentCard = document.getElementById(`sub-card-${id}`);
+        if (!currentCard || !currentCard.isConnected) return false;
+
         currentCard.outerHTML = html;
         this.$nextTick(() => {
             const nextCard = document.getElementById(`sub-card-${id}`);
@@ -232,11 +334,23 @@
         this.addForm.image = anime.image || '';
         this.addForm.season = anime.season || '';
         this.addForm.subtitle_group = subgroup.Name || '';
+        if (subgroup.ID) {
+            const match = rss.match(/^([^?]+\?bangumiId=\d+)/);
+            if (match && match[1]) {
+                this.addForm.backup_rss = match[1];
+            }
+        } else {
+            this.addForm.backup_rss = '';
+        }
+        if (!this.addForm.allow_multi_subgroup) {
+            this.addForm.filter = subgroup.Name || '';
+        }
         
         this.showSearchModal = false;
         this.showSubgroupList = false;
         this.selectedAnime = null;
         this.showAddModal = true;
+        this.addValidation = null;
         const previewArea = document.getElementById('add-preview-results');
         if (previewArea) previewArea.innerHTML = '';
         this.showSuccess('已选择: ' + subgroup.Name);
@@ -739,6 +853,12 @@
     editForm.rss = $event.detail.rss;
     editForm.filter = $event.detail.filter;
     editForm.exclude = $event.detail.exclude;
+    editForm.backup_rss = $event.detail.backup_rss || '';
+    editForm.expected_episodes = $event.detail.expected_episodes || 0;
+    editForm.allow_multi_subgroup = !!$event.detail.allow_multi_subgroup;
+    editForm.auto_disable_on_done = !!$event.detail.auto_disable_on_done;
+    editForm.stale_after_hours = $event.detail.stale_after_hours || 168;
+    editValidation = null;
     showEditModal = true;
 " @delete-subscription.window="
     deleteId = $event.detail.id;
@@ -786,7 +906,7 @@
                 <span class="text-sm">🔄</span> 刷新
             </button>
             <button
-                @click="showAddModal = true; addForm = {title:'', rss:''}; document.getElementById('add-preview-results').innerHTML = ''"
+                @click="resetAddForm(); showAddModal = true"
                 class="col-span-2 justify-center bg-primary text-white px-4 py-2 rounded-xl hover:bg-accent transition-all shadow-[0_4px_12px_rgba(236,72,153,0.3)] hover:shadow-accent/40 flex items-center gap-2 active:scale-95 font-bold sm:col-span-1">
                 <span class="text-sm">➕</span> RSS添加
             </button>
@@ -1218,21 +1338,82 @@
                         <div>
                             <label
                                 class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">过滤规则</label>
-                            <input type="text" name="FilterRule"
+                            <input type="text" name="FilterRule" x-model="addForm.filter"
                                 class="w-full px-4 py-3 rounded-xl bg-gray-50 border border-gray-200 focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none transition-all shadow-inner">
                         </div>
                         <div>
                             <label
                                 class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">排除规则</label>
-                            <input type="text" name="ExcludeRule"
+                            <input type="text" name="ExcludeRule" x-model="addForm.exclude"
                                 class="w-full px-4 py-3 rounded-xl bg-gray-50 border border-gray-200 focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none transition-all shadow-inner">
                         </div>
                     </div>
+
+                    <details class="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+                        <summary class="cursor-pointer text-xs font-bold uppercase tracking-wider text-slate-500">高级订阅策略</summary>
+                        <div class="mt-4 space-y-4">
+                            <div>
+                                <label class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">备用 RSS</label>
+                                <input type="url" name="BackupRSSUrl" x-model="addForm.backup_rss"
+                                    class="w-full px-4 py-3 rounded-xl bg-white border border-gray-200 focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none transition-all shadow-inner"
+                                    placeholder="主 RSS 挂掉时自动切换">
+                            </div>
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">预期总集数</label>
+                                    <input type="number" min="0" name="ExpectedEpisodes" x-model.number="addForm.expected_episodes"
+                                        class="w-full px-4 py-3 rounded-xl bg-white border border-gray-200 focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none transition-all shadow-inner"
+                                        placeholder="例如 12">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">无新进展提醒 (小时)</label>
+                                    <input type="number" min="0" name="StaleAfterHours" x-model.number="addForm.stale_after_hours"
+                                        class="w-full px-4 py-3 rounded-xl bg-white border border-gray-200 focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none transition-all shadow-inner"
+                                        placeholder="默认 168">
+                                </div>
+                            </div>
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <label class="flex items-start gap-3 rounded-xl border border-gray-200 bg-white px-4 py-3">
+                                    <input type="checkbox" name="AllowMultiSubgroup" x-model="addForm.allow_multi_subgroup" value="true" class="mt-1 rounded border-gray-300 text-primary focus:ring-primary">
+                                    <span class="text-sm text-slate-600 leading-6">
+                                        <span class="block font-semibold text-slate-800">多字幕组共存</span>
+                                        不再自动把过滤规则锁死到当前字幕组。
+                                    </span>
+                                </label>
+                                <label class="flex items-start gap-3 rounded-xl border border-gray-200 bg-white px-4 py-3">
+                                    <input type="checkbox" name="AutoDisableOnDone" x-model="addForm.auto_disable_on_done" value="true" class="mt-1 rounded border-gray-300 text-primary focus:ring-primary">
+                                    <span class="text-sm text-slate-600 leading-6">
+                                        <span class="block font-semibold text-slate-800">完结自动停用</span>
+                                        达到预期总集数后自动暂停订阅。
+                                    </span>
+                                </label>
+                            </div>
+                            <template x-if="addValidation">
+                                <div class="rounded-xl border border-sky-100 bg-sky-50 px-4 py-3 text-sm text-sky-800">
+                                    <div class="font-bold">测试结果</div>
+                                    <div class="mt-1 leading-6">
+                                        主 RSS <span class="font-semibold" x-text="addValidation.primary_count || 0"></span> 集，
+                                        当前策略可命中 <span class="font-semibold" x-text="addValidation.matching_count || 0"></span> 集
+                                        <template x-if="addValidation.backup_count">
+                                            <span>，备用 RSS <span class="font-semibold" x-text="addValidation.backup_count"></span> 集</span>
+                                        </template>
+                                    </div>
+                                    <template x-if="addValidation.warnings && addValidation.warnings.length">
+                                        <ul class="mt-2 space-y-1 text-xs text-sky-700 list-disc pl-5">
+                                            <template x-for="warn in addValidation.warnings" :key="warn">
+                                                <li x-text="warn"></li>
+                                            </template>
+                                        </ul>
+                                    </template>
+                                </div>
+                            </template>
+                        </div>
+                    </details>
                 </div>
 
                 <div class="flex flex-col-reverse sm:flex-row sm:justify-end gap-3 mt-8 pt-6 border-t border-gray-100">
                     <button type="button"
-                        @click="showAddModal = false; document.getElementById('add-preview-results').innerHTML = ''"
+                        @click="showAddModal = false; addValidation = null; document.getElementById('add-preview-results').innerHTML = ''"
                         class="w-full sm:w-auto px-6 py-2.5 rounded-xl border border-gray-200 text-gray-600 font-medium hover:bg-gray-50 transition-all">取消</button>
                     <button type="submit" id="add-sub-btn" hx-indicator="#add-sub-btn"
                         class="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-primary text-white font-bold hover:bg-accent shadow-lg shadow-pink-200 transition-all active:scale-95 disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2">
@@ -1628,8 +1809,13 @@
                     </div>
 
                     <div>
-                        <label class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">RSS
-                            链接</label>
+                        <div class="flex justify-between items-center mb-2">
+                            <label class="block text-xs font-bold text-gray-500 uppercase tracking-wider">RSS 链接</label>
+                            <button type="button" @click="testEditRSSSource()"
+                                class="text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-lg bg-emerald-50 text-emerald-600 hover:bg-emerald-500 hover:text-white transition-all">
+                                测试策略
+                            </button>
+                        </div>
                         <input type="url" name="RSSUrl" x-model="editForm.rss" required
                             class="w-full px-4 py-3 rounded-xl bg-gray-50 border border-gray-200 focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none transition-all shadow-inner">
                     </div>
@@ -1648,10 +1834,69 @@
                                 class="w-full px-4 py-3 rounded-xl bg-gray-50 border border-gray-200 focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none transition-all shadow-inner">
                         </div>
                     </div>
+
+                    <details class="rounded-2xl border border-slate-200 bg-slate-50/70 p-4" open>
+                        <summary class="cursor-pointer text-xs font-bold uppercase tracking-wider text-slate-500">高级订阅策略</summary>
+                        <div class="mt-4 space-y-4">
+                            <div>
+                                <label class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">备用 RSS</label>
+                                <input type="url" name="BackupRSSUrl" x-model="editForm.backup_rss"
+                                    class="w-full px-4 py-3 rounded-xl bg-white border border-gray-200 focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none transition-all shadow-inner"
+                                    placeholder="主 RSS 挂掉时自动切换">
+                            </div>
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">预期总集数</label>
+                                    <input type="number" min="0" name="ExpectedEpisodes" x-model.number="editForm.expected_episodes"
+                                        class="w-full px-4 py-3 rounded-xl bg-white border border-gray-200 focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none transition-all shadow-inner">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">无新进展提醒 (小时)</label>
+                                    <input type="number" min="0" name="StaleAfterHours" x-model.number="editForm.stale_after_hours"
+                                        class="w-full px-4 py-3 rounded-xl bg-white border border-gray-200 focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none transition-all shadow-inner">
+                                </div>
+                            </div>
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <label class="flex items-start gap-3 rounded-xl border border-gray-200 bg-white px-4 py-3">
+                                    <input type="checkbox" name="AllowMultiSubgroup" x-model="editForm.allow_multi_subgroup" value="true" class="mt-1 rounded border-gray-300 text-primary focus:ring-primary">
+                                    <span class="text-sm text-slate-600 leading-6">
+                                        <span class="block font-semibold text-slate-800">多字幕组共存</span>
+                                        不自动把过滤规则锁死到当前字幕组。
+                                    </span>
+                                </label>
+                                <label class="flex items-start gap-3 rounded-xl border border-gray-200 bg-white px-4 py-3">
+                                    <input type="checkbox" name="AutoDisableOnDone" x-model="editForm.auto_disable_on_done" value="true" class="mt-1 rounded border-gray-300 text-primary focus:ring-primary">
+                                    <span class="text-sm text-slate-600 leading-6">
+                                        <span class="block font-semibold text-slate-800">完结自动停用</span>
+                                        达到预期总集数后自动暂停订阅。
+                                    </span>
+                                </label>
+                            </div>
+                            <template x-if="editValidation">
+                                <div class="rounded-xl border border-sky-100 bg-sky-50 px-4 py-3 text-sm text-sky-800">
+                                    <div class="font-bold">测试结果</div>
+                                    <div class="mt-1 leading-6">
+                                        主 RSS <span class="font-semibold" x-text="editValidation.primary_count || 0"></span> 集，
+                                        当前策略可命中 <span class="font-semibold" x-text="editValidation.matching_count || 0"></span> 集
+                                        <template x-if="editValidation.backup_count">
+                                            <span>，备用 RSS <span class="font-semibold" x-text="editValidation.backup_count"></span> 集</span>
+                                        </template>
+                                    </div>
+                                    <template x-if="editValidation.warnings && editValidation.warnings.length">
+                                        <ul class="mt-2 space-y-1 text-xs text-sky-700 list-disc pl-5">
+                                            <template x-for="warn in editValidation.warnings" :key="warn">
+                                                <li x-text="warn"></li>
+                                            </template>
+                                        </ul>
+                                    </template>
+                                </div>
+                            </template>
+                        </div>
+                    </details>
                 </div>
 
                 <div class="flex flex-col-reverse sm:flex-row sm:justify-end gap-3 mt-8 pt-6 border-t border-gray-100">
-                    <button type="button" @click="showEditModal = false"
+                    <button type="button" @click="editValidation = null; showEditModal = false"
                         class="w-full sm:w-auto px-6 py-2.5 rounded-xl border border-gray-200 text-gray-600 font-medium hover:bg-gray-50 transition-all">取消</button>
                     <button type="submit" id="edit-sub-btn" hx-indicator="#edit-sub-btn"
                         class="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-primary text-white font-bold hover:bg-accent shadow-lg shadow-pink-200 transition-all active:scale-95 disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2">

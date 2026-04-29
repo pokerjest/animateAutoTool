@@ -109,9 +109,10 @@ type DownloadLogRepairResult struct {
 }
 
 type DownloadLogArchiveResult struct {
-	Scanned   int
-	Archived  int
-	Protected int
+	Scanned                 int
+	Archived                int
+	Protected               int
+	AffectedSubscriptionIDs []uint
 }
 
 const (
@@ -479,6 +480,7 @@ func ArchiveStaleDownloadLogs(source TorrentStatusSource, maxAge time.Duration) 
 
 	cutoff := time.Now().Add(-maxAge)
 	result := DownloadLogArchiveResult{}
+	affected := make(map[uint]struct{})
 	for _, logEntry := range logs {
 		if logEntry.CreatedAt.After(cutoff) {
 			continue
@@ -503,6 +505,9 @@ func ArchiveStaleDownloadLogs(source TorrentStatusSource, maxAge time.Duration) 
 				return result, err
 			}
 			result.Archived++
+			if logEntry.SubscriptionID != 0 {
+				affected[logEntry.SubscriptionID] = struct{}{}
+			}
 			continue
 		}
 
@@ -510,9 +515,15 @@ func ArchiveStaleDownloadLogs(source TorrentStatusSource, maxAge time.Duration) 
 			return result, err
 		}
 		result.Archived++
+		if logEntry.SubscriptionID != 0 {
+			affected[logEntry.SubscriptionID] = struct{}{}
+		}
 	}
 
 	GlobalDownloadLogSyncStatus.RecordArchived(result.Archived)
+	for id := range affected {
+		result.AffectedSubscriptionIDs = append(result.AffectedSubscriptionIDs, id)
+	}
 	return result, nil
 }
 

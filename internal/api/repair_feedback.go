@@ -3,11 +3,15 @@ package api
 type repairAction string
 
 const (
-	repairActionUseBaseRSS    repairAction = "use_base_rss"
-	repairActionClearFilter   repairAction = "clear_filter"
-	repairActionResetStaleLog repairAction = "reset_stale_log"
-	repairActionRetryScrape   repairAction = "retry_scrape"
-	repairActionSyncDownloads repairAction = "sync_downloads"
+	repairActionUseBaseRSS     repairAction = "use_base_rss"
+	repairActionClearFilter    repairAction = "clear_filter"
+	repairActionResetStaleLog  repairAction = "reset_stale_log"
+	repairActionRetryMissing   repairAction = "retry_missing"
+	repairActionRetryStale     repairAction = "retry_stale"
+	repairActionRetryUpgrade   repairAction = "retry_upgrade"
+	repairActionRefreshLibrary repairAction = "refresh_library"
+	repairActionRetryScrape    repairAction = "retry_scrape"
+	repairActionSyncDownloads  repairAction = "sync_downloads"
 )
 
 func repairPendingSummary(action repairAction) string {
@@ -18,6 +22,14 @@ func repairPendingSummary(action repairAction) string {
 		return "已清空过滤规则，建议立即重新检查"
 	case repairActionResetStaleLog:
 		return "已清理陈旧下载记录，建议立即重新检查"
+	case repairActionRetryMissing:
+		return "已触发缺集重检，建议查看最新订阅结果"
+	case repairActionRetryStale:
+		return "已触发重新检查，建议查看最新进展"
+	case repairActionRetryUpgrade:
+		return "已触发洗版检查，建议查看是否出现更优片源"
+	case repairActionRefreshLibrary:
+		return "已触发媒体库刷新，建议稍后确认是否进入可播放状态"
 	default:
 		return "已执行智能修复，建议立即重新检查"
 	}
@@ -31,6 +43,14 @@ func repairActionLabel(action repairAction) string {
 		return "已清空过滤规则"
 	case repairActionResetStaleLog:
 		return "已清理陈旧下载记录"
+	case repairActionRetryMissing:
+		return "已触发缺集重检"
+	case repairActionRetryStale:
+		return "已触发重新检查"
+	case repairActionRetryUpgrade:
+		return "已触发洗版检查"
+	case repairActionRefreshLibrary:
+		return "已触发媒体库刷新"
 	case repairActionRetryScrape:
 		return "已尝试重新抓取"
 	default:
@@ -50,6 +70,14 @@ func repairSuccessToast(action repairAction) string {
 		return "已清空过滤规则并重新检查"
 	case repairActionResetStaleLog:
 		return "已清理阻塞记录并重新检查"
+	case repairActionRetryMissing:
+		return "已启动缺集重检，请查看最新订阅结果"
+	case repairActionRetryStale:
+		return "已重新检查该订阅，请查看最新进展"
+	case repairActionRetryUpgrade:
+		return "已启动洗版检查，请查看是否出现更优资源"
+	case repairActionRefreshLibrary:
+		return "已请求刷新媒体库，请稍后查看是否进入可播放状态"
 	case repairActionRetryScrape:
 		return "本地番剧已完成重新抓取"
 	case repairActionSyncDownloads:

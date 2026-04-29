@@ -9,14 +9,19 @@ import (
 // Subscription 代表一个番剧订阅
 type Subscription struct {
 	gorm.Model
-	MikanID             string     `json:"mikan_id"`                                 // 蜜柑计划的 RSS ID 或 Group ID
-	Title               string     `json:"title" form:"Title"`                       // 番剧名称 (RSS 原始标题)
-	RSSUrl              string     `json:"rss_url" form:"RSSUrl" gorm:"uniqueIndex"` // 具体的 RSS 链接
-	Image               string     `json:"image" form:"Image"`                       // 番剧封面图片 (RSS 原始封面)
-	SubtitleGroup       string     `json:"subtitle_group" form:"SubtitleGroup"`      // 字幕组名称
-	Season              string     `json:"season" form:"season"`                     // 季度
-	FilterRule          string     `json:"filter_rule" form:"FilterRule"`            // 过滤规则
-	ExcludeRule         string     `json:"exclude_rule" form:"ExcludeRule"`          // 排除规则
+	MikanID             string     `json:"mikan_id"`                                  // 蜜柑计划的 RSS ID 或 Group ID
+	Title               string     `json:"title" form:"Title"`                        // 番剧名称 (RSS 原始标题)
+	RSSUrl              string     `json:"rss_url" form:"RSSUrl" gorm:"uniqueIndex"`  // 具体的 RSS 链接
+	Image               string     `json:"image" form:"Image"`                        // 番剧封面图片 (RSS 原始封面)
+	SubtitleGroup       string     `json:"subtitle_group" form:"SubtitleGroup"`       // 字幕组名称
+	Season              string     `json:"season" form:"season"`                      // 季度
+	FilterRule          string     `json:"filter_rule" form:"FilterRule"`             // 过滤规则
+	ExcludeRule         string     `json:"exclude_rule" form:"ExcludeRule"`           // 排除规则
+	BackupRSSUrl        string     `json:"backup_rss_url" form:"BackupRSSUrl"`        // 备用 RSS
+	ExpectedEpisodes    int        `json:"expected_episodes" form:"ExpectedEpisodes"` // 预期总集数
+	AutoDisableOnDone   bool       `json:"auto_disable_on_done" form:"AutoDisableOnDone"`
+	AllowMultiSubgroup  bool       `json:"allow_multi_subgroup" form:"AllowMultiSubgroup"`
+	StaleAfterHours     int        `json:"stale_after_hours" form:"StaleAfterHours"` // 超过多少小时无更新后提示
 	SavePath            string     `json:"save_path"`                                // 保存路径
 	RenameEnabled       bool       `json:"rename_enabled"`                           // 是否启用重命名
 	Offset              int        `json:"offset"`                                   // 偏移
@@ -36,7 +41,17 @@ type Subscription struct {
 	BaseRSSURL          string     `json:"base_rss_url" gorm:"-"`
 	CanClearFilter      bool       `json:"can_clear_filter" gorm:"-"`
 	CanResetStaleLogs   bool       `json:"can_reset_stale_logs" gorm:"-"`
+	CanRetryMissing     bool       `json:"can_retry_missing" gorm:"-"`
+	CanRetryStale       bool       `json:"can_retry_stale" gorm:"-"`
+	CanRetryUpgrade     bool       `json:"can_retry_upgrade" gorm:"-"`
+	CanRefreshLibrary   bool       `json:"can_refresh_library" gorm:"-"`
 	HasRepairActions    bool       `json:"has_repair_actions" gorm:"-"`
+	StrategyHint        string     `json:"strategy_hint" gorm:"-"`
+	LifecycleStage      string     `json:"lifecycle_stage" gorm:"-"`
+	LifecycleTone       string     `json:"lifecycle_tone" gorm:"-"`
+	LibraryStage        string     `json:"library_stage" gorm:"-"`
+	LibraryTone         string     `json:"library_tone" gorm:"-"`
+	LibraryHint         string     `json:"library_hint" gorm:"-"`
 
 	// Refactored Metadata
 	MetadataID *uint          `json:"metadata_id"`

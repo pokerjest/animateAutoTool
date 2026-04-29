@@ -161,6 +161,24 @@
                         <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500">可选但推荐</span>
                     </div>
 
+                    <div class="mt-4 grid gap-3 md:grid-cols-3">
+                        <button type="button" @click="applyPreset('quick-local')"
+                            class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-left transition hover:border-primary/30 hover:bg-primary/5">
+                            <div class="text-sm font-bold text-slate-900">快速起步</div>
+                            <div class="mt-2 text-xs leading-6 text-slate-500">保留托管模式，先把基础流程跑起来。</div>
+                        </button>
+                        <button type="button" @click="applyPreset('nas-jellyfin')"
+                            class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-left transition hover:border-secondary/30 hover:bg-secondary/5">
+                            <div class="text-sm font-bold text-slate-900">NAS + Jellyfin</div>
+                            <div class="mt-2 text-xs leading-6 text-slate-500">默认走外部 qB，下载目录按媒体库场景预填。</div>
+                        </button>
+                        <button type="button" @click="applyPreset('external-qb')"
+                            class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-left transition hover:border-emerald-300 hover:bg-emerald-50">
+                            <div class="text-sm font-bold text-slate-900">外部 qB WebUI</div>
+                            <div class="mt-2 text-xs leading-6 text-slate-500">适合你已经有独立 qB，只想把地址和账号填上。</div>
+                        </button>
+                    </div>
+
                     <div class="mt-4 grid gap-3 md:grid-cols-2">
                         <label class="rounded-2xl border p-4 transition"
                             :class="qbMode === 'managed' ? 'border-primary bg-primary/5 shadow-lg shadow-primary/10' : 'border-slate-200 bg-white'">
@@ -251,6 +269,37 @@
                 qbUsername: '{{.QBUsername}}',
                 qbPassword: '{{.QBPassword}}',
                 baseDir: '{{.BaseDir}}',
+                applyPreset(name) {
+                    const presets = {
+                        'quick-local': {
+                            qbMode: 'managed',
+                            qbUrl: '',
+                            qbUsername: '',
+                            qbPassword: '',
+                            baseDir: this.baseDir || ''
+                        },
+                        'nas-jellyfin': {
+                            qbMode: 'external',
+                            qbUrl: this.qbUrl || 'http://127.0.0.1:8080',
+                            qbUsername: this.qbUsername || 'admin',
+                            qbPassword: this.qbPassword || '',
+                            baseDir: this.baseDir || '/media/anime/downloads'
+                        },
+                        'external-qb': {
+                            qbMode: 'external',
+                            qbUrl: this.qbUrl || 'http://127.0.0.1:8080',
+                            qbUsername: this.qbUsername || 'admin',
+                            qbPassword: this.qbPassword || ''
+                        }
+                    };
+                    const preset = presets[name];
+                    if (!preset) return;
+                    this.qbMode = preset.qbMode ?? this.qbMode;
+                    this.qbUrl = preset.qbUrl ?? this.qbUrl;
+                    this.qbUsername = preset.qbUsername ?? this.qbUsername;
+                    this.qbPassword = preset.qbPassword ?? this.qbPassword;
+                    this.baseDir = preset.baseDir ?? this.baseDir;
+                },
                 init() {
                     this.fetchReadiness();
                 },

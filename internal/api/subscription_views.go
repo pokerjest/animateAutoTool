@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -141,13 +142,16 @@ func populateSubscriptionStat(sub *model.Subscription) {
 }
 
 func loadSubscriptionCard(id uint) (model.Subscription, error) {
-	var sub model.Subscription
-	if err := db.DB.Preload("Metadata").First(&sub, id).Error; err != nil {
+	sub, err := subscriptionWithMetadataByID(id)
+	if err != nil || sub == nil {
+		if err == nil {
+			err = fmt.Errorf("subscription %d not found", id)
+		}
 		return model.Subscription{}, err
 	}
 
-	populateSubscriptionStat(&sub)
-	return sub, nil
+	populateSubscriptionStat(sub)
+	return *sub, nil
 }
 
 func populateSubscriptionActionHints(sub *model.Subscription) {
@@ -159,9 +163,41 @@ func populateSubscriptionActionHints(sub *model.Subscription) {
 	sub.BaseRSSURL = ""
 	sub.CanClearFilter = false
 	sub.CanResetStaleLogs = false
+	sub.CanRetryMissing = false
+	sub.CanRetryStale = false
+	sub.CanRetryUpgrade = false
+	sub.CanRefreshLibrary = false
 	sub.HasRepairActions = false
+	sub.StrategyHint = ""
+	sub.LifecycleStage = ""
+	sub.LifecycleTone = ""
+	sub.LibraryStage = ""
+	sub.LibraryTone = ""
+	sub.LibraryHint = ""
 	sub.LastErrorDisplay = humanizeOperationError(sub.LastError)
+	if sub.ExpectedEpisodes > 0 && sub.LastEp < sub.ExpectedEpisodes {
+		appendStrategyHint(sub, fmt.Sprintf("当前已追到 %d / %d 集，还差 %d 集达到完结目标。", sub.LastEp, sub.ExpectedEpisodes, sub.ExpectedEpisodes-sub.LastEp))
+	}
+	if missing := missingEpisodeSummary(sub); missing != "" {
+		sub.CanRetryMissing = true
+		appendStrategyHint(sub, missing)
+	}
+	if sub.StaleAfterHours > 0 && sub.LastSuccessAt != nil {
+		if time.Since(*sub.LastSuccessAt) > time.Duration(sub.StaleAfterHours)*time.Hour {
+			sub.CanRetryStale = true
+			appendStrategyHint(sub, fmt.Sprintf("已经超过 %d 小时没有出现新进展，建议检查 RSS 源、下载器或备用 RSS。", sub.StaleAfterHours))
+		}
+	}
+	if sub.AutoDisableOnDone && sub.ExpectedEpisodes > 0 && sub.LastEp >= sub.ExpectedEpisodes {
+		appendStrategyHint(sub, "这部番剧的目标集数已经完成；如果还在运行，可以直接自动停用。")
+	}
+	if staleCount := countResettableSubscriptionLogs(sub.ID, staleLogResetAge); staleCount > 0 {
+		appendStrategyHint(sub, fmt.Sprintf("有 %d 条下载记录已经卡住超过 24 小时，可直接清理阻塞后重试。", staleCount))
+	}
+	populateSubscriptionLibraryState(sub)
+	sub.HasRepairActions = sub.CanUseBaseRSS || sub.CanClearFilter || sub.CanResetStaleLogs || sub.CanRetryMissing || sub.CanRetryStale || sub.CanRetryUpgrade || sub.CanRefreshLibrary
 	if sub.LastRunStatus != service.SubscriptionRunStatusIdle {
+		populateSubscriptionLifecycle(sub)
 		return
 	}
 	if strings.Contains(sub.LastRunSummary, emptySubgroupFeedHint) {
@@ -177,7 +213,188 @@ func populateSubscriptionActionHints(sub *model.Subscription) {
 	if strings.Contains(sub.LastRunSummary, duplicateOnlyHint) && hasResettableSubscriptionLogs(sub.ID, staleLogResetAge) {
 		sub.CanResetStaleLogs = true
 	}
-	sub.HasRepairActions = sub.CanUseBaseRSS || sub.CanClearFilter || sub.CanResetStaleLogs
+	sub.HasRepairActions = sub.CanUseBaseRSS || sub.CanClearFilter || sub.CanResetStaleLogs || sub.CanRetryMissing || sub.CanRetryStale || sub.CanRetryUpgrade || sub.CanRefreshLibrary
+	populateSubscriptionLifecycle(sub)
+}
+
+func populateSubscriptionLifecycle(sub *model.Subscription) {
+	if sub == nil {
+		return
+	}
+
+	switch {
+	case sub.CanRetryMissing:
+		sub.LifecycleStage = "疑似缺集"
+		sub.LifecycleTone = "warning"
+	case sub.CanResetStaleLogs:
+		sub.LifecycleStage = "下载阻塞"
+		sub.LifecycleTone = "danger"
+	case sub.CanRetryStale:
+		sub.LifecycleStage = "长期无进展"
+		sub.LifecycleTone = "warning"
+	case !sub.IsActive && sub.AutoDisableOnDone && sub.ExpectedEpisodes > 0 && sub.LastEp >= sub.ExpectedEpisodes:
+		sub.LifecycleStage = "已完结停用"
+		sub.LifecycleTone = "success"
+	case sub.ExpectedEpisodes > 0 && sub.LastEp >= sub.ExpectedEpisodes:
+		sub.LifecycleStage = "已追平目标"
+		sub.LifecycleTone = "success"
+	case sub.ExpectedEpisodes > 0 && sub.LastEp > 0:
+		sub.LifecycleStage = "追更中"
+		sub.LifecycleTone = "info"
+	case sub.IsActive:
+		sub.LifecycleStage = "运行中"
+		sub.LifecycleTone = "neutral"
+	default:
+		sub.LifecycleStage = "待配置"
+		sub.LifecycleTone = "neutral"
+	}
+}
+
+func appendStrategyHint(sub *model.Subscription, hint string) {
+	if sub == nil {
+		return
+	}
+	hint = strings.TrimSpace(hint)
+	if hint == "" {
+		return
+	}
+	if sub.StrategyHint == "" {
+		sub.StrategyHint = hint
+		return
+	}
+	sub.StrategyHint = sub.StrategyHint + " " + hint
+}
+
+func populateSubscriptionLibraryState(sub *model.Subscription) {
+	if sub == nil || db.DB == nil {
+		return
+	}
+
+	animeIDs := make([]uint, 0, 2)
+	var localAnimes []model.LocalAnime
+	query := db.DB.Model(&model.LocalAnime{})
+	switch {
+	case sub.MetadataID != nil && *sub.MetadataID != 0:
+		query = query.Where("metadata_id = ?", *sub.MetadataID)
+	case sub.Metadata != nil && sub.Metadata.BangumiID != 0:
+		query = query.Joins("JOIN anime_metadata ON anime_metadata.id = local_animes.metadata_id").
+			Where("anime_metadata.bangumi_id = ?", sub.Metadata.BangumiID)
+	default:
+		cleanTitle := parser.CleanTitle(sub.Title)
+		query = query.Where("title = ? OR title = ?", sub.Title, cleanTitle)
+	}
+	if err := query.Find(&localAnimes).Error; err != nil || len(localAnimes) == 0 {
+		return
+	}
+
+	hasSeriesInJellyfin := false
+	for _, anime := range localAnimes {
+		animeIDs = append(animeIDs, anime.ID)
+		if strings.TrimSpace(anime.JellyfinSeriesID) != "" {
+			hasSeriesInJellyfin = true
+		}
+	}
+	if len(animeIDs) == 0 {
+		return
+	}
+	jellyfinConfigured := strings.TrimSpace(configValue(model.ConfigKeyJellyfinUrl)) != "" &&
+		strings.TrimSpace(configValue(model.ConfigKeyJellyfinApiKey)) != ""
+
+	var totalEpisodes int64
+	db.DB.Model(&model.LocalEpisode{}).Where("local_anime_id IN ?", animeIDs).Count(&totalEpisodes)
+	if totalEpisodes > 0 {
+		sub.LibraryStage = "已入库"
+		sub.LibraryTone = "info"
+		sub.LibraryHint = fmt.Sprintf("本地媒体库已识别 %d 集。", totalEpisodes)
+	}
+
+	var jellyfinEpisodeCount int64
+	db.DB.Model(&model.LocalEpisode{}).
+		Where("local_anime_id IN ? AND jellyfin_item_id <> ''", animeIDs).
+		Count(&jellyfinEpisodeCount)
+	if hasSeriesInJellyfin || jellyfinEpisodeCount > 0 {
+		sub.LibraryStage = "可播放"
+		sub.LibraryTone = "success"
+		if totalEpisodes > 0 {
+			sub.LibraryHint = fmt.Sprintf("本地已入库 %d 集，Jellyfin 已建立条目，可直接播放。", totalEpisodes)
+		} else {
+			sub.LibraryHint = "Jellyfin 已建立条目，可直接播放。"
+		}
+	} else if totalEpisodes > 0 && jellyfinConfigured {
+		sub.LibraryStage = "待同步到媒体库"
+		sub.LibraryTone = "warning"
+		sub.LibraryHint = fmt.Sprintf("本地已经识别 %d 集，但 Jellyfin 还没有建立条目；建议触发一次库刷新。", totalEpisodes)
+		sub.CanRefreshLibrary = true
+	}
+
+	var episodes []model.LocalEpisode
+	if err := db.DB.Select("episode_num", "resolution").
+		Where("local_anime_id IN ?", animeIDs).
+		Find(&episodes).Error; err == nil {
+		lowResEpisodes := collectUpgradeableEpisodes(episodes)
+		if len(lowResEpisodes) > 0 {
+			sub.CanRetryUpgrade = true
+			appendStrategyHint(sub, formatUpgradeHint(lowResEpisodes))
+			if sub.LibraryHint == "" {
+				sub.LibraryHint = formatUpgradeHint(lowResEpisodes)
+			} else {
+				sub.LibraryHint = strings.TrimSpace(sub.LibraryHint + " " + formatUpgradeHint(lowResEpisodes))
+			}
+		}
+	}
+}
+
+func collectUpgradeableEpisodes(episodes []model.LocalEpisode) []int {
+	bestByEpisode := make(map[int]int)
+	for _, episode := range episodes {
+		if episode.EpisodeNum <= 0 {
+			continue
+		}
+		score := resolutionScore(episode.Resolution)
+		if current, ok := bestByEpisode[episode.EpisodeNum]; !ok || score > current {
+			bestByEpisode[episode.EpisodeNum] = score
+		}
+	}
+
+	upgradeable := make([]int, 0)
+	for episodeNum, score := range bestByEpisode {
+		if score >= resolutionScore("1080p") {
+			continue
+		}
+		upgradeable = append(upgradeable, episodeNum)
+	}
+	sort.Ints(upgradeable)
+	return upgradeable
+}
+
+func formatUpgradeHint(episodes []int) string {
+	if len(episodes) == 0 {
+		return ""
+	}
+	preview := make([]string, 0, min(len(episodes), 4))
+	for i := 0; i < len(episodes) && i < 4; i++ {
+		preview = append(preview, fmt.Sprintf("%02d", episodes[i]))
+	}
+	if len(episodes) > 4 {
+		return fmt.Sprintf("检测到 %s 等 %d 集仍是较低分辨率，可尝试洗版检查更优片源。", strings.Join(preview, "、"), len(episodes))
+	}
+	return fmt.Sprintf("检测到 %s 仍是较低分辨率，可尝试洗版检查更优片源。", strings.Join(preview, "、"))
+}
+
+func resolutionScore(raw string) int {
+	value := strings.ToLower(strings.TrimSpace(raw))
+	switch {
+	case strings.Contains(value, "2160"), strings.Contains(value, "4k"), strings.Contains(value, "3840x2160"):
+		return 4
+	case strings.Contains(value, "1080"), strings.Contains(value, "1920x1080"), strings.Contains(value, "fhd"):
+		return 3
+	case strings.Contains(value, "720"), strings.Contains(value, "1280x720"), strings.Contains(value, "hd"):
+		return 2
+	case strings.Contains(value, "480"), strings.Contains(value, "360"):
+		return 1
+	default:
+		return 0
+	}
 }
 
 func deriveBaseRSSURL(raw string) (string, bool) {
@@ -236,8 +453,12 @@ func clearFilterAndRecheck(sub *model.Subscription) error {
 }
 
 func hasResettableSubscriptionLogs(subscriptionID uint, maxAge time.Duration) bool {
+	return countResettableSubscriptionLogs(subscriptionID, maxAge) > 0
+}
+
+func countResettableSubscriptionLogs(subscriptionID uint, maxAge time.Duration) int64 {
 	if subscriptionID == 0 || db.DB == nil {
-		return false
+		return 0
 	}
 
 	var count int64
@@ -245,7 +466,56 @@ func hasResettableSubscriptionLogs(subscriptionID uint, maxAge time.Duration) bo
 	db.DB.Model(&model.DownloadLog{}).
 		Where("subscription_id = ? AND status IN ? AND created_at < ?", subscriptionID, []string{"downloading", "failed"}, cutoff).
 		Count(&count)
-	return count > 0
+	return count
+}
+
+func missingEpisodeSummary(sub *model.Subscription) string {
+	if sub == nil || sub.ID == 0 || sub.ExpectedEpisodes <= 1 || db.DB == nil {
+		return ""
+	}
+
+	var logs []model.DownloadLog
+	if err := db.DB.
+		Where("subscription_id = ? AND status IN ?", sub.ID, []string{"downloading", "completed", "renamed"}).
+		Find(&logs).Error; err != nil {
+		return ""
+	}
+
+	observed := make(map[int]struct{}, len(logs))
+	for _, logEntry := range logs {
+		ep := strings.TrimSpace(logEntry.Episode)
+		if ep == "" || strings.Contains(ep, ".") {
+			continue
+		}
+		n, err := strconv.Atoi(ep)
+		if err != nil || n <= 0 {
+			continue
+		}
+		observed[n] = struct{}{}
+	}
+	if len(observed) == 0 {
+		return ""
+	}
+
+	missing := make([]int, 0)
+	for i := 1; i <= sub.ExpectedEpisodes; i++ {
+		if _, ok := observed[i]; ok {
+			continue
+		}
+		missing = append(missing, i)
+	}
+	if len(missing) == 0 {
+		return ""
+	}
+
+	preview := make([]string, 0, min(len(missing), 4))
+	for i := 0; i < len(missing) && i < 4; i++ {
+		preview = append(preview, fmt.Sprintf("%02d", missing[i]))
+	}
+	if len(missing) > 4 {
+		return fmt.Sprintf("疑似缺集：%s 等 %d 集，建议触发一次重检或检查备用 RSS。", strings.Join(preview, "、"), len(missing))
+	}
+	return fmt.Sprintf("疑似缺集：%s，建议触发一次重检或检查备用 RSS。", strings.Join(preview, "、"))
 }
 
 func resetStaleLogsAndRecheck(sub *model.Subscription, maxAge time.Duration) error {
@@ -270,7 +540,7 @@ func persistRepairAndRecheck(sub *model.Subscription, action repairAction) error
 		return fmt.Errorf("subscription is nil")
 	}
 
-	if err := db.DB.Save(sub).Error; err != nil {
+	if err := saveSubscription(sub); err != nil {
 		return err
 	}
 
@@ -279,7 +549,7 @@ func persistRepairAndRecheck(sub *model.Subscription, action repairAction) error
 		sub.LastRunStatus = service.SubscriptionRunStatusIdle
 		sub.LastRunSummary = repairAutoRecheckFailureSummary(action)
 		sub.LastError = err.Error()
-		if saveErr := db.DB.Save(sub).Error; saveErr != nil {
+		if saveErr := saveSubscription(sub); saveErr != nil {
 			return saveErr
 		}
 	}
@@ -393,8 +663,8 @@ func GetMikanDashboardHandler(c *gin.Context) {
 }
 
 func RefreshSubscriptionsHandler(c *gin.Context) {
-	var subs []model.Subscription
-	if err := db.DB.Preload("Metadata").Find(&subs).Error; err != nil {
+	subs, err := listSubscriptionsWithMetadata()
+	if err != nil {
 		subscriptionJSONServerError(c, "读取订阅列表", err)
 		return
 	}
@@ -404,7 +674,7 @@ func RefreshSubscriptionsHandler(c *gin.Context) {
 
 	for i := range subs {
 		metaSvc.EnrichMetadata(subs[i].Metadata, subs[i].Title)
-		if err := db.DB.Save(&subs[i]).Error; err == nil {
+		if err := saveSubscription(&subs[i]); err == nil {
 			updatedCount++
 		}
 		time.Sleep(200 * time.Millisecond)

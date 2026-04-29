@@ -39,6 +39,76 @@ func NewSubscriptionManager(down downloader.Downloader) *SubscriptionManager {
 	}
 }
 
+func RetrySubscriptionsByID(ctx context.Context, down downloader.Downloader, ids []uint, source string) error {
+	if db.DB == nil || len(ids) == 0 {
+		return nil
+	}
+	unique := make(map[uint]struct{}, len(ids))
+	filtered := make([]uint, 0, len(ids))
+	for _, id := range ids {
+		if id == 0 {
+			continue
+		}
+		if _, ok := unique[id]; ok {
+			continue
+		}
+		unique[id] = struct{}{}
+		filtered = append(filtered, id)
+	}
+	if len(filtered) == 0 {
+		return nil
+	}
+
+	var subs []model.Subscription
+	if err := db.DB.Where("id IN ? AND is_active = ?", filtered, true).Find(&subs).Error; err != nil {
+		return err
+	}
+	mgr := NewSubscriptionManager(down)
+	for i := range subs {
+		mgr.ProcessSubscriptionWithSourceContext(ctx, &subs[i], source)
+	}
+	return nil
+}
+
+func RetryStaleSubscriptions(ctx context.Context, down downloader.Downloader, minCheckInterval time.Duration, source string) (int, error) {
+	if db.DB == nil || down == nil {
+		return 0, nil
+	}
+	if minCheckInterval <= 0 {
+		minCheckInterval = 2 * time.Hour
+	}
+
+	now := time.Now()
+	var subs []model.Subscription
+	if err := db.DB.
+		Where("is_active = ? AND stale_after_hours > 0 AND last_success_at IS NOT NULL", true).
+		Find(&subs).Error; err != nil {
+		return 0, err
+	}
+
+	mgr := NewSubscriptionManager(down)
+	retried := 0
+	for i := range subs {
+		sub := &subs[i]
+		if sub.LastSuccessAt == nil {
+			continue
+		}
+		staleFor := time.Duration(sub.StaleAfterHours) * time.Hour
+		if staleFor <= 0 {
+			continue
+		}
+		if now.Sub(*sub.LastSuccessAt) < staleFor {
+			continue
+		}
+		if sub.LastCheckAt != nil && now.Sub(*sub.LastCheckAt) < minCheckInterval {
+			continue
+		}
+		mgr.ProcessSubscriptionWithSourceContext(ctx, sub, source)
+		retried++
+	}
+	return retried, nil
+}
+
 // CheckUpdate 对所有活跃订阅执行一次检查
 func (m *SubscriptionManager) CheckUpdate() {
 	m.CheckUpdateContext(context.Background())
@@ -68,7 +138,7 @@ func (m *SubscriptionManager) ProcessSubscriptionWithSourceContext(ctx context.C
 	log.Printf("DEBUG: Processing subscription %s (URL: %s)", sub.Title, sub.RSSUrl)
 	checkedAt := time.Now()
 
-	episodes, err := m.parseRSS(ctx, sub.RSSUrl)
+	episodes, activeRSS, fallbackUsed, err := m.parseRSSWithFallback(ctx, sub)
 	if err != nil {
 		log.Printf("Failed to parse RSS for %s: %v", sub.Title, err)
 		m.persistRunState(sub, subscriptionRunState{
@@ -187,7 +257,72 @@ func (m *SubscriptionManager) ProcessSubscriptionWithSourceContext(ctx context.C
 		state.Summary = strings.TrimSpace(m.buildIdleRunSummary(sub, len(episodes), filteredCount, duplicateCount))
 	}
 
+	if fallbackUsed {
+		fallbackNote := "已自动切换到备用 RSS 继续检查"
+		if activeRSS != "" {
+			fallbackNote = "主 RSS 暂时不可用，已使用备用 RSS"
+		}
+		if state.Summary == "" {
+			state.Summary = fallbackNote
+		} else {
+			state.Summary = strings.TrimSpace(state.Summary + "；" + fallbackNote)
+		}
+	}
+
+	if shouldAutoDisableSubscription(sub, state) {
+		if err := m.DB.Model(&model.Subscription{}).Where("id = ?", sub.ID).Update("is_active", false).Error; err != nil {
+			log.Printf("Failed to auto-disable subscription %s: %v", sub.Title, err)
+		} else {
+			sub.IsActive = false
+			if state.Summary == "" {
+				state.Summary = "已完成全部集数，订阅已自动停用"
+			} else {
+				state.Summary = strings.TrimSpace(state.Summary + "；已完成全部集数，订阅已自动停用")
+			}
+		}
+	}
+
 	m.persistRunState(sub, state)
+}
+
+func (m *SubscriptionManager) parseRSSWithFallback(ctx context.Context, sub *model.Subscription) ([]parser.Episode, string, bool, error) {
+	if sub == nil {
+		return nil, "", false, fmt.Errorf("subscription is nil")
+	}
+
+	primary := strings.TrimSpace(sub.RSSUrl)
+	backup := strings.TrimSpace(sub.BackupRSSUrl)
+
+	episodes, err := m.parseRSS(ctx, primary)
+	if err == nil && len(episodes) > 0 {
+		return episodes, primary, false, nil
+	}
+
+	if backup == "" || backup == primary {
+		if err != nil {
+			return nil, primary, false, err
+		}
+		return episodes, primary, false, nil
+	}
+
+	backupEpisodes, backupErr := m.parseRSS(ctx, backup)
+	if backupErr != nil {
+		if err != nil {
+			return nil, primary, false, err
+		}
+		return backupEpisodes, backup, true, backupErr
+	}
+	return backupEpisodes, backup, true, nil
+}
+
+func shouldAutoDisableSubscription(sub *model.Subscription, state subscriptionRunState) bool {
+	if sub == nil || !sub.AutoDisableOnDone || sub.ExpectedEpisodes <= 0 {
+		return false
+	}
+	if state.NewDownloads > 0 || state.FailedDownloads > 0 {
+		return false
+	}
+	return sub.LastEp >= sub.ExpectedEpisodes
 }
 
 type subscriptionRunState struct {

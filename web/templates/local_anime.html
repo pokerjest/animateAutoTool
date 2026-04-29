@@ -1646,11 +1646,23 @@ showToast(resolveAppToastMessage($event.detail), $event.detail.type || 'success'
                                     placeholder="01">
                             </div>
                             <div class="mt-2">
-                                <button
-                                    @click="renameState.pattern = '{TitleCN} ({Year}) / Season {Season} / {TitleCN} - S{Season}E{Ep}.{Ext}'; previewRename()"
-                                    class="w-full py-1.5 px-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-[10px] font-bold rounded border border-indigo-200 transition-colors">
-                                    🌟 预设: Jellyfin/Plex 标准
-                                </button>
+                                <div class="grid grid-cols-1 gap-2">
+                                    <button
+                                        @click="renameState.pattern = '{TitleCN} ({Year}) / Season {Season} / {TitleCN} - S{Season}E{Ep}.{Ext}'; previewRename()"
+                                        class="w-full py-1.5 px-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-[10px] font-bold rounded border border-indigo-200 transition-colors">
+                                        🌟 预设: Jellyfin/Plex 标准
+                                    </button>
+                                    <button
+                                        @click="renameState.pattern = '{TitleCN} / {TitleCN} - S{Season}E{Ep}.{Ext}'; previewRename()"
+                                        class="w-full py-1.5 px-2 bg-sky-50 hover:bg-sky-100 text-sky-700 text-[10px] font-bold rounded border border-sky-200 transition-colors">
+                                        📺 预设: Jellyfin 轻量目录
+                                    </button>
+                                    <button
+                                        @click="renameState.pattern = '{TitleCN} - S{Season}E{Ep} [{SubGroup}] [{Resolution}].{Ext}'; previewRename()"
+                                        class="w-full py-1.5 px-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-[10px] font-bold rounded border border-emerald-200 transition-colors">
+                                        🧩 预设: 保留字幕组与分辨率
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </div>

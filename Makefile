@@ -1,4 +1,4 @@
-.PHONY: all build run start stop restart status log help clean
+.PHONY: all build run start stop restart status log help clean doctor repair
 
 # 默认目标：显示帮助信息
 all: help
@@ -40,6 +40,14 @@ log:
 package:
 	@./scripts/package.sh $(v)
 
+# 运行健康诊断
+doctor:
+	@go run ./cmd/doctor
+
+# 执行下载日志与订阅修复
+repair:
+	@go run ./cmd/repair
+
 # 清理本地构建与调试残留（保留 config.yaml 和运行数据）
 clean:
 	@bash ./scripts/clean_worktree.sh
@@ -58,6 +66,8 @@ help:
 	@echo "  make status   - 查看服务运行状态 (PID)"
 	@echo "  make log      - 实时查看日志 (logs/server.log)"
 	@echo "  make package  - 打包发布 (用法: make package v=1.0.0)"
+	@echo "  make doctor   - 输出当前系统健康摘要"
+	@echo "  make repair   - 执行一次下载日志与订阅修复"
 	@echo "  make clean    - 清理本地构建、日志与调试残留"
 	@echo "  make help     - 显示此帮助信息"
 	@echo "========================================"

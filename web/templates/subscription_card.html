@@ -98,6 +98,24 @@
                     {{ .Season }}
                 </span>
                 {{ end }}
+                {{ if .BackupRSSUrl }}
+                <span
+                    class="inline-flex items-center px-2 py-0.5 rounded-lg text-[10px] bg-sky-50/80 text-sky-700 border border-sky-100 font-bold">
+                    备用 RSS
+                </span>
+                {{ end }}
+                {{ if .AllowMultiSubgroup }}
+                <span
+                    class="inline-flex items-center px-2 py-0.5 rounded-lg text-[10px] bg-violet-50/80 text-violet-700 border border-violet-100 font-bold">
+                    多字幕组
+                </span>
+                {{ end }}
+                {{ if .AutoDisableOnDone }}
+                <span
+                    class="inline-flex items-center px-2 py-0.5 rounded-lg text-[10px] bg-emerald-50/80 text-emerald-700 border border-emerald-100 font-bold">
+                    完结自动停用
+                </span>
+                {{ end }}
             </div>
 
             <!-- Stats -->
@@ -113,6 +131,35 @@
                     title="最近一次检查新增下载">
                     <span>⬇️</span>
                     <span class="font-medium">最近新增 {{ .LastNewDownloads }} 集</span>
+                </div>
+                {{ end }}
+                {{ if gt .ExpectedEpisodes 0 }}
+                <div class="flex items-center gap-1.5 text-xs text-sky-700 bg-sky-50 px-2.5 py-1 rounded-lg border border-sky-100"
+                    title="目标总集数">
+                    <span>🎯</span>
+                    <span class="font-medium">目标 {{ .ExpectedEpisodes }} 集</span>
+                </div>
+                {{ end }}
+                {{ if .LifecycleStage }}
+                <div class="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg border
+                    {{ if eq .LifecycleTone "success" }}text-emerald-700 bg-emerald-50 border-emerald-100
+                    {{ else if eq .LifecycleTone "warning" }}text-amber-700 bg-amber-50 border-amber-100
+                    {{ else if eq .LifecycleTone "danger" }}text-rose-700 bg-rose-50 border-rose-100
+                    {{ else if eq .LifecycleTone "info" }}text-blue-700 bg-blue-50 border-blue-100
+                    {{ else }}text-slate-700 bg-slate-50 border-slate-100{{ end }}"
+                    title="当前订阅生命周期状态">
+                    <span>🧭</span>
+                    <span class="font-medium">{{ .LifecycleStage }}</span>
+                </div>
+                {{ end }}
+                {{ if .LibraryStage }}
+                <div class="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg border
+                    {{ if eq .LibraryTone "success" }}text-emerald-700 bg-emerald-50 border-emerald-100
+                    {{ else if eq .LibraryTone "warning" }}text-amber-700 bg-amber-50 border-amber-100
+                    {{ else }}text-cyan-700 bg-cyan-50 border-cyan-100{{ end }}"
+                    title="当前媒体库闭环状态">
+                    <span>🎞️</span>
+                    <span class="font-medium">{{ .LibraryStage }}</span>
                 </div>
                 {{ end }}
             </div>
@@ -199,6 +246,66 @@
                     </button>
                 </div>
                 {{ end }}
+
+                {{ if .CanRetryMissing }}
+                <div class="flex items-center justify-between gap-3 rounded-lg border border-sky-100 bg-sky-50/80 px-2.5 py-2">
+                    <div class="min-w-0 text-[10px] text-sky-700 leading-relaxed">
+                        发现疑似缺集，立即重检可以结合当前 RSS 和备用 RSS 再补一次。
+                    </div>
+                    <button
+                        hx-post="/api/subscriptions/{{ .ID }}/retry-missing"
+                        hx-target="#sub-card-{{.ID}}"
+                        hx-swap="outerHTML swap:120ms settle:220ms"
+                        class="shrink-0 rounded-lg border border-sky-200 bg-white px-2.5 py-1 text-[10px] font-bold text-sky-700 hover:bg-sky-50 transition">
+                        补缺集重检
+                    </button>
+                </div>
+                {{ end }}
+
+                {{ if .CanRetryStale }}
+                <div class="flex items-center justify-between gap-3 rounded-lg border border-violet-100 bg-violet-50/80 px-2.5 py-2">
+                    <div class="min-w-0 text-[10px] text-violet-700 leading-relaxed">
+                        这条订阅已经长时间没有新进展，可以立即重新检查一次主 RSS 和备用 RSS。
+                    </div>
+                    <button
+                        hx-post="/api/subscriptions/{{ .ID }}/recheck-stale"
+                        hx-target="#sub-card-{{.ID}}"
+                        hx-swap="outerHTML swap:120ms settle:220ms"
+                        class="shrink-0 rounded-lg border border-violet-200 bg-white px-2.5 py-1 text-[10px] font-bold text-violet-700 hover:bg-violet-50 transition">
+                        重新检查
+                    </button>
+                </div>
+                {{ end }}
+
+                {{ if .CanRetryUpgrade }}
+                <div class="flex items-center justify-between gap-3 rounded-lg border border-cyan-100 bg-cyan-50/80 px-2.5 py-2">
+                    <div class="min-w-0 text-[10px] text-cyan-700 leading-relaxed">
+                        已入库集数里检测到较低分辨率内容，可以主动做一次洗版检查，看看当前 RSS 是否已经有更优片源。
+                    </div>
+                    <button
+                        hx-post="/api/subscriptions/{{ .ID }}/retry-upgrade"
+                        hx-target="#sub-card-{{.ID}}"
+                        hx-swap="outerHTML swap:120ms settle:220ms"
+                        class="shrink-0 rounded-lg border border-cyan-200 bg-white px-2.5 py-1 text-[10px] font-bold text-cyan-700 hover:bg-cyan-50 transition">
+                        洗版检查
+                    </button>
+                </div>
+                {{ end }}
+
+                {{ if .CanRefreshLibrary }}
+                <div class="flex items-center justify-between gap-3 rounded-lg border border-teal-100 bg-teal-50/80 px-2.5 py-2">
+                    <div class="min-w-0 text-[10px] text-teal-700 leading-relaxed">
+                        这条订阅已经入库，但 Jellyfin 还没建立条目，可以主动触发一次媒体库刷新。
+                    </div>
+                    <button
+                        hx-post="/api/subscriptions/{{ .ID }}/refresh-library"
+                        hx-target="#sub-card-{{.ID}}"
+                        hx-swap="outerHTML swap:120ms settle:220ms"
+                        class="shrink-0 rounded-lg border border-teal-200 bg-white px-2.5 py-1 text-[10px] font-bold text-teal-700 hover:bg-teal-50 transition">
+                        刷新媒体库
+                    </button>
+                </div>
+                {{ end }}
             </div>
             {{ end }}
 
@@ -213,6 +320,20 @@
             <div class="flex items-center gap-2 text-[10px] text-red-600" title="{{ .LastError }}">
                 <span class="w-4 h-4 flex items-center justify-center bg-red-50 rounded shadow-sm text-[8px]">⚠️</span>
                 <span class="truncate flex-1">{{ if .LastErrorDisplay }}{{ .LastErrorDisplay }}{{ else }}{{ .LastError }}{{ end }}</span>
+            </div>
+            {{ end }}
+
+            {{ if .StrategyHint }}
+            <div class="flex items-start gap-2 text-[10px] text-sky-700" title="{{ .StrategyHint }}">
+                <span class="w-4 h-4 mt-0.5 flex items-center justify-center bg-sky-50 rounded shadow-sm text-[8px]">💡</span>
+                <span class="flex-1 leading-relaxed">{{ .StrategyHint }}</span>
+            </div>
+            {{ end }}
+
+            {{ if .LibraryHint }}
+            <div class="flex items-start gap-2 text-[10px] text-cyan-700" title="{{ .LibraryHint }}">
+                <span class="w-4 h-4 mt-0.5 flex items-center justify-center bg-cyan-50 rounded shadow-sm text-[8px]">🎬</span>
+                <span class="flex-1 leading-relaxed">{{ .LibraryHint }}</span>
             </div>
             {{ end }}
 
@@ -273,12 +394,20 @@
             </button>
 
             <button data-id="{{.ID}}" data-title="{{.Title}}" data-rss="{{.RSSUrl}}" data-filter="{{.FilterRule}}"
-                data-exclude="{{.ExcludeRule}}" @click.stop="$dispatch('edit-subscription', { 
+                data-exclude="{{.ExcludeRule}}" data-backup-rss="{{.BackupRSSUrl}}" data-expected-episodes="{{.ExpectedEpisodes}}"
+                data-allow-multi-subgroup="{{ if .AllowMultiSubgroup }}true{{ else }}false{{ end }}"
+                data-auto-disable-on-done="{{ if .AutoDisableOnDone }}true{{ else }}false{{ end }}"
+                data-stale-after-hours="{{.StaleAfterHours}}" @click.stop="$dispatch('edit-subscription', { 
                     id: $el.dataset.id, 
                     title: $el.dataset.title, 
                     rss: $el.dataset.rss, 
                     filter: $el.dataset.filter, 
-                    exclude: $el.dataset.exclude 
+                    exclude: $el.dataset.exclude,
+                    backup_rss: $el.dataset.backupRss,
+                    expected_episodes: Number($el.dataset.expectedEpisodes || 0),
+                    allow_multi_subgroup: $el.dataset.allowMultiSubgroup === 'true',
+                    auto_disable_on_done: $el.dataset.autoDisableOnDone === 'true',
+                    stale_after_hours: Number($el.dataset.staleAfterHours || 0)
                 })"
                 class="min-h-9 min-w-9 p-2 text-gray-400 hover:text-amber-600 hover:bg-white rounded-xl transition-all hover:shadow-sm"
                 title="编辑">

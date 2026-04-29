@@ -2,6 +2,7 @@ package service
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -208,6 +209,85 @@ func TestProcessSubscriptionPersistsIdleStateForEmptySubgroupRSS(t *testing.T) {
 	}
 	if updated.LastRunSummary != "RSS 当前没有可用剧集（字幕组 ANi）" {
 		t.Fatalf("unexpected empty subgroup summary: %q", updated.LastRunSummary)
+	}
+}
+
+func TestProcessSubscriptionFallsBackToBackupRSS(t *testing.T) {
+	withServiceTestDB(t)
+
+	sub := model.Subscription{
+		Title:        "Fallback Show",
+		RSSUrl:       "https://example.test/primary",
+		BackupRSSUrl: "https://example.test/backup",
+		IsActive:     true,
+	}
+	if err := db.DB.Create(&sub).Error; err != nil {
+		t.Fatalf("failed to create subscription: %v", err)
+	}
+
+	down := &fakeDownloader{}
+	mgr := &SubscriptionManager{
+		RSSParser: fakeRSSParser{
+			episodesBy: map[string][]parser.Episode{
+				"https://example.test/primary": {},
+				"https://example.test/backup": {
+					{Title: "[Alt] Fallback Show - 01", EpisodeNum: "01", TorrentURL: "magnet:?xt=urn:btih:fallback-1"},
+				},
+			},
+		},
+		Downloader: down,
+		DB:         db.DB,
+	}
+
+	mgr.ProcessSubscription(&sub)
+
+	var updated model.Subscription
+	if err := db.DB.First(&updated, sub.ID).Error; err != nil {
+		t.Fatalf("failed to reload subscription: %v", err)
+	}
+	if updated.LastRunStatus != SubscriptionRunStatusSuccess {
+		t.Fatalf("expected success status, got %q", updated.LastRunStatus)
+	}
+	if !strings.Contains(updated.LastRunSummary, "备用 RSS") {
+		t.Fatalf("expected fallback summary to mention backup rss, got %q", updated.LastRunSummary)
+	}
+	if len(down.added) != 1 {
+		t.Fatalf("expected one torrent to be added from backup rss, got %d", len(down.added))
+	}
+}
+
+func TestProcessSubscriptionAutoDisablesCompletedSeries(t *testing.T) {
+	withServiceTestDB(t)
+
+	sub := model.Subscription{
+		Title:             "Complete Show",
+		RSSUrl:            "https://example.test/complete",
+		IsActive:          true,
+		LastEp:            12,
+		ExpectedEpisodes:  12,
+		AutoDisableOnDone: true,
+	}
+	if err := db.DB.Create(&sub).Error; err != nil {
+		t.Fatalf("failed to create subscription: %v", err)
+	}
+
+	mgr := &SubscriptionManager{
+		RSSParser:  fakeRSSParser{episodes: []parser.Episode{}},
+		Downloader: &fakeDownloader{},
+		DB:         db.DB,
+	}
+
+	mgr.ProcessSubscription(&sub)
+
+	var updated model.Subscription
+	if err := db.DB.First(&updated, sub.ID).Error; err != nil {
+		t.Fatalf("failed to reload subscription: %v", err)
+	}
+	if updated.IsActive {
+		t.Fatal("expected completed subscription to be auto-disabled")
+	}
+	if !strings.Contains(updated.LastRunSummary, "自动停用") {
+		t.Fatalf("expected summary to mention auto-disable, got %q", updated.LastRunSummary)
 	}
 }
 

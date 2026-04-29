@@ -37,6 +37,14 @@ func buildSubscriptionRuleSet(sub *model.Subscription) subscriptionRuleSet {
 	return rules
 }
 
+func BuildSubscriptionRuleSetForValidation(sub *model.Subscription) subscriptionRuleSet {
+	return buildSubscriptionRuleSet(sub)
+}
+
+func (r subscriptionRuleSet) Allows(ep parser.Episode) bool {
+	return r.allows(ep)
+}
+
 func newPatternMatcher(raw, kind, subTitle string) patternMatcher {
 	expr := strings.TrimSpace(raw)
 	if expr == "" {

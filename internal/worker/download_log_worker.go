@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"context"
 	"log"
 	"net/url"
 	"os"
@@ -61,6 +62,16 @@ func syncDownloadLogStatuses() {
 	} else if archiveResult.Archived > 0 {
 		log.Printf("Worker: archived %d stale download logs (scanned=%d protected=%d)",
 			archiveResult.Archived, archiveResult.Scanned, archiveResult.Protected)
+		if len(archiveResult.AffectedSubscriptionIDs) > 0 {
+			if err := service.RetrySubscriptionsByID(context.Background(), client, archiveResult.AffectedSubscriptionIDs, "manual"); err != nil {
+				log.Printf("Worker: auto retry after archive failed: %v", err)
+			}
+		}
+	}
+	if retried, err := service.RetryStaleSubscriptions(context.Background(), client, 6*time.Hour, "auto_recovery"); err != nil {
+		log.Printf("Worker: stale subscription retry failed: %v", err)
+	} else if retried > 0 {
+		log.Printf("Worker: retried %d stale subscriptions", retried)
 	}
 
 	autoScanCompletedDownloads(result.CompletedTargets)

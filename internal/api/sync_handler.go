@@ -58,10 +58,22 @@ var runDashboardSyncNow = func(ctx context.Context) error {
 				steps = append(steps, "本地回补")
 			}
 
-			if _, err := service.ArchiveStaleDownloadLogs(client, 30*24*time.Hour); err != nil {
+			if archiveResult, err := service.ArchiveStaleDownloadLogs(client, 30*24*time.Hour); err != nil {
 				errs = append(errs, fmt.Sprintf("归档旧下载记录失败: %v", err))
 			} else {
 				steps = append(steps, "旧日志归档")
+				if len(archiveResult.AffectedSubscriptionIDs) > 0 {
+					if err := service.RetrySubscriptionsByID(ctx, client, archiveResult.AffectedSubscriptionIDs, "manual"); err != nil {
+						errs = append(errs, fmt.Sprintf("订阅恢复重试失败: %v", err))
+					} else {
+						steps = append(steps, "订阅自动恢复")
+					}
+				}
+			}
+			if retried, err := service.RetryStaleSubscriptions(ctx, client, 6*time.Hour, "manual_recovery"); err != nil {
+				errs = append(errs, fmt.Sprintf("长期停滞订阅恢复失败: %v", err))
+			} else if retried > 0 {
+				steps = append(steps, fmt.Sprintf("长期停滞恢复 %d 条", retried))
 			}
 		}
 	}

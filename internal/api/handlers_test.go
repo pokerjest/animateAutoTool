@@ -1615,11 +1615,14 @@ func TestRepairFeedbackCatalogUsesConsistentLanguage(t *testing.T) {
 	assert.Equal(t, "已切回主 RSS，建议立即重新检查", repairPendingSummary(repairActionUseBaseRSS))
 	assert.Equal(t, "已清空过滤规则", repairActionLabel(repairActionClearFilter))
 	assert.Equal(t, "已清理陈旧下载记录，但自动重检未执行", repairAutoRecheckFailureSummary(repairActionResetStaleLog))
+	assert.Equal(t, "已触发缺集重检", repairActionLabel(repairActionRetryMissing))
 }
 
 func TestRepairFeedbackCatalogProvidesToastMessages(t *testing.T) {
 	assert.Equal(t, "已执行智能修复，订阅已重新检查", repairSuccessToast(repairActionUseBaseRSS))
 	assert.Equal(t, "已清理阻塞记录并重新检查", repairSuccessToast(repairActionResetStaleLog))
+	assert.Equal(t, "已启动缺集重检，请查看最新订阅结果", repairSuccessToast(repairActionRetryMissing))
+	assert.Equal(t, "已重新检查该订阅，请查看最新进展", repairSuccessToast(repairActionRetryStale))
 	assert.Equal(t, "本地番剧已完成重新抓取", repairSuccessToast(repairActionRetryScrape))
 	assert.Equal(t, "已完成下载状态修复，请查看任务总览", repairSuccessToast(repairActionSyncDownloads))
 	assert.Equal(t, "已尝试重新抓取，请查看卡片诊断", repairReviewToast(repairActionRetryScrape))
@@ -2109,6 +2112,252 @@ func TestPopulateSubscriptionActionHintsForStaleDuplicateLogs(t *testing.T) {
 	populateSubscriptionActionHints(&sub)
 
 	assert.True(t, sub.CanResetStaleLogs)
+	assert.Contains(t, sub.StrategyHint, "卡住超过 24 小时")
+}
+
+func TestPopulateSubscriptionActionHintsIncludesEpisodeProgressHint(t *testing.T) {
+	sub := model.Subscription{
+		Title:            "Progress Show",
+		RSSUrl:           "https://example.test/progress",
+		ExpectedEpisodes: 12,
+		LastEp:           8,
+		StaleAfterHours:  0,
+	}
+
+	populateSubscriptionActionHints(&sub)
+
+	assert.Contains(t, sub.StrategyHint, "当前已追到 8 / 12 集")
+}
+
+func TestPopulateSubscriptionActionHintsIncludesMissingEpisodeHint(t *testing.T) {
+	if err := db.DB.Exec("DELETE FROM subscriptions").Error; err != nil {
+		t.Fatalf("failed to clear subscriptions: %v", err)
+	}
+	if err := db.DB.Exec("DELETE FROM download_logs").Error; err != nil {
+		t.Fatalf("failed to clear download logs: %v", err)
+	}
+
+	sub := model.Subscription{
+		Title:            "Gap Show",
+		RSSUrl:           "https://example.test/gap",
+		ExpectedEpisodes: 4,
+		LastEp:           4,
+		IsActive:         true,
+	}
+	if err := db.DB.Create(&sub).Error; err != nil {
+		t.Fatalf("failed to create subscription: %v", err)
+	}
+	logs := []model.DownloadLog{
+		{SubscriptionID: sub.ID, Title: "Gap Show - 01", Episode: "1", Status: "completed"},
+		{SubscriptionID: sub.ID, Title: "Gap Show - 03", Episode: "3", Status: "completed"},
+	}
+	if err := db.DB.Create(&logs).Error; err != nil {
+		t.Fatalf("failed to create logs: %v", err)
+	}
+
+	populateSubscriptionActionHints(&sub)
+
+	assert.Contains(t, sub.StrategyHint, "疑似缺集")
+	assert.Contains(t, sub.StrategyHint, "02")
+	assert.Contains(t, sub.StrategyHint, "04")
+	assert.True(t, sub.CanRetryMissing)
+	assert.Equal(t, "疑似缺集", sub.LifecycleStage)
+	assert.Equal(t, "warning", sub.LifecycleTone)
+}
+
+func TestPopulateSubscriptionActionHintsMarksStaleLifecycle(t *testing.T) {
+	now := time.Now().Add(-240 * time.Hour)
+	sub := model.Subscription{
+		Title:           "Quiet Show",
+		RSSUrl:          "https://example.test/quiet",
+		StaleAfterHours: 24,
+		LastSuccessAt:   &now,
+		IsActive:        true,
+	}
+
+	populateSubscriptionActionHints(&sub)
+
+	assert.True(t, sub.CanRetryStale)
+	assert.Equal(t, "长期无进展", sub.LifecycleStage)
+	assert.Equal(t, "warning", sub.LifecycleTone)
+	assert.Contains(t, sub.StrategyHint, "超过 24 小时没有出现新进展")
+}
+
+func TestPopulateSubscriptionActionHintsIncludesLibraryAndUpgradeState(t *testing.T) {
+	if err := db.DB.Exec("DELETE FROM subscriptions").Error; err != nil {
+		t.Fatalf("failed to clear subscriptions: %v", err)
+	}
+	if err := db.DB.Exec("DELETE FROM anime_metadata").Error; err != nil {
+		t.Fatalf("failed to clear metadata: %v", err)
+	}
+	if err := db.DB.Exec("DELETE FROM local_animes").Error; err != nil {
+		t.Fatalf("failed to clear local anime: %v", err)
+	}
+	if err := db.DB.Exec("DELETE FROM local_episodes").Error; err != nil {
+		t.Fatalf("failed to clear local episodes: %v", err)
+	}
+
+	metadata := model.AnimeMetadata{Title: "Library Show", BangumiID: 5566}
+	if err := db.DB.Create(&metadata).Error; err != nil {
+		t.Fatalf("failed to create metadata: %v", err)
+	}
+	sub := model.Subscription{
+		Title:      "Library Show",
+		RSSUrl:     "https://example.test/library",
+		IsActive:   true,
+		MetadataID: &metadata.ID,
+		Metadata:   &metadata,
+	}
+	if err := db.DB.Create(&sub).Error; err != nil {
+		t.Fatalf("failed to create subscription: %v", err)
+	}
+	localAnime := model.LocalAnime{
+		Title:            "Library Show",
+		MetadataID:       &metadata.ID,
+		JellyfinSeriesID: "jf-series-1",
+	}
+	if err := db.DB.Create(&localAnime).Error; err != nil {
+		t.Fatalf("failed to create local anime: %v", err)
+	}
+	episodes := []model.LocalEpisode{
+		{LocalAnimeID: localAnime.ID, EpisodeNum: 1, Resolution: "720p", JellyfinItemID: "ep1", Path: "/tmp/library-show-01.mkv"},
+		{LocalAnimeID: localAnime.ID, EpisodeNum: 2, Resolution: "1080p", JellyfinItemID: "ep2", Path: "/tmp/library-show-02.mkv"},
+	}
+	if err := db.DB.Create(&episodes).Error; err != nil {
+		t.Fatalf("failed to create local episodes: %v", err)
+	}
+
+	populateSubscriptionActionHints(&sub)
+
+	assert.Equal(t, "可播放", sub.LibraryStage)
+	assert.Equal(t, "success", sub.LibraryTone)
+	assert.Contains(t, sub.LibraryHint, "Jellyfin 已建立条目")
+	assert.True(t, sub.CanRetryUpgrade)
+	assert.Contains(t, sub.StrategyHint, "较低分辨率")
+}
+
+func TestPopulateSubscriptionActionHintsMarksLibraryPendingSyncWhenJellyfinConfigured(t *testing.T) {
+	if err := db.DB.Exec("DELETE FROM subscriptions").Error; err != nil {
+		t.Fatalf("failed to clear subscriptions: %v", err)
+	}
+	if err := db.DB.Exec("DELETE FROM anime_metadata").Error; err != nil {
+		t.Fatalf("failed to clear metadata: %v", err)
+	}
+	if err := db.DB.Exec("DELETE FROM local_animes").Error; err != nil {
+		t.Fatalf("failed to clear local anime: %v", err)
+	}
+	if err := db.DB.Exec("DELETE FROM local_episodes").Error; err != nil {
+		t.Fatalf("failed to clear local episodes: %v", err)
+	}
+	if err := db.DB.Exec("DELETE FROM global_configs WHERE key IN (?, ?)", model.ConfigKeyJellyfinUrl, model.ConfigKeyJellyfinApiKey).Error; err != nil {
+		t.Fatalf("failed to clear jellyfin config: %v", err)
+	}
+	if err := db.DB.Create(&model.GlobalConfig{Key: model.ConfigKeyJellyfinUrl, Value: "http://jf.local"}).Error; err != nil {
+		t.Fatalf("failed to seed jellyfin url: %v", err)
+	}
+	if err := db.DB.Create(&model.GlobalConfig{Key: model.ConfigKeyJellyfinApiKey, Value: "token"}).Error; err != nil {
+		t.Fatalf("failed to seed jellyfin key: %v", err)
+	}
+
+	metadata := model.AnimeMetadata{Title: "Pending Sync Show", BangumiID: 7788}
+	if err := db.DB.Create(&metadata).Error; err != nil {
+		t.Fatalf("failed to create metadata: %v", err)
+	}
+	sub := model.Subscription{
+		Title:      "Pending Sync Show",
+		RSSUrl:     "https://example.test/pending-sync",
+		IsActive:   true,
+		MetadataID: &metadata.ID,
+		Metadata:   &metadata,
+	}
+	if err := db.DB.Create(&sub).Error; err != nil {
+		t.Fatalf("failed to create subscription: %v", err)
+	}
+	localAnime := model.LocalAnime{
+		Title:      "Pending Sync Show",
+		MetadataID: &metadata.ID,
+	}
+	if err := db.DB.Create(&localAnime).Error; err != nil {
+		t.Fatalf("failed to create local anime: %v", err)
+	}
+	episode := model.LocalEpisode{
+		LocalAnimeID: localAnime.ID,
+		EpisodeNum:   1,
+		Resolution:   "1080p",
+		Path:         "/tmp/pending-sync-01.mkv",
+	}
+	if err := db.DB.Create(&episode).Error; err != nil {
+		t.Fatalf("failed to create local episode: %v", err)
+	}
+
+	populateSubscriptionActionHints(&sub)
+
+	assert.Equal(t, "待同步到媒体库", sub.LibraryStage)
+	assert.Equal(t, "warning", sub.LibraryTone)
+	assert.Contains(t, sub.LibraryHint, "建议触发一次库刷新")
+	assert.True(t, sub.CanRefreshLibrary)
+}
+
+func TestRenderSubscriptionCardTemplateIncludesLifecycleAndRepairActions(t *testing.T) {
+	html, err := renderTemplateToString("subscription_card.html", model.Subscription{
+		Model:            gorm.Model{ID: 42},
+		Title:            "Repair Show",
+		RSSUrl:           "https://example.test/rss",
+		ExpectedEpisodes: 12,
+		LifecycleStage:   "疑似缺集",
+		LifecycleTone:    "warning",
+		CanRetryMissing:  true,
+		CanRetryStale:    true,
+		HasRepairActions: true,
+		StrategyHint:     "疑似缺集：02、04。 已经超过 24 小时没有出现新进展。",
+	})
+	if err != nil {
+		t.Fatalf("failed to render template: %v", err)
+	}
+
+	assert.Contains(t, html, "疑似缺集")
+	assert.Contains(t, html, "补缺集重检")
+	assert.Contains(t, html, "重新检查")
+}
+
+func TestRenderSubscriptionCardTemplateIncludesLibraryStateAndUpgradeAction(t *testing.T) {
+	html, err := renderTemplateToString("subscription_card.html", model.Subscription{
+		Model:            gorm.Model{ID: 77},
+		Title:            "Upgrade Show",
+		RSSUrl:           "https://example.test/upgrade",
+		LibraryStage:     "可播放",
+		LibraryTone:      "success",
+		LibraryHint:      "本地已入库 2 集，Jellyfin 已建立条目，可直接播放。",
+		CanRetryUpgrade:  true,
+		HasRepairActions: true,
+	})
+	if err != nil {
+		t.Fatalf("failed to render template: %v", err)
+	}
+
+	assert.Contains(t, html, "可播放")
+	assert.Contains(t, html, "洗版检查")
+	assert.Contains(t, html, "Jellyfin 已建立条目")
+}
+
+func TestRenderSubscriptionCardTemplateIncludesPendingLibraryRefreshAction(t *testing.T) {
+	html, err := renderTemplateToString("subscription_card.html", model.Subscription{
+		Model:             gorm.Model{ID: 88},
+		Title:             "Pending Library Show",
+		RSSUrl:            "https://example.test/pending-library",
+		LibraryStage:      "待同步到媒体库",
+		LibraryTone:       "warning",
+		LibraryHint:       "本地已经识别 3 集，但 Jellyfin 还没有建立条目；建议触发一次库刷新。",
+		CanRefreshLibrary: true,
+		HasRepairActions:  true,
+	})
+	if err != nil {
+		t.Fatalf("failed to render template: %v", err)
+	}
+
+	assert.Contains(t, html, "待同步到媒体库")
+	assert.Contains(t, html, "刷新媒体库")
+	assert.Contains(t, html, "/api/subscriptions/88/refresh-library")
 }
 
 func TestResetStaleLogsAndRecheckArchivesOldBlockingLogs(t *testing.T) {
@@ -2217,4 +2466,96 @@ func TestResetStaleLogsAndRecheckRecordsConsistentFailureSummary(t *testing.T) {
 	assert.Equal(t, service.SubscriptionRunStatusIdle, updated.LastRunStatus)
 	assert.Equal(t, "已清理陈旧下载记录，但自动重检未执行", updated.LastRunSummary)
 	assert.Equal(t, "qb offline", updated.LastError)
+}
+
+func TestHealthPageAndReportHandlers(t *testing.T) {
+	resetAuthFixtures(t)
+
+	if err := db.DB.Exec("DELETE FROM subscriptions").Error; err != nil {
+		t.Fatalf("failed to clear subscriptions: %v", err)
+	}
+	if err := db.DB.Exec("DELETE FROM download_logs").Error; err != nil {
+		t.Fatalf("failed to clear download logs: %v", err)
+	}
+	if err := db.DB.Exec("DELETE FROM local_animes").Error; err != nil {
+		t.Fatalf("failed to clear local_animes: %v", err)
+	}
+	if err := db.DB.Exec("DELETE FROM local_episodes").Error; err != nil {
+		t.Fatalf("failed to clear local_episodes: %v", err)
+	}
+	if err := db.DB.Exec("DELETE FROM library_issues").Error; err != nil {
+		t.Fatalf("failed to clear library_issues: %v", err)
+	}
+	if err := db.DB.Exec("DELETE FROM global_configs").Error; err != nil {
+		t.Fatalf("failed to clear global_configs: %v", err)
+	}
+
+	seedConfigs := []model.GlobalConfig{
+		{Key: model.ConfigKeyJellyfinUrl, Value: "http://jellyfin.test"},
+		{Key: model.ConfigKeyJellyfinApiKey, Value: "secret"},
+		{Key: model.ConfigKeyQBUrl, Value: "http://127.0.0.1:7603"},
+	}
+	for _, item := range seedConfigs {
+		if err := db.DB.Create(&item).Error; err != nil {
+			t.Fatalf("failed to seed config %s: %v", item.Key, err)
+		}
+	}
+
+	lastSuccessAt := time.Now().Add(-96 * time.Hour)
+	sub := model.Subscription{
+		Title:             "Health Demo",
+		RSSUrl:            "https://example.test/rss",
+		IsActive:          true,
+		StaleAfterHours:   24,
+		LastSuccessAt:     &lastSuccessAt,
+		ExpectedEpisodes:  12,
+		AutoDisableOnDone: true,
+	}
+	if err := db.DB.Create(&sub).Error; err != nil {
+		t.Fatalf("failed to create subscription: %v", err)
+	}
+	if err := db.DB.Create(&model.DownloadLog{SubscriptionID: sub.ID, Title: "Health Demo - 01", Status: "downloading"}).Error; err != nil {
+		t.Fatalf("failed to create downloading log: %v", err)
+	}
+	if err := db.DB.Create(&model.DownloadLog{SubscriptionID: sub.ID, Title: "Health Demo - 02", Status: "failed"}).Error; err != nil {
+		t.Fatalf("failed to create failed log: %v", err)
+	}
+	localAnime := model.LocalAnime{Title: "Health Demo"}
+	if err := db.DB.Create(&localAnime).Error; err != nil {
+		t.Fatalf("failed to create local anime: %v", err)
+	}
+	localAnimeID := localAnime.ID
+	if err := db.DB.Create(&model.LibraryIssue{LocalAnimeID: &localAnimeID, IssueType: "missing_cover", Status: "open"}).Error; err != nil {
+		t.Fatalf("failed to create library issue: %v", err)
+	}
+
+	r := setupRouter()
+	cookie, _ := loginCookie(t, r, "admin")
+
+	pageRecorder := httptest.NewRecorder()
+	pageReq, _ := http.NewRequest("GET", "/health", nil)
+	pageReq.Header.Set("Cookie", cookie)
+	markLocalRequest(pageReq)
+	r.ServeHTTP(pageRecorder, pageReq)
+	assert.Equal(t, http.StatusOK, pageRecorder.Code)
+	assert.Contains(t, pageRecorder.Body.String(), "系统健康")
+	assert.Contains(t, pageRecorder.Body.String(), "下载链路仍有阻塞或失败记录")
+
+	reportRecorder := httptest.NewRecorder()
+	reportReq, _ := http.NewRequest("GET", "/api/health/report", nil)
+	reportReq.Header.Set("Cookie", cookie)
+	markLocalRequest(reportReq)
+	r.ServeHTTP(reportRecorder, reportReq)
+	assert.Equal(t, http.StatusOK, reportRecorder.Code)
+
+	var report HealthReport
+	if err := json.Unmarshal(reportRecorder.Body.Bytes(), &report); err != nil {
+		t.Fatalf("failed to decode report: %v", err)
+	}
+	assert.Equal(t, int64(1), report.SubscriptionTotal)
+	assert.Equal(t, int64(1), report.OpenLibraryIssues)
+	assert.Equal(t, int64(1), report.DownloadDownloading)
+	assert.Equal(t, int64(1), report.DownloadFailed)
+	assert.Equal(t, "rose", report.HealthTone)
+	assert.NotEmpty(t, report.Recommendations)
 }

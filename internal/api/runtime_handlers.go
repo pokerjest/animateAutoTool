@@ -10,6 +10,16 @@ import (
 
 var runtimeStatsStartedAt = time.Now()
 
+func HealthPageHandler(c *gin.Context) {
+	c.HTML(http.StatusOK, "health.html", gin.H{
+		"Report": buildHealthReport(),
+	})
+}
+
+func HealthReportHandler(c *gin.Context) {
+	c.JSON(http.StatusOK, buildHealthReport())
+}
+
 func RuntimeStatsHandler(c *gin.Context) {
 	var mem runtime.MemStats
 	runtime.ReadMemStats(&mem)

@@ -38,6 +38,13 @@ var migrations = []migration{
 			return tx.AutoMigrate(&model.SubscriptionRunLog{})
 		},
 	},
+	{
+		ID:          "003_subscription_strategy_fields",
+		Description: "Add advanced subscription strategy fields",
+		Apply: func(tx *gorm.DB) error {
+			return tx.AutoMigrate(&model.Subscription{})
+		},
+	},
 }
 
 func autoMigrateCoreSchema(tx *gorm.DB) error {

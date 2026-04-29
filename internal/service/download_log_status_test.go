@@ -351,6 +351,9 @@ func TestArchiveStaleDownloadLogsArchivesOldUnmatchedLog(t *testing.T) {
 	if updated.Status != downloadLogStatusArchived {
 		t.Fatalf("expected archived status, got %q", updated.Status)
 	}
+	if len(result.AffectedSubscriptionIDs) != 1 || result.AffectedSubscriptionIDs[0] != sub.ID {
+		t.Fatalf("expected affected subscription ids to include %d, got %#v", sub.ID, result.AffectedSubscriptionIDs)
+	}
 }
 
 func TestArchiveStaleDownloadLogsProtectsMatchedTorrent(t *testing.T) {
