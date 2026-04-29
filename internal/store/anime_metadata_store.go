@@ -65,7 +65,7 @@ func (s *AnimeMetadataStore) FindByAniListID(id int) (*model.AnimeMetadata, erro
 		return nil, gorm.ErrInvalidDB
 	}
 	var m model.AnimeMetadata
-	if err := s.db.Where("anilist_id = ?", id).First(&m).Error; err != nil {
+	if err := s.db.Where("ani_list_id = ?", id).First(&m).Error; err != nil {
 		return nil, err
 	}
 	return &m, nil
@@ -106,7 +106,7 @@ func (s *AnimeMetadataStore) ListWithImageRawMissing() ([]model.AnimeMetadata, e
 	if err := s.db.Where(
 		"(bangumi_image != '' AND (bangumi_image_raw IS NULL OR bangumi_image_raw = '')) OR " +
 			"(tmdb_image != '' AND (tmdb_image_raw IS NULL OR tmdb_image_raw = '')) OR " +
-			"(anilist_image != '' AND (anilist_image_raw IS NULL OR anilist_image_raw = ''))",
+			"(ani_list_image != '' AND (ani_list_image_raw IS NULL OR ani_list_image_raw = ''))",
 	).Find(&list).Error; err != nil {
 		return nil, err
 	}

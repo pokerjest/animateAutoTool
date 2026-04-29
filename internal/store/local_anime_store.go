@@ -102,31 +102,6 @@ func (s *LocalAnimeStore) GetWithMetadata(id any) (*model.LocalAnime, error) {
 	return &anime, nil
 }
 
-func (s *LocalAnimeStore) FindAnimeByTitleVariants(titles ...string) (*model.LocalAnime, error) {
-	if s == nil || s.db == nil {
-		return nil, gorm.ErrInvalidDB
-	}
-	if len(titles) == 0 {
-		return nil, gorm.ErrRecordNotFound
-	}
-	var anime model.LocalAnime
-	q := s.db
-	switch len(titles) {
-	case 1:
-		q = q.Where("title = ?", titles[0])
-	case 2:
-		q = q.Where("title = ? OR title_cn = ?", titles[0], titles[1])
-	case 3:
-		q = q.Where("title = ? OR title_cn = ? OR title_jp = ?", titles[0], titles[1], titles[2])
-	default:
-		q = q.Where("title = ? OR title_cn = ? OR title_jp = ? OR title_en = ?", titles[0], titles[1], titles[2], titles[3])
-	}
-	if err := q.First(&anime).Error; err != nil {
-		return nil, err
-	}
-	return &anime, nil
-}
-
 func (s *LocalAnimeStore) ListEpisodesByAnimeID(animeID uint) ([]model.LocalEpisode, error) {
 	if s == nil || s.db == nil {
 		return nil, gorm.ErrInvalidDB
