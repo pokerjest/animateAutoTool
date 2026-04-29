@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/pokerjest/animateAutoTool/internal/httpx"
 )
 
 type Client struct {
@@ -30,9 +32,7 @@ func NewClient(baseURL, apiKey, model string) *Client {
 		baseURL: baseURL,
 		apiKey:  apiKey,
 		model:   model,
-		httpClient: &http.Client{
-			Timeout: 60 * time.Second, // Long timeout for LLM responses
-		},
+		httpClient: httpx.NewHTTPClient(60 * time.Second), // Long timeout for LLM responses
 	}
 }
 

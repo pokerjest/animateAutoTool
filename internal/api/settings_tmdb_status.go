@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/pokerjest/animateAutoTool/internal/httpx"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/safeio"
 )
@@ -44,9 +45,9 @@ func CheckTMDBConnection() (bool, string) {
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Accept", "application/json")
 
-	client := &http.Client{Timeout: 10 * time.Second}
-	if transport := buildProxyTransport(proxyEnabled, proxyURL); transport != nil {
-		client.Transport = transport
+	client := httpx.NewHTTPClient(10 * time.Second)
+	if proxyEnabled == ValueTrue && proxyURL != "" {
+		client = httpx.NewHTTPClientWithProxy(10*time.Second, proxyURL)
 	}
 
 	resp, err := client.Do(req)

@@ -26,13 +26,6 @@ func RecoveryPageHandler(c *gin.Context) {
 }
 
 func LocalResetAdminPasswordHandler(c *gin.Context) {
-	if bootstrap.BootstrapSetupPending() {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "首次初始化尚未完成，请先在本机登录并完成初始化向导。",
-		})
-		return
-	}
-
 	var req LocalRecoveryRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		jsonBadRequest(c, "本地重置密码请求格式不正确")
@@ -52,6 +45,13 @@ func LocalResetAdminPasswordHandler(c *gin.Context) {
 		return
 	case req.Password != req.Confirm:
 		jsonBadRequest(c, "两次输入的新密码不一致")
+		return
+	}
+
+	if bootstrapInfo, pending := bootstrap.PendingAdminBootstrapInfo(); pending && req.Username != bootstrapInfo.Username {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "首次初始化期间只能重置当前 bootstrap 管理员的密码",
+		})
 		return
 	}
 

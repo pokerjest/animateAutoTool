@@ -41,6 +41,15 @@
                 这一步只会在首次管理员密码还没更新时出现。完成后我们就会放行到主界面，后续其它服务可以继续在设置页慢慢补。
             </p>
 
+            {{if .IsWindows}}
+            <div class="mt-6 rounded-2xl border border-slate-200/40 bg-slate-900/60 p-5 text-sm leading-7 text-slate-100">
+                <div class="font-bold text-white">Windows quick start</div>
+                <div class="mt-2">Use a writable folder like <span class="font-mono">D:\Apps\AnimateAutoTool</span> or <span class="font-mono">%USERPROFILE%\Apps\AnimateAutoTool</span>.</div>
+                <div>Recommended download directory: <span class="font-mono">D:\Anime\Downloads</span></div>
+                <div>If qB is not ready today, you can finish setup first and connect it later from Settings.</div>
+            </div>
+            {{end}}
+
             <div class="mt-8 grid gap-4 md:grid-cols-2">
                 <div class="rounded-2xl border border-white/10 bg-slate-900/45 p-5">
                     <div class="text-xs font-bold uppercase tracking-[0.2em] text-slate-400">当前管理员</div>

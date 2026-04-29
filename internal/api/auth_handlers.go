@@ -3,6 +3,7 @@ package api
 import (
 	"math"
 	"net/http"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -44,6 +45,7 @@ func LoginPageHandler(c *gin.Context) {
 		"DataDir":             config.DataDir(),
 		"ManagedDownloadsOff": !config.AppConfig.Managed.DownloadMissing,
 		"ConfigAutoCreated":   config.ConfigAutoCreated,
+		"IsWindows":           runtime.GOOS == goosWindows,
 	})
 }
 

@@ -677,8 +677,8 @@
         class="space-y-6">
 
         <script>
-            document.addEventListener('alpine:init', () => {
-                Alpine.data('r2Backup', () => ({
+            window.settingsR2BackupData = function () {
+                return {
                     config: { endpoint: '', access_key: '', secret_key: '', bucket: '' },
                     backups: [],
                     loading: true,
@@ -840,7 +840,7 @@
                                         }
                                     } else if (data.status === 'error') {
                                         clearInterval(interval);
-                                        throw new Error(data.error || 'Unknown error');
+                                        this.renderError(previewEl, data.error || 'Unknown error');
                                     } else {
                                         // Update Progress
                                         let percent = 0;
@@ -926,8 +926,8 @@
                             })
                             .finally(() => this.modalLoading = false);
                     }
-                }));
-            });
+                };
+            };
         </script>
 
         <!-- Backup UI -->
@@ -1036,7 +1036,7 @@
                         <span>☁️</span> Cloudflare R2 云备份
                     </h3>
 
-                    <div x-data="r2Backup" @tab-backup.window="loadBackups()" class="space-y-4">
+                    <div x-data="settingsR2BackupData()" @tab-backup.window="loadBackups()" class="space-y-4">
 
                         <!-- Config Form -->
                         <div

@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -59,6 +60,9 @@ const (
 	appName               = "AnimateAutoTool"
 	defaultAuthSecret     = "change_me_random_string"
 	defaultConfigFileName = "config.yaml"
+	defaultDatabaseFile   = "animate.db"
+	defaultWindowsDBFile  = "app.db"
+	goosWindows           = "windows"
 )
 
 var appRootOverride string
@@ -79,9 +83,9 @@ func LoadConfig(configPath string) error {
 	v.SetDefault("server.port", 8306)
 	v.SetDefault("server.mode", "release")
 	v.SetDefault("server.public_url", "")
-	v.SetDefault("server.headless", runtime.GOOS != "windows")
+	v.SetDefault("server.headless", runtime.GOOS != goosWindows)
 	v.SetDefault("server.trusted_proxies", []string{"127.0.0.1", "::1"})
-	v.SetDefault("database.path", filepath.Join(AppPaths.DataDir, "animate.db"))
+	v.SetDefault("database.path", filepath.Join(AppPaths.DataDir, defaultDatabaseFileName()))
 	v.SetDefault("log.level", "info")
 	v.SetDefault("alist_url", "http://alist:5244") // Docker internal default
 	v.SetDefault("auth.secret_key", defaultAuthSecret)
@@ -119,9 +123,15 @@ func LoadConfig(configPath string) error {
 	}
 
 	if AppConfig.Database.Path == "" {
-		AppConfig.Database.Path = filepath.Join(AppPaths.DataDir, "animate.db")
+		AppConfig.Database.Path = filepath.Join(AppPaths.DataDir, defaultDatabaseFileName())
 	} else if !filepath.IsAbs(AppConfig.Database.Path) {
 		AppConfig.Database.Path = filepath.Join(AppPaths.RootDir, AppConfig.Database.Path)
+	}
+	if currentGOOS() == goosWindows &&
+		strings.EqualFold(filepath.Base(AppConfig.Database.Path), defaultDatabaseFile) {
+		if _, err := os.Stat(AppConfig.Database.Path); os.IsNotExist(err) {
+			AppConfig.Database.Path = filepath.Join(filepath.Dir(AppConfig.Database.Path), defaultWindowsDBFile)
+		}
 	}
 
 	if AppConfig.Auth.SecretKey == "" || AppConfig.Auth.SecretKey == defaultAuthSecret {
@@ -208,7 +218,7 @@ func executableDir() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Dir(exePath), nil
+	return pathDirForGOOS(exePath), nil
 }
 
 func hasConfigFile(dir string) bool {
@@ -239,24 +249,24 @@ func defaultAppRoot() string {
 	if exeDir, err := executableDir(); err == nil && strings.TrimSpace(exeDir) != "" {
 		if macOSBundleDataRoot(exeDir) {
 			if dir, err := userConfigDirFunc(); err == nil && dir != "" {
-				return filepath.Join(dir, appName)
+				return pathJoinForGOOS(dir, appName)
 			}
 		}
 		return exeDir
 	}
 
-	if currentGOOS() == "windows" {
+	if currentGOOS() == goosWindows {
 		if local := strings.TrimSpace(os.Getenv("LOCALAPPDATA")); local != "" {
 			return filepath.Join(local, appName)
 		}
 	}
 
 	if dir, err := userConfigDirFunc(); err == nil && dir != "" {
-		return filepath.Join(dir, appName)
+		return pathJoinForGOOS(dir, appName)
 	}
 
 	if home, err := os.UserHomeDir(); err == nil && home != "" {
-		return filepath.Join(home, "."+strings.ToLower(appName))
+		return pathJoinForGOOS(home, "."+strings.ToLower(appName))
 	}
 
 	return appName
@@ -267,6 +277,29 @@ func currentGOOS() string {
 		return goosOverride
 	}
 	return runtime.GOOS
+}
+
+func pathDirForGOOS(targetPath string) string {
+	if currentGOOS() == "windows" {
+		return filepath.Dir(targetPath)
+	}
+	return path.Dir(filepath.ToSlash(targetPath))
+}
+
+func pathJoinForGOOS(base string, parts ...string) string {
+	if currentGOOS() == "windows" {
+		all := append([]string{base}, parts...)
+		return filepath.Join(all...)
+	}
+	all := append([]string{filepath.ToSlash(base)}, parts...)
+	return path.Join(all...)
+}
+
+func defaultDatabaseFileName() string {
+	if currentGOOS() == goosWindows {
+		return defaultWindowsDBFile
+	}
+	return defaultDatabaseFile
 }
 
 func macOSBundleDataRoot(exeDir string) bool {
@@ -344,7 +377,7 @@ server:
 
 # Database Configuration
 database:
-  path: data/animate.db
+  path: data/` + defaultDatabaseFileName() + `
 
 # Logging
 log:

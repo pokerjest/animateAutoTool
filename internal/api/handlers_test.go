@@ -402,6 +402,29 @@ func TestBootstrapSetupCompletesPasswordRotationAndQBSave(t *testing.T) {
 	assert.Equal(t, "D:\\Anime\\Downloads", configMap[model.ConfigKeyBaseDir])
 }
 
+func TestStaleBootstrapPasswordDoesNotKeepSetupPending(t *testing.T) {
+	resetAuthFixtures(t)
+	r := setupRouter()
+
+	if err := bootstrap.SaveAdminBootstrapInfo(bootstrap.AdminBootstrapInfo{
+		Username:  "admin",
+		Password:  "stale-bootstrap-password",
+		CreatedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("failed to save bootstrap info: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/setup", nil)
+	markLocalRequest(req)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusFound {
+		t.Fatalf("expected stale bootstrap info to stop setup flow, got %d: %s", w.Code, w.Body.String())
+	}
+	assert.Equal(t, "/login", w.Header().Get("Location"))
+}
+
 func TestSetupReadinessReportsFreshInstallGuidance(t *testing.T) {
 	resetAuthFixtures(t)
 	r := setupRouter()
@@ -450,6 +473,9 @@ func TestBootstrapPendingBlocksRemoteAccessUntilLocalSetupCompletes(t *testing.T
 	r := setupRouter()
 
 	bootstrapPassword := "bootstrap-secret-123"
+	if err := service.NewAuthService().ResetPasswordByUsername("admin", bootstrapPassword); err != nil {
+		t.Fatalf("failed to align admin password with bootstrap password: %v", err)
+	}
 	if err := bootstrap.SaveAdminBootstrapInfo(bootstrap.AdminBootstrapInfo{
 		Username:  "admin",
 		Password:  bootstrapPassword,
@@ -486,6 +512,9 @@ func TestBootstrapLoginPageShowsLocalCredentialPathWithoutPassword(t *testing.T)
 	r := setupRouter()
 
 	bootstrapPassword := "bootstrap-secret-456"
+	if err := service.NewAuthService().ResetPasswordByUsername("admin", bootstrapPassword); err != nil {
+		t.Fatalf("failed to align admin password with bootstrap password: %v", err)
+	}
 	if err := bootstrap.SaveAdminBootstrapInfo(bootstrap.AdminBootstrapInfo{
 		Username:  "admin",
 		Password:  bootstrapPassword,
@@ -600,6 +629,81 @@ func TestLocalRecoveryCanResetAdminPassword(t *testing.T) {
 
 	if _, err := service.NewAuthService().Login("admin", "admin"); err == nil {
 		t.Fatal("expected old password to stop working after local recovery reset")
+	}
+}
+
+func TestLocalRecoveryCanResetBootstrapAdminDuringSetup(t *testing.T) {
+	resetAuthFixtures(t)
+	r := setupRouter()
+
+	if err := bootstrap.SaveAdminBootstrapInfo(bootstrap.AdminBootstrapInfo{
+		Username:  "admin",
+		Password:  "admin",
+		CreatedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("failed to save bootstrap info: %v", err)
+	}
+
+	body, err := json.Marshal(map[string]string{
+		"username":         "admin",
+		"password":         "bootstrap-reset-123",
+		"confirm_password": "bootstrap-reset-123",
+	})
+	if err != nil {
+		t.Fatalf("failed to marshal recovery payload: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/recovery/reset-admin", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	markLocalRequest(req)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("unexpected bootstrap recovery response %d: %s", w.Code, w.Body.String())
+	}
+
+	if _, err := service.NewAuthService().Login("admin", "bootstrap-reset-123"); err != nil {
+		t.Fatalf("expected recovery password to work during bootstrap: %v", err)
+	}
+}
+
+func TestLocalRecoveryRejectsOtherUsersDuringBootstrap(t *testing.T) {
+	resetAuthFixtures(t)
+	r := setupRouter()
+
+	if _, err := service.NewAuthService().CreateUser("editor", "editor-pass-123"); err != nil {
+		t.Fatalf("failed to seed editor user: %v", err)
+	}
+	if err := bootstrap.SaveAdminBootstrapInfo(bootstrap.AdminBootstrapInfo{
+		Username:  "admin",
+		Password:  "admin",
+		CreatedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("failed to save bootstrap info: %v", err)
+	}
+
+	body, err := json.Marshal(map[string]string{
+		"username":         "editor",
+		"password":         "editor-reset-123",
+		"confirm_password": "editor-reset-123",
+	})
+	if err != nil {
+		t.Fatalf("failed to marshal recovery payload: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/recovery/reset-admin", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	markLocalRequest(req)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected non-bootstrap recovery to be rejected during setup, got %d: %s", w.Code, w.Body.String())
+	}
+
+	if _, err := service.NewAuthService().Login("editor", "editor-pass-123"); err != nil {
+		t.Fatalf("expected editor password to remain unchanged: %v", err)
 	}
 }
 

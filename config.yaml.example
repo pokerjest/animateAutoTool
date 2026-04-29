@@ -1,7 +1,7 @@
 # Server Configuration
 server:
   port: 8306
-  mode: debug # debug or release
+  mode: release # debug or release
   public_url: "" # strongly recommended for reverse-proxy/public access, e.g. https://anime.example.com
   # headless: true # optional; leave unset to use the platform default (Windows tray=false, macOS/Linux headless=true)
   trusted_proxies: # only add IPs/CIDRs for reverse proxies you control
@@ -10,7 +10,7 @@ server:
 
 # Database Configuration
 database:
-  path: data/animate.db
+  path: data/app.db
 
 # Logging
 log:

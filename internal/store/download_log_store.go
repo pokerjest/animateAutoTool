@@ -26,7 +26,7 @@ func (s *DownloadLogStore) ListActiveOrIncompleteCompleted(downloading, failed, 
 	if err := s.db.
 		Where("status IN ?", []string{downloading, failed}).
 		Or("status = ? AND (target_file = '' OR target_file IS NULL)", completed).
-		Order("created_at DESC").
+		Order("created_at DESC, id DESC").
 		Find(&logs).Error; err != nil {
 		return nil, err
 	}
@@ -44,7 +44,7 @@ func (s *DownloadLogStore) ListByStatuses(statuses []string) ([]model.DownloadLo
 	var logs []model.DownloadLog
 	if err := s.db.
 		Where("status IN ?", statuses).
-		Order("created_at DESC").
+		Order("created_at DESC, id DESC").
 		Find(&logs).Error; err != nil {
 		return nil, err
 	}
@@ -62,7 +62,7 @@ func (s *DownloadLogStore) ListByStatusesAsc(statuses []string) ([]model.Downloa
 	var logs []model.DownloadLog
 	if err := s.db.
 		Where("status IN ?", statuses).
-		Order("created_at ASC").
+		Order("created_at ASC, id ASC").
 		Find(&logs).Error; err != nil {
 		return nil, err
 	}

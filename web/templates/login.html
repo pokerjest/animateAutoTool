@@ -75,6 +75,17 @@
             <p class="text-gray-500 text-sm">Animate Auto Tool</p>
         </div>
 
+        {{if .IsWindows}}
+        <div class="mb-5 rounded-2xl border border-slate-200 bg-slate-50/95 p-4 text-sm text-slate-800 shadow-sm">
+            <div class="font-bold mb-2">Windows quick tips</div>
+            <div class="space-y-1">
+                <div>1. Keep the app in a writable folder, not <span class="font-mono">Program Files</span>.</div>
+                <div>2. Use <span class="font-mono">start.bat</span> for background mode and <span class="font-mono">run.bat</span> for foreground troubleshooting.</div>
+                <div>3. If startup fails, check <span class="font-mono">logs\server.log</span>.</div>
+            </div>
+        </div>
+        {{end}}
+
         {{if .BootstrapAdmin}}
         <div class="mb-5 rounded-2xl border border-amber-200 bg-amber-50/90 p-4 text-sm text-amber-900 shadow-sm">
             <div class="font-bold mb-2">首次启动账号</div>

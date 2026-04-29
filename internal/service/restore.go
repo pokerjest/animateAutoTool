@@ -8,6 +8,7 @@ import (
 	"github.com/glebarez/sqlite"
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/model"
+	"github.com/pokerjest/animateAutoTool/internal/safeio"
 	"golang.org/x/sync/errgroup"
 	"gorm.io/gorm"
 )
@@ -49,6 +50,9 @@ func (s *RestoreService) PerformRestore(sourcePath string, options RestoreOption
 	})
 	if err != nil {
 		return fmt.Errorf("failed to open backup file: %v", err)
+	}
+	if sqlDB, err := srcDB.DB(); err == nil {
+		defer safeio.Close(sqlDB)
 	}
 
 	// 2. Read Data

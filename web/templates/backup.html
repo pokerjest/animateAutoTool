@@ -180,7 +180,8 @@
                                 this.loading = false;
                             } else if (data.status === 'error') {
                                 clearInterval(interval);
-                                throw new Error(data.error || 'Unknown error');
+                                this.renderError(previewEl, data.error || 'Unknown error');
+                                this.loading = false;
                             } else {
                                 // Update Progress
                                 let percent = 0;

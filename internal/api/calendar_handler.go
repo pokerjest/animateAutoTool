@@ -12,24 +12,25 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/model"
 )
 
-// GetCalendarHandler renders the anime calendar
-func GetCalendarHandler(c *gin.Context) {
-	// Use Bangumi Client (Public API, no auth needed)
-	client := bangumi.NewClient("", "", "")
+const calendarFetchTimeout = 4 * time.Second
 
-	// Check for HTMX request
+// GetCalendarHandler renders the anime calendar.
+func GetCalendarHandler(c *gin.Context) {
+	client := bangumi.NewClient("", "", "")
+	applyProxyToBangumiClient(client)
+	client.SetTimeout(calendarFetchTimeout)
+
 	log.Printf("DEBUG: Calendar Handler: Fetching data...")
 	calendar, err := client.GetCalendar()
 	if err != nil {
 		log.Printf("Calendar: Failed to fetch calendar: %v", err)
 		c.HTML(http.StatusOK, "calendar.html", gin.H{
-			"Error": "无法获取番剧日历: " + err.Error(),
+			"Error": "无法获取番剧日历：" + humanizeOperationError(err.Error()),
 		})
 		return
 	}
 	today := calendarTodayTab(calendar, time.Now())
 
-	// Check for HTMX request
 	isHTMX := c.GetHeader("HX-Request") == ValueTrue
 	log.Printf("DEBUG: Calendar: Today=%d, isHTMX=%v", today, isHTMX)
 
@@ -41,17 +42,15 @@ func GetCalendarHandler(c *gin.Context) {
 		}
 	}
 
-	// Fetch active subscriptions to check status
 	type SubInfo struct {
 		ID            uint
 		Total         int
 		Downloaded    int64
-		BangumiStatus int // 1:Wish, 2:Collect, 3:Doing, 4:OnHold, 5:Dropped
+		BangumiStatus int
 	}
 	subMap := make(map[int]SubInfo)
 	var mu sync.Mutex
 
-	// 1. Load Local Subscriptions
 	var subs []model.Subscription
 	if err := db.DB.Preload("Metadata").Where("is_active = ?", true).Find(&subs).Error; err == nil {
 		for _, sub := range subs {
@@ -67,20 +66,14 @@ func GetCalendarHandler(c *gin.Context) {
 		}
 	}
 
-	// 2. Fetch Bangumi Collection Status (If authenticated)
 	if token := configValue(model.ConfigKeyBangumiAccessToken); token != "" {
 		var wg sync.WaitGroup
-
-		// Fetch types 1 (Wish), 2 (Collect), 3 (Doing), 4 (OnHold), 5 (Dropped)
-		// We limit to 50 items per type to avoid slow load, assuming calendar items are recent
 		types := []int{1, 2, 3, 4, 5}
 
 		for _, t := range types {
 			wg.Add(1)
 			go func(status int) {
 				defer wg.Done()
-				// Fetch "me" collection
-				// Use a reasonable limit, e.g., 100
 				items, err := client.GetUserCollection(token, "me", status, 100, 0)
 				if err == nil {
 					mu.Lock()

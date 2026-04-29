@@ -5,6 +5,9 @@ import (
 	"time"
 
 	"github.com/pokerjest/animateAutoTool/internal/config"
+	"github.com/pokerjest/animateAutoTool/internal/db"
+	"github.com/pokerjest/animateAutoTool/internal/model"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type AdminBootstrapInfo struct {
@@ -35,6 +38,10 @@ func PendingAdminBootstrapInfo() (*AdminBootstrapInfo, bool) {
 		}
 		return nil, false
 	}
+	if !bootstrapPasswordStillActive(info) {
+		_ = ClearAdminBootstrapInfo()
+		return nil, false
+	}
 	return &info, true
 }
 
@@ -45,4 +52,17 @@ func BootstrapSetupPending() bool {
 
 func ClearAdminBootstrapInfo() error {
 	return remove("admin.json")
+}
+
+func bootstrapPasswordStillActive(info AdminBootstrapInfo) bool {
+	if db.DB == nil {
+		return true
+	}
+
+	var user model.User
+	if err := db.DB.Where("username = ?", info.Username).First(&user).Error; err != nil {
+		return false
+	}
+
+	return bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(info.Password)) == nil
 }

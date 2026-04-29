@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/pokerjest/animateAutoTool/internal/httpx"
 	"github.com/pokerjest/animateAutoTool/internal/jellyfin"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/safeio"
@@ -53,9 +54,9 @@ func CheckJellyfinConnection() (bool, string) {
 	req.Header.Set("X-Emby-Token", apiKey)
 	req.Header.Set("Accept", "application/json")
 
-	client := &http.Client{Timeout: 5 * time.Second}
-	if transport := buildProxyTransport(proxyEnabled, proxyURL); transport != nil {
-		client.Transport = transport
+	client := httpx.NewHTTPClient(5 * time.Second)
+	if proxyEnabled == ValueTrue && proxyURL != "" {
+		client = httpx.NewHTTPClientWithProxy(5*time.Second, proxyURL)
 	}
 
 	resp, err := client.Do(req)

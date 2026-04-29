@@ -2,8 +2,10 @@ package launcher
 
 import (
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
+	"strings"
 )
 
 func ManagedQBExecutablePath(binDir string) string {
@@ -12,6 +14,9 @@ func ManagedQBExecutablePath(binDir string) string {
 		exeName = "qbittorrent-nox"
 	}
 
+	if strings.Contains(binDir, "/") && !strings.Contains(binDir, `\`) {
+		return path.Join(binDir, exeName)
+	}
 	return filepath.Join(binDir, exeName)
 }
 

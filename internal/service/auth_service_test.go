@@ -116,3 +116,31 @@ func TestChangePasswordClearsBootstrapAdminInfo(t *testing.T) {
 		t.Fatalf("expected bootstrap admin info to be cleared, got %v", err)
 	}
 }
+
+func TestSetPasswordClearsBootstrapAdminInfo(t *testing.T) {
+	withBootstrapDataDir(t)
+	db.InitDB(":memory:")
+	t.Cleanup(func() {
+		_ = db.CloseDB()
+	})
+
+	svc := NewAuthService()
+	svc.EnsureDefaultUser()
+
+	var admin model.User
+	if err := db.DB.Where("username = ?", bootstrapAdminUsername).First(&admin).Error; err != nil {
+		t.Fatalf("failed to fetch admin user: %v", err)
+	}
+
+	if err := svc.SetPassword(admin.ID, "new-password-456"); err != nil {
+		t.Fatalf("SetPassword failed: %v", err)
+	}
+
+	if _, err := bootstrap.LoadAdminBootstrapInfo(); !os.IsNotExist(err) {
+		t.Fatalf("expected bootstrap admin info to be cleared, got %v", err)
+	}
+
+	if _, err := svc.Login(bootstrapAdminUsername, "new-password-456"); err != nil {
+		t.Fatalf("expected updated password to work: %v", err)
+	}
+}

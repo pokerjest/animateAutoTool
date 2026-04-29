@@ -108,7 +108,8 @@
         console.log('Library Alpine initialized. Parsing metadata...');
         try {
             const metadataRaw = document.getElementById('library-metadata').textContent;
-            const metadataArray = JSON.parse(metadataRaw);
+            const parsed = JSON.parse(metadataRaw);
+            const metadataArray = Array.isArray(parsed) ? parsed : [];
             this.libraryMetadata = metadataArray.reduce((acc, item) => {
                 acc[item.ID] = item;
                 return acc;

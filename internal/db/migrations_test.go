@@ -9,6 +9,17 @@ import (
 	"gorm.io/gorm"
 )
 
+func closeTestDB(t *testing.T, target *gorm.DB) {
+	t.Helper()
+	sqlDB, err := target.DB()
+	if err != nil {
+		t.Fatalf("resolve sql handle: %v", err)
+	}
+	if err := sqlDB.Close(); err != nil {
+		t.Fatalf("close sqlite db: %v", err)
+	}
+}
+
 func TestRunMigrationsRecordsCurrentVersionAndIsIdempotent(t *testing.T) {
 	tempPath := filepath.Join(t.TempDir(), "app.db")
 
@@ -16,6 +27,9 @@ func TestRunMigrationsRecordsCurrentVersionAndIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open sqlite db: %v", err)
 	}
+	t.Cleanup(func() {
+		closeTestDB(t, target)
+	})
 
 	if err := RunMigrations(target); err != nil {
 		t.Fatalf("first migration run failed: %v", err)
@@ -60,6 +74,9 @@ func TestRunMigrationsUpgradesLegacySubscriptionSchema(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open sqlite db: %v", err)
 	}
+	t.Cleanup(func() {
+		closeTestDB(t, target)
+	})
 
 	if err := target.Exec(`
 		CREATE TABLE subscriptions (

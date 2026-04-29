@@ -20,6 +20,7 @@ import (
 	"github.com/google/uuid"
 	appconfig "github.com/pokerjest/animateAutoTool/internal/config"
 	"github.com/pokerjest/animateAutoTool/internal/db"
+	"github.com/pokerjest/animateAutoTool/internal/httpx"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/safeio"
 	"github.com/pokerjest/animateAutoTool/internal/service"
@@ -42,6 +43,8 @@ const (
 	r2ProgressCleanupInterval = 15 * time.Minute
 	r2ProgressTerminalTTL     = 2 * time.Hour
 	r2ProgressActiveTTL       = 24 * time.Hour
+	r2RequestTimeout          = 15 * time.Second
+	r2StageDownloadTimeout    = 30 * time.Minute
 )
 
 var r2ProgressJanitorOnce sync.Once
@@ -83,6 +86,10 @@ type R2Config struct {
 }
 
 func getR2Client(ctx context.Context) (*s3.Client, string, error) {
+	return getR2ClientWithHTTPClient(ctx, httpx.NewHTTPClient(r2RequestTimeout))
+}
+
+func getR2ClientWithHTTPClient(ctx context.Context, httpClient *http.Client) (*s3.Client, string, error) {
 	debugLog("DEBUG: getR2Client called")
 	var endpoint, accessKey, secretKey, bucket string
 
@@ -101,6 +108,7 @@ func getR2Client(ctx context.Context) (*s3.Client, string, error) {
 	cfg, err := awsconfig.LoadDefaultConfig(ctx,
 		awsconfig.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(accessKey, secretKey, "")),
 		awsconfig.WithRegion("us-east-1"), // R2 generally requires us-east-1 or auto, but S3 clients often prefer us-east-1
+		awsconfig.WithHTTPClient(httpClient),
 	)
 	if err != nil {
 		debugLog("DEBUG: getR2Client LoadDefaultConfig error: %v", err)
@@ -210,7 +218,7 @@ func UploadToR2Handler(c *gin.Context) {
 	}
 
 	// 2. Upload to R2
-	client, bucket, err := getR2Client(c.Request.Context())
+	client, bucket, err := getR2ClientWithHTTPClient(c.Request.Context(), httpx.NewHTTPClient(0))
 	if err != nil {
 		debugLog("DEBUG: getR2Client error: %v", err)
 		jsonBadRequest(c, "R2 配置有误: "+err.Error())
@@ -398,7 +406,7 @@ func StageR2BackupHandler(c *gin.Context) {
 		return
 	}
 
-	client, bucket, err := getR2Client(c.Request.Context())
+	client, bucket, err := getR2ClientWithHTTPClient(c.Request.Context(), httpx.NewHTTPClient(0))
 	if err != nil {
 		jsonBadRequest(c, "R2 配置有误: "+err.Error())
 		return
@@ -432,7 +440,8 @@ func StageR2BackupHandler(c *gin.Context) {
 		// 1. Get Object Info (Head/Get)
 		// We use GetObject directly.
 		// Note: We need a specialized Context for background task, don't use c.Request.Context()
-		bgCtx := context.Background()
+		bgCtx, cancel := context.WithTimeout(context.Background(), r2StageDownloadTimeout)
+		defer cancel()
 
 		resp, err := cli.GetObject(bgCtx, &s3.GetObjectInput{
 			Bucket: aws.String(b),
@@ -663,6 +672,7 @@ func TestR2ConnectionHandler(c *gin.Context) {
 	cfg, err := awsconfig.LoadDefaultConfig(c.Request.Context(),
 		awsconfig.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(req.AccessKey, secretKey, "")),
 		awsconfig.WithRegion("us-east-1"),
+		awsconfig.WithHTTPClient(httpx.NewHTTPClient(r2RequestTimeout)),
 	)
 	if err != nil {
 		debugLog("DEBUG: LoadDefaultConfig error: %v", err)

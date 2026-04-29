@@ -4,6 +4,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/glebarez/sqlite"
@@ -31,6 +32,8 @@ func InitDB(storagePath string) {
 		// SQLite keeps plain :memory: databases per connection, which causes tables to
 		// disappear when GORM opens additional pooled connections during tests.
 		driverPath = "file::memory:?cache=shared"
+	} else {
+		driverPath = sqliteDriverPath(storagePath)
 	}
 
 	DB, err = gorm.Open(sqlite.Open(driverPath), &gorm.Config{})
@@ -73,4 +76,20 @@ func SaveGlobalConfig(key string, value string) error {
 
 func isInMemoryDB(storagePath string) bool {
 	return storagePath == ":memory:" || strings.HasPrefix(storagePath, "file::memory:")
+}
+
+func sqliteDriverPath(storagePath string) string {
+	if runtime.GOOS != "windows" {
+		return storagePath
+	}
+
+	separator := "?"
+	if strings.Contains(storagePath, "?") {
+		separator = "&"
+	}
+
+	// modernc/glebarez SQLite can fail to delete rollback journals on Windows
+	// in some portable/self-contained layouts. MEMORY journaling avoids that
+	// startup failure without changing other platforms.
+	return storagePath + separator + "_pragma=journal_mode(MEMORY)"
 }

@@ -16,6 +16,8 @@ var errPickerCancelled = errors.New("directory picker cancelled")
 
 var pickDirectoryFunc = pickDirectoryNative
 
+const goosWindows = "windows"
+
 type pickDirectoryRequest struct {
 	Title       string `form:"title" json:"title"`
 	DefaultPath string `form:"default_path" json:"default_path"`
@@ -61,7 +63,7 @@ func pickDirectoryNative(title, defaultPath string) (string, error) {
 	switch runtime.GOOS {
 	case "darwin":
 		return pickDirectoryDarwin(title, defaultPath)
-	case "windows":
+	case goosWindows:
 		return pickDirectoryWindows(title, defaultPath)
 	case "linux":
 		return pickDirectoryLinux(title, defaultPath)

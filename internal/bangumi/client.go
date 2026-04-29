@@ -48,6 +48,12 @@ func (c *Client) SetProxy(proxyURL string) {
 	}
 }
 
+func (c *Client) SetTimeout(timeout time.Duration) {
+	if timeout > 0 {
+		c.client.SetTimeout(timeout)
+	}
+}
+
 func (c *Client) GetAuthorizationURL() string {
 	// https://bgm.tv/oauth/authorize?client_id=[client_id]&response_type=code&redirect_uri=[redirect_uri]
 	u := fmt.Sprintf("https://bgm.tv/oauth/authorize?client_id=%s&response_type=code&redirect_uri=%s",

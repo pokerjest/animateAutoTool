@@ -3,6 +3,8 @@ package api
 import (
 	"fmt"
 	"net/http"
+	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -67,6 +69,7 @@ func SetupPageHandler(c *gin.Context) {
 		"ConfigPath":          config.ConfigFilePath(),
 		"DataDir":             config.DataDir(),
 		"ManagedDownloadsOff": managedDownloadsOff,
+		"IsWindows":           runtime.GOOS == goosWindows,
 		"QBMode":              qbCfg.Mode,
 		"QBURL":               qbCfg.URL,
 		"QBUsername":          qbCfg.Username,
@@ -132,7 +135,7 @@ func CompleteBootstrapSetupHandler(c *gin.Context) {
 	}
 
 	authService := service.NewAuthService()
-	if err := authService.ChangePassword(currentUser.ID, bootstrapInfo.Password, req.NewPassword); err != nil {
+	if err := authService.SetPassword(currentUser.ID, req.NewPassword); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -173,12 +176,30 @@ func collectSetupReadinessStatuses() []SetupReadinessStatus {
 }
 
 func buildAppReadinessStatus() SetupReadinessStatus {
+	detail := fmt.Sprintf("配置: %s | 数据: %s", config.ConfigFilePath(), config.DataDir())
+	action := ""
+	state := setupStateReady
+	headline := "配置文件和数据目录已经就绪"
+
+	if runtime.GOOS == "windows" {
+		root := strings.ToLower(filepath.Clean(config.RootDir()))
+		switch {
+		case strings.Contains(root, `\program files`):
+			state = setupStateWarning
+			headline = "建议把应用移到可写目录后再长期使用"
+			action = "Windows 下不要长期放在 Program Files。建议移动到 D:\\Apps\\AnimateAutoTool 或 %USERPROFILE%\\Apps\\AnimateAutoTool。"
+		case strings.TrimSpace(loadGlobalConfigValue(model.ConfigKeyBaseDir)) == "":
+			action = "如果准备在 Windows 本机下载，建议顺手选一个默认下载目录，例如 D:\\Anime\\Downloads。"
+		}
+	}
+
 	return SetupReadinessStatus{
 		Key:      "app",
 		Label:    "应用目录",
-		State:    setupStateReady,
-		Headline: "配置文件和数据目录已经就绪",
-		Detail:   fmt.Sprintf("配置: %s | 数据: %s", config.ConfigFilePath(), config.DataDir()),
+		State:    state,
+		Headline: headline,
+		Detail:   detail,
+		Action:   action,
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"github.com/glebarez/sqlite"
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/model"
+	"github.com/pokerjest/animateAutoTool/internal/safeio"
 	"gorm.io/gorm"
 )
 
@@ -131,6 +132,9 @@ func InspectBackup(path string) (BackupDescriptor, error) {
 	if err != nil {
 		return BackupDescriptor{}, err
 	}
+	if sqlDB, err := targetDB.DB(); err == nil {
+		defer safeio.Close(sqlDB)
+	}
 
 	desc := BackupDescriptor{
 		Mode:           BackupModeFull,
@@ -239,6 +243,9 @@ func annotateBackupFile(destPath string, mode string) error {
 	if err != nil {
 		return err
 	}
+	if sqlDB, err := destDB.DB(); err == nil {
+		defer safeio.Close(sqlDB)
+	}
 	if err := destDB.AutoMigrate(&backupManifest{}); err != nil {
 		return err
 	}
@@ -262,6 +269,9 @@ func createSelectiveBackupFile(destPath string, mode string) error {
 	destDB, err := gorm.Open(sqlite.Open(destPath), &gorm.Config{})
 	if err != nil {
 		return err
+	}
+	if sqlDB, err := destDB.DB(); err == nil {
+		defer safeio.Close(sqlDB)
 	}
 
 	if err := destDB.AutoMigrate(&backupManifest{}); err != nil {

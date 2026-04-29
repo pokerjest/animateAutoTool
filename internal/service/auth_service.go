@@ -101,24 +101,16 @@ func (s *AuthService) ChangePassword(userID uint, oldPassword, newPassword strin
 		return errors.New("incorrect old password")
 	}
 
-	// Hash new password
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
-	if err != nil {
-		return err
+	return s.updatePassword(&user, newPassword)
+}
+
+func (s *AuthService) SetPassword(userID uint, newPassword string) error {
+	var user model.User
+	if err := db.DB.First(&user, userID).Error; err != nil {
+		return errors.New("user not found")
 	}
 
-	user.PasswordHash = string(hashedPassword)
-	if err := db.DB.Save(&user).Error; err != nil {
-		return err
-	}
-
-	if info, err := bootstrap.LoadAdminBootstrapInfo(); err == nil && info.Username == user.Username {
-		if err := bootstrap.ClearAdminBootstrapInfo(); err != nil {
-			log.Printf("Failed to clear bootstrap admin info: %v", err)
-		}
-	}
-
-	return nil
+	return s.updatePassword(&user, newPassword)
 }
 
 func (s *AuthService) ResetPasswordByUsername(username, newPassword string) error {
@@ -132,13 +124,17 @@ func (s *AuthService) ResetPasswordByUsername(username, newPassword string) erro
 		return errors.New("user not found")
 	}
 
+	return s.updatePassword(&user, newPassword)
+}
+
+func (s *AuthService) updatePassword(user *model.User, newPassword string) error {
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
 	if err != nil {
 		return err
 	}
 
 	user.PasswordHash = string(hashedPassword)
-	if err := db.DB.Save(&user).Error; err != nil {
+	if err := db.DB.Save(user).Error; err != nil {
 		return err
 	}
 

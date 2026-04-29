@@ -1,0 +1,37 @@
+Animate Auto Tool - Windows Quick Start
+======================================
+
+1. Extract the zip to a writable folder.
+   Recommended:
+   - D:\Apps\AnimateAutoTool
+   - %USERPROFILE%\Apps\AnimateAutoTool
+
+   Avoid:
+   - C:\Program Files\...
+   - other read-only or admin-only folders
+
+2. Edit config.yaml if needed.
+   The release package includes config.yaml.
+   You can edit it directly, or run:
+   - init-config.bat
+   - open-config.bat
+
+3. Start the app.
+   - start.bat   : run in background
+   - run.bat     : run in foreground for troubleshooting
+   - stop.bat    : stop the running app
+   - restart.bat : restart the app
+   - open-ui.bat : open the Web UI in your browser
+   - open-data.bat : open the local data folder
+   - open-config.bat : open config.yaml in Notepad
+   - view-logs.bat : open logs\server.log
+
+4. Open the Web UI.
+   Default address:
+   http://127.0.0.1:8306/login
+
+5. If startup fails, check:
+   logs\server.log
+
+6. qBittorrent can be configured later.
+   You can complete first-run setup first, then connect qB from Settings.

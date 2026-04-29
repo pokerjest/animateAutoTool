@@ -5,6 +5,9 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -39,6 +42,7 @@ func GetDeploymentCheckHandler(c *gin.Context) {
 
 func buildDeploymentCheckReport() DeploymentCheckReport {
 	items := []DeploymentCheckItem{
+		checkAppDataLocation(),
 		checkPublicURL(),
 		checkTrustedProxies(),
 		checkSecureCookies(),
@@ -58,6 +62,48 @@ func buildDeploymentCheckReport() DeploymentCheckReport {
 		}
 	}
 	return report
+}
+
+func checkAppDataLocation() DeploymentCheckItem {
+	root := config.RootDir()
+	dataDir := config.DataDir()
+	if root == "" && dataDir == "" {
+		return DeploymentCheckItem{
+			Name:    "应用目录",
+			Status:  deploymentCheckWarn,
+			Summary: "当前无法识别应用目录",
+		}
+	}
+
+	if runtime.GOOS == "windows" {
+		normalizedRoot := strings.ToLower(filepath.Clean(root))
+		if strings.Contains(normalizedRoot, `\program files`) {
+			return DeploymentCheckItem{
+				Name:    "应用目录",
+				Status:  deploymentCheckWarn,
+				Summary: "应用当前位于 Program Files 之下",
+				Detail:  root,
+				Action:  "Windows 下建议放到可写目录，例如 D:\\Apps\\AnimateAutoTool 或 %USERPROFILE%\\Apps\\AnimateAutoTool，避免配置、日志和数据库写入被权限拦截。",
+			}
+		}
+	}
+
+	if err := ensureDeploymentCheckWritable(dataDir); err != nil {
+		return DeploymentCheckItem{
+			Name:    "应用目录",
+			Status:  deploymentCheckFail,
+			Summary: "数据目录当前不可写",
+			Detail:  fmt.Sprintf("%s (%v)", dataDir, err),
+			Action:  "请确认当前目录对普通启动用户可写，或把程序移动到你自己的应用目录后再启动。",
+		}
+	}
+
+	return DeploymentCheckItem{
+		Name:    "应用目录",
+		Status:  deploymentCheckPass,
+		Summary: "配置、日志和数据目录都可写",
+		Detail:  fmt.Sprintf("root=%s | data=%s", root, dataDir),
+	}
 }
 
 func checkPublicURL() DeploymentCheckItem {
@@ -231,6 +277,23 @@ func normalizedTrustedProxies() []string {
 		result = append(result, entry)
 	}
 	return result
+}
+
+func ensureDeploymentCheckWritable(dir string) error {
+	if strings.TrimSpace(dir) == "" {
+		return fmt.Errorf("empty data dir")
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	probe, err := os.CreateTemp(dir, "write-check-*.tmp")
+	if err != nil {
+		return err
+	}
+	probePath := probe.Name()
+	_ = probe.Close()
+	_ = os.Remove(probePath)
+	return nil
 }
 
 func onlyLoopbackTrusted(entries []string) bool {

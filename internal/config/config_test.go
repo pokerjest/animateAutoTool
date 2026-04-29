@@ -57,7 +57,7 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	if len(AppConfig.Server.TrustedProxies) != 2 || AppConfig.Server.TrustedProxies[0] != "127.0.0.1" {
 		t.Errorf("Expected loopback trusted proxies by default, got %#v", AppConfig.Server.TrustedProxies)
 	}
-	expectedDBPath := filepath.Join(tempRoot, "data", "animate.db")
+	expectedDBPath := filepath.Join(tempRoot, "data", defaultDatabaseFileName())
 	if AppConfig.Database.Path != expectedDBPath {
 		t.Errorf("Expected default db path %q, got %s", expectedDBPath, AppConfig.Database.Path)
 	}
