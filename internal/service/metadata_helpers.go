@@ -1,7 +1,6 @@
 package service
 
 import (
-	"log"
 	"strings"
 	"time"
 
@@ -107,10 +106,4 @@ func performWithRetry[T any](op func() (T, error)) (T, error) {
 		}
 	}
 	return result, err
-}
-
-func logMetadataSaveFailure(title string, err error) {
-	if err != nil {
-		log.Printf("MetadataService: failed to persist metadata for %q: %v", title, err)
-	}
 }
