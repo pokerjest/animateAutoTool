@@ -2,6 +2,8 @@ package parser
 
 import "testing"
 
+const parserResolution1080p = "1080p"
+
 func TestIsVideoFile(t *testing.T) {
 	cases := []struct {
 		path string
@@ -75,8 +77,8 @@ func TestParseFilenameBasicSxxExx(t *testing.T) {
 	if info.Season != 1 || info.Episode != 5 {
 		t.Errorf("expected S1E5, got S%dE%d", info.Season, info.Episode)
 	}
-	if info.Resolution != "1080p" {
-		t.Errorf("expected 1080p, got %q", info.Resolution)
+	if info.Resolution != parserResolution1080p {
+		t.Errorf("expected %s, got %q", parserResolution1080p, info.Resolution)
 	}
 	if info.VideoCodec != "X265" {
 		t.Errorf("expected X265, got %q", info.VideoCodec)
@@ -94,8 +96,8 @@ func TestParseFilenameMikanStyle(t *testing.T) {
 	if info.Group != "ANi" {
 		t.Errorf("expected group ANi, got %q", info.Group)
 	}
-	if info.Resolution != "1080p" {
-		t.Errorf("expected 1080p, got %q", info.Resolution)
+	if info.Resolution != parserResolution1080p {
+		t.Errorf("expected %s, got %q", parserResolution1080p, info.Resolution)
 	}
 	if info.AudioCodec != "AAC" {
 		t.Errorf("expected AAC, got %q", info.AudioCodec)
@@ -117,7 +119,7 @@ func TestParseFilenameStandaloneEpisodeNumber(t *testing.T) {
 	if info.Group != "LoliHouse" {
 		t.Errorf("expected group LoliHouse, got %q", info.Group)
 	}
-	if info.Resolution != "1080p" {
-		t.Errorf("expected 1080p, got %q", info.Resolution)
+	if info.Resolution != parserResolution1080p {
+		t.Errorf("expected %s, got %q", parserResolution1080p, info.Resolution)
 	}
 }

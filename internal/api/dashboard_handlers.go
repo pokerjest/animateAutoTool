@@ -54,6 +54,7 @@ type TaskOverviewData struct {
 const (
 	taskToneAmber       = "amber"
 	taskToneEmerald     = "emerald"
+	taskToneRose        = "rose"
 	taskStatusCompleted = "最近已完成"
 	taskStatusIdle      = "待命"
 )
@@ -278,7 +279,7 @@ func buildDownloadSyncTaskCard() TaskOverviewCard {
 		card.Detail = taskNeverRunDetail(card.Title)
 	case status.LastError != "":
 		card.StatusLabel = "同步异常"
-		card.StatusTone = "rose"
+		card.StatusTone = taskToneRose
 		card.Summary = "最近一次下载状态同步失败"
 		card.Detail = fmt.Sprintf("待修复记录 %d，长时间下载中 %d", missingTargetCount, staleDownloadingCount)
 		card.FinishedAt = status.LastCheckedAt
@@ -365,7 +366,7 @@ func formatSchedulerDetail(status scheduler.RunStatus) string {
 func statusToneFromCounts(errorsCount, warnings int) string {
 	switch {
 	case errorsCount > 0:
-		return "rose"
+		return taskToneRose
 	case warnings > 0:
 		return taskToneAmber
 	default:

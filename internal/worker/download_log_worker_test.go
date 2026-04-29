@@ -81,9 +81,9 @@ func TestPublishCompletedDownloadEvents(t *testing.T) {
 	}
 
 	var (
-		mu      sync.Mutex
-		got     []map[string]interface{}
-		notify  = make(chan struct{}, 4)
+		mu     sync.Mutex
+		got    []map[string]interface{}
+		notify = make(chan struct{}, 4)
 	)
 	event.GlobalBus.Subscribe(event.EventDownloadReady, func(e event.Event) {
 		payload, ok := e.Payload.(map[string]interface{})

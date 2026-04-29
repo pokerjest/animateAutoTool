@@ -18,6 +18,12 @@ import (
 	"gorm.io/gorm"
 )
 
+const (
+	subscriptionToneWarning     = "warning"
+	subscriptionToneSuccess     = "success"
+	subscriptionResolution1080p = "1080p"
+)
+
 func populateSubscriptionStats(subs []model.Subscription) {
 	for i := range subs {
 		populateSubscriptionStat(&subs[i])
@@ -160,43 +166,11 @@ func populateSubscriptionActionHints(sub *model.Subscription) {
 		return
 	}
 
-	sub.CanUseBaseRSS = false
-	sub.BaseRSSURL = ""
-	sub.CanClearFilter = false
-	sub.CanResetStaleLogs = false
-	sub.CanRetryMissing = false
-	sub.CanRetryStale = false
-	sub.CanRetryUpgrade = false
-	sub.CanRefreshLibrary = false
-	sub.HasRepairActions = false
-	sub.StrategyHint = ""
-	sub.LifecycleStage = ""
-	sub.LifecycleTone = ""
-	sub.LibraryStage = ""
-	sub.LibraryTone = ""
-	sub.LibraryHint = ""
-	sub.LastErrorDisplay = humanizeOperationError(sub.LastError)
-	if sub.ExpectedEpisodes > 0 && sub.LastEp < sub.ExpectedEpisodes {
-		appendStrategyHint(sub, fmt.Sprintf("当前已追到 %d / %d 集，还差 %d 集达到完结目标。", sub.LastEp, sub.ExpectedEpisodes, sub.ExpectedEpisodes-sub.LastEp))
-	}
-	if missing := missingEpisodeSummary(sub); missing != "" {
-		sub.CanRetryMissing = true
-		appendStrategyHint(sub, missing)
-	}
-	if sub.StaleAfterHours > 0 && sub.LastSuccessAt != nil {
-		if time.Since(*sub.LastSuccessAt) > time.Duration(sub.StaleAfterHours)*time.Hour {
-			sub.CanRetryStale = true
-			appendStrategyHint(sub, fmt.Sprintf("已经超过 %d 小时没有出现新进展，建议检查 RSS 源、下载器或备用 RSS。", sub.StaleAfterHours))
-		}
-	}
-	if sub.AutoDisableOnDone && sub.ExpectedEpisodes > 0 && sub.LastEp >= sub.ExpectedEpisodes {
-		appendStrategyHint(sub, "这部番剧的目标集数已经完成；如果还在运行，可以直接自动停用。")
-	}
-	if staleCount := countResettableSubscriptionLogs(sub.ID, staleLogResetAge); staleCount > 0 {
-		appendStrategyHint(sub, fmt.Sprintf("有 %d 条下载记录已经卡住超过 24 小时，可直接清理阻塞后重试。", staleCount))
-	}
+	resetSubscriptionActionHints(sub)
+	populateSubscriptionProgressHints(sub)
+	populateSubscriptionStaleHints(sub)
 	populateSubscriptionLibraryState(sub)
-	sub.HasRepairActions = sub.CanUseBaseRSS || sub.CanClearFilter || sub.CanResetStaleLogs || sub.CanRetryMissing || sub.CanRetryStale || sub.CanRetryUpgrade || sub.CanRefreshLibrary
+	sub.HasRepairActions = subscriptionHasRepairActions(sub)
 	if sub.LastRunStatus != service.SubscriptionRunStatusIdle {
 		populateSubscriptionLifecycle(sub)
 		return
@@ -214,8 +188,54 @@ func populateSubscriptionActionHints(sub *model.Subscription) {
 	if strings.Contains(sub.LastRunSummary, duplicateOnlyHint) && hasResettableSubscriptionLogs(sub.ID, staleLogResetAge) {
 		sub.CanResetStaleLogs = true
 	}
-	sub.HasRepairActions = sub.CanUseBaseRSS || sub.CanClearFilter || sub.CanResetStaleLogs || sub.CanRetryMissing || sub.CanRetryStale || sub.CanRetryUpgrade || sub.CanRefreshLibrary
+	sub.HasRepairActions = subscriptionHasRepairActions(sub)
 	populateSubscriptionLifecycle(sub)
+}
+
+func resetSubscriptionActionHints(sub *model.Subscription) {
+	sub.CanUseBaseRSS = false
+	sub.BaseRSSURL = ""
+	sub.CanClearFilter = false
+	sub.CanResetStaleLogs = false
+	sub.CanRetryMissing = false
+	sub.CanRetryStale = false
+	sub.CanRetryUpgrade = false
+	sub.CanRefreshLibrary = false
+	sub.HasRepairActions = false
+	sub.StrategyHint = ""
+	sub.LifecycleStage = ""
+	sub.LifecycleTone = ""
+	sub.LibraryStage = ""
+	sub.LibraryTone = ""
+	sub.LibraryHint = ""
+	sub.LastErrorDisplay = humanizeOperationError(sub.LastError)
+}
+
+func populateSubscriptionProgressHints(sub *model.Subscription) {
+	if sub.ExpectedEpisodes > 0 && sub.LastEp < sub.ExpectedEpisodes {
+		appendStrategyHint(sub, fmt.Sprintf("当前已追到 %d / %d 集，还差 %d 集达到完结目标。", sub.LastEp, sub.ExpectedEpisodes, sub.ExpectedEpisodes-sub.LastEp))
+	}
+	if missing := missingEpisodeSummary(sub); missing != "" {
+		sub.CanRetryMissing = true
+		appendStrategyHint(sub, missing)
+	}
+	if sub.AutoDisableOnDone && sub.ExpectedEpisodes > 0 && sub.LastEp >= sub.ExpectedEpisodes {
+		appendStrategyHint(sub, "这部番剧的目标集数已经完成；如果还在运行，可以直接自动停用。")
+	}
+}
+
+func populateSubscriptionStaleHints(sub *model.Subscription) {
+	if sub.StaleAfterHours > 0 && sub.LastSuccessAt != nil && time.Since(*sub.LastSuccessAt) > time.Duration(sub.StaleAfterHours)*time.Hour {
+		sub.CanRetryStale = true
+		appendStrategyHint(sub, fmt.Sprintf("已经超过 %d 小时没有出现新进展，建议检查 RSS 源、下载器或备用 RSS。", sub.StaleAfterHours))
+	}
+	if staleCount := countResettableSubscriptionLogs(sub.ID, staleLogResetAge); staleCount > 0 {
+		appendStrategyHint(sub, fmt.Sprintf("有 %d 条下载记录已经卡住超过 24 小时，可直接清理阻塞后重试。", staleCount))
+	}
+}
+
+func subscriptionHasRepairActions(sub *model.Subscription) bool {
+	return sub.CanUseBaseRSS || sub.CanClearFilter || sub.CanResetStaleLogs || sub.CanRetryMissing || sub.CanRetryStale || sub.CanRetryUpgrade || sub.CanRefreshLibrary
 }
 
 func populateSubscriptionLifecycle(sub *model.Subscription) {
@@ -226,19 +246,19 @@ func populateSubscriptionLifecycle(sub *model.Subscription) {
 	switch {
 	case sub.CanRetryMissing:
 		sub.LifecycleStage = "疑似缺集"
-		sub.LifecycleTone = "warning"
+		sub.LifecycleTone = subscriptionToneWarning
 	case sub.CanResetStaleLogs:
 		sub.LifecycleStage = "下载阻塞"
 		sub.LifecycleTone = "danger"
 	case sub.CanRetryStale:
 		sub.LifecycleStage = "长期无进展"
-		sub.LifecycleTone = "warning"
+		sub.LifecycleTone = subscriptionToneWarning
 	case !sub.IsActive && sub.AutoDisableOnDone && sub.ExpectedEpisodes > 0 && sub.LastEp >= sub.ExpectedEpisodes:
 		sub.LifecycleStage = "已完结停用"
-		sub.LifecycleTone = "success"
+		sub.LifecycleTone = subscriptionToneSuccess
 	case sub.ExpectedEpisodes > 0 && sub.LastEp >= sub.ExpectedEpisodes:
 		sub.LifecycleStage = "已追平目标"
-		sub.LifecycleTone = "success"
+		sub.LifecycleTone = subscriptionToneSuccess
 	case sub.ExpectedEpisodes > 0 && sub.LastEp > 0:
 		sub.LifecycleStage = "追更中"
 		sub.LifecycleTone = "info"
@@ -315,7 +335,7 @@ func populateSubscriptionLibraryState(sub *model.Subscription) {
 		Count(&jellyfinEpisodeCount)
 	if hasSeriesInJellyfin || jellyfinEpisodeCount > 0 {
 		sub.LibraryStage = "可播放"
-		sub.LibraryTone = "success"
+		sub.LibraryTone = subscriptionToneSuccess
 		if totalEpisodes > 0 {
 			sub.LibraryHint = fmt.Sprintf("本地已入库 %d 集，Jellyfin 已建立条目，可直接播放。", totalEpisodes)
 		} else {
@@ -323,7 +343,7 @@ func populateSubscriptionLibraryState(sub *model.Subscription) {
 		}
 	} else if totalEpisodes > 0 && jellyfinConfigured {
 		sub.LibraryStage = "待同步到媒体库"
-		sub.LibraryTone = "warning"
+		sub.LibraryTone = subscriptionToneWarning
 		sub.LibraryHint = fmt.Sprintf("本地已经识别 %d 集，但 Jellyfin 还没有建立条目；建议触发一次库刷新。", totalEpisodes)
 		sub.CanRefreshLibrary = true
 	}
@@ -359,7 +379,7 @@ func collectUpgradeableEpisodes(episodes []model.LocalEpisode) []int {
 
 	upgradeable := make([]int, 0)
 	for episodeNum, score := range bestByEpisode {
-		if score >= resolutionScore("1080p") {
+		if score >= resolutionScore(subscriptionResolution1080p) {
 			continue
 		}
 		upgradeable = append(upgradeable, episodeNum)

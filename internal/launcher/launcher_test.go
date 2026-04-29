@@ -44,10 +44,10 @@ func TestExtractedRootDirSingleSubdir(t *testing.T) {
 
 func TestExtractedRootDirMultipleEntries(t *testing.T) {
 	tmp := t.TempDir()
-	if err := os.WriteFile(filepath.Join(tmp, "a.txt"), []byte("x"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(tmp, "a.txt"), []byte("x"), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(tmp, "b.txt"), []byte("y"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(tmp, "b.txt"), []byte("y"), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 
@@ -93,7 +93,7 @@ func TestHasManagedQBBinary(t *testing.T) {
 	}
 
 	target := ManagedQBExecutablePath(tmp)
-	if err := os.WriteFile(target, []byte("stub"), 0o755); err != nil {
+	if err := os.WriteFile(target, []byte("stub"), 0o600); err != nil {
 		t.Fatalf("write stub: %v", err)
 	}
 	if !HasManagedQBBinary(tmp) {

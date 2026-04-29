@@ -9,6 +9,8 @@ import (
 	"github.com/go-resty/resty/v2"
 )
 
+const mikanTestSubgroupANi = "ANi"
+
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (fn roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
@@ -56,7 +58,7 @@ func TestMikanParseRSS(t *testing.T) {
 	if len(episodes) != 1 {
 		t.Fatalf("expected 1 episode, got %d", len(episodes))
 	}
-	if got := episodes[0].SubGroup; got != "ANi" {
+	if got := episodes[0].SubGroup; got != mikanTestSubgroupANi {
 		t.Fatalf("unexpected subgroup: %q", got)
 	}
 	if got := episodes[0].EpisodeNum; got != "03" {
@@ -111,7 +113,7 @@ func TestMikanSearchAndSubgroups(t *testing.T) {
 	if len(subgroups) != 3 {
 		t.Fatalf("expected 3 subgroup options including all, got %d", len(subgroups))
 	}
-	if subgroups[1].Name != "ANi" || subgroups[2].ID != "382" {
+	if subgroups[1].Name != mikanTestSubgroupANi || subgroups[2].ID != "382" {
 		t.Fatalf("unexpected subgroups: %+v", subgroups)
 	}
 }
