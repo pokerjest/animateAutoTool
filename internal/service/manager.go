@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/url"
@@ -13,6 +14,7 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/event"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/parser"
+	"github.com/pokerjest/animateAutoTool/internal/store"
 	"gorm.io/gorm"
 )
 
@@ -39,6 +41,10 @@ func NewSubscriptionManager(down downloader.Downloader) *SubscriptionManager {
 
 // CheckUpdate 对所有活跃订阅执行一次检查
 func (m *SubscriptionManager) CheckUpdate() {
+	m.CheckUpdateContext(context.Background())
+}
+
+func (m *SubscriptionManager) CheckUpdateContext(ctx context.Context) {
 	var subs []model.Subscription
 	if err := m.DB.Where("is_active = ?", true).Find(&subs).Error; err != nil {
 		log.Printf("Error fetching subscriptions: %v", err)
@@ -46,19 +52,23 @@ func (m *SubscriptionManager) CheckUpdate() {
 	}
 
 	for _, sub := range subs {
-		m.ProcessSubscriptionWithSource(&sub, "auto")
+		m.ProcessSubscriptionWithSourceContext(ctx, &sub, "auto")
 	}
 }
 
 func (m *SubscriptionManager) ProcessSubscription(sub *model.Subscription) {
-	m.ProcessSubscriptionWithSource(sub, "manual")
+	m.ProcessSubscriptionWithSourceContext(context.Background(), sub, "manual")
 }
 
 func (m *SubscriptionManager) ProcessSubscriptionWithSource(sub *model.Subscription, source string) {
+	m.ProcessSubscriptionWithSourceContext(context.Background(), sub, source)
+}
+
+func (m *SubscriptionManager) ProcessSubscriptionWithSourceContext(ctx context.Context, sub *model.Subscription, source string) {
 	log.Printf("DEBUG: Processing subscription %s (URL: %s)", sub.Title, sub.RSSUrl)
 	checkedAt := time.Now()
 
-	episodes, err := m.RSSParser.Parse(sub.RSSUrl)
+	episodes, err := m.parseRSS(ctx, sub.RSSUrl)
 	if err != nil {
 		log.Printf("Failed to parse RSS for %s: %v", sub.Title, err)
 		m.persistRunState(sub, subscriptionRunState{
@@ -104,7 +114,7 @@ func (m *SubscriptionManager) ProcessSubscriptionWithSource(sub *model.Subscript
 		savePath := m.resolveSavePath(sub)
 
 		log.Printf("DEBUG: Adding torrent to QB: %s -> %s", ep.Title, savePath)
-		err := m.Downloader.AddTorrent(ep.TorrentURL, savePath, "Anime", false)
+		err := m.addTorrent(ctx, ep.TorrentURL, savePath, "Anime", false)
 		if err != nil {
 			log.Printf("Failed to add torrent for %s - %s: %v", sub.Title, ep.Title, err)
 			failedCount++
@@ -301,6 +311,10 @@ func (m *SubscriptionManager) buildIdleRunSummary(sub *model.Subscription, total
 }
 
 func (m *SubscriptionManager) diagnoseEmptySubscriptionFeed(sub *model.Subscription) string {
+	return m.diagnoseEmptySubscriptionFeedContext(context.Background(), sub)
+}
+
+func (m *SubscriptionManager) diagnoseEmptySubscriptionFeedContext(ctx context.Context, sub *model.Subscription) string {
 	if m == nil || m.RSSParser == nil || sub == nil {
 		return ""
 	}
@@ -325,7 +339,7 @@ func (m *SubscriptionManager) diagnoseEmptySubscriptionFeed(sub *model.Subscript
 		return ""
 	}
 
-	episodes, err := m.RSSParser.Parse(fallbackURL)
+	episodes, err := m.parseRSS(ctx, fallbackURL)
 	if err != nil || len(episodes) == 0 {
 		return ""
 	}
@@ -354,13 +368,21 @@ func (m *SubscriptionManager) loadGlobalConfigValue(key string) string {
 	if m.DB == nil {
 		return ""
 	}
+	return store.NewConfigStore(m.DB).GetDefault(key, "")
+}
 
-	var cfg model.GlobalConfig
-	if err := m.DB.Where("key = ?", key).First(&cfg).Error; err != nil {
-		return ""
+func (m *SubscriptionManager) parseRSS(ctx context.Context, feedURL string) ([]parser.Episode, error) {
+	if ctxParser, ok := m.RSSParser.(parser.ContextRSSParser); ok {
+		return ctxParser.ParseContext(ctx, feedURL)
 	}
+	return m.RSSParser.Parse(feedURL)
+}
 
-	return cfg.Value
+func (m *SubscriptionManager) addTorrent(ctx context.Context, torrentURL, savePath, category string, paused bool) error {
+	if ctxDownloader, ok := m.Downloader.(downloader.ContextDownloader); ok {
+		return ctxDownloader.AddTorrentContext(ctx, torrentURL, savePath, category, paused)
+	}
+	return m.Downloader.AddTorrent(torrentURL, savePath, category, paused)
 }
 
 func joinDownloadPath(base, child string) string {

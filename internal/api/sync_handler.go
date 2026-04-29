@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -16,16 +17,16 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/service"
 )
 
-var runDashboardSyncNow = func() error {
+var runDashboardSyncNow = func(ctx context.Context) error {
 	var steps []string
 	var errs []string
 
-	schedulerMgr := scheduler.NewManager()
+	schedulerMgr := scheduler.NewManagerWithContext(ctx)
 	defer schedulerMgr.Stop()
 	if scheduler.IsRunInProgress() {
 		steps = append(steps, "订阅检查（已在运行，跳过重复触发）")
 	} else {
-		schedulerMgr.CheckUpdates()
+		schedulerMgr.CheckUpdatesContext(ctx)
 		steps = append(steps, "订阅检查")
 	}
 
@@ -42,7 +43,7 @@ var runDashboardSyncNow = func() error {
 	qbCfg := qbutil.LoadConfig()
 	if !qbutil.ManagedBinaryMissing(qbCfg, config.BinDir()) && !qbutil.MissingExternalURL(qbCfg) && strings.TrimSpace(qbCfg.URL) != "" {
 		client := downloader.NewQBittorrentClient(qbCfg.URL)
-		if err := client.Login(qbCfg.Username, qbCfg.Password); err != nil {
+		if err := client.LoginContext(ctx, qbCfg.Username, qbCfg.Password); err != nil {
 			errs = append(errs, fmt.Sprintf("下载状态同步失败: %v", err))
 		} else {
 			if _, err := service.SyncDownloadLogStatusesWithQBClient(client); err != nil {
@@ -75,7 +76,7 @@ var runDashboardSyncNow = func() error {
 
 func DashboardSyncHandler(c *gin.Context) {
 	go func() {
-		if err := runDashboardSyncNow(); err != nil {
+		if err := runDashboardSyncNow(context.Background()); err != nil {
 			log.Printf("Dashboard sync failed: %v", err)
 		}
 	}()

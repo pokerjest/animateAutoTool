@@ -254,7 +254,7 @@ func SearchMetadataHandler(c *gin.Context) {
 
 		tmdbClient := tmdb.NewClient(token.Value, proxyURL)
 
-		results, err := tmdbClient.SearchTV(keyword)
+		results, err := tmdbClient.SearchTVContext(c.Request.Context(), keyword)
 		if err != nil {
 			jsonServerError(c, "搜索 TMDB 元数据", err)
 			return
@@ -293,7 +293,7 @@ func SearchMetadataHandler(c *gin.Context) {
 
 		client := anilist.NewClient(token.Value, proxyURL)
 
-		result, err := client.SearchAnime(keyword)
+		result, err := client.SearchAnimeContext(c.Request.Context(), keyword)
 		if err != nil {
 			jsonServerError(c, "搜索 AniList 元数据", err)
 			return
@@ -386,7 +386,7 @@ func GetBangumiSubjectHandler(c *gin.Context) {
 		client.SetProxy(proxyUrl.Value)
 	}
 
-	subject, err := client.GetSubject(id)
+	subject, err := client.GetSubjectContext(c.Request.Context(), id)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

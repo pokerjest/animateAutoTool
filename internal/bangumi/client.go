@@ -1,6 +1,7 @@
 package bangumi
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/go-resty/resty/v2"
+	"github.com/pokerjest/animateAutoTool/internal/httpx"
 )
 
 type Client struct {
@@ -36,7 +38,7 @@ func NewClient(appID, appSecret, redirectURI string) *Client {
 		AppID:       appID,
 		AppSecret:   appSecret,
 		RedirectURI: redirectURI,
-		client:      resty.New().SetTimeout(10 * time.Second),
+		client:      httpx.NewRestyClient(10*time.Second, "", nil),
 	}
 }
 
@@ -54,8 +56,12 @@ func (c *Client) GetAuthorizationURL() string {
 }
 
 func (c *Client) ExchangeToken(code string) (*OauthTokenResponse, error) {
+	return c.ExchangeTokenContext(context.Background(), code)
+}
+
+func (c *Client) ExchangeTokenContext(ctx context.Context, code string) (*OauthTokenResponse, error) {
 	// POST https://bgm.tv/oauth/access_token
-	resp, err := c.client.R().
+	resp, err := httpx.NewRequest(ctx, c.client).
 		SetFormData(map[string]string{
 			"grant_type":    "authorization_code",
 			"client_id":     c.AppID,
@@ -80,8 +86,12 @@ func (c *Client) ExchangeToken(code string) (*OauthTokenResponse, error) {
 }
 
 func (c *Client) RefreshToken(refreshToken string) (*OauthTokenResponse, error) {
+	return c.RefreshTokenContext(context.Background(), refreshToken)
+}
+
+func (c *Client) RefreshTokenContext(ctx context.Context, refreshToken string) (*OauthTokenResponse, error) {
 	// POST https://bgm.tv/oauth/access_token
-	resp, err := c.client.R().
+	resp, err := httpx.NewRequest(ctx, c.client).
 		SetFormData(map[string]string{
 			"grant_type":    "refresh_token",
 			"client_id":     c.AppID,
@@ -106,8 +116,12 @@ func (c *Client) RefreshToken(refreshToken string) (*OauthTokenResponse, error) 
 }
 
 func (c *Client) GetCurrentUser(accessToken string) (*UserProfile, error) {
+	return c.GetCurrentUserContext(context.Background(), accessToken)
+}
+
+func (c *Client) GetCurrentUserContext(ctx context.Context, accessToken string) (*UserProfile, error) {
 	// GET https://api.bgm.tv/v0/me
-	resp, err := c.client.R().
+	resp, err := httpx.NewRequest(ctx, c.client).
 		SetHeader("Authorization", "Bearer "+accessToken).
 		SetHeader("User-Agent", "pokerjest/animateAutoTool/1.0 (https://github.com/pokerjest/animateAutoTool)").
 		Get("https://api.bgm.tv/v0/me")
@@ -148,10 +162,14 @@ type SearchResult struct {
 
 // SearchSubjects searches for subjects by keyword and returns a list of matches
 func (c *Client) SearchSubjects(keyword string) ([]SearchResult, error) {
+	return c.SearchSubjectsContext(context.Background(), keyword)
+}
+
+func (c *Client) SearchSubjectsContext(ctx context.Context, keyword string) ([]SearchResult, error) {
 	encodedKeyword := url.QueryEscape(keyword)
 	u := fmt.Sprintf("https://api.bgm.tv/search/subject/%s?type=2&responseGroup=small&max_results=10", encodedKeyword)
 
-	resp, err := c.client.R().
+	resp, err := httpx.NewRequest(ctx, c.client).
 		SetHeader("User-Agent", "pokerjest/animateAutoTool/1.0 (https://github.com/pokerjest/animateAutoTool)").
 		Get(u)
 
@@ -184,7 +202,11 @@ func (c *Client) SearchSubjects(keyword string) ([]SearchResult, error) {
 
 // SearchSubject searches for a subject by keyword and returns the first match with details
 func (c *Client) SearchSubject(keyword string) (*SearchResult, error) {
-	list, err := c.SearchSubjects(keyword)
+	return c.SearchSubjectContext(context.Background(), keyword)
+}
+
+func (c *Client) SearchSubjectContext(ctx context.Context, keyword string) (*SearchResult, error) {
+	list, err := c.SearchSubjectsContext(ctx, keyword)
 	if err != nil {
 		return nil, err
 	}
@@ -195,11 +217,15 @@ func (c *Client) SearchSubject(keyword string) (*SearchResult, error) {
 }
 
 func (c *Client) GetSubject(id int) (*Subject, error) {
+	return c.GetSubjectContext(context.Background(), id)
+}
+
+func (c *Client) GetSubjectContext(ctx context.Context, id int) (*Subject, error) {
 	// GET https://api.bgm.tv/v0/subjects/{subject_id}
 	// Try V0 API first
 	u := fmt.Sprintf("https://api.bgm.tv/v0/subjects/%d", id)
 
-	resp, err := c.client.R().
+	resp, err := httpx.NewRequest(ctx, c.client).
 		SetHeader("User-Agent", "pokerjest/animateAutoTool/1.0 (https://github.com/pokerjest/animateAutoTool)").
 		Get(u)
 
@@ -217,7 +243,7 @@ func (c *Client) GetSubject(id int) (*Subject, error) {
 	if !success {
 		// GET https://api.bgm.tv/subject/{subject_id}?responseGroup=medium
 		uLegacy := fmt.Sprintf("https://api.bgm.tv/subject/%d?responseGroup=medium", id)
-		resp, err = c.client.R().
+		resp, err = httpx.NewRequest(ctx, c.client).
 			SetHeader("User-Agent", "pokerjest/animateAutoTool/1.0 (https://github.com/pokerjest/animateAutoTool)").
 			Get(uLegacy)
 
@@ -236,7 +262,7 @@ func (c *Client) GetSubject(id int) (*Subject, error) {
 		if legacyFailed {
 			uWeb := fmt.Sprintf("https://bgm.tv/subject/%d", id)
 			// Mimic a real browser slightly more just in case
-			resp, err = c.client.R().
+			resp, err = httpx.NewRequest(ctx, c.client).
 				SetHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36").
 				Get(uWeb)
 

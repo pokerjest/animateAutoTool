@@ -1,6 +1,7 @@
 package downloader
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/go-resty/resty/v2"
+	"github.com/pokerjest/animateAutoTool/internal/httpx"
 )
 
 type QBittorrentClient struct {
@@ -30,12 +32,10 @@ func NewQBittorrentClient(baseURL string) *QBittorrentClient {
 	// 确保 baseURL 不以 / 结尾
 	baseURL = strings.TrimSuffix(baseURL, "/")
 
-	client := resty.New().
-		SetTimeout(5*time.Second).
+	client := httpx.NewRestyClient(5*time.Second, "", nil).
 		SetBaseURL(baseURL).
 		SetHeader("Referer", baseURL).
 		SetHeader("Origin", baseURL).
-		SetHeader("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36").
 		SetCookieJar(nil) // Keep Jar just in case, but we will manual override
 
 	client.SetRetryCount(3).SetRetryWaitTime(2 * time.Second)
@@ -53,14 +53,18 @@ func NewQBittorrentClient(baseURL string) *QBittorrentClient {
 }
 
 func (q *QBittorrentClient) Login(username, password string) error {
+	return q.LoginContext(context.Background(), username, password)
+}
+
+func (q *QBittorrentClient) LoginContext(ctx context.Context, username, password string) error {
 	if username == "" && password == "" {
-		if _, err := q.GetVersion(); err == nil {
+		if _, err := q.GetVersionContext(ctx); err == nil {
 			log.Printf("DEBUG: qBittorrent is reachable without explicit login; using localhost-auth bypass")
 			return nil
 		}
 	}
 
-	resp, err := q.client.R().
+	resp, err := httpx.NewRequest(ctx, q.client).
 		SetFormData(map[string]string{
 			"username": username,
 			"password": password,
@@ -87,12 +91,16 @@ func (q *QBittorrentClient) Login(username, password string) error {
 }
 
 func (q *QBittorrentClient) AddTorrent(torrentURL, savePath, category string, paused bool) error {
+	return q.AddTorrentContext(context.Background(), torrentURL, savePath, category, paused)
+}
+
+func (q *QBittorrentClient) AddTorrentContext(ctx context.Context, torrentURL, savePath, category string, paused bool) error {
 	pausedStr := "false"
 	if paused {
 		pausedStr = "true"
 	}
 
-	req := q.client.R().
+	req := httpx.NewRequest(ctx, q.client).
 		SetFormData(map[string]string{
 			"urls":        torrentURL,
 			"savepath":    savePath,
@@ -126,12 +134,20 @@ func (q *QBittorrentClient) AddTorrent(torrentURL, savePath, category string, pa
 }
 
 func (q *QBittorrentClient) Ping() error {
-	_, err := q.GetVersion()
+	return q.PingContext(context.Background())
+}
+
+func (q *QBittorrentClient) PingContext(ctx context.Context) error {
+	_, err := q.GetVersionContext(ctx)
 	return err
 }
 
 func (q *QBittorrentClient) GetVersion() (string, error) {
-	req := q.client.R()
+	return q.GetVersionContext(context.Background())
+}
+
+func (q *QBittorrentClient) GetVersionContext(ctx context.Context) (string, error) {
+	req := httpx.NewRequest(ctx, q.client)
 	// Manually attach cookies provided by Login
 	if len(q.cookies) > 0 {
 		req.SetCookies(q.cookies)
@@ -148,7 +164,11 @@ func (q *QBittorrentClient) GetVersion() (string, error) {
 }
 
 func (q *QBittorrentClient) ListTorrents() ([]TorrentInfo, error) {
-	req := q.client.R().
+	return q.ListTorrentsContext(context.Background())
+}
+
+func (q *QBittorrentClient) ListTorrentsContext(ctx context.Context) ([]TorrentInfo, error) {
+	req := httpx.NewRequest(ctx, q.client).
 		SetQueryParam("filter", "all").
 		SetResult(&[]TorrentInfo{})
 	if len(q.cookies) > 0 {
@@ -171,6 +191,10 @@ func (q *QBittorrentClient) ListTorrents() ([]TorrentInfo, error) {
 }
 
 func (q *QBittorrentClient) RenameFile(hash, oldPath, newPath string) error {
+	return q.RenameFileContext(context.Background(), hash, oldPath, newPath)
+}
+
+func (q *QBittorrentClient) RenameFileContext(ctx context.Context, hash, oldPath, newPath string) error {
 	if strings.TrimSpace(hash) == "" {
 		return errors.New("rename file failed: missing torrent hash")
 	}
@@ -178,7 +202,7 @@ func (q *QBittorrentClient) RenameFile(hash, oldPath, newPath string) error {
 		return errors.New("rename file failed: missing old or new path")
 	}
 
-	req := q.client.R().
+	req := httpx.NewRequest(ctx, q.client).
 		SetFormData(map[string]string{
 			"hash":    strings.TrimSpace(hash),
 			"oldPath": filepath.ToSlash(strings.TrimSpace(oldPath)),

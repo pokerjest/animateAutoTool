@@ -1,5 +1,7 @@
 package downloader
 
+import "context"
+
 // Downloader 定义下载器通用接口
 type Downloader interface {
 	Login(username, password string) error
@@ -12,4 +14,10 @@ type Downloader interface {
 
 	// 简单的连通性测试
 	Ping() error
+}
+
+type ContextDownloader interface {
+	LoginContext(ctx context.Context, username, password string) error
+	AddTorrentContext(ctx context.Context, url, savePath, category string, paused bool) error
+	PingContext(ctx context.Context) error
 }

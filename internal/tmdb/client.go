@@ -1,12 +1,14 @@
 package tmdb
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/go-resty/resty/v2"
+	"github.com/pokerjest/animateAutoTool/internal/httpx"
 )
 
 const (
@@ -20,15 +22,12 @@ type Client struct {
 }
 
 func NewClient(token string, proxyURL string) *Client {
-	c := resty.New()
-	c.SetTimeout(30 * time.Second)
-	if proxyURL != "" {
-		c.SetProxy(proxyURL)
-	}
+	c := httpx.NewRestyClient(30*time.Second, proxyURL, map[string]string{
+		"Content-Type": "application/json",
+	})
 	if token != "" {
 		c.SetHeader("Authorization", "Bearer "+token)
 	}
-	c.SetHeader("Content-Type", "application/json")
 
 	return &Client{
 		client: c,
@@ -64,8 +63,12 @@ type SimpleSeason struct {
 
 // SearchTV searches for a TV show by query and returns a list of results
 func (c *Client) SearchTV(query string) ([]TVShow, error) {
+	return c.SearchTVContext(context.Background(), query)
+}
+
+func (c *Client) SearchTVContext(ctx context.Context, query string) ([]TVShow, error) {
 	// Search in Chinese first (zh-CN)
-	resp, err := c.client.R().
+	resp, err := httpx.NewRequest(ctx, c.client).
 		SetQueryParam("query", query).
 		SetQueryParam("language", "zh-CN").
 		Get(BaseURL + "/search/tv")
@@ -92,7 +95,11 @@ func (c *Client) SearchTV(query string) ([]TVShow, error) {
 
 // GetTVDetails fetches details including overview for a specific ID
 func (c *Client) GetTVDetails(id int) (*TVShow, error) {
-	resp, err := c.client.R().
+	return c.GetTVDetailsContext(context.Background(), id)
+}
+
+func (c *Client) GetTVDetailsContext(ctx context.Context, id int) (*TVShow, error) {
+	resp, err := httpx.NewRequest(ctx, c.client).
 		SetQueryParam("language", "zh-CN").
 		Get(fmt.Sprintf("%s/tv/%d", BaseURL, id))
 
@@ -136,7 +143,11 @@ type Episode struct {
 
 // GetSeasonDetails fetches all episodes for a specific season
 func (c *Client) GetSeasonDetails(tvID int, seasonNumber int) (*SeasonDetails, error) {
-	resp, err := c.client.R().
+	return c.GetSeasonDetailsContext(context.Background(), tvID, seasonNumber)
+}
+
+func (c *Client) GetSeasonDetailsContext(ctx context.Context, tvID int, seasonNumber int) (*SeasonDetails, error) {
+	resp, err := httpx.NewRequest(ctx, c.client).
 		SetQueryParam("language", "zh-CN").
 		Get(fmt.Sprintf("%s/tv/%d/season/%d", BaseURL, tvID, seasonNumber))
 
@@ -171,10 +182,14 @@ func (c *Client) fixImage(path string) string {
 
 // ProxyImage fetches an image from TMDB and returns the response
 func (c *Client) ProxyImage(path string) (*resty.Response, error) {
+	return c.ProxyImageContext(context.Background(), path)
+}
+
+func (c *Client) ProxyImageContext(ctx context.Context, path string) (*resty.Response, error) {
 	// If path contains the base URL, strip it or just use the suffix
 	cleanPath := strings.TrimPrefix(path, ImageBaseURL)
 	cleanPath = strings.TrimPrefix(cleanPath, "/")
 
-	return c.client.R().
+	return httpx.NewRequest(ctx, c.client).
 		Get("https://image.tmdb.org/t/p/original/" + cleanPath)
 }

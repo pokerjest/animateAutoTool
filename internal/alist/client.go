@@ -6,13 +6,14 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/go-resty/resty/v2"
 	"github.com/pokerjest/animateAutoTool/internal/bootstrap"
 	"github.com/pokerjest/animateAutoTool/internal/db"
+	"github.com/pokerjest/animateAutoTool/internal/httpx"
 	"github.com/pokerjest/animateAutoTool/internal/model"
+	"github.com/pokerjest/animateAutoTool/internal/store"
 )
 
-var client = resty.New().SetTimeout(10 * time.Second)
+var client = httpx.NewRestyClient(10*time.Second, "", nil)
 
 // Common response wrapper
 type Response struct {
@@ -34,7 +35,6 @@ func getBaseUrl() string {
 		}
 	}
 
-	var cfg model.GlobalConfig
 	// We assume DB is initialized when this is called.
 	// launcher handles binaries before DB init, but API calls happen after DB init.
 	if db.DB == nil {
@@ -43,11 +43,8 @@ func getBaseUrl() string {
 		}
 		return DefaultAListURL
 	}
-
-	if err := db.DB.Where("key = ?", model.ConfigKeyAListUrl).First(&cfg).Error; err != nil {
-		return DefaultAListURL
-	}
-	if cfg.Value == "" {
+	value := store.NewConfigStore(db.DB).GetDefault(model.ConfigKeyAListUrl, "")
+	if value == "" {
 		if creds, err := bootstrap.LoadAListCredentials(); err == nil && creds.URL != "" {
 			return creds.URL
 		}
@@ -55,14 +52,13 @@ func getBaseUrl() string {
 	}
 	// Also if cfg.Value is "http://localhost:5244", we might want to replace it?
 	// But let's assume user config is respected if set.
-	return cfg.Value
+	return value
 }
 
 func getToken() string {
 	if db.DB != nil {
-		var cfg model.GlobalConfig
-		if err := db.DB.Where("key = ?", model.ConfigKeyAListToken).First(&cfg).Error; err == nil && cfg.Value != "" {
-			return cfg.Value
+		if token := store.NewConfigStore(db.DB).GetDefault(model.ConfigKeyAListToken, ""); token != "" {
+			return token
 		}
 	}
 
@@ -241,9 +237,8 @@ func CheckConnection() (bool, string) {
 	hasCredentials := false
 
 	if db.DB != nil {
-		var cfg model.GlobalConfig
-		if err := db.DB.Where("key = ?", model.ConfigKeyAListToken).First(&cfg).Error; err == nil && cfg.Value != "" {
-			token = cfg.Value
+		if storedToken := store.NewConfigStore(db.DB).GetDefault(model.ConfigKeyAListToken, ""); storedToken != "" {
+			token = storedToken
 			hasCredentials = true
 		}
 	}

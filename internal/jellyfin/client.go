@@ -2,6 +2,7 @@ package jellyfin
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pokerjest/animateAutoTool/internal/httpx"
 	"github.com/pokerjest/animateAutoTool/internal/safeio"
 )
 
@@ -48,9 +50,7 @@ func NewClient(url, apiKey string) *Client {
 	return &Client{
 		BaseURL: strings.TrimRight(url, "/"),
 		APIKey:  apiKey,
-		Client: &http.Client{
-			Timeout: 10 * time.Second,
-		},
+		Client:  httpx.NewHTTPClient(10 * time.Second),
 	}
 }
 
@@ -60,7 +60,11 @@ type User struct {
 }
 
 func (c *Client) GetUsers() ([]User, error) {
-	data, err := c.do("GET", "/Users", nil)
+	return c.GetUsersContext(context.Background())
+}
+
+func (c *Client) GetUsersContext(ctx context.Context) ([]User, error) {
+	data, err := c.doContext(ctx, "GET", "/Users", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -76,6 +80,10 @@ func (c *Client) SetToken(token string) {
 }
 
 func (c *Client) do(method, path string, body interface{}) ([]byte, error) {
+	return c.doContext(context.Background(), method, path, body)
+}
+
+func (c *Client) doContext(ctx context.Context, method, path string, body interface{}) ([]byte, error) {
 	var bodyReader io.Reader
 	if body != nil {
 		jsonData, err := json.Marshal(body)
@@ -86,7 +94,7 @@ func (c *Client) do(method, path string, body interface{}) ([]byte, error) {
 	}
 
 	url := c.BaseURL + path
-	req, err := http.NewRequest(method, url, bodyReader)
+	req, err := http.NewRequestWithContext(ctx, method, url, bodyReader)
 	if err != nil {
 		return nil, err
 	}
@@ -134,7 +142,11 @@ type PublicSystemInfo struct {
 }
 
 func (c *Client) GetPublicInfo() (*PublicSystemInfo, error) {
-	data, err := c.do("GET", "/System/Info/Public", nil)
+	return c.GetPublicInfoContext(context.Background())
+}
+
+func (c *Client) GetPublicInfoContext(ctx context.Context) (*PublicSystemInfo, error) {
+	data, err := c.doContext(ctx, "GET", "/System/Info/Public", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -154,11 +166,15 @@ type AuthenticateResponse struct {
 }
 
 func (c *Client) Authenticate(username, password string) (*AuthenticateResponse, error) {
+	return c.AuthenticateContext(context.Background(), username, password)
+}
+
+func (c *Client) AuthenticateContext(ctx context.Context, username, password string) (*AuthenticateResponse, error) {
 	req := map[string]string{
 		"Username": username,
 		"Pw":       password,
 	}
-	data, err := c.do("POST", "/Users/AuthenticateByName", req)
+	data, err := c.doContext(ctx, "POST", "/Users/AuthenticateByName", req)
 	if err != nil {
 		return nil, err
 	}

@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -1283,7 +1284,7 @@ func TestDashboardSyncHandlerStartsBackgroundTasksAndReturnsToast(t *testing.T) 
 
 	original := runDashboardSyncNow
 	triggered := make(chan struct{}, 1)
-	runDashboardSyncNow = func() error {
+	runDashboardSyncNow = func(context.Context) error {
 		select {
 		case triggered <- struct{}{}:
 		default:

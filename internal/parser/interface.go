@@ -1,6 +1,9 @@
 package parser
 
-import "time"
+import (
+	"context"
+	"time"
+)
 
 // Episode 代表从 RSS 解析出的单集信息
 type Episode struct {
@@ -42,4 +45,12 @@ type RSSParser interface {
 	Search(keyword string) ([]SearchResult, error)
 	GetSubgroups(bangumiID string) ([]Subgroup, error)
 	GetDashboard(year, season string) (*MikanDashboard, error)
+}
+
+type ContextRSSParser interface {
+	Name() string
+	ParseContext(ctx context.Context, url string) ([]Episode, error)
+	SearchContext(ctx context.Context, keyword string) ([]SearchResult, error)
+	GetSubgroupsContext(ctx context.Context, bangumiID string) ([]Subgroup, error)
+	GetDashboardContext(ctx context.Context, year, season string) (*MikanDashboard, error)
 }

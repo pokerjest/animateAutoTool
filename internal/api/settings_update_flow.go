@@ -12,6 +12,7 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/jellyfin"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/qbutil"
+	"github.com/pokerjest/animateAutoTool/internal/store"
 	"github.com/pokerjest/animateAutoTool/internal/updater"
 )
 
@@ -169,7 +170,7 @@ func maybeAutoAuthJellyfin(c *gin.Context) []string {
 	}
 
 	client := jellyfin.NewClient(jfURL, "")
-	authResp, err := client.Authenticate(jfUser, jfPass)
+	authResp, err := client.AuthenticateContext(c.Request.Context(), jfUser, jfPass)
 	if err == nil && authResp.AccessToken != "" {
 		log.Printf("Jellyfin Auto-Auth Successful for user: %s", jfUser)
 		if err := persistGlobalConfig(model.ConfigKeyJellyfinApiKey, authResp.AccessToken); err != nil {
@@ -280,14 +281,12 @@ func persistBangumiSettings(c *gin.Context) error {
 }
 
 func loadSettingsViewData() (map[string]string, string, any) {
-	var configs []model.GlobalConfig
-	if err := db.DB.Find(&configs).Error; err != nil {
+	configMap, err := store.NewConfigStore(db.DB).ListMap()
+	if err != nil {
 		log.Printf("Error fetching configs: %v", err)
 	}
-
-	configMap := make(map[string]string, len(configs))
-	for _, cfg := range configs {
-		configMap[cfg.Key] = cfg.Value
+	if configMap == nil {
+		configMap = map[string]string{}
 	}
 
 	qbCfg := qbutil.LoadConfig()

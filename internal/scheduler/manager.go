@@ -1,6 +1,7 @@
 package scheduler
 
 import (
+	"context"
 	"log"
 	"sync/atomic"
 	"time"
@@ -9,23 +10,29 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/downloader"
 	"github.com/pokerjest/animateAutoTool/internal/event"
-	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/qbutil"
 	"github.com/pokerjest/animateAutoTool/internal/service"
+	"github.com/pokerjest/animateAutoTool/internal/store"
 )
 
 type Manager struct {
 	ticker *time.Ticker
 	quit   chan struct{}
+	ctx    context.Context
 }
 
 var schedulerRunInProgress atomic.Bool
 
 func NewManager() *Manager {
+	return NewManagerWithContext(context.Background())
+}
+
+func NewManagerWithContext(ctx context.Context) *Manager {
 	// 每15分钟检查一次
 	return &Manager{
 		ticker: time.NewTicker(15 * time.Minute),
 		quit:   make(chan struct{}),
+		ctx:    ctx,
 	}
 }
 
@@ -35,7 +42,7 @@ func (m *Manager) Start() {
 		for {
 			select {
 			case <-m.ticker.C:
-				m.CheckUpdates()
+				m.CheckUpdatesContext(m.ctx)
 			case <-m.quit:
 				m.ticker.Stop()
 				return
@@ -43,7 +50,7 @@ func (m *Manager) Start() {
 		}
 	}()
 	// 立即执行一次
-	go m.CheckUpdates()
+	go m.CheckUpdatesContext(m.ctx)
 }
 
 func (m *Manager) Stop() {
@@ -52,6 +59,10 @@ func (m *Manager) Stop() {
 }
 
 func (m *Manager) CheckUpdates() {
+	m.CheckUpdatesContext(m.ctx)
+}
+
+func (m *Manager) CheckUpdatesContext(ctx context.Context) {
 	if !schedulerRunInProgress.CompareAndSwap(false, true) {
 		log.Println("Scheduler: Check already running, skipping duplicate trigger.")
 		return
@@ -59,9 +70,9 @@ func (m *Manager) CheckUpdates() {
 	defer schedulerRunInProgress.Store(false)
 
 	log.Println("Scheduler: Checking updates...")
-	var subs []model.Subscription
-	// 只查 Active 的
-	if err := db.DB.Where("is_active = ?", true).Find(&subs).Error; err != nil {
+	subStore := store.NewSubscriptionStore(db.DB)
+	subs, err := subStore.ListActive()
+	if err != nil {
 		log.Printf("Scheduler Error: Failed to fetch subscriptions: %v", err)
 		status := GlobalRunStatus.Skip("auto", "获取订阅列表失败")
 		publishSchedulerStatus(status)
@@ -87,7 +98,7 @@ func (m *Manager) CheckUpdates() {
 
 	// Initialize Service Manager
 	qbt := downloader.NewQBittorrentClient(qbCfg.URL)
-	if err := qbt.Login(qbCfg.Username, qbCfg.Password); err != nil {
+	if err := qbt.LoginContext(ctx, qbCfg.Username, qbCfg.Password); err != nil {
 		log.Printf("Scheduler Warning: QB unavailable: %v", err)
 		status := GlobalRunStatus.Skip("auto", "qBittorrent 登录失败")
 		status.LastError = err.Error()
@@ -103,7 +114,7 @@ func (m *Manager) CheckUpdates() {
 
 	for _, sub := range subs {
 		log.Printf("Scheduler: Checking sub %s (%s)", sub.Title, sub.RSSUrl)
-		mgr.ProcessSubscriptionWithSource(&sub, "auto")
+		mgr.ProcessSubscriptionWithSourceContext(ctx, &sub, "auto")
 		switch sub.LastRunStatus {
 		case "success", "idle":
 			successCount++

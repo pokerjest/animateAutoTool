@@ -28,14 +28,20 @@ func RandomPassword(length int) (string, error) {
 		return "", fmt.Errorf("length must be positive")
 	}
 
-	buf := make([]byte, length)
-	if _, err := rand.Read(buf); err != nil {
-		return "", err
-	}
-
 	out := make([]byte, length)
-	for i, b := range buf {
-		out[i] = passwordAlphabet[int(b)%len(passwordAlphabet)]
+	alphabetLen := byte(len(passwordAlphabet))
+	maxValid := byte((256 / int(alphabetLen)) * int(alphabetLen))
+
+	for i := 0; i < length; {
+		var single [1]byte
+		if _, err := rand.Read(single[:]); err != nil {
+			return "", err
+		}
+		if single[0] >= maxValid {
+			continue
+		}
+		out[i] = passwordAlphabet[int(single[0]%alphabetLen)]
+		i++
 	}
 
 	return string(out), nil

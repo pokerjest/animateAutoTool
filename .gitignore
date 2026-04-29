@@ -30,6 +30,8 @@ go.work
 # Log files
 *.log
 *.pid
+logs/*.log
+server*.log
 
 # IDE
 .vscode/
@@ -57,6 +59,7 @@ animate_tool
 debug_calendar.html
 mikan_home.html
 /debug_metadata
+debug_*
 
 animateTool
 

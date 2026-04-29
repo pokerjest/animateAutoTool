@@ -44,7 +44,7 @@ func GetMikanEpisodesHandler(c *gin.Context) {
 	if err := db.DB.Where("key = ?", model.ConfigKeyProxyURL).First(&proxyConfig).Error; err == nil {
 		p.SetProxy(proxyConfig.Value)
 	}
-	episodes, err := p.Parse(rssURL)
+	episodes, err := p.ParseContext(c.Request.Context(), rssURL)
 	if err != nil {
 		jsonServerError(c, "获取 RSS 剧集列表", err)
 		return
@@ -71,7 +71,7 @@ func GetMikanEpisodesHandler(c *gin.Context) {
 				if subgroupID != "" {
 					newRSSURL += fmt.Sprintf("&subgroupid=%s", subgroupID)
 				}
-				episodes, _ = p.Parse(newRSSURL)
+				episodes, _ = p.ParseContext(c.Request.Context(), newRSSURL)
 			}
 		}
 	}

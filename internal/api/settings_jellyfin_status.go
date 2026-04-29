@@ -94,7 +94,7 @@ func JellyfinLoginHandler(c *gin.Context) {
 	}
 
 	client := jellyfin.NewClient(url, "")
-	resp, err := client.Authenticate(username, password)
+	resp, err := client.AuthenticateContext(c.Request.Context(), username, password)
 	if err != nil {
 		c.String(http.StatusOK, fmt.Sprintf(`<div id="jellyfin-login-status" class="text-red-500 text-sm mt-2">❌ 登录失败: %s</div>`, err.Error()))
 		return

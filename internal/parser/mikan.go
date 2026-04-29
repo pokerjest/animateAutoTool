@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"context"
 	"encoding/xml"
 	"fmt"
 	"html"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/go-resty/resty/v2"
+	"github.com/pokerjest/animateAutoTool/internal/httpx"
 )
 
 type MikanParser struct {
@@ -17,9 +19,7 @@ type MikanParser struct {
 }
 
 func NewMikanParser() *MikanParser {
-	client := resty.New().
-		SetTimeout(10*time.Second).
-		SetHeader("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	client := httpx.NewRestyClient(10*time.Second, "", nil)
 
 	return &MikanParser{
 		client: client,
@@ -60,7 +60,11 @@ type MikanRSS struct {
 }
 
 func (p *MikanParser) Parse(url string) ([]Episode, error) {
-	resp, err := p.client.R().Get(url)
+	return p.ParseContext(context.Background(), url)
+}
+
+func (p *MikanParser) ParseContext(ctx context.Context, url string) ([]Episode, error) {
+	resp, err := httpx.NewRequest(ctx, p.client).Get(url)
 	if err != nil {
 		return nil, err
 	}
@@ -158,11 +162,15 @@ func ParseTitle(title string) Episode {
 }
 
 func (p *MikanParser) Search(keyword string) ([]SearchResult, error) {
+	return p.SearchContext(context.Background(), keyword)
+}
+
+func (p *MikanParser) SearchContext(ctx context.Context, keyword string) ([]SearchResult, error) {
 	// Search URL: https://mikanani.me/Home/Search?searchstr={keyword}
 	encodedKeyword := url.QueryEscape(keyword)
 	url := fmt.Sprintf("https://mikanani.me/Home/Search?searchstr=%s", encodedKeyword)
 
-	resp, err := p.client.R().Get(url)
+	resp, err := httpx.NewRequest(ctx, p.client).Get(url)
 	if err != nil {
 		log.Printf("Search Request Failed: %v", err)
 		return nil, err
@@ -203,9 +211,13 @@ func (p *MikanParser) Search(keyword string) ([]SearchResult, error) {
 }
 
 func (p *MikanParser) GetSubgroups(bangumiID string) ([]Subgroup, error) {
+	return p.GetSubgroupsContext(context.Background(), bangumiID)
+}
+
+func (p *MikanParser) GetSubgroupsContext(ctx context.Context, bangumiID string) ([]Subgroup, error) {
 	url := fmt.Sprintf("https://mikanani.me/Home/Bangumi/%s", bangumiID)
 
-	resp, err := p.client.R().Get(url)
+	resp, err := httpx.NewRequest(ctx, p.client).Get(url)
 	if err != nil {
 		return nil, err
 	}
@@ -239,12 +251,16 @@ func (p *MikanParser) GetSubgroups(bangumiID string) ([]Subgroup, error) {
 }
 
 func (p *MikanParser) GetDashboard(year, season string) (*MikanDashboard, error) {
+	return p.GetDashboardContext(context.Background(), year, season)
+}
+
+func (p *MikanParser) GetDashboardContext(ctx context.Context, year, season string) (*MikanDashboard, error) {
 	baseUrl := "https://mikanani.me/"
 	if year != "" && season != "" {
 		baseUrl = fmt.Sprintf("https://mikanani.me/Home/BangumiCoverFlowByDayOfWeek?year=%s&seasonStr=%s", year, url.QueryEscape(season))
 	}
 
-	resp, err := p.client.R().Get(baseUrl)
+	resp, err := httpx.NewRequest(ctx, p.client).Get(baseUrl)
 	if err != nil {
 		return nil, err
 	}

@@ -1,11 +1,13 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
 	"path/filepath"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pokerjest/animateAutoTool/internal/db"
@@ -46,7 +48,20 @@ func LocalAnimePageHandler(c *gin.Context) {
 	db.DB.Find(&dirs)
 
 	var animes []model.LocalAnime
-	db.DB.Preload("Metadata").Find(&animes) // TODO: Pagination? For now fetch all
+	pageSize := 200
+	page := 1
+	if raw := c.Query("page_size"); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 && parsed <= 1000 {
+			pageSize = parsed
+		}
+	}
+	if raw := c.Query("page"); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
+			page = parsed
+		}
+	}
+	offset := (page - 1) * pageSize
+	db.DB.Preload("Metadata").Order("id desc").Limit(pageSize).Offset(offset).Find(&animes)
 	populateLocalAnimeActionHints(animes)
 
 	diagnostics, err := service.ListOpenLibraryIssues(12)
@@ -79,7 +94,9 @@ func LocalAnimePageHandler(c *gin.Context) {
 		// However, for this specific "fix mismatch" user request, let's fetch it.
 		// Optimization: We could reuse the client from elsewhere?
 		client := jellyfin.NewClient(urlCfg.Value, keyCfg.Value)
-		info, err := client.GetPublicInfo()
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 3*time.Second)
+		defer cancel()
+		info, err := client.GetPublicInfoContext(ctx)
 		if err == nil {
 			serverId = info.Id
 			log.Printf("DEBUG: Fetched Jellyfin Server ID for LocalAnime page: %s", serverId)

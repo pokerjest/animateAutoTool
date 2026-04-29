@@ -13,6 +13,7 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/qbutil"
+	"github.com/pokerjest/animateAutoTool/internal/store"
 	"gorm.io/gorm"
 )
 
@@ -52,25 +53,14 @@ func persistGlobalConfig(key, val string) error {
 	if db.DB == nil {
 		return gorm.ErrInvalidDB
 	}
-
-	var count int64
-	if err := db.DB.Model(&model.GlobalConfig{}).Where("key = ?", key).Count(&count).Error; err != nil {
-		return err
-	}
-	if count == 0 {
-		return db.DB.Create(&model.GlobalConfig{Key: key, Value: val}).Error
-	}
-
-	return db.DB.Model(&model.GlobalConfig{}).Where("key = ?", key).Update("value", val).Error
+	return store.NewConfigStore(db.DB).Set(key, val)
 }
 
 func persistGlobalConfigs(values map[string]string) error {
-	for key, val := range values {
-		if err := persistGlobalConfig(key, val); err != nil {
-			return err
-		}
+	if db.DB == nil {
+		return gorm.ErrInvalidDB
 	}
-	return nil
+	return store.NewConfigStore(db.DB).SetMany(values)
 }
 
 func normalizedQBValues(mode, url, username, password string) map[string]string {

@@ -14,6 +14,7 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/qbutil"
 	"github.com/pokerjest/animateAutoTool/internal/service"
+	"github.com/pokerjest/animateAutoTool/internal/store"
 )
 
 type BootstrapSetupRequest struct {
@@ -158,13 +159,7 @@ func loadGlobalConfigValue(key string) string {
 	if db.DB == nil {
 		return ""
 	}
-
-	var cfg model.GlobalConfig
-	if err := db.DB.Where("key = ?", key).First(&cfg).Error; err != nil {
-		return ""
-	}
-
-	return cfg.Value
+	return store.NewConfigStore(db.DB).GetDefault(key, "")
 }
 
 func collectSetupReadinessStatuses() []SetupReadinessStatus {

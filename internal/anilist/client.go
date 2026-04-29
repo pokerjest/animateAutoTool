@@ -1,11 +1,13 @@
 package anilist
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"time"
 
 	"github.com/go-resty/resty/v2"
+	"github.com/pokerjest/animateAutoTool/internal/httpx"
 )
 
 const (
@@ -18,16 +20,13 @@ type Client struct {
 }
 
 func NewClient(token string, proxyURL string) *Client {
-	c := resty.New()
-	c.SetTimeout(10 * time.Second)
-	if proxyURL != "" {
-		c.SetProxy(proxyURL)
-	}
+	c := httpx.NewRestyClient(10*time.Second, proxyURL, map[string]string{
+		"Content-Type": "application/json",
+		"Accept":       "application/json",
+	})
 	if token != "" {
 		c.SetHeader("Authorization", "Bearer "+token)
 	}
-	c.SetHeader("Content-Type", "application/json")
-	c.SetHeader("Accept", "application/json")
 
 	return &Client{
 		client: c,
@@ -88,6 +87,10 @@ type MediaResponse struct {
 }
 
 func (c *Client) SearchAnime(query string) (*Media, error) {
+	return c.SearchAnimeContext(context.Background(), query)
+}
+
+func (c *Client) SearchAnimeContext(ctx context.Context, query string) (*Media, error) {
 	graphqlQuery := `
 	query ($search: String) {
 	  Page(page: 1, perPage: 1) {
@@ -114,7 +117,7 @@ func (c *Client) SearchAnime(query string) (*Media, error) {
 		},
 	}
 
-	resp, err := c.client.R().
+	resp, err := httpx.NewRequest(ctx, c.client).
 		SetBody(payload).
 		Post(GraphQLEndpoint)
 
@@ -142,6 +145,10 @@ func (c *Client) SearchAnime(query string) (*Media, error) {
 }
 
 func (c *Client) GetAnimeDetails(id int) (*Media, error) {
+	return c.GetAnimeDetailsContext(context.Background(), id)
+}
+
+func (c *Client) GetAnimeDetailsContext(ctx context.Context, id int) (*Media, error) {
 	graphqlQuery := `
 	query ($id: Int) {
 	  Media(id: $id, type: ANIME) {
@@ -166,7 +173,7 @@ func (c *Client) GetAnimeDetails(id int) (*Media, error) {
 		},
 	}
 
-	resp, err := c.client.R().
+	resp, err := httpx.NewRequest(ctx, c.client).
 		SetBody(payload).
 		Post(GraphQLEndpoint)
 
@@ -191,6 +198,10 @@ func (c *Client) GetAnimeDetails(id int) (*Media, error) {
 
 // GetMediaListEntry fetches the user's progress for a specific media
 func (c *Client) GetMediaListEntry(mediaID int) (*MediaListEntry, error) {
+	return c.GetMediaListEntryContext(context.Background(), mediaID)
+}
+
+func (c *Client) GetMediaListEntryContext(ctx context.Context, mediaID int) (*MediaListEntry, error) {
 	graphqlQuery := `
 	query ($id: Int) {
 	  Media(id: $id) {
@@ -208,7 +219,7 @@ func (c *Client) GetMediaListEntry(mediaID int) (*MediaListEntry, error) {
 		},
 	}
 
-	resp, err := c.client.R().
+	resp, err := httpx.NewRequest(ctx, c.client).
 		SetBody(payload).
 		Post(GraphQLEndpoint)
 

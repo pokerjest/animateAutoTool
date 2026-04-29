@@ -1,13 +1,18 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log"
+	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pokerjest/animateAutoTool/internal/api"
@@ -67,13 +72,38 @@ func runServer() {
 	api.InitRoutes(r)
 	api.InitR2Cache()
 
-	sch := scheduler.NewManager()
+	rootCtx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopSignals()
+
+	sch := scheduler.NewManagerWithContext(rootCtx)
 	sch.Start()
 	defer sch.Stop()
 
 	port := fmt.Sprintf("%d", config.AppConfig.Server.Port)
 	log.Printf("Server starting on port %s", port)
-	if err := r.Run(":" + port); err != nil {
+	srv := &http.Server{
+		Addr:              ":" + port,
+		Handler:           r,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- srv.ListenAndServe()
+	}()
+
+	select {
+	case <-rootCtx.Done():
+		log.Println("Shutdown signal received, stopping services...")
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			log.Printf("Graceful shutdown failed: %v", err)
+		}
+	case err := <-errCh:
+		if err == nil || err == http.ErrServerClosed {
+			return
+		}
 		log.Fatal(err)
 	}
 }
