@@ -14,14 +14,6 @@ func subscriptionStore() *store.SubscriptionStore {
 	return store.NewSubscriptionStore(db.DB)
 }
 
-func loadActiveSubscriptions() ([]model.Subscription, error) {
-	s := subscriptionStore()
-	if s == nil {
-		return nil, gorm.ErrInvalidDB
-	}
-	return s.ListActive()
-}
-
 func loadActiveSubscriptionsByIDs(ids []uint) ([]model.Subscription, error) {
 	s := subscriptionStore()
 	if s == nil {
@@ -36,12 +28,4 @@ func loadStaleStrategySubscriptions() ([]model.Subscription, error) {
 		return nil, gorm.ErrInvalidDB
 	}
 	return s.ListWithStaleStrategy()
-}
-
-func saveSubscription(sub *model.Subscription) error {
-	s := subscriptionStore()
-	if s == nil {
-		return gorm.ErrInvalidDB
-	}
-	return s.Save(sub)
 }

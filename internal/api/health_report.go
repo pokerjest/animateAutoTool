@@ -131,26 +131,6 @@ func determineHealthTone(report HealthReport) string {
 	}
 }
 
-func configTruthCount(configs map[string]bool) int {
-	count := 0
-	for _, ok := range configs {
-		if ok {
-			count++
-		}
-	}
-	return count
-}
-
-func healthConfigSummary(configs map[string]bool) string {
-	available := make([]string, 0, len(configs))
-	for name, ok := range configs {
-		if ok {
-			available = append(available, name)
-		}
-	}
-	return strings.Join(available, "、")
-}
-
 func healthHasConfig(value string) bool {
 	return strings.TrimSpace(value) != ""
 }
