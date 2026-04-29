@@ -143,10 +143,7 @@ func populateSubscriptionStat(sub *model.Subscription) {
 
 func loadSubscriptionCard(id uint) (model.Subscription, error) {
 	sub, err := subscriptionWithMetadataByID(id)
-	if err != nil || sub == nil {
-		if err == nil {
-			err = fmt.Errorf("subscription %d not found", id)
-		}
+	if err != nil {
 		return model.Subscription{}, err
 	}
 

@@ -1,4 +1,4 @@
-package api
+package service
 
 import (
 	"github.com/pokerjest/animateAutoTool/internal/db"
@@ -14,20 +14,28 @@ func subscriptionStore() *store.SubscriptionStore {
 	return store.NewSubscriptionStore(db.DB)
 }
 
-func subscriptionByID(id any) (*model.Subscription, error) {
+func loadActiveSubscriptions() ([]model.Subscription, error) {
 	s := subscriptionStore()
 	if s == nil {
 		return nil, gorm.ErrInvalidDB
 	}
-	return s.GetByID(id)
+	return s.ListActive()
 }
 
-func subscriptionWithMetadataByID(id any) (*model.Subscription, error) {
+func loadActiveSubscriptionsByIDs(ids []uint) ([]model.Subscription, error) {
 	s := subscriptionStore()
 	if s == nil {
 		return nil, gorm.ErrInvalidDB
 	}
-	return s.GetByIDWithMetadata(id)
+	return s.ListActiveByIDs(ids)
+}
+
+func loadStaleStrategySubscriptions() ([]model.Subscription, error) {
+	s := subscriptionStore()
+	if s == nil {
+		return nil, gorm.ErrInvalidDB
+	}
+	return s.ListWithStaleStrategy()
 }
 
 func saveSubscription(sub *model.Subscription) error {
@@ -36,12 +44,4 @@ func saveSubscription(sub *model.Subscription) error {
 		return gorm.ErrInvalidDB
 	}
 	return s.Save(sub)
-}
-
-func listSubscriptionsWithMetadata() ([]model.Subscription, error) {
-	s := subscriptionStore()
-	if s == nil {
-		return nil, gorm.ErrInvalidDB
-	}
-	return s.ListWithMetadata()
 }

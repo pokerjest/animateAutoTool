@@ -59,8 +59,8 @@ func RetrySubscriptionsByID(ctx context.Context, down downloader.Downloader, ids
 		return nil
 	}
 
-	var subs []model.Subscription
-	if err := db.DB.Where("id IN ? AND is_active = ?", filtered, true).Find(&subs).Error; err != nil {
+	subs, err := loadActiveSubscriptionsByIDs(filtered)
+	if err != nil {
 		return err
 	}
 	mgr := NewSubscriptionManager(down)
@@ -79,10 +79,8 @@ func RetryStaleSubscriptions(ctx context.Context, down downloader.Downloader, mi
 	}
 
 	now := time.Now()
-	var subs []model.Subscription
-	if err := db.DB.
-		Where("is_active = ? AND stale_after_hours > 0 AND last_success_at IS NOT NULL", true).
-		Find(&subs).Error; err != nil {
+	subs, err := loadStaleStrategySubscriptions()
+	if err != nil {
 		return 0, err
 	}
 
