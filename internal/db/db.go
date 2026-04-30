@@ -14,6 +14,7 @@ import (
 
 var DB *gorm.DB
 var CurrentDBPath string
+var currentDBGOOS = func() string { return runtime.GOOS }
 
 func InitDB(storagePath string) {
 	CurrentDBPath = storagePath
@@ -79,7 +80,7 @@ func isInMemoryDB(storagePath string) bool {
 }
 
 func sqliteDriverPath(storagePath string) string {
-	if runtime.GOOS != "windows" {
+	if currentDBGOOS() != "windows" {
 		return storagePath
 	}
 
@@ -88,8 +89,9 @@ func sqliteDriverPath(storagePath string) string {
 		separator = "&"
 	}
 
-	// modernc/glebarez SQLite can fail to delete rollback journals on Windows
-	// in some portable/self-contained layouts. MEMORY journaling avoids that
-	// startup failure without changing other platforms.
-	return storagePath + separator + "_pragma=journal_mode(MEMORY)"
+	// modernc/glebarez SQLite can fail to clean up rollback journals on Windows
+	// in some portable/self-contained layouts. WAL keeps crash recovery and
+	// durability characteristics closer to the default mode while avoiding the
+	// most fragile rollback-journal path.
+	return storagePath + separator + "_pragma=journal_mode(WAL)"
 }

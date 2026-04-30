@@ -59,14 +59,15 @@ if %ERRORLEVEL% NEQ 0 (
 powershell -NoProfile -NonInteractive -Command "$pidValue = (Get-Content -LiteralPath '%PID_FILE%' -ErrorAction SilentlyContinue | Select-Object -First 1).Trim(); Start-Sleep -Seconds 2; if ($pidValue -and (Get-Process -Id $pidValue -ErrorAction SilentlyContinue)) { exit 0 } else { exit 1 }"
 if %ERRORLEVEL% NEQ 0 (
     echo Animate Auto Tool exited during startup.
-    echo Main log: %LOG_FILE%
+    echo For startup troubleshooting, try run.bat to keep the server in the foreground.
+    if exist "%LOG_FILE%" echo If %LOG_FILE% already exists, check it for early startup logs.
     del "%PID_FILE%" >nul 2>nul
     pause
     exit /b 1
 )
 
 echo Started in background.
-echo Logs: %LOG_FILE%
+echo After initialization completes, application logs will be written to %LOG_FILE%.
 echo PID file: %PID_FILE%
 echo Open UI: run open-ui.bat
 exit /b 0
