@@ -100,6 +100,32 @@ resp, err := httpx.NewRequest(ctx, client).Get(url)
 - 每个外部 client 都暴露**两套方法**：`Foo()` 和 `FooContext(ctx)`，前者只是 `FooContext(context.Background())` 的便捷包装。新代码请走 ctx 版本。
 - 超时由调用方传入，不要在 httpx 里写死默认值。
 - proxy / UA / headers 通过参数注入，不读全局配置。
+- `httpx.NewHTTPClient` / `NewHTTPClientWithProxy` 同样基于 `newHTTPTransport`，**显式禁用环境变量代理**并强制 30s connect / 30s keep-alive，避免被系统 `HTTP_PROXY` 影响。
+
+## AI 能力：`internal/ai`
+
+`internal/ai` 提供与 OpenAI 兼容（`/v1/chat/completions` + `/v1/models`）的最小客户端 + 工具注册机制，给后续在番剧匹配 / 元数据归类 / 自动诊断等场景调用 LLM 用。
+
+```go
+client := ai.NewClient(baseURL, apiKey, model)
+resp, err := client.CreateChatCompletion(ctx, ai.ChatCompletionRequest{
+    Messages: []ai.ChatMessage{{Role: "user", Content: "..."}},
+    Tools:    registry.GetToolDefinitions(),
+})
+```
+
+约定：
+- `NewClient(baseURL, apiKey, model)`：`baseURL` 留空回退到官方 `https://api.openai.com/v1`，自动剥末尾 `/`。
+- HTTP 走 `httpx.NewHTTPClient(60s)` —— **复用统一 Transport**，自动禁用环境代理；不要直接 `http.DefaultClient`。
+- 请求体走 OpenAI 兼容 schema（`ChatMessage`/`Tool`/`ToolCall`），换其他模型供应商时**只改 baseURL/apiKey/model**，不改类型。
+- 工具调用用 `Registry`：`Register(name, description, params, handler)` → 模型回 `tool_calls` 时调 `ExecuteTool(ctx, name, args)` 执行。
+- `JSONSchemaObject` / `JSONSchemaProperty` 是参数 schema 的便捷构造，避免每个工具自己拼 map。
+- **凭据存哪**：API Key 走 `global_configs`（参考 bangumi/tmdb token 的存储位置），用 `configValue(key)` 读取；不要写进配置文件或环境变量。
+
+何时引入 AI 调用：
+- ✅ 番剧标题归一化（中英日多语对齐）、元数据冲突仲裁、订阅疑似缺集的自然语言总结
+- ❌ 不要把 AI 用在**正确性敏感**的链路（重命名规则、文件移动、数据库 schema 演进）—— 这些场景模型幻觉成本太高
+- 调用都要带超时与降级：LLM 不可用时退到现有的 deterministic 路径
 
 ## 数据库迁移：`internal/db/migrations.go`
 
@@ -150,6 +176,14 @@ var migrations = []migration{
 - macOS DMG 路径：mount point 由 Go 侧 `os.MkdirTemp` 创建并作为 `$6` 参数传入 bash，**不在 shell 里 mktemp**
 - Release asset 命名 `<binary>_<version>_<goos>_<goarch>.<ext>`，配合 `SHA256SUMS.txt`
 - 校验流程：拉 release → 选 asset → 找 checksum 文件 → 下载 → 比对 SHA256 → 应用
+
+## Windows 部署
+
+- `cmd/server/main.go` 在 Windows 默认 `headless=false`（其他平台默认 `true`），保留系统托盘
+- DB 文件名分平台：Windows 默认 `app.db`，其他平台 `animate.db`；旧 `animate.db` 已存在则不切换（向后兼容）
+- SQLite 在 Windows 自动追加 `?_pragma=journal_mode(WAL)`，避免 modernc/glebarez SQLite 在 portable 部署下 rollback journal 删不掉的启动崩溃
+- `scripts/start.bat` 用 PowerShell `WindowStyle=Hidden` 启动 + PID 文件管理；`Program Files` 安装会被检测并警告
+- 一站式 `.bat` 工具箱：`init-config` / `open-config` / `open-data` / `open-ui` / `view-logs`，配 `WINDOWS_QUICKSTART.txt` 给非技术用户
 
 ## 测试约定
 
