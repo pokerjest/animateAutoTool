@@ -28,7 +28,7 @@ func InitDB(storagePath string) {
 		}
 	}
 
-	driverPath := storagePath
+	var driverPath string
 	if isInMemoryDB(storagePath) {
 		// SQLite keeps plain :memory: databases per connection, which causes tables to
 		// disappear when GORM opens additional pooled connections during tests.

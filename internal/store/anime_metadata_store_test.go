@@ -9,6 +9,8 @@ import (
 	"gorm.io/gorm"
 )
 
+const testAnimeMetadataShowTitle = "Show"
+
 func setupAnimeMetadataStore(t *testing.T) *AnimeMetadataStore {
 	t.Helper()
 	db.InitDB(":memory:")
@@ -69,7 +71,7 @@ func TestAnimeMetadataStorePropagateNoOpOnZeroOrEmpty(t *testing.T) {
 func TestAnimeMetadataStoreCreateAndGet(t *testing.T) {
 	s := setupAnimeMetadataStore(t)
 
-	m := &model.AnimeMetadata{Title: "Show", BangumiID: 100, TMDBID: 200, AniListID: 300}
+	m := &model.AnimeMetadata{Title: testAnimeMetadataShowTitle, BangumiID: 100, TMDBID: 200, AniListID: 300}
 	if err := s.Create(m); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -81,7 +83,7 @@ func TestAnimeMetadataStoreCreateAndGet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetByID: %v", err)
 	}
-	if got.Title != "Show" {
+	if got.Title != testAnimeMetadataShowTitle {
 		t.Fatalf("unexpected title: %q", got.Title)
 	}
 
@@ -97,7 +99,7 @@ func TestAnimeMetadataStoreCreateAndGet(t *testing.T) {
 func TestAnimeMetadataStoreFindByExternalIDs(t *testing.T) {
 	s := setupAnimeMetadataStore(t)
 
-	m := &model.AnimeMetadata{Title: "Show", BangumiID: 11, TMDBID: 22, AniListID: 33}
+	m := &model.AnimeMetadata{Title: testAnimeMetadataShowTitle, BangumiID: 11, TMDBID: 22, AniListID: 33}
 	if err := s.Create(m); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -120,11 +122,11 @@ func TestAnimeMetadataStoreFindByExternalIDs(t *testing.T) {
 func TestAnimeMetadataStoreFindByAnyTitle(t *testing.T) {
 	s := setupAnimeMetadataStore(t)
 
-	if err := s.Create(&model.AnimeMetadata{Title: "Show", TitleCN: "节目", TitleJP: "ショー", TitleEN: "Show EN", BangumiID: 1}); err != nil {
+	if err := s.Create(&model.AnimeMetadata{Title: testAnimeMetadataShowTitle, TitleCN: "节目", TitleJP: "ショー", TitleEN: "Show EN", BangumiID: 1}); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
-	for _, q := range []string{"Show", "节目", "ショー", "Show EN"} {
+	for _, q := range []string{testAnimeMetadataShowTitle, "节目", "ショー", "Show EN"} {
 		got, err := s.FindByAnyTitle(q)
 		if err != nil || got == nil {
 			t.Errorf("FindByAnyTitle(%q): %v / %v", q, got, err)

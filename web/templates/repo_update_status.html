@@ -70,6 +70,33 @@
         <div class="rounded-xl border border-gray-200/80 bg-white/70 px-4 py-3 text-sm text-gray-700">
             <div class="font-semibold text-gray-800">结果</div>
             <div class="mt-1">{{ .LastMessage }}</div>
+            {{ if .Running }}
+            <div class="mt-3 space-y-2">
+                <div class="flex items-center justify-between text-xs text-gray-500">
+                    <span>{{ if .ProgressPhase }}{{ .ProgressPhase }}{{ else }}处理中{{ end }}</span>
+                    <span>
+                        {{ if gt .ProgressTotalBytes 0 }}
+                            {{ .ProgressPercent }}%
+                        {{ else }}
+                            准备中
+                        {{ end }}
+                    </span>
+                </div>
+                <div class="h-2 rounded-full bg-gray-200 overflow-hidden">
+                    <div class="h-full rounded-full bg-blue-500 transition-all duration-300"
+                        style="width: {{ if gt .ProgressPercent 0 }}{{ .ProgressPercent }}{{ else }}8{{ end }}%;"></div>
+                </div>
+                <div class="text-xs text-gray-500">
+                    {{ if gt .ProgressTotalBytes 0 }}
+                        已下载 {{ humanizeBytes .ProgressCurrentBytes }} / {{ humanizeBytes .ProgressTotalBytes }}
+                    {{ else if gt .ProgressCurrentBytes 0 }}
+                        已下载 {{ humanizeBytes .ProgressCurrentBytes }}
+                    {{ else }}
+                        正在准备更新任务...
+                    {{ end }}
+                </div>
+            </div>
+            {{ end }}
             {{ if .LastError }}
             <div class="mt-2 text-xs text-rose-700 break-all">{{ .LastError }}</div>
             {{ end }}
@@ -80,6 +107,7 @@
                 hx-post="/api/settings/repo-update-check"
                 hx-target="#repo-update-container"
                 hx-swap="innerHTML"
+                {{ if .Running }}disabled{{ end }}
                 class="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-bold hover:bg-blue-700 transition-all">
                 立即检查
             </button>
@@ -87,6 +115,7 @@
                 hx-post="/api/settings/repo-update-pull"
                 hx-target="#repo-update-container"
                 hx-swap="innerHTML"
+                {{ if .Running }}disabled{{ end }}
                 class="px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-bold hover:bg-emerald-700 transition-all">
                 立即更新并重启
             </button>
@@ -102,5 +131,13 @@
     <div class="absolute -right-6 -bottom-6 text-9xl text-blue-100 opacity-40 group-hover:scale-110 transition duration-500 select-none">
         🔄
     </div>
+    {{ if .Running }}
+    <div
+        hx-get="/api/settings/repo-update-status"
+        hx-trigger="every 1s"
+        hx-target="#repo-update-container"
+        hx-swap="innerHTML"
+        class="hidden"></div>
+    {{ end }}
 </div>
 {{ end }}

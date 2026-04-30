@@ -1,8 +1,6 @@
 package api
 
 import (
-	"net/http"
-	"net/url"
 	"time"
 
 	"github.com/pokerjest/animateAutoTool/internal/model"
@@ -49,14 +47,4 @@ func loadProxySettings(flagKey string) (string, string) {
 		proxyURL = configValue(model.ConfigKeyProxyURL)
 	}
 	return enabled, proxyURL
-}
-
-func buildProxyTransport(enabledValue, proxyURL string) *http.Transport {
-	if enabledValue != ValueTrue || proxyURL == "" {
-		return nil
-	}
-	if parsed, err := url.Parse(proxyURL); err == nil {
-		return &http.Transport{Proxy: http.ProxyURL(parsed)}
-	}
-	return nil
 }

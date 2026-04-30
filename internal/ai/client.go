@@ -29,9 +29,9 @@ func NewClient(baseURL, apiKey, model string) *Client {
 	}
 
 	return &Client{
-		baseURL: baseURL,
-		apiKey:  apiKey,
-		model:   model,
+		baseURL:    baseURL,
+		apiKey:     apiKey,
+		model:      model,
 		httpClient: httpx.NewHTTPClient(60 * time.Second), // Long timeout for LLM responses
 	}
 }

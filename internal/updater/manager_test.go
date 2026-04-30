@@ -10,6 +10,7 @@ import (
 )
 
 const updaterVersionZero = "v0.0.0"
+const updaterResultRunning = "running"
 
 func TestCompareVersions(t *testing.T) {
 	t.Parallel()
@@ -271,5 +272,36 @@ func TestApplySettingsLockedClearsRepoScopedCache(t *testing.T) {
 	}
 	if m.cachedRepoOwner != "" || m.cachedRepoName != "" {
 		t.Fatalf("expected cached repo identity reset, got %q/%q", m.cachedRepoOwner, m.cachedRepoName)
+	}
+}
+
+func TestBeginRunInitialProgress(t *testing.T) {
+	t.Parallel()
+
+	m := &Manager{}
+	cfg := settings{
+		Enabled:         true,
+		AutoApplyEnable: true,
+		RequireChecksum: true,
+		IntervalMinutes: defaultIntervalMinutes,
+		RepoOwner:       defaultRepoOwner,
+		RepoName:        defaultRepoName,
+	}
+
+	snapshot, started := m.beginRun(cfg, "manual-pull", true)
+	if !started {
+		t.Fatal("expected beginRun to start")
+	}
+	if !snapshot.Running {
+		t.Fatal("expected running status")
+	}
+	if snapshot.ProgressPhase != "准备下载更新" {
+		t.Fatalf("unexpected phase: %q", snapshot.ProgressPhase)
+	}
+	if snapshot.LastResult != updaterResultRunning {
+		t.Fatalf("unexpected result: %q", snapshot.LastResult)
+	}
+	if snapshot.ProgressPercent != 0 {
+		t.Fatalf("expected zero percent, got %d", snapshot.ProgressPercent)
 	}
 }

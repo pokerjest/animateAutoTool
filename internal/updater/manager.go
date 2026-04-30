@@ -13,8 +13,10 @@ import (
 	"time"
 
 	"github.com/pokerjest/animateAutoTool/internal/db"
+	"github.com/pokerjest/animateAutoTool/internal/httpx"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/safeio"
+	"github.com/pokerjest/animateAutoTool/internal/store"
 )
 
 const (
@@ -57,6 +59,11 @@ type Status struct {
 	RepoName        string
 
 	Running bool
+
+	ProgressPhase        string
+	ProgressPercent      int
+	ProgressCurrentBytes int64
+	ProgressTotalBytes   int64
 
 	CurrentVersion   string
 	LatestVersion    string
@@ -139,6 +146,16 @@ func CheckAndPullNow(triggerSource string) Status {
 	return manager.runCheck(triggerSource, true)
 }
 
+func TriggerCheckNow(triggerSource string) Status {
+	Start()
+	return manager.runCheckAsync(triggerSource, false)
+}
+
+func TriggerCheckAndPullNow(triggerSource string) Status {
+	Start()
+	return manager.runCheckAsync(triggerSource, true)
+}
+
 func (m *Manager) setDisabledHintIfNeeded() {
 	cfg := loadSettings()
 	m.mu.Lock()
@@ -205,21 +222,91 @@ func (m *Manager) runPeriodicCheck(source string) {
 }
 
 func (m *Manager) runCheck(source string, applyWhenBehind bool) Status {
-	cfg := loadSettings()
-	now := time.Now()
+	return m.runCheckInternal(source, applyWhenBehind, false)
+}
 
-	m.mu.Lock()
-	if m.status.Running {
-		snapshot := m.status
-		m.mu.Unlock()
+func (m *Manager) runCheckAsync(source string, applyWhenBehind bool) Status {
+	cfg := loadSettings()
+	snapshot, started := m.beginRun(cfg, source, applyWhenBehind)
+	if !started {
 		return snapshot
+	}
+	go m.runCheckInternal(source, applyWhenBehind, true)
+	return snapshot
+}
+
+func (m *Manager) beginRun(cfg settings, source string, applyWhenBehind bool) (Status, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.status.Running {
+		return m.status, false
 	}
 	m.applySettingsLocked(cfg)
 	m.status.BackoffUntil = m.backoffUntil
 	m.status.Running = true
 	m.status.LastSource = source
 	m.status.LastError = ""
-	m.mu.Unlock()
+	m.status.CurrentVersion = normalizeVersion(currentVersion())
+	m.status.ProgressCurrentBytes = 0
+	m.status.ProgressTotalBytes = 0
+	m.status.ProgressPercent = 0
+	if applyWhenBehind {
+		m.status.ProgressPhase = "准备下载更新"
+		m.status.LastResult = "running"
+		m.status.LastMessage = "正在检查最新版本并准备下载更新包..."
+	} else {
+		m.status.ProgressPhase = "检查最新版本"
+		m.status.LastResult = "running"
+		m.status.LastMessage = "正在检查最新版本..."
+	}
+	return m.status, true
+}
+
+func (m *Manager) updateProgress(phase, message string, currentBytes, totalBytes int64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if !m.status.Running {
+		return
+	}
+	if strings.TrimSpace(phase) != "" {
+		m.status.ProgressPhase = phase
+	}
+	if strings.TrimSpace(message) != "" {
+		m.status.LastMessage = message
+	}
+	if currentBytes >= 0 {
+		m.status.ProgressCurrentBytes = currentBytes
+	}
+	if totalBytes >= 0 {
+		m.status.ProgressTotalBytes = totalBytes
+	}
+	if totalBytes > 0 && currentBytes >= 0 {
+		percent := int((currentBytes * 100) / totalBytes)
+		if percent < 0 {
+			percent = 0
+		}
+		if percent > 100 {
+			percent = 100
+		}
+		m.status.ProgressPercent = percent
+		return
+	}
+	if currentBytes <= 0 {
+		m.status.ProgressPercent = 0
+	}
+}
+
+func (m *Manager) runCheckInternal(source string, applyWhenBehind, alreadyStarted bool) Status {
+	cfg := loadSettings()
+	now := time.Now()
+
+	if !alreadyStarted {
+		snapshot, started := m.beginRun(cfg, source, applyWhenBehind)
+		if !started {
+			return snapshot
+		}
+	}
 
 	current := normalizeVersion(currentVersion())
 	result := resultError
@@ -257,10 +344,15 @@ func (m *Manager) runCheck(source string, applyWhenBehind bool) Status {
 			m.backoffUntil = backoffUntil
 		}
 		m.status.BackoffUntil = m.backoffUntil
+		m.status.ProgressPhase = ""
+		m.status.ProgressPercent = 0
+		m.status.ProgressCurrentBytes = 0
+		m.status.ProgressTotalBytes = 0
 		m.status.Running = false
 		return m.status
 	}
 
+	m.updateProgress("连接 GitHub", "正在获取最新 Release 信息...", 0, 0)
 	release, notModified, retryAfter, err := m.fetchLatestRelease(cfg.RepoOwner, cfg.RepoName, currentVersionWantsPrerelease(current))
 	if err != nil {
 		backoffUntil = m.recordFailure(now, retryAfter)
@@ -319,6 +411,7 @@ func (m *Manager) runCheck(source string, applyWhenBehind bool) Status {
 
 	expectedChecksum := ""
 	if cfg.RequireChecksum {
+		m.updateProgress("校验更新包", "正在获取更新包校验信息...", 0, 0)
 		expectedChecksum, err = fetchExpectedChecksum(release, assetName)
 		if err != nil {
 			result = resultError
@@ -328,7 +421,8 @@ func (m *Manager) runCheck(source string, applyWhenBehind bool) Status {
 		}
 	}
 
-	artifactPath, err := downloadAsset(assetURL, assetName)
+	m.updateProgress("下载更新包", "正在下载更新包...", 0, 0)
+	artifactPath, err := m.downloadAsset(assetURL, assetName)
 	if err != nil {
 		result = resultError
 		message = "下载更新包失败"
@@ -337,6 +431,7 @@ func (m *Manager) runCheck(source string, applyWhenBehind bool) Status {
 	}
 
 	if expectedChecksum != "" {
+		m.updateProgress("校验更新包", "正在校验下载内容完整性...", 0, 0)
 		if err := verifyFileSHA256(artifactPath, expectedChecksum); err != nil {
 			result = resultError
 			message = "更新包完整性校验失败"
@@ -346,6 +441,7 @@ func (m *Manager) runCheck(source string, applyWhenBehind bool) Status {
 		checksumVerified = true
 	}
 
+	m.updateProgress("应用更新", "正在应用更新包并准备重启...", 0, 0)
 	if err := applyUpdateForPlatform(artifactPath); err != nil {
 		result = resultError
 		message = "应用更新失败"
@@ -444,7 +540,7 @@ func (m *Manager) fetchLatestRelease(owner, repo string, includePrerelease bool)
 		req.Header.Set("If-None-Match", e)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := updaterHTTPClient(httpTimeout).Do(req)
 	if err != nil {
 		return nil, false, time.Time{}, err
 	}
@@ -569,12 +665,7 @@ func readGlobalConfig(key string) string {
 	if db.DB == nil {
 		return ""
 	}
-
-	var val string
-	if err := db.DB.Model(&model.GlobalConfig{}).Where("key = ?", key).Select("value").Scan(&val).Error; err != nil {
-		return ""
-	}
-	return strings.TrimSpace(val)
+	return strings.TrimSpace(store.NewConfigStore(db.DB).GetDefault(key, ""))
 }
 
 func parseBool(raw string, fallback bool) bool {
@@ -593,4 +684,9 @@ func clampInt(v, min, max int) int {
 		return max
 	}
 	return v
+}
+
+func updaterHTTPClient(timeout time.Duration) *http.Client {
+	proxyURL := readGlobalConfig(model.ConfigKeyProxyURL)
+	return httpx.NewHTTPClientWithProxy(timeout, proxyURL)
 }

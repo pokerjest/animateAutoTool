@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/pokerjest/animateAutoTool/internal/config"
 	"github.com/pokerjest/animateAutoTool/internal/safeio"
@@ -211,7 +212,7 @@ func downloadSmallTextAsset(url string) (string, error) {
 	}
 	req.Header.Set("User-Agent", defaultUserAgent)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := updaterHTTPClient(httpTimeout).Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -242,7 +243,7 @@ func isHexSHA256(s string) bool {
 	return true
 }
 
-func downloadAsset(url, assetName string) (string, error) {
+func (m *Manager) downloadAsset(url, assetName string) (string, error) {
 	assetName = filepath.Base(strings.TrimSpace(assetName))
 	if assetName == "" {
 		assetName = "update_artifact"
@@ -266,7 +267,7 @@ func downloadAsset(url, assetName string) (string, error) {
 	}
 	req.Header.Set("User-Agent", defaultUserAgent)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := updaterHTTPClient(downloadTimeout).Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -282,11 +283,42 @@ func downloadAsset(url, assetName string) (string, error) {
 		return "", err
 	}
 
-	if _, err := io.Copy(file, resp.Body); err != nil {
-		_ = file.Close()
-		_ = os.Remove(tempPath)
-		return "", err
+	totalBytes := resp.ContentLength
+	var written int64
+	buffer := make([]byte, 32*1024)
+	lastUpdate := time.Time{}
+	for {
+		n, readErr := resp.Body.Read(buffer)
+		if n > 0 {
+			chunk := buffer[:n]
+			wn, writeErr := file.Write(chunk)
+			written += int64(wn)
+			now := time.Now()
+			if now.Sub(lastUpdate) >= 250*time.Millisecond || (totalBytes > 0 && written >= totalBytes) {
+				m.updateProgress("下载更新包", "正在下载更新包...", written, totalBytes)
+				lastUpdate = now
+			}
+			if writeErr != nil {
+				_ = file.Close()
+				_ = os.Remove(tempPath)
+				return "", writeErr
+			}
+			if wn != len(chunk) {
+				_ = file.Close()
+				_ = os.Remove(tempPath)
+				return "", io.ErrShortWrite
+			}
+		}
+		if readErr == io.EOF {
+			break
+		}
+		if readErr != nil {
+			_ = file.Close()
+			_ = os.Remove(tempPath)
+			return "", readErr
+		}
 	}
+	m.updateProgress("下载更新包", "正在下载更新包...", written, totalBytes)
 	if err := file.Close(); err != nil {
 		_ = os.Remove(tempPath)
 		return "", err

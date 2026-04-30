@@ -12,9 +12,9 @@ func GetRepoUpdateStatusHandler(c *gin.Context) {
 }
 
 func RepoUpdateCheckNowHandler(c *gin.Context) {
-	c.HTML(http.StatusOK, "repo_update_status.html", updater.CheckNow("manual-check"))
+	c.HTML(http.StatusOK, "repo_update_status.html", updater.TriggerCheckNow("manual-check"))
 }
 
 func RepoUpdatePullNowHandler(c *gin.Context) {
-	c.HTML(http.StatusOK, "repo_update_status.html", updater.CheckAndPullNow("manual-pull"))
+	c.HTML(http.StatusOK, "repo_update_status.html", updater.TriggerCheckAndPullNow("manual-pull"))
 }

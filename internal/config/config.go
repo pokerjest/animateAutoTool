@@ -377,7 +377,7 @@ server:
 
 # Database Configuration
 database:
-  path: data/` + defaultDatabaseFileName() + `
+  path: data/`+defaultDatabaseFileName()+`
 
 # Logging
 log:
