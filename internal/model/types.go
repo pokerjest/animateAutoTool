@@ -66,6 +66,23 @@ type User struct {
 	Memo         string `json:"memo"` // 备注 (可存储明文恢复密码)
 }
 
+// AuditLog 记录登录、密码变更、删除、备份恢复等敏感操作,
+// 用于多人部署场景下的事后追溯。Details 字段保存与操作相关的
+// 结构化补充信息(JSON 字符串),便于在不增加列的情况下扩展上下文。
+type AuditLog struct {
+	ID         uint      `gorm:"primaryKey" json:"id"`
+	CreatedAt  time.Time `gorm:"index" json:"created_at"`
+	UserID     uint      `gorm:"index" json:"user_id"`
+	Username   string    `gorm:"size:128;index" json:"username"`
+	Action     string    `gorm:"size:64;index" json:"action"`
+	TargetType string    `gorm:"size:64" json:"target_type"`
+	TargetID   string    `gorm:"size:128" json:"target_id"`
+	Outcome    string    `gorm:"size:16;index" json:"outcome"` // success / failure
+	IP         string    `gorm:"size:64" json:"ip"`
+	UserAgent  string    `gorm:"size:512" json:"user_agent"`
+	Details    string    `gorm:"type:text" json:"details"`
+}
+
 // AnimeMetadata 统一的番剧元数据表
 type AnimeMetadata struct {
 	gorm.Model

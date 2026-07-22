@@ -26,14 +26,16 @@ internal/
 ├── config, security, safeio, bootstrap, version, tray, renamer/
 └── ...
 pkg/rss/              # 对外可复用的 RSS 包
-web/                  # 前端模板 + static + embed.go
+web/                  # Vue 前端源码 + Vite 产物 + embed.go
 scripts/              # 部署/打包脚本
 docs/                 # 本文件、release-checklist、mobile-qa-checklist
 ```
 
 ## 数据访问：Store + Access Helper
 
-**原则**：handler / service 不直接调用 `db.DB.Where(...).Find(...)`。所有 SQL 路过 `internal/store/` 中的 *Store 类型。
+**原则**：新增或重写的 handler / service 不直接调用 `db.DB.Where(...).Find(...)`。业务 SQL 应优先路过 `internal/store/` 中的 *Store 类型。
+
+迁移状态：订阅、下载日志、本地库、元数据、配置、审计日志和用户认证链路已经有 store 层；部分历史 handler / service 仍存在直接 `db.DB` 调用。碰到这些代码时，优先随手收口到对应 store，不要继续扩大直连面。
 
 ### Store 层（`internal/store/`）
 
@@ -43,6 +45,8 @@ docs/                 # 本文件、release-checklist、mobile-qa-checklist
 - `LocalAnimeStore` — 本地番剧目录 / 番剧 / 单集
 - `AnimeMetadataStore` — 元数据 + 跨表 propagate
 - `ConfigStore` — `global_configs` 键值
+- `AuditLogStore` — 敏感操作审计日志
+- `UserStore` — 登录用户、密码哈希与 bootstrap 认证
 
 约定：
 - 第一个参数固定 `*gorm.DB`，构造函数 `NewXxxStore(db)`。

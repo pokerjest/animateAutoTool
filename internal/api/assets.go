@@ -1,14 +1,12 @@
 package api
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"html/template"
 	"time"
 
 	appversion "github.com/pokerjest/animateAutoTool/internal/version"
-	webassets "github.com/pokerjest/animateAutoTool/web"
 )
 
 func templateFuncMap() template.FuncMap {
@@ -97,18 +95,4 @@ func humanizeTimeAgo(d time.Duration) string {
 	default:
 		return fmt.Sprintf("%d 天前", int(d.Hours()/24))
 	}
-}
-
-func renderTemplateToString(name string, data interface{}) (string, error) {
-	tmpl, err := webassets.ParseTemplates(templateFuncMap())
-	if err != nil {
-		return "", err
-	}
-
-	var buf bytes.Buffer
-	if err := tmpl.ExecuteTemplate(&buf, name, data); err != nil {
-		return "", err
-	}
-
-	return buf.String(), nil
 }

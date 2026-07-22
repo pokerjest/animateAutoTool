@@ -60,6 +60,7 @@ func setupRouter() *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	InitRoutes(r)
+	initLegacyTestRoutes(r)
 	return r
 }
 

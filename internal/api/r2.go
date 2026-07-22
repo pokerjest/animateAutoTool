@@ -33,7 +33,7 @@ type DownloadProgress struct {
 	Downloaded int64     `json:"downloaded"`
 	Status     string    `json:"status"` // "pending", "downloading", "analyzing", "completed", "error"
 	Error      string    `json:"error,omitempty"`
-	ResultHTML string    `json:"result_html,omitempty"`
+	Result     any       `json:"result,omitempty"`
 	UpdatedAt  time.Time `json:"-"`
 }
 
@@ -45,6 +45,7 @@ const (
 	r2ProgressActiveTTL       = 24 * time.Hour
 	r2RequestTimeout          = 15 * time.Second
 	r2StageDownloadTimeout    = 30 * time.Minute
+	r2UploadTimeout           = 30 * time.Minute
 )
 
 var r2ProgressJanitorOnce sync.Once
@@ -257,6 +258,77 @@ func UploadToR2Handler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "uploaded", "key": key})
 }
 
+// startR2UploadTask creates a full backup and uploads it without tying the
+// operation to the lifetime of the initiating HTTP request.
+func startR2UploadTask(ctx context.Context) (string, error) {
+	client, bucket, err := getR2ClientWithHTTPClient(ctx, httpx.NewHTTPClient(0))
+	if err != nil {
+		return "", err
+	}
+
+	taskID := uuid.New().String()
+	ensureR2ProgressJanitor()
+	progressMap.Store(taskID, &DownloadProgress{TaskID: taskID, Status: "pending", UpdatedAt: time.Now()})
+
+	go func(tID, b string, cli *s3.Client) {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				updateProgress(tID, "error", fmt.Sprintf("上传任务异常: %v", recovered), 0, 0, nil)
+			}
+		}()
+
+		updateProgress(tID, "preparing", "", 0, 0, nil)
+		tempFile, err := os.CreateTemp("", "backup_r2_*.db")
+		if err != nil {
+			updateProgress(tID, "error", "创建临时备份文件失败: "+err.Error(), 0, 0, nil)
+			return
+		}
+		tempPath := tempFile.Name()
+		if err := tempFile.Close(); err != nil {
+			safeio.Remove(tempPath)
+			updateProgress(tID, "error", "完成临时备份文件写入失败: "+err.Error(), 0, 0, nil)
+			return
+		}
+		defer safeio.Remove(tempPath)
+
+		if err := service.CreateBackupFile(tempPath, service.BackupModeFull); err != nil {
+			updateProgress(tID, "error", "创建备份文件失败: "+err.Error(), 0, 0, nil)
+			return
+		}
+
+		file, err := os.Open(filepath.Clean(tempPath)) //nolint:gosec // tempPath is created by this task.
+		if err != nil {
+			updateProgress(tID, "error", "打开备份文件失败: "+err.Error(), 0, 0, nil)
+			return
+		}
+		defer safeio.Close(file)
+		info, err := file.Stat()
+		if err != nil {
+			updateProgress(tID, "error", "读取备份文件信息失败: "+err.Error(), 0, 0, nil)
+			return
+		}
+
+		total := info.Size()
+		updateProgress(tID, "uploading", "", total, 0, nil)
+		key := service.R2BackupObjectKey(service.BackupModeFull, time.Now())
+		reader := &CountingReader{Reader: file, Total: total, TaskID: tID}
+		bgCtx, cancel := context.WithTimeout(context.Background(), r2UploadTimeout)
+		defer cancel()
+		if _, err := cli.PutObject(bgCtx, &s3.PutObjectInput{Bucket: aws.String(b), Key: aws.String(key), Body: reader}); err != nil {
+			updateProgress(tID, "error", "上传备份到 R2 失败: "+err.Error(), total, 0, nil)
+			return
+		}
+
+		r2BackupCacheLock.Lock()
+		r2BackupCache = nil
+		r2BackupCacheTime = time.Time{}
+		r2BackupCacheLock.Unlock()
+		updateProgress(tID, "completed", "", total, total, gin.H{"key": key})
+	}(taskID, bucket, client)
+
+	return taskID, nil
+}
+
 // InitR2Cache starts a background goroutine to pre-fetch R2 backup list.
 func InitR2Cache() {
 	go func() {
@@ -431,11 +503,11 @@ func StageR2BackupHandler(c *gin.Context) {
 		// Recovery
 		defer func() {
 			if r := recover(); r != nil {
-				updateProgress(tID, "error", fmt.Sprintf("Panic: %v", r), 0, 0, "")
+				updateProgress(tID, "error", fmt.Sprintf("Panic: %v", r), 0, 0, nil)
 			}
 		}()
 
-		updateProgress(tID, "downloading", "", 0, 0, "")
+		updateProgress(tID, "downloading", "", 0, 0, nil)
 
 		// 1. Get Object Info (Head/Get)
 		// We use GetObject directly.
@@ -448,7 +520,7 @@ func StageR2BackupHandler(c *gin.Context) {
 			Key:    aws.String(k),
 		})
 		if err != nil {
-			updateProgress(tID, "error", "Download init failed: "+err.Error(), 0, 0, "")
+			updateProgress(tID, "error", "Download init failed: "+err.Error(), 0, 0, nil)
 			return
 		}
 		defer safeio.Close(resp.Body)
@@ -457,12 +529,12 @@ func StageR2BackupHandler(c *gin.Context) {
 		if resp.ContentLength != nil {
 			total = *resp.ContentLength
 		}
-		updateProgress(tID, "downloading", "", total, 0, "")
+		updateProgress(tID, "downloading", "", total, 0, nil)
 
 		// 2. Create Temp File
 		tempFile, err := os.CreateTemp("", "restore_r2_stage_*.db")
 		if err != nil {
-			updateProgress(tID, "error", "Create temp file failed", total, 0, "")
+			updateProgress(tID, "error", "Create temp file failed", total, 0, nil)
 			return
 		}
 		// Note: No defer remove, kept for restore execution.
@@ -477,54 +549,42 @@ func StageR2BackupHandler(c *gin.Context) {
 		if _, err := io.Copy(tempFile, reader); err != nil {
 			safeio.Close(tempFile)
 			safeio.Remove(tempFile.Name())
-			updateProgress(tID, "error", "Download stream failed: "+err.Error(), total, 0, "")
+			updateProgress(tID, "error", "Download stream failed: "+err.Error(), total, 0, nil)
 			return
 		}
 		if err := tempFile.Close(); err != nil {
 			safeio.Remove(tempFile.Name())
-			updateProgress(tID, "error", "Finalize temp file failed: "+err.Error(), total, total, "")
+			updateProgress(tID, "error", "Finalize temp file failed: "+err.Error(), total, total, nil)
 			return
 		}
 
 		// 4. Analyze
-		updateProgress(tID, "analyzing", "", total, total, "") // 100% downloaded
+		updateProgress(tID, "analyzing", "", total, total, nil) // 100% downloaded
 
 		stats, err := service.InspectBackup(tempFile.Name())
 		if err != nil {
 			safeio.Remove(tempFile.Name())
-			updateProgress(tID, "error", "Invalid Database File", total, total, "")
+			updateProgress(tID, "error", "Invalid Database File", total, total, nil)
 			return
 		}
 
-		// 5. Render HTML
+		// 5. Register the staged file and return structured restore data.
 		restoreToken := registerRestoreArtifact(tempFile.Name())
-		resultHTML, err := renderTemplateToString("backup_analyze.html", map[string]interface{}{
-			"Stats":    stats,
-			"TempFile": restoreToken,
-		})
-		if err != nil {
-			discardRestoreArtifact(restoreToken)
-			safeio.Remove(tempFile.Name())
-			updateProgress(tID, "error", "Template render error: "+err.Error(), total, total, "")
-			return
-		}
-
-		// 6. Complete
-		updateProgress(tID, "completed", "", total, total, resultHTML)
+		updateProgress(tID, "completed", "", total, total, gin.H{"stats": stats, "restore_token": restoreToken})
 
 	}(taskID, key, bucket, client)
 
-	c.JSON(http.StatusOK, gin.H{"task_id": taskID, "status": "started"})
+	c.JSON(http.StatusAccepted, gin.H{"task_id": taskID, "status": "running"})
 }
 
-func updateProgress(taskID, status, errStr string, total, downloaded int64, html string) {
+func updateProgress(taskID, status, errStr string, total, downloaded int64, result any) {
 	p := &DownloadProgress{
 		TaskID:     taskID,
 		Status:     status,
 		TotalBytes: total,
 		Downloaded: downloaded,
 		Error:      errStr,
-		ResultHTML: html,
+		Result:     result,
 		UpdatedAt:  time.Now(),
 	}
 	// If existing, preserve Total/Downloaded if passed 0?
@@ -594,6 +654,7 @@ func DeleteR2BackupHandler(c *gin.Context) {
 		return
 	}
 
+	auditCtx := buildAuditContext(c)
 	client, bucket, err := getR2Client(c.Request.Context())
 	if err != nil {
 		jsonBadRequest(c, "R2 配置有误: "+err.Error())
@@ -607,6 +668,13 @@ func DeleteR2BackupHandler(c *gin.Context) {
 	})
 	if err != nil {
 		debugLog("DEBUG: DeleteObject error: %v", err)
+		service.RecordAudit(auditCtx, service.AuditEntry{
+			Action:     service.AuditActionR2BackupDelete,
+			Outcome:    service.AuditOutcomeFailure,
+			TargetType: "r2_object",
+			TargetID:   key,
+			Details:    map[string]string{"bucket": bucket, "error": err.Error()},
+		})
 		jsonServerError(c, "删除 R2 备份", err)
 		return
 	}
@@ -618,6 +686,13 @@ func DeleteR2BackupHandler(c *gin.Context) {
 	r2BackupCacheTime = time.Time{}
 	r2BackupCacheLock.Unlock()
 
+	service.RecordAudit(auditCtx, service.AuditEntry{
+		Action:     service.AuditActionR2BackupDelete,
+		Outcome:    service.AuditOutcomeSuccess,
+		TargetType: "r2_object",
+		TargetID:   key,
+		Details:    map[string]string{"bucket": bucket},
+	})
 	c.JSON(http.StatusOK, gin.H{"status": "deleted"})
 }
 
@@ -647,6 +722,15 @@ func TestR2ConnectionHandler(c *gin.Context) {
 		debugLog("DEBUG: BindJSON error: %v", err)
 		jsonBadRequest(c, "R2 连通性测试请求格式不正确: "+err.Error())
 		return
+	}
+	if strings.TrimSpace(req.Endpoint) == "" {
+		req.Endpoint = configValue(model.ConfigKeyR2Endpoint)
+	}
+	if strings.TrimSpace(req.Bucket) == "" {
+		req.Bucket = configValue(model.ConfigKeyR2Bucket)
+	}
+	if strings.TrimSpace(req.AccessKey) == "" || isMasked(req.AccessKey) {
+		req.AccessKey = configValue(model.ConfigKeyR2AccessKey)
 	}
 	debugLog("DEBUG: Testing R2 Config: Endpoint=%s, Bucket=%s, AccessKey=%s", req.Endpoint, req.Bucket, maskSecret(req.AccessKey))
 

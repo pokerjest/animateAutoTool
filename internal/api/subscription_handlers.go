@@ -75,17 +75,17 @@ type SubscriptionHistoryData struct {
 }
 
 type SubscriptionTrendReport struct {
-	WindowLabel                string
-	CheckedCount               int
-	SuccessCount               int
-	WarningCount               int
-	ErrorCount                 int
-	DownloadLogCount           int64
-	CompletedCount             int64
-	RecentNewDownloads         int
-	ActiveIssueCount           int
-	TopIssueSubscriptions      []SubscriptionTrendItem
-	RecentWinningSubscriptions []SubscriptionTrendItem
+	WindowLabel                string                  `json:"window_label"`
+	CheckedCount               int                     `json:"checked_count"`
+	SuccessCount               int                     `json:"success_count"`
+	WarningCount               int                     `json:"warning_count"`
+	ErrorCount                 int                     `json:"error_count"`
+	DownloadLogCount           int64                   `json:"download_log_count"`
+	CompletedCount             int64                   `json:"completed_count"`
+	RecentNewDownloads         int                     `json:"recent_new_downloads"`
+	ActiveIssueCount           int                     `json:"active_issue_count"`
+	TopIssueSubscriptions      []SubscriptionTrendItem `json:"top_issue_subscriptions"`
+	RecentWinningSubscriptions []SubscriptionTrendItem `json:"recent_winning_subscriptions"`
 }
 
 type SubscriptionTrendItem struct {
@@ -369,6 +369,13 @@ func DeleteSubscriptionHandler(c *gin.Context) {
 
 	log.Printf("DEBUG: Deleting subscription ID: %d", id)
 
+	auditCtx := buildAuditContext(c)
+	var subTitle string
+	var existing model.Subscription
+	if err := db.DB.Unscoped().First(&existing, id).Error; err == nil {
+		subTitle = existing.Title
+	}
+
 	// Start transaction for cascading delete
 	tx := db.DB.Begin()
 
@@ -393,6 +400,13 @@ func DeleteSubscriptionHandler(c *gin.Context) {
 		subscriptionSaveError(c, "提交删除操作", err)
 		return
 	}
+	service.RecordAudit(auditCtx, service.AuditEntry{
+		Action:     service.AuditActionSubscriptionDelete,
+		Outcome:    service.AuditOutcomeSuccess,
+		TargetType: "subscription",
+		TargetID:   idStr,
+		Details:    map[string]string{"title": subTitle},
+	})
 	c.Status(http.StatusOK)
 }
 

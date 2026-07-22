@@ -180,11 +180,22 @@ func ExecuteRestoreHandler(c *gin.Context) {
 	}
 
 	// EXECUTE PARALLEL RESTORE
+	auditCtx := buildAuditContext(c)
 	svc := service.NewRestoreService()
 	if err := svc.PerformRestore(tempPath, options); err != nil {
+		service.RecordAudit(auditCtx, service.AuditEntry{
+			Action:  service.AuditActionBackupRestore,
+			Outcome: service.AuditOutcomeFailure,
+			Details: map[string]any{"options": options, "error": err.Error()},
+		})
 		htmlServerError(c, "恢复备份", err)
 		return
 	}
+	service.RecordAudit(auditCtx, service.AuditEntry{
+		Action:  service.AuditActionBackupRestore,
+		Outcome: service.AuditOutcomeSuccess,
+		Details: map[string]any{"options": options},
+	})
 
 	// Optional: Regenerate NFOs
 	if options.RegenerateNFO {

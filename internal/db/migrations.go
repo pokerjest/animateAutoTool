@@ -45,6 +45,13 @@ var migrations = []migration{
 			return tx.AutoMigrate(&model.Subscription{})
 		},
 	},
+	{
+		ID:          "004_audit_logs",
+		Description: "Create audit_logs table for sensitive operation history",
+		Apply: func(tx *gorm.DB) error {
+			return tx.AutoMigrate(&model.AuditLog{})
+		},
+	},
 }
 
 func autoMigrateCoreSchema(tx *gorm.DB) error {

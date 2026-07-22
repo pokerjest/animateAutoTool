@@ -3,21 +3,88 @@ package api
 import (
 	"context"
 	"fmt"
+	"html"
 	"log"
 	"net/http"
 	"strings"
 	"sync"
 
+	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/pokerjest/animateAutoTool/internal/ai"
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/model"
+	"github.com/pokerjest/animateAutoTool/internal/service"
 )
 
 var (
-	globalChatHistory []ai.ChatMessage
-	chatMutex         sync.Mutex
+	globalChatHistories = map[string][]ai.ChatMessage{}
+	chatMutex           sync.Mutex
 )
+
+const (
+	aiChatSessionKey = "ai_chat_id"
+	maxChatMessages  = 25
+	aiSystemPrompt   = "You are a helpful assistant integrated into AnimateAutoTool, an anime downloading and management application. Use tools to help the user manage their system. Be concise."
+)
+
+func truncateChatHistory(history []ai.ChatMessage) []ai.ChatMessage {
+	if len(history) <= maxChatMessages {
+		return history
+	}
+
+	// We must keep the system message (usually at index 0)
+	var systemMsg *ai.ChatMessage
+	if len(history) > 0 && history[0].Role == "system" {
+		systemMsg = &history[0]
+	}
+
+	// Find a user message index starting from the middle or later to act as the new beginning
+	// We want to keep approximately maxChatMessages messages, so we search around the retained tail.
+	startIndex := len(history) - (maxChatMessages - 1)
+	if startIndex < 1 {
+		startIndex = 1
+	}
+
+	// Search forward to find the next 'user' role so the dialogue starts clean
+	newStart := -1
+	for i := startIndex; i < len(history); i++ {
+		if history[i].Role == "user" {
+			newStart = i
+			break
+		}
+	}
+
+	// If no user message was found in the tail, just cut exactly at startIndex
+	if newStart == -1 {
+		newStart = startIndex
+	}
+
+	newHistory := make([]ai.ChatMessage, 0, len(history)-newStart+1)
+	if systemMsg != nil {
+		newHistory = append(newHistory, *systemMsg)
+	}
+	newHistory = append(newHistory, history[newStart:]...)
+	return newHistory
+}
+
+func aiChatHistoryKey(c *gin.Context) string {
+	session := sessions.Default(c)
+	chatID, _ := session.Get(aiChatSessionKey).(string)
+	if strings.TrimSpace(chatID) == "" {
+		chatID = uuid.NewString()
+		session.Set(aiChatSessionKey, chatID)
+		if err := session.Save(); err != nil {
+			log.Printf("AI chat: failed to persist session id: %v", err)
+		}
+	}
+
+	if userID, err := currentSessionUserID(c); err == nil && userID != 0 {
+		return fmt.Sprintf("user:%d:%s", userID, chatID)
+	}
+	return "session:" + chatID
+}
 
 // AIChatHandler processes incoming messages from the AI chat widget.
 func AIChatHandler(c *gin.Context) {
@@ -43,20 +110,24 @@ func AIChatHandler(c *gin.Context) {
 
 	client := ai.NewClient(baseURL, apiKey, modelName)
 	tools := GlobalAIRegistry.GetToolDefinitions()
+	historyKey := aiChatHistoryKey(c)
 
 	chatMutex.Lock()
 	defer chatMutex.Unlock()
 
+	// Truncate long history first
+	history := truncateChatHistory(globalChatHistories[historyKey])
+
 	// Initialize history if empty
-	if len(globalChatHistory) == 0 {
-		globalChatHistory = append(globalChatHistory, ai.ChatMessage{
+	if len(history) == 0 {
+		history = append(history, ai.ChatMessage{
 			Role:    "system",
-			Content: "You are a helpful assistant integrated into AnimateAutoTool, an anime downloading and management application. Use tools to help the user manage their system. Be concise.",
+			Content: aiSystemPrompt,
 		})
 	}
 
 	// Add user message
-	globalChatHistory = append(globalChatHistory, ai.ChatMessage{
+	history = append(history, ai.ChatMessage{
 		Role:    "user",
 		Content: userMessage,
 	})
@@ -69,7 +140,7 @@ func AIChatHandler(c *gin.Context) {
 	for {
 		req := ai.ChatCompletionRequest{
 			Model:    modelName,
-			Messages: globalChatHistory,
+			Messages: history,
 			Tools:    tools,
 		}
 
@@ -77,7 +148,7 @@ func AIChatHandler(c *gin.Context) {
 		if err != nil {
 			log.Printf("AI API Error: %v", err)
 			msg := "抱歉，调用大模型接口失败，请检查设置中的 Base URL 和 API Key 或网络连通性。"
-			globalChatHistory = append(globalChatHistory, ai.ChatMessage{Role: "assistant", Content: msg})
+			history = append(history, ai.ChatMessage{Role: "assistant", Content: msg})
 			responseHTML.WriteString(chatBubble("assistant", msg))
 			break
 		}
@@ -85,7 +156,7 @@ func AIChatHandler(c *gin.Context) {
 		choice := resp.Choices[0].Message
 
 		// Append assistant message to history
-		globalChatHistory = append(globalChatHistory, choice)
+		history = append(history, choice)
 
 		if len(choice.ToolCalls) == 0 {
 			// Normal reply
@@ -106,7 +177,7 @@ func AIChatHandler(c *gin.Context) {
 			}
 
 			// Return result to LLM
-			globalChatHistory = append(globalChatHistory, ai.ChatMessage{
+			history = append(history, ai.ChatMessage{
 				Role:       "tool",
 				ToolCallID: toolCall.ID,
 				Name:       toolCall.Function.Name,
@@ -115,13 +186,15 @@ func AIChatHandler(c *gin.Context) {
 		}
 	}
 
+	globalChatHistories[historyKey] = history
 	c.Data(http.StatusOK, "text/html", []byte(responseHTML.String()))
 }
 
 // AIClearHistoryHandler clears the chat context.
 func AIClearHistoryHandler(c *gin.Context) {
+	historyKey := aiChatHistoryKey(c)
 	chatMutex.Lock()
-	globalChatHistory = nil
+	delete(globalChatHistories, historyKey)
 	chatMutex.Unlock()
 	c.Data(http.StatusOK, "text/html", []byte(chatBubble("assistant", "对话历史已清空。")))
 }
@@ -129,7 +202,7 @@ func AIClearHistoryHandler(c *gin.Context) {
 // chatBubble renders a premium Gemini-style HTML chat bubble for HTMX insertion
 func chatBubble(role, content string) string {
 	// Convert newlines to <br> for HTML display
-	content = strings.ReplaceAll(content, "\n", "<br>")
+	content = strings.ReplaceAll(html.EscapeString(content), "\n", "<br>")
 
 	if role == "user" {
 		return fmt.Sprintf(`
@@ -175,6 +248,16 @@ func AIConfigHandler(c *gin.Context) {
 		jsonServerError(c, "保存 AI 模型", err)
 		return
 	}
+
+	service.RecordAudit(buildAuditContext(c), service.AuditEntry{
+		Action:  service.AuditActionAISettingsUpdate,
+		Outcome: service.AuditOutcomeSuccess,
+		Details: map[string]any{
+			"base_url":    baseUrl,
+			"model":       modelName,
+			"api_key_set": apiKey != "",
+		},
+	})
 
 	c.JSON(http.StatusOK, gin.H{"status": "success", "message": "AI 设置已保存"})
 }

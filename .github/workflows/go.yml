@@ -27,6 +27,21 @@ jobs:
           go-version: '1.25.9'
           cache: true
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/frontend/package-lock.json
+
+      - name: Build and test frontend
+        run: |
+          npm --prefix web/frontend ci
+          npm --prefix web/frontend run generate:types
+          npm --prefix web/frontend run test:run
+          npm --prefix web/frontend run build
+          git diff --exit-code -- web/dist web/frontend/src/api/schema.d.ts
+
       - name: Read build version
         run: |
           if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
@@ -73,6 +88,13 @@ jobs:
         with:
           go-version: '1.25.9'
           cache: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/frontend/package-lock.json
 
       - name: Read build version
         run: |
@@ -128,6 +150,13 @@ jobs:
           go-version: '1.25.9'
           cache: true
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/frontend/package-lock.json
+
       - name: Read package version
         run: |
           if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
@@ -163,6 +192,13 @@ jobs:
         with:
           go-version: '1.25.9'
           cache: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/frontend/package-lock.json
 
       - name: Read package version
         run: |

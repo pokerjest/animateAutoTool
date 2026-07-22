@@ -1,0 +1,434 @@
+{{ define "subscription_card.html" }}
+<div id="sub-card-{{.ID}}"
+    data-subscription-card="true"
+    data-subscription-id="{{ .ID }}"
+    data-title="{{ .Title }}"
+    data-run-status="{{ .LastRunStatus }}"
+    data-active="{{ if .IsActive }}true{{ else }}false{{ end }}"
+    data-has-new="{{ if gt .LastNewDownloads 0 }}true{{ else }}false{{ end }}"
+    data-has-error="{{ if .LastError }}true{{ else }}false{{ end }}"
+    data-summary="{{ .LastRunSummary }}"
+    data-error-message="{{ if .LastErrorDisplay }}{{ .LastErrorDisplay }}{{ else }}{{ .LastError }}{{ end }}"
+    data-last-check="{{ timeAgo .LastCheckAt }}"
+    data-status-label="{{ if eq .LastRunStatus "success" }}下载成功{{ else if eq .LastRunStatus "warning" }}部分失败{{ else if eq .LastRunStatus "error" }}检查失败{{ else if eq .LastRunStatus "idle" }}无新内容{{ else }}未运行{{ end }}"
+    class="bg-white/60 backdrop-blur-md rounded-2xl shadow-sm border border-white/70 hover:shadow-xl transition-all duration-300 hover:-translate-y-1 relative group overflow-hidden flex flex-col">
+
+    <div class="p-4 md:p-5 flex gap-3 md:gap-5">
+        <!-- Image Section -->
+        <div class="w-20 h-28 md:w-24 md:h-32 shrink-0 rounded-xl overflow-hidden shadow-lg bg-gray-100 relative group/poster cursor-pointer"
+            @click.stop="$dispatch('show-anime-details', { 
+                subId: {{ .ID }},
+                bangumiId: {{ if .Metadata }}{{ .Metadata.BangumiID }}{{ else }}0{{ end }}, 
+                title: '{{ .Title }}', 
+                image: '{{ .Image }}',
+                tmdbId: {{ if .Metadata }}{{ .Metadata.TMDBID }}{{ else }}0{{ end }},
+                tmdbTitle: '{{ if .Metadata }}{{ .Metadata.TMDBTitle }}{{ end }}',
+                tmdbImage: '{{ if .Metadata }}{{ .Metadata.TMDBImage }}{{ end }}',
+                tmdbSummary: `{{ if .Metadata }}{{ .Metadata.TMDBSummary }}{{ end }}`,
+                bangumiTitle: '{{ if .Metadata }}{{ .Metadata.BangumiTitle }}{{ end }}',
+                bangumiImage: '{{ if .Metadata }}{{ .Metadata.BangumiImage }}{{ end }}',
+                bangumiSummary: `{{ if .Metadata }}{{ .Metadata.BangumiSummary }}{{ end }}`,
+                bangumiRating: {{ if .Metadata }}{{ .Metadata.BangumiRating }}{{ else }}0{{ end }},
+                tmdbRating: {{ if .Metadata }}{{ .Metadata.TMDBRating }}{{ else }}0{{ end }},
+                anilistId: {{ if .Metadata }}{{ .Metadata.AniListID }}{{ else }}0{{ end }},
+                anilistTitle: `{{ if .Metadata }}{{ .Metadata.AniListTitle }}{{ end }}`,
+                anilistImage: `{{ if .Metadata }}{{ .Metadata.AniListImage }}{{ end }}`,
+                anilistSummary: `{{ if .Metadata }}{{ .Metadata.AniListSummary }}{{ end }}`,
+                anilistRating: {{ if .Metadata }}{{ .Metadata.AniListRating }}{{ else }}0{{ end }},
+                titleCN: `{{ if .Metadata }}{{ .Metadata.TitleCN }}{{ end }}`,
+                titleEN: `{{ if .Metadata }}{{ .Metadata.TitleEN }}{{ end }}`,
+                titleJP: `{{ if .Metadata }}{{ .Metadata.TitleJP }}{{ end }}`
+            })">
+            {{ if .Image }}
+            <img src="{{ .Image }}"
+                class="w-full h-full object-cover transition-transform duration-500 group-hover/poster:scale-110"
+                loading="lazy" alt="{{.Title}}">
+            {{ else }}
+            <div class="w-full h-full flex items-center justify-center text-gray-300 text-3xl bg-gray-50">📺</div>
+            {{ end }}
+            <!-- Detail Overlay -->
+            <div
+                class="absolute inset-0 bg-black/40 opacity-100 md:opacity-0 md:group-hover/poster:opacity-100 transition-opacity flex items-center justify-center">
+                <span
+                    class="text-white text-xs font-bold bg-black/40 px-2 py-1 rounded-lg backdrop-blur-sm border border-white/20">详情</span>
+            </div>
+        </div>
+
+        <!-- Content Section -->
+        <div class="flex-1 min-w-0 flex flex-col">
+            <h3 class="font-black text-base md:text-lg text-gray-800 line-clamp-2 leading-tight mb-2 hover:text-primary transition-colors cursor-pointer"
+                title="点击查看详情" @click.stop="$dispatch('show-anime-details', { 
+                    subId: {{ .ID }},
+                    bangumiId: {{ if .Metadata }}{{ .Metadata.BangumiID }}{{ else }}0{{ end }}, 
+                    title: '{{ .Title }}', 
+                    image: '{{ .Image }}',
+                    tmdbId: {{ if .Metadata }}{{ .Metadata.TMDBID }}{{ else }}0{{ end }},
+                    tmdbTitle: '{{ if .Metadata }}{{ .Metadata.TMDBTitle }}{{ end }}',
+                    tmdbImage: '{{ if .Metadata }}{{ .Metadata.TMDBImage }}{{ end }}',
+                    tmdbSummary: `{{ if .Metadata }}{{ .Metadata.TMDBSummary }}{{ end }}`,
+                    bangumiTitle: '{{ if .Metadata }}{{ .Metadata.BangumiTitle }}{{ end }}',
+                    bangumiImage: '{{ if .Metadata }}{{ .Metadata.BangumiImage }}{{ end }}',
+                    bangumiSummary: `{{ if .Metadata }}{{ .Metadata.BangumiSummary }}{{ end }}`,
+                    bangumiRating: {{ if .Metadata }}{{ .Metadata.BangumiRating }}{{ else }}0{{ end }},
+                    tmdbRating: {{ if .Metadata }}{{ .Metadata.TMDBRating }}{{ else }}0{{ end }},
+                    anilistId: {{ if .Metadata }}{{ .Metadata.AniListID }}{{ else }}0{{ end }},
+                    anilistTitle: `{{ if .Metadata }}{{ .Metadata.AniListTitle }}{{ end }}`,
+                    anilistImage: `{{ if .Metadata }}{{ .Metadata.AniListImage }}{{ end }}`,
+                    anilistSummary: `{{ if .Metadata }}{{ .Metadata.AniListSummary }}{{ end }}`,
+                    anilistRating: {{ if .Metadata }}{{ .Metadata.AniListRating }}{{ else }}0{{ end }},
+                    titleCN: `{{ if .Metadata }}{{ .Metadata.TitleCN }}{{ end }}`,
+                    titleEN: `{{ if .Metadata }}{{ .Metadata.TitleEN }}{{ end }}`,
+                    titleJP: `{{ if .Metadata }}{{ .Metadata.TitleJP }}{{ end }}`
+                })">
+                {{ .Title }}
+            </h3>
+
+            <!-- Quick Metadata Tags -->
+            <div class="flex flex-wrap gap-1.5 mb-3">
+                {{ if .SubtitleGroup }}
+                <span
+                    class="inline-flex items-center px-2 py-0.5 rounded-lg text-[10px] bg-indigo-50/80 text-indigo-600 border border-indigo-100 font-bold max-w-[120px] truncate"
+                    title="{{ .SubtitleGroup }}">
+                    {{ .SubtitleGroup }}
+                </span>
+                {{ end }}
+                {{ if .Season }}
+                <span
+                    class="inline-flex items-center px-2 py-0.5 rounded-lg text-[10px] bg-rose-50/80 text-rose-600 border border-rose-100 font-bold">
+                    {{ .Season }}
+                </span>
+                {{ end }}
+                {{ if .BackupRSSUrl }}
+                <span
+                    class="inline-flex items-center px-2 py-0.5 rounded-lg text-[10px] bg-sky-50/80 text-sky-700 border border-sky-100 font-bold">
+                    备用 RSS
+                </span>
+                {{ end }}
+                {{ if .AllowMultiSubgroup }}
+                <span
+                    class="inline-flex items-center px-2 py-0.5 rounded-lg text-[10px] bg-violet-50/80 text-violet-700 border border-violet-100 font-bold">
+                    多字幕组
+                </span>
+                {{ end }}
+                {{ if .AutoDisableOnDone }}
+                <span
+                    class="inline-flex items-center px-2 py-0.5 rounded-lg text-[10px] bg-emerald-50/80 text-emerald-700 border border-emerald-100 font-bold">
+                    完结自动停用
+                </span>
+                {{ end }}
+            </div>
+
+            <!-- Stats -->
+            <div class="mt-auto flex flex-wrap items-center gap-3">
+                <div class="flex items-center gap-1.5 text-xs text-gray-500 bg-gray-50/50 px-2.5 py-1 rounded-lg border border-gray-100"
+                    title="RSS: {{.RSSUrl}}">
+                    <span class="opacity-70">🎬</span>
+                    <span class="font-medium">已下载: <b class="text-gray-900 font-black">{{ .DownloadedCount }}</b>
+                        集</span>
+                </div>
+                {{ if gt .LastNewDownloads 0 }}
+                <div class="flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-100"
+                    title="最近一次检查新增下载">
+                    <span>⬇️</span>
+                    <span class="font-medium">最近新增 {{ .LastNewDownloads }} 集</span>
+                </div>
+                {{ end }}
+                {{ if gt .ExpectedEpisodes 0 }}
+                <div class="flex items-center gap-1.5 text-xs text-sky-700 bg-sky-50 px-2.5 py-1 rounded-lg border border-sky-100"
+                    title="目标总集数">
+                    <span>🎯</span>
+                    <span class="font-medium">目标 {{ .ExpectedEpisodes }} 集</span>
+                </div>
+                {{ end }}
+                {{ if .LifecycleStage }}
+                <div class="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg border
+                    {{ if eq .LifecycleTone "success" }}text-emerald-700 bg-emerald-50 border-emerald-100
+                    {{ else if eq .LifecycleTone "warning" }}text-amber-700 bg-amber-50 border-amber-100
+                    {{ else if eq .LifecycleTone "danger" }}text-rose-700 bg-rose-50 border-rose-100
+                    {{ else if eq .LifecycleTone "info" }}text-blue-700 bg-blue-50 border-blue-100
+                    {{ else }}text-slate-700 bg-slate-50 border-slate-100{{ end }}"
+                    title="当前订阅生命周期状态">
+                    <span>🧭</span>
+                    <span class="font-medium">{{ .LifecycleStage }}</span>
+                </div>
+                {{ end }}
+                {{ if .LibraryStage }}
+                <div class="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg border
+                    {{ if eq .LibraryTone "success" }}text-emerald-700 bg-emerald-50 border-emerald-100
+                    {{ else if eq .LibraryTone "warning" }}text-amber-700 bg-amber-50 border-amber-100
+                    {{ else }}text-cyan-700 bg-cyan-50 border-cyan-100{{ end }}"
+                    title="当前媒体库闭环状态">
+                    <span>🎞️</span>
+                    <span class="font-medium">{{ .LibraryStage }}</span>
+                </div>
+                {{ end }}
+            </div>
+        </div>
+    </div>
+
+    <!-- Tech Details (Compact) -->
+    <div class="px-5 pb-3">
+        <div class="space-y-2 p-2.5 bg-gray-50/50 rounded-xl border border-gray-100/50">
+            <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                    <div class="text-[10px] font-bold uppercase tracking-wide text-gray-400">最近检查</div>
+                    <div class="text-xs font-semibold text-gray-700 mt-0.5" title="{{ formatTime .LastCheckAt }}">{{ timeAgo .LastCheckAt }}</div>
+                </div>
+                <div class="shrink-0">
+                    {{ if eq .LastRunStatus "success" }}
+                    <span class="inline-flex items-center px-2 py-0.5 rounded-lg text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-100 font-bold">下载成功</span>
+                    {{ else if eq .LastRunStatus "warning" }}
+                    <span class="inline-flex items-center px-2 py-0.5 rounded-lg text-[10px] bg-amber-50 text-amber-700 border border-amber-100 font-bold">部分失败</span>
+                    {{ else if eq .LastRunStatus "error" }}
+                    <span class="inline-flex items-center px-2 py-0.5 rounded-lg text-[10px] bg-red-50 text-red-700 border border-red-100 font-bold">检查失败</span>
+                    {{ else if eq .LastRunStatus "idle" }}
+                    <span class="inline-flex items-center px-2 py-0.5 rounded-lg text-[10px] bg-slate-100 text-slate-700 border border-slate-200 font-bold">无新内容</span>
+                    {{ else }}
+                    <span class="inline-flex items-center px-2 py-0.5 rounded-lg text-[10px] bg-gray-100 text-gray-600 border border-gray-200 font-bold">未运行</span>
+                    {{ end }}
+                </div>
+            </div>
+
+            {{ if .LastRunSummary }}
+            <div class="text-[11px] text-gray-600 leading-relaxed">{{ .LastRunSummary }}</div>
+            {{ else }}
+            <div class="text-[11px] text-gray-400 italic">还没有执行记录</div>
+            {{ end }}
+
+            {{ if .HasRepairActions }}
+            <div class="space-y-2 rounded-xl border border-sky-100 bg-sky-50/60 px-2.5 py-2.5">
+                <div class="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wide text-sky-700">
+                    <span class="inline-flex h-4 w-4 items-center justify-center rounded-md bg-white text-[9px] shadow-sm">🛠</span>
+                    <span>智能修复建议</span>
+                </div>
+
+                {{ if .CanUseBaseRSS }}
+                <div class="flex items-center justify-between gap-3 rounded-lg border border-blue-100 bg-blue-50/80 px-2.5 py-2">
+                    <div class="min-w-0 text-[10px] text-blue-700 leading-relaxed">
+                        主 RSS 仍有内容，可切回通用订阅继续抓取。
+                    </div>
+                    <button
+                        hx-post="/api/subscriptions/{{ .ID }}/use-base-rss"
+                        hx-target="#sub-card-{{.ID}}"
+                        hx-swap="outerHTML swap:120ms settle:220ms"
+                        class="shrink-0 rounded-lg border border-blue-200 bg-white px-2.5 py-1 text-[10px] font-bold text-blue-700 hover:bg-blue-50 transition">
+                        切回主 RSS
+                    </button>
+                </div>
+                {{ end }}
+
+                {{ if .CanClearFilter }}
+                <div class="flex items-center justify-between gap-3 rounded-lg border border-amber-100 bg-amber-50/80 px-2.5 py-2">
+                    <div class="min-w-0 text-[10px] text-amber-700 leading-relaxed">
+                        当前 RSS 有内容，但被过滤规则全部拦下了。
+                    </div>
+                    <button
+                        hx-post="/api/subscriptions/{{ .ID }}/clear-filter"
+                        hx-target="#sub-card-{{.ID}}"
+                        hx-swap="outerHTML swap:120ms settle:220ms"
+                        class="shrink-0 rounded-lg border border-amber-200 bg-white px-2.5 py-1 text-[10px] font-bold text-amber-700 hover:bg-amber-50 transition">
+                        清空过滤并重试
+                    </button>
+                </div>
+                {{ end }}
+
+                {{ if .CanResetStaleLogs }}
+                <div class="flex items-center justify-between gap-3 rounded-lg border border-rose-100 bg-rose-50/80 px-2.5 py-2">
+                    <div class="min-w-0 text-[10px] text-rose-700 leading-relaxed">
+                        有旧的下载记录仍在阻塞本次检查，可先清理再重试。
+                    </div>
+                    <button
+                        hx-post="/api/subscriptions/{{ .ID }}/reset-logs"
+                        hx-target="#sub-card-{{.ID}}"
+                        hx-swap="outerHTML swap:120ms settle:220ms"
+                        class="shrink-0 rounded-lg border border-rose-200 bg-white px-2.5 py-1 text-[10px] font-bold text-rose-700 hover:bg-rose-50 transition">
+                        清理阻塞并重试
+                    </button>
+                </div>
+                {{ end }}
+
+                {{ if .CanRetryMissing }}
+                <div class="flex items-center justify-between gap-3 rounded-lg border border-sky-100 bg-sky-50/80 px-2.5 py-2">
+                    <div class="min-w-0 text-[10px] text-sky-700 leading-relaxed">
+                        发现疑似缺集，立即重检可以结合当前 RSS 和备用 RSS 再补一次。
+                    </div>
+                    <button
+                        hx-post="/api/subscriptions/{{ .ID }}/retry-missing"
+                        hx-target="#sub-card-{{.ID}}"
+                        hx-swap="outerHTML swap:120ms settle:220ms"
+                        class="shrink-0 rounded-lg border border-sky-200 bg-white px-2.5 py-1 text-[10px] font-bold text-sky-700 hover:bg-sky-50 transition">
+                        补缺集重检
+                    </button>
+                </div>
+                {{ end }}
+
+                {{ if .CanRetryStale }}
+                <div class="flex items-center justify-between gap-3 rounded-lg border border-violet-100 bg-violet-50/80 px-2.5 py-2">
+                    <div class="min-w-0 text-[10px] text-violet-700 leading-relaxed">
+                        这条订阅已经长时间没有新进展，可以立即重新检查一次主 RSS 和备用 RSS。
+                    </div>
+                    <button
+                        hx-post="/api/subscriptions/{{ .ID }}/recheck-stale"
+                        hx-target="#sub-card-{{.ID}}"
+                        hx-swap="outerHTML swap:120ms settle:220ms"
+                        class="shrink-0 rounded-lg border border-violet-200 bg-white px-2.5 py-1 text-[10px] font-bold text-violet-700 hover:bg-violet-50 transition">
+                        重新检查
+                    </button>
+                </div>
+                {{ end }}
+
+                {{ if .CanRetryUpgrade }}
+                <div class="flex items-center justify-between gap-3 rounded-lg border border-cyan-100 bg-cyan-50/80 px-2.5 py-2">
+                    <div class="min-w-0 text-[10px] text-cyan-700 leading-relaxed">
+                        已入库集数里检测到较低分辨率内容，可以主动做一次洗版检查，看看当前 RSS 是否已经有更优片源。
+                    </div>
+                    <button
+                        hx-post="/api/subscriptions/{{ .ID }}/retry-upgrade"
+                        hx-target="#sub-card-{{.ID}}"
+                        hx-swap="outerHTML swap:120ms settle:220ms"
+                        class="shrink-0 rounded-lg border border-cyan-200 bg-white px-2.5 py-1 text-[10px] font-bold text-cyan-700 hover:bg-cyan-50 transition">
+                        洗版检查
+                    </button>
+                </div>
+                {{ end }}
+
+                {{ if .CanRefreshLibrary }}
+                <div class="flex items-center justify-between gap-3 rounded-lg border border-teal-100 bg-teal-50/80 px-2.5 py-2">
+                    <div class="min-w-0 text-[10px] text-teal-700 leading-relaxed">
+                        这条订阅已经入库，但 Jellyfin 还没建立条目，可以主动触发一次媒体库刷新。
+                    </div>
+                    <button
+                        hx-post="/api/subscriptions/{{ .ID }}/refresh-library"
+                        hx-target="#sub-card-{{.ID}}"
+                        hx-swap="outerHTML swap:120ms settle:220ms"
+                        class="shrink-0 rounded-lg border border-teal-200 bg-white px-2.5 py-1 text-[10px] font-bold text-teal-700 hover:bg-teal-50 transition">
+                        刷新媒体库
+                    </button>
+                </div>
+                {{ end }}
+            </div>
+            {{ end }}
+
+            {{ if .LastDownloadedTitle }}
+            <div class="flex items-center gap-2 text-[10px] text-emerald-700" title="最近一次加入下载：{{ .LastDownloadedTitle }}">
+                <span class="w-4 h-4 flex items-center justify-center bg-emerald-50 rounded shadow-sm text-[8px]">⬇️</span>
+                <span class="truncate flex-1">{{ .LastDownloadedTitle }}</span>
+            </div>
+            {{ end }}
+
+            {{ if .LastError }}
+            <div class="flex items-center gap-2 text-[10px] text-red-600" title="{{ .LastError }}">
+                <span class="w-4 h-4 flex items-center justify-center bg-red-50 rounded shadow-sm text-[8px]">⚠️</span>
+                <span class="truncate flex-1">{{ if .LastErrorDisplay }}{{ .LastErrorDisplay }}{{ else }}{{ .LastError }}{{ end }}</span>
+            </div>
+            {{ end }}
+
+            {{ if .StrategyHint }}
+            <div class="flex items-start gap-2 text-[10px] text-sky-700" title="{{ .StrategyHint }}">
+                <span class="w-4 h-4 mt-0.5 flex items-center justify-center bg-sky-50 rounded shadow-sm text-[8px]">💡</span>
+                <span class="flex-1 leading-relaxed">{{ .StrategyHint }}</span>
+            </div>
+            {{ end }}
+
+            {{ if .LibraryHint }}
+            <div class="flex items-start gap-2 text-[10px] text-cyan-700" title="{{ .LibraryHint }}">
+                <span class="w-4 h-4 mt-0.5 flex items-center justify-center bg-cyan-50 rounded shadow-sm text-[8px]">🎬</span>
+                <span class="flex-1 leading-relaxed">{{ .LibraryHint }}</span>
+            </div>
+            {{ end }}
+
+            {{ if .FilterRule }}
+            <div class="flex items-center gap-2 text-[10px] text-gray-500" title="包含规则: {{ .FilterRule }}">
+                <span class="w-4 h-4 flex items-center justify-center bg-white rounded shadow-sm text-[8px]">🔍</span>
+                <span class="font-mono truncate flex-1">{{ .FilterRule }}</span>
+            </div>
+            {{ end }}
+            {{ if .ExcludeRule }}
+            <div class="flex items-center gap-2 text-[10px] text-gray-500" title="排除规则: {{ .ExcludeRule }}">
+                <span class="w-4 h-4 flex items-center justify-center bg-white rounded shadow-sm text-[8px]">🚫</span>
+                <span class="font-mono truncate flex-1">{{ .ExcludeRule }}</span>
+            </div>
+            {{ end }}
+            {{ if and (not .FilterRule) (not .ExcludeRule) }}
+            <div class="text-[10px] text-gray-400 italic text-center py-1">无过滤规则</div>
+            {{ end }}
+        </div>
+    </div>
+
+    <!-- Footer Actions -->
+    <div
+        class="mt-auto bg-gray-50/80 backdrop-blur-sm px-3 md:px-4 py-3 border-t border-gray-100 flex items-center justify-between gap-3">
+        <!-- Status -->
+        <div class="flex items-center">
+            {{ if .IsActive }}
+            <button id="toggle-{{.ID}}" hx-post="/api/subscriptions/{{ .ID }}/toggle" hx-target="#sub-card-{{.ID}}" hx-swap="outerHTML swap:120ms settle:220ms"
+                hx-indicator="#toggle-{{.ID}}"
+                class="px-3 py-1 rounded-full text-[10px] font-black tracking-tight text-emerald-600 bg-emerald-50 border border-emerald-100 hover:bg-emerald-100 transition shadow-sm flex items-center gap-1.5 cursor-pointer">
+                <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                <span>运行中</span>
+                <span class="htmx-indicator hidden animate-spin">⌛</span>
+            </button>
+            {{ else }}
+            <button id="toggle-{{.ID}}" hx-post="/api/subscriptions/{{ .ID }}/toggle" hx-target="#sub-card-{{.ID}}" hx-swap="outerHTML swap:120ms settle:220ms"
+                hx-indicator="#toggle-{{.ID}}"
+                class="px-3 py-1 rounded-full text-[10px] font-black tracking-tight text-gray-500 bg-gray-100 border border-gray-200 hover:bg-gray-200 transition shadow-sm flex items-center gap-1.5 cursor-pointer">
+                <span class="w-1.5 h-1.5 rounded-full bg-gray-400"></span>
+                <span>已暂停</span>
+                <span class="htmx-indicator hidden animate-spin">⌛</span>
+            </button>
+            {{ end }}
+        </div>
+
+        <!-- Actions -->
+        <div class="flex items-center gap-0.5">
+            <button hx-post="/api/subscriptions/{{ .ID }}/run" hx-target="#sub-card-{{.ID}}" hx-swap="outerHTML swap:120ms settle:220ms"
+                class="min-h-9 min-w-9 p-2 text-gray-400 hover:text-blue-600 hover:bg-white rounded-xl transition-all hover:shadow-sm"
+                title="立即运行">
+                <span class="text-sm">▶️</span>
+            </button>
+
+            <button type="button" @click.stop="$dispatch('show-subscription-history', { id: {{ .ID }}, title: '{{ .Title }}' })"
+                class="min-h-9 min-w-9 p-2 text-gray-400 hover:text-rose-600 hover:bg-white rounded-xl transition-all hover:shadow-sm"
+                title="执行历史">
+                <span class="text-sm">🕘</span>
+            </button>
+
+            <button data-id="{{.ID}}" data-title="{{.Title}}" data-rss="{{.RSSUrl}}" data-filter="{{.FilterRule}}"
+                data-exclude="{{.ExcludeRule}}" data-backup-rss="{{.BackupRSSUrl}}" data-expected-episodes="{{.ExpectedEpisodes}}"
+                data-allow-multi-subgroup="{{ if .AllowMultiSubgroup }}true{{ else }}false{{ end }}"
+                data-auto-disable-on-done="{{ if .AutoDisableOnDone }}true{{ else }}false{{ end }}"
+                data-stale-after-hours="{{.StaleAfterHours}}" @click.stop="$dispatch('edit-subscription', { 
+                    id: $el.dataset.id, 
+                    title: $el.dataset.title, 
+                    rss: $el.dataset.rss, 
+                    filter: $el.dataset.filter, 
+                    exclude: $el.dataset.exclude,
+                    backup_rss: $el.dataset.backupRss,
+                    expected_episodes: Number($el.dataset.expectedEpisodes || 0),
+                    allow_multi_subgroup: $el.dataset.allowMultiSubgroup === 'true',
+                    auto_disable_on_done: $el.dataset.autoDisableOnDone === 'true',
+                    stale_after_hours: Number($el.dataset.staleAfterHours || 0)
+                })"
+                class="min-h-9 min-w-9 p-2 text-gray-400 hover:text-amber-600 hover:bg-white rounded-xl transition-all hover:shadow-sm"
+                title="编辑">
+                <span class="text-sm">✏️</span>
+            </button>
+
+            <button hx-post="/api/subscriptions/{{ .ID }}/refresh-metadata" hx-swap="outerHTML swap:120ms settle:220ms"
+                hx-target="#sub-card-{{.ID}}"
+                class="min-h-9 min-w-9 p-2 text-gray-400 hover:text-purple-600 hover:bg-white rounded-xl transition-all hover:shadow-sm"
+                title="刷新元数据">
+                <span class="text-sm">🔄</span>
+            </button>
+
+            <div class="w-px h-4 bg-gray-200 mx-1"></div>
+
+            <button data-id="{{.ID}}" @click.stop="$dispatch('delete-subscription', { id: $el.dataset.id })"
+                class="min-h-9 min-w-9 p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-all" title="删除">
+                <span class="text-sm">🗑️</span>
+            </button>
+        </div>
+    </div>
+</div>
+{{ end }}
+{{/* Legacy UI fixture used only by compatibility tests. */}}

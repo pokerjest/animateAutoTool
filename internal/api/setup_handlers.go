@@ -152,6 +152,16 @@ func CompleteBootstrapSetupHandler(c *gin.Context) {
 	}
 	statusCache.Delete("qb")
 
+	auditCtx := buildAuditContext(c)
+	service.RecordAudit(auditCtx, service.AuditEntry{
+		Action:  service.AuditActionBootstrapComplete,
+		Outcome: service.AuditOutcomeSuccess,
+		Details: map[string]string{
+			"qb_mode":  qbValues[model.ConfigKeyQBMode],
+			"base_dir": strings.TrimSpace(req.BaseDir),
+		},
+	})
+
 	c.JSON(http.StatusOK, gin.H{
 		"message":  "初始化完成",
 		"redirect": "/",

@@ -250,12 +250,26 @@ func DeleteLocalDirectoryHandler(c *gin.Context) {
 		return
 	}
 
+	auditCtx := buildAuditContext(c)
 	scannerSvc := service.NewScannerService()
 	if err := scannerSvc.RemoveDirectory(uint(id)); err != nil {
+		service.RecordAudit(auditCtx, service.AuditEntry{
+			Action:     service.AuditActionLocalDirectoryDelete,
+			Outcome:    service.AuditOutcomeFailure,
+			TargetType: "local_directory",
+			TargetID:   idStr,
+			Details:    map[string]string{"error": err.Error()},
+		})
 		htmlServerError(c, "删除目录", err)
 		return
 	}
 
+	service.RecordAudit(auditCtx, service.AuditEntry{
+		Action:     service.AuditActionLocalDirectoryDelete,
+		Outcome:    service.AuditOutcomeSuccess,
+		TargetType: "local_directory",
+		TargetID:   idStr,
+	})
 	c.Status(http.StatusOK)
 }
 

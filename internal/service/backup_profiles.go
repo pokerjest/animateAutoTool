@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/glebarez/sqlite"
@@ -291,6 +292,15 @@ func createSelectiveBackupFile(destPath string, mode string) error {
 	}).Error
 }
 
+func IsSensitiveConfigKey(key string) bool {
+	lowerKey := strings.ToLower(key)
+	return strings.Contains(lowerKey, "password") ||
+		strings.Contains(lowerKey, "secret") ||
+		strings.Contains(lowerKey, "token") ||
+		strings.Contains(lowerKey, "key") ||
+		strings.Contains(lowerKey, "credential")
+}
+
 func writeSelectiveBackupData(destDB *gorm.DB, mode string) error {
 	if err := destDB.AutoMigrate(&model.GlobalConfig{}); err != nil {
 		return err
@@ -304,6 +314,14 @@ func writeSelectiveBackupData(destDB *gorm.DB, mode string) error {
 	if err := query.Find(&configs).Error; err != nil {
 		return err
 	}
+
+	// Desensitize sensitive credentials before writing to backup DB
+	for i := range configs {
+		if IsSensitiveConfigKey(configs[i].Key) {
+			configs[i].Value = ""
+		}
+	}
+
 	if len(configs) > 0 {
 		return destDB.CreateInBatches(&configs, 500).Error
 	}

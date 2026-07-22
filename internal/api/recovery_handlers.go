@@ -56,12 +56,26 @@ func LocalResetAdminPasswordHandler(c *gin.Context) {
 	}
 
 	authService := service.NewAuthService()
+	auditCtx := service.AuditContext{
+		Username:  req.Username,
+		IP:        requestClientIP(c),
+		UserAgent: c.Request.UserAgent(),
+	}
 	if err := authService.ResetPasswordByUsername(req.Username, req.Password); err != nil {
+		service.RecordAudit(auditCtx, service.AuditEntry{
+			Action:  service.AuditActionPasswordRecoveryLoc,
+			Outcome: service.AuditOutcomeFailure,
+			Details: map[string]string{"error": err.Error()},
+		})
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
 	clearFailedLoginAttempts(requestClientIP(c))
+	service.RecordAudit(auditCtx, service.AuditEntry{
+		Action:  service.AuditActionPasswordRecoveryLoc,
+		Outcome: service.AuditOutcomeSuccess,
+	})
 
 	c.JSON(http.StatusOK, gin.H{
 		"message":  "密码重置成功",

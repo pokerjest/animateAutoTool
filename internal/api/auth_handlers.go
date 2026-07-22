@@ -74,6 +74,12 @@ func LoginPostHandler(c *gin.Context) {
 	user, err := authService.Login(req.Username, req.Password)
 	if err != nil {
 		registerFailedLoginAttempt(clientIP)
+		failureCtx := auditContextForLogin(c, req.Username)
+		service.RecordAudit(failureCtx, service.AuditEntry{
+			Action:  service.AuditActionLoginFailure,
+			Outcome: service.AuditOutcomeFailure,
+			Details: map[string]string{"reason": "invalid_credentials"},
+		})
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "用户名或密码不正确"})
 		return
 	}
@@ -94,6 +100,14 @@ func LoginPostHandler(c *gin.Context) {
 		return
 	}
 
+	successCtx := auditContextForLogin(c, user.Username)
+	successCtx.UserID = user.ID
+	service.RecordAudit(successCtx, service.AuditEntry{
+		Action:  service.AuditActionLoginSuccess,
+		Outcome: service.AuditOutcomeSuccess,
+		Details: map[string]any{"remember_me": req.RememberMe},
+	})
+
 	redirect := "/"
 	if bootstrap.BootstrapSetupPending() {
 		redirect = "/setup"
@@ -106,6 +120,7 @@ func LoginPostHandler(c *gin.Context) {
 }
 
 func LogoutHandler(c *gin.Context) {
+	auditCtx := buildAuditContext(c)
 	session := sessions.Default(c)
 	session.Clear()
 	session.Options(sessionCookieOptions(c, -1))
@@ -113,6 +128,10 @@ func LogoutHandler(c *gin.Context) {
 		jsonServerError(c, "保存退出状态", err)
 		return
 	}
+	service.RecordAudit(auditCtx, service.AuditEntry{
+		Action:  service.AuditActionLogout,
+		Outcome: service.AuditOutcomeSuccess,
+	})
 	c.Redirect(http.StatusFound, "/login")
 }
 
@@ -141,10 +160,20 @@ func ChangePasswordHandler(c *gin.Context) {
 	}
 
 	authService := service.NewAuthService()
+	auditCtx := buildAuditContext(c)
 	if err := authService.ChangePassword(uid, req.OldPassword, req.NewPassword); err != nil {
+		service.RecordAudit(auditCtx, service.AuditEntry{
+			Action:  service.AuditActionPasswordChange,
+			Outcome: service.AuditOutcomeFailure,
+			Details: map[string]string{"error": err.Error()},
+		})
 		jsonBadRequest(c, err.Error())
 		return
 	}
 
+	service.RecordAudit(auditCtx, service.AuditEntry{
+		Action:  service.AuditActionPasswordChange,
+		Outcome: service.AuditOutcomeSuccess,
+	})
 	c.JSON(http.StatusOK, gin.H{"message": "密码修改成功"})
 }

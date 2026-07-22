@@ -9,10 +9,14 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/bootstrap"
 )
 
-const securityHeadersCSP = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data: https:; connect-src 'self' http: https: ws: wss:; media-src 'self' blob: data: http: https:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+const securityHeadersCSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: http: https:; font-src 'self' data:; connect-src 'self' http: https: ws: wss:; media-src 'self' blob: data: http: https:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
 
 func isAPIRequestPath(path string) bool {
 	return strings.HasPrefix(path, "/api")
+}
+
+func isV1APIRequestPath(path string) bool {
+	return path == "/api/v1" || strings.HasPrefix(path, "/api/v1/")
 }
 
 func setupEnforcementExempt(path string) bool {
@@ -23,8 +27,10 @@ func setupEnforcementExempt(path string) bool {
 
 	return path == "/logout" ||
 		strings.HasPrefix(path, "/api/setup/") ||
+		strings.HasPrefix(path, "/api/v1/setup/") ||
 		path == "/api/recovery/reset-admin" ||
-		path == "/api/system/pick-directory"
+		path == "/api/system/pick-directory" ||
+		path == "/api/v1/system/pick-directory"
 }
 
 func requestIsDirectLoopback(c *gin.Context) bool {
@@ -39,6 +45,10 @@ func DirectLocalOnlyMiddleware() gin.HandlerFunc {
 		}
 
 		if isAPIRequestPath(c.Request.URL.Path) {
+			if isV1APIRequestPath(c.Request.URL.Path) {
+				v1Error(c, http.StatusForbidden, "local_only", "这个接口仅允许在本机通过 localhost 直接访问。")
+				return
+			}
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
 				"error": "这个接口仅允许在本机通过 localhost 直接访问。",
 			})
@@ -64,6 +74,10 @@ func BootstrapLocalOnlyMiddleware() gin.HandlerFunc {
 		}
 
 		if isAPIRequestPath(c.Request.URL.Path) {
+			if isV1APIRequestPath(c.Request.URL.Path) {
+				v1Error(c, http.StatusForbidden, "bootstrap_local_only", "首次初始化仅允许在本机通过 localhost 直接访问。")
+				return
+			}
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
 				"error": "首次初始化仅允许在本机通过 localhost 直接访问。",
 			})
@@ -98,6 +112,10 @@ func SameOriginMiddleware() gin.HandlerFunc {
 		}
 
 		if isAPIRequestPath(c.Request.URL.Path) {
+			if isV1APIRequestPath(c.Request.URL.Path) {
+				v1Error(c, http.StatusForbidden, "cross_origin_write", "不允许跨站发起写操作请求。")
+				return
+			}
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
 				"error": "不允许跨站发起写操作请求。",
 			})
@@ -129,6 +147,10 @@ func AuthMiddleware() gin.HandlerFunc {
 
 		if userID == nil {
 			if isAPIRequestPath(path) {
+				if isV1APIRequestPath(path) {
+					v1Error(c, http.StatusUnauthorized, "unauthorized", "请先登录")
+					return
+				}
 				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "请先登录"})
 				return
 			}
@@ -140,6 +162,10 @@ func AuthMiddleware() gin.HandlerFunc {
 
 		if bootstrap.BootstrapSetupPending() && !setupEnforcementExempt(path) {
 			if isAPIRequestPath(path) {
+				if isV1APIRequestPath(path) {
+					v1Error(c, http.StatusForbidden, "setup_required", "需要先完成初始化设置")
+					return
+				}
 				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
 					"error":    "需要先完成初始化设置",
 					"redirect": "/setup",

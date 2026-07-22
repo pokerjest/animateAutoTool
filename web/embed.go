@@ -2,17 +2,12 @@ package webassets
 
 import (
 	"embed"
-	"html/template"
 	"io/fs"
 	"net/http"
 )
 
-//go:embed templates static
+//go:embed static dist
 var Assets embed.FS
-
-func ParseTemplates(funcMap template.FuncMap) (*template.Template, error) {
-	return template.New("").Funcs(funcMap).ParseFS(Assets, "templates/*.html")
-}
 
 func StaticFS() (http.FileSystem, error) {
 	sub, err := fs.Sub(Assets, "static")
@@ -20,4 +15,16 @@ func StaticFS() (http.FileSystem, error) {
 		return nil, err
 	}
 	return http.FS(sub), nil
+}
+
+func DistAssetsFS() (http.FileSystem, error) {
+	sub, err := fs.Sub(Assets, "dist/assets")
+	if err != nil {
+		return nil, err
+	}
+	return http.FS(sub), nil
+}
+
+func SPAIndex() ([]byte, error) {
+	return Assets.ReadFile("dist/index.html")
 }

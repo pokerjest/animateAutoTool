@@ -55,12 +55,19 @@ function check_deps() {
         echo -e "${RED}Error: 'go' is not installed.${NC}"
         exit 1
     fi
+    if ! command -v npm &> /dev/null; then
+        echo -e "${RED}Error: 'npm' is not installed (Node.js 22+ is required).${NC}"
+        exit 1
+    fi
 }
 
 function build() {
     check_deps
     echo -e "${GREEN}Building $APP_NAME...${NC}"
-    
+
+    npm --prefix web/frontend ci
+    npm --prefix web/frontend run build
+
     # Check if we should tidy first (optional, but good for stability)
     go mod tidy
     

@@ -1,0 +1,225 @@
+openapi: 3.1.0
+info:
+  title: Animate Auto Tool API
+  version: 1.0.0
+  description: JSON contract consumed by the embedded Vue application.
+servers:
+  - url: /api/v1
+security:
+  - cookieSession: []
+paths:
+  /session:
+    get: { security: [], operationId: getSession, responses: { "200": { $ref: "#/components/responses/Success" } } }
+  /session/login:
+    post:
+      security: []
+      operationId: login
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/LoginInput" } } } }
+      responses: { "200": { $ref: "#/components/responses/Success" }, "401": { $ref: "#/components/responses/Error" }, "429": { $ref: "#/components/responses/Error" } }
+  /session/logout:
+    post: { operationId: logout, responses: { "200": { $ref: "#/components/responses/Success" } } }
+  /session/change-password:
+    post: { operationId: changePassword, requestBody: { $ref: "#/components/requestBodies/JsonObject" }, responses: { "200": { $ref: "#/components/responses/Success" }, "400": { $ref: "#/components/responses/Error" } } }
+  /recovery/reset:
+    post: { security: [], operationId: recoverPassword, requestBody: { $ref: "#/components/requestBodies/JsonObject" }, responses: { "200": { $ref: "#/components/responses/Success" }, "403": { $ref: "#/components/responses/Error" } } }
+  /setup/readiness:
+    get: { operationId: getSetupReadiness, responses: { "200": { $ref: "#/components/responses/Success" } } }
+  /setup/bootstrap:
+    post: { operationId: completeSetup, requestBody: { $ref: "#/components/requestBodies/JsonObject" }, responses: { "200": { $ref: "#/components/responses/Success" } } }
+  /system/pick-directory:
+    post: { operationId: pickDirectory, requestBody: { $ref: "#/components/requestBodies/JsonObject" }, responses: { "200": { $ref: "#/components/responses/Success" } } }
+  /dashboard:
+    get: { operationId: getDashboard, responses: { "200": { $ref: "#/components/responses/Success" } } }
+  /tasks/sync:
+    post: { operationId: startSync, responses: { "202": { $ref: "#/components/responses/TaskAccepted" } } }
+  /events:
+    get:
+      operationId: streamEvents
+      responses:
+        "200": { description: Typed server-sent event stream, content: { text/event-stream: { schema: { type: string } } } }
+  /subscriptions:
+    get:
+      operationId: listSubscriptions
+      parameters: [{ $ref: "#/components/parameters/Page" }, { $ref: "#/components/parameters/PageSize" }]
+      responses: { "200": { $ref: "#/components/responses/Paginated" } }
+    post:
+      operationId: createSubscription
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/SubscriptionInput" } } } }
+      responses: { "201": { $ref: "#/components/responses/Success" }, "400": { $ref: "#/components/responses/Error" } }
+  /subscriptions/batch:
+    post: { operationId: createSubscriptionsBatch, requestBody: { $ref: "#/components/requestBodies/JsonArray" }, responses: { "200": { $ref: "#/components/responses/Success" } } }
+  /subscriptions/batch-preview:
+    post: { operationId: previewSubscriptionsBatch, requestBody: { $ref: "#/components/requestBodies/JsonArray" }, responses: { "200": { $ref: "#/components/responses/Success" } } }
+  /subscriptions/validate-rss:
+    get: { operationId: validateSubscriptionRss, responses: { "200": { $ref: "#/components/responses/Success" } } }
+  /subscriptions/search:
+    get: { operationId: searchMikan, parameters: [{ name: q, in: query, required: true, schema: { type: string } }], responses: { "200": { $ref: "#/components/responses/Success" } } }
+  /subscriptions/rss-preview:
+    get: { operationId: previewRss, parameters: [{ name: rss, in: query, required: true, schema: { type: string, format: uri } }], responses: { "200": { $ref: "#/components/responses/Success" } } }
+  /subscriptions/mikan/dashboard:
+    get: { operationId: getMikanDashboard, responses: { "200": { $ref: "#/components/responses/Success" } } }
+  /subscriptions/mikan/episodes:
+    get: { operationId: getMikanEpisodes, responses: { "200": { $ref: "#/components/responses/Success" } } }
+  /subscriptions/mikan/subgroups:
+    get: { operationId: getMikanSubgroups, responses: { "200": { $ref: "#/components/responses/Success" } } }
+  /subscriptions/{id}:
+    parameters: [{ $ref: "#/components/parameters/Id" }]
+    put: { operationId: updateSubscription, requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/SubscriptionInput" } } } }, responses: { "200": { $ref: "#/components/responses/Success" } } }
+    delete: { operationId: deleteSubscription, responses: { "200": { $ref: "#/components/responses/Success" } } }
+  /subscriptions/{id}/toggle:
+    post: { operationId: toggleSubscription, parameters: [{ $ref: "#/components/parameters/Id" }], responses: { "200": { $ref: "#/components/responses/Success" } } }
+  /subscriptions/{id}/run:
+    post: { operationId: runSubscription, parameters: [{ $ref: "#/components/parameters/Id" }], responses: { "202": { $ref: "#/components/responses/TaskAccepted" } } }
+  /subscriptions/{id}/repair/{action}:
+    post:
+      operationId: repairSubscription
+      parameters: [{ $ref: "#/components/parameters/Id" }, { name: action, in: path, required: true, schema: { type: string, enum: [use-base-rss, clear-filter, reset-logs, retry-missing, recheck-stale, retry-upgrade, refresh-library] } }]
+      responses: { "202": { $ref: "#/components/responses/TaskAccepted" } }
+  /subscriptions/{id}/refresh-metadata:
+    post: { operationId: refreshSubscriptionMetadata, parameters: [{ $ref: "#/components/parameters/Id" }], responses: { "202": { $ref: "#/components/responses/TaskAccepted" } } }
+  /subscriptions/{id}/source:
+    post: { operationId: switchSubscriptionSource, parameters: [{ $ref: "#/components/parameters/Id" }], responses: { "200": { $ref: "#/components/responses/Success" } } }
+  /subscriptions/{id}/history:
+    get: { operationId: getSubscriptionHistory, parameters: [{ $ref: "#/components/parameters/Id" }], responses: { "200": { $ref: "#/components/responses/Success" } } }
+  /calendar:
+    get: { operationId: getCalendar, responses: { "200": { $ref: "#/components/responses/Success" } } }
+  /library:
+    get: { operationId: getLibrary, parameters: [{ $ref: "#/components/parameters/Page" }, { $ref: "#/components/parameters/PageSize" }], responses: { "200": { $ref: "#/components/responses/Paginated" } } }
+  /library/refresh:
+    post: { operationId: refreshLibrary, responses: { "202": { $ref: "#/components/responses/TaskAccepted" } } }
+  /library/metadata/{id}/refresh:
+    post: { operationId: refreshMetadataItem, parameters: [{ $ref: "#/components/parameters/Id" }], responses: { "202": { $ref: "#/components/responses/TaskAccepted" } } }
+  /library/fix-match:
+    post: { operationId: fixMetadataMatch, requestBody: { $ref: "#/components/requestBodies/JsonObject" }, responses: { "200": { $ref: "#/components/responses/Success" } } }
+  /metadata/search:
+    get: { operationId: searchMetadata, responses: { "200": { $ref: "#/components/responses/Success" } } }
+  /local-anime:
+    get: { operationId: getLocalAnime, parameters: [{ $ref: "#/components/parameters/Page" }, { $ref: "#/components/parameters/PageSize" }], responses: { "200": { $ref: "#/components/responses/Paginated" } } }
+  /local-anime/scan:
+    post: { operationId: scanLocalAnime, responses: { "202": { $ref: "#/components/responses/TaskAccepted" } } }
+  /local-directories:
+    post: { operationId: addLocalDirectory, requestBody: { $ref: "#/components/requestBodies/JsonObject" }, responses: { "201": { $ref: "#/components/responses/Success" } } }
+  /local-directories/{id}:
+    delete: { operationId: deleteLocalDirectory, parameters: [{ $ref: "#/components/parameters/Id" }], responses: { "200": { $ref: "#/components/responses/Success" } } }
+  /local-directories/{id}/rename-preview:
+    post: { operationId: previewDirectoryRename, parameters: [{ $ref: "#/components/parameters/Id" }], requestBody: { $ref: "#/components/requestBodies/JsonObject" }, responses: { "200": { $ref: "#/components/responses/Success" } } }
+  /local-directories/{id}/rename:
+    post: { operationId: applyDirectoryRename, parameters: [{ $ref: "#/components/parameters/Id" }], requestBody: { $ref: "#/components/requestBodies/JsonObject" }, responses: { "200": { $ref: "#/components/responses/Success" } } }
+  /local-anime/{id}/episodes:
+    get: { operationId: getEpisodes, parameters: [{ $ref: "#/components/parameters/Id" }], responses: { "200": { $ref: "#/components/responses/Success" } } }
+  /local-anime/{id}/files:
+    get: { operationId: getLocalFiles, parameters: [{ $ref: "#/components/parameters/Id" }], responses: { "200": { $ref: "#/components/responses/Success" } } }
+  /local-anime/{id}/refresh-metadata:
+    post: { operationId: refreshLocalMetadata, parameters: [{ $ref: "#/components/parameters/Id" }], responses: { "202": { $ref: "#/components/responses/TaskAccepted" } } }
+  /local-anime/{id}/source:
+    post: { operationId: switchLocalSource, parameters: [{ $ref: "#/components/parameters/Id" }], responses: { "200": { $ref: "#/components/responses/Success" } } }
+  /bangumi/subject/{id}/collection:
+    post: { operationId: updateBangumiCollection, parameters: [{ $ref: "#/components/parameters/Id" }], requestBody: { $ref: "#/components/requestBodies/JsonObject" }, responses: { "200": { $ref: "#/components/responses/Success" } } }
+  /bangumi/subject/{id}/progress:
+    post: { operationId: updateBangumiProgress, parameters: [{ $ref: "#/components/parameters/Id" }], requestBody: { $ref: "#/components/requestBodies/JsonObject" }, responses: { "200": { $ref: "#/components/responses/Success" } } }
+  /backup:
+    get: { operationId: getBackupStatus, responses: { "200": { $ref: "#/components/responses/Success" } } }
+  /backup/export:
+    get: { operationId: exportBackup, responses: { "200": { description: SQLite backup attachment, content: { application/octet-stream: { schema: { type: string, format: binary } } } } } }
+  /backup/analyze:
+    post: { operationId: analyzeBackup, responses: { "200": { $ref: "#/components/responses/Success" } } }
+  /backup/restore:
+    post: { operationId: restoreBackup, requestBody: { $ref: "#/components/requestBodies/JsonObject" }, responses: { "200": { $ref: "#/components/responses/Success" } } }
+  /backup/r2/list:
+    get: { operationId: listR2Backups, responses: { "200": { $ref: "#/components/responses/Success" } } }
+  /backup/r2/upload:
+    post: { operationId: uploadR2Backup, responses: { "202": { $ref: "#/components/responses/TaskAccepted" } } }
+  /backup/r2/stage:
+    post: { operationId: stageR2Backup, requestBody: { $ref: "#/components/requestBodies/JsonObject" }, responses: { "202": { $ref: "#/components/responses/TaskAccepted" } } }
+  /backup/r2/progress/{taskId}:
+    get: { operationId: getR2Progress, parameters: [{ name: taskId, in: path, required: true, schema: { type: string } }], responses: { "200": { $ref: "#/components/responses/Success" } } }
+  /backup/r2/delete:
+    post: { operationId: deleteR2Backup, requestBody: { $ref: "#/components/requestBodies/JsonObject" }, responses: { "200": { $ref: "#/components/responses/Success" } } }
+  /backup/r2/test:
+    post: { operationId: testR2, requestBody: { $ref: "#/components/requestBodies/JsonObject" }, responses: { "200": { $ref: "#/components/responses/Success" } } }
+  /health:
+    get: { operationId: getHealth, responses: { "200": { $ref: "#/components/responses/Success" } } }
+  /runtime:
+    get: { operationId: getRuntime, responses: { "200": { $ref: "#/components/responses/Success" } } }
+  /audit-logs:
+    get: { operationId: listAuditLogs, parameters: [{ $ref: "#/components/parameters/Page" }, { $ref: "#/components/parameters/PageSize" }], responses: { "200": { $ref: "#/components/responses/Paginated" } } }
+  /settings:
+    get: { operationId: getSettings, responses: { "200": { $ref: "#/components/responses/Success" } } }
+    put: { operationId: updateSettings, requestBody: { $ref: "#/components/requestBodies/JsonObject" }, responses: { "200": { $ref: "#/components/responses/Success" } } }
+  /settings/connections/{provider}:
+    get: { operationId: getConnectionStatus, parameters: [{ name: provider, in: path, required: true, schema: { type: string, enum: [qb, tmdb, anilist, jellyfin, bangumi] } }], responses: { "200": { $ref: "#/components/responses/Success" } } }
+  /settings/maintenance:
+    get: { operationId: getMaintenance, responses: { "200": { $ref: "#/components/responses/Success" } } }
+  /settings/updater/{action}:
+    post: { operationId: runUpdaterAction, parameters: [{ name: action, in: path, required: true, schema: { type: string, enum: [check, apply] } }], responses: { "202": { $ref: "#/components/responses/TaskAccepted" } } }
+  /settings/ai:
+    get: { operationId: getAiSettings, responses: { "200": { $ref: "#/components/responses/Success" } } }
+  /settings/ai/models:
+    get: { operationId: getAiModels, responses: { "200": { $ref: "#/components/responses/Success" } } }
+  /assistant/messages:
+    post: { operationId: sendAssistantMessage, requestBody: { $ref: "#/components/requestBodies/JsonObject" }, responses: { "200": { $ref: "#/components/responses/Success" } } }
+    delete: { operationId: clearAssistantMessages, responses: { "200": { $ref: "#/components/responses/Success" } } }
+components:
+  securitySchemes:
+    cookieSession: { type: apiKey, in: cookie, name: animate_session }
+  parameters:
+    Id: { name: id, in: path, required: true, schema: { type: integer, minimum: 1 } }
+    Page: { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+    PageSize: { name: page_size, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 100 } }
+  requestBodies:
+    JsonObject: { required: true, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+    JsonArray: { required: true, content: { application/json: { schema: { type: array, items: { type: object, additionalProperties: true } } } } }
+  responses:
+    Success: { description: Successful response, content: { application/json: { schema: { $ref: "#/components/schemas/Envelope" } } } }
+    Paginated: { description: Paginated successful response, content: { application/json: { schema: { $ref: "#/components/schemas/PaginatedEnvelope" } } } }
+    TaskAccepted: { description: Background task accepted, content: { application/json: { schema: { $ref: "#/components/schemas/TaskEnvelope" } } } }
+    Error: { description: Error response, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  schemas:
+    LoginInput:
+      type: object
+      required: [username, password]
+      properties: { username: { type: string }, password: { type: string, format: password }, remember_me: { type: boolean, default: false } }
+    SubscriptionInput:
+      type: object
+      required: [title, rss_url]
+      properties:
+        title: { type: string }
+        rss_url: { type: string, format: uri }
+        backup_rss_url: { type: string, format: uri }
+        filter_rule: { type: string }
+        exclude_rule: { type: string }
+        expected_episodes: { type: integer, minimum: 0 }
+        allow_multi_subgroup: { type: boolean }
+        auto_disable_on_done: { type: boolean }
+        stale_after_hours: { type: integer, minimum: 1 }
+    Envelope:
+      type: object
+      required: [data]
+      properties: { data: {}, message: { type: string }, meta: { type: object, additionalProperties: true } }
+    PaginatedEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          required: [meta]
+          properties:
+            meta:
+              type: object
+              required: [page, page_size, total]
+              properties: { page: { type: integer }, page_size: { type: integer }, total: { type: integer } }
+    TaskEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              required: [task_id, status]
+              properties: { task_id: { type: string }, status: { type: string, const: running } }
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties: { code: { type: string }, message: { type: string } }

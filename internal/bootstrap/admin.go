@@ -6,7 +6,7 @@ import (
 
 	"github.com/pokerjest/animateAutoTool/internal/config"
 	"github.com/pokerjest/animateAutoTool/internal/db"
-	"github.com/pokerjest/animateAutoTool/internal/model"
+	"github.com/pokerjest/animateAutoTool/internal/store"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -59,8 +59,8 @@ func bootstrapPasswordStillActive(info AdminBootstrapInfo) bool {
 		return true
 	}
 
-	var user model.User
-	if err := db.DB.Where("username = ?", info.Username).First(&user).Error; err != nil {
+	user, err := store.NewUserStore(db.DB).GetByUsername(info.Username)
+	if err != nil {
 		return false
 	}
 

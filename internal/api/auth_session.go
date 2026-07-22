@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/model"
+	"github.com/pokerjest/animateAutoTool/internal/store"
 )
 
 var errNoActiveSession = errors.New("no active session")
@@ -38,10 +39,13 @@ func currentSessionUser(c *gin.Context) (*model.User, error) {
 		return nil, err
 	}
 
-	var user model.User
-	if err := db.DB.First(&user, userID).Error; err != nil {
+	if db.DB == nil {
+		return nil, errors.New("invalid database")
+	}
+	user, err := store.NewUserStore(db.DB).GetByID(userID)
+	if err != nil {
 		return nil, err
 	}
 
-	return &user, nil
+	return user, nil
 }

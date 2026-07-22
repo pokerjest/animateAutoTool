@@ -1,0 +1,164 @@
+{{ define "local_anime_card.html" }}
+<div id="local-card-{{.ID}}"
+    class="bg-white rounded-2xl shadow-sm border border-gray-100 hover:shadow-xl transition-all duration-300 overflow-hidden flex flex-col h-full group relative">
+
+    <!-- Card Header/Cover (Poster Aspect Ratio) -->
+    <!-- Card Header/Cover (Poster Aspect Ratio) -->
+    <div class="relative w-full aspect-[2/3] bg-gray-100 overflow-hidden cursor-pointer"
+        @click="console.log('Clicked card ID:', {{.ID}}); $dispatch('show-anime-details-id', {{.ID}})">
+        {{ if .Image }}
+        <img src="{{ .Image }}" alt="{{ .Title }}" loading="lazy"
+            class="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110">
+        {{ else }}
+        <div class="w-full h-full flex flex-col items-center justify-center text-gray-300 bg-gray-50">
+            <span class="text-4xl mb-2">🎬</span>
+            <span class="text-xs font-mono">NO COVER</span>
+        </div>
+        {{ end }}
+
+        <!-- Overlay Gradient (Bottom) -->
+        <div
+            class="absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-black/80 via-black/40 to-transparent opacity-60 group-hover:opacity-80 transition-opacity pointer-events-none">
+        </div>
+
+        <!-- File Count Badge (Top Right) -->
+        <div
+            class="absolute top-2 right-2 bg-black/60 backdrop-blur-sm text-white text-[10px] font-bold px-2 py-1 rounded-full border border-white/10 flex items-center gap-1 shadow-sm">
+            <span>💾</span>
+            <span>{{ .FileCount }}</span>
+        </div>
+
+        <!-- Season & Size Badge (Top Left) -->
+        <div class="absolute top-2 left-2 flex flex-col gap-1">
+            {{ if gt .Season 0 }}
+            <div
+                class="bg-indigo-600/80 backdrop-blur-sm text-white text-[10px] font-bold px-2 py-1 rounded-full border border-white/10 shadow-sm text-center">
+                S{{ if lt .Season 10 }}0{{ end }}{{ .Season }}
+            </div>
+            {{ end }}
+            <div
+                class="bg-black/60 backdrop-blur-sm text-white text-[10px] font-bold px-2 py-1 rounded-full border border-white/10 shadow-sm text-center">
+                {{ .TotalSize | toGB }}
+            </div>
+        </div>
+    </div>
+
+    <!-- Card Body -->
+    <div class="p-3 flex flex-col flex-grow">
+        <!-- Title -->
+        <div class="flex justify-between items-start gap-2 mb-2">
+            <h3 class="font-bold text-gray-800 text-sm leading-snug line-clamp-2 cursor-pointer hover:text-primary transition-colors h-10"
+                title="{{ .Title }}" @click="$dispatch('show-anime-details-id', {{.ID}})">
+                {{ .Title }}
+            </h3>
+        </div>
+
+        {{ if .HasRepairActions }}
+        <div class="mb-3 space-y-2 rounded-xl border border-sky-100 bg-sky-50/60 px-2.5 py-2.5">
+            <div class="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wide text-sky-700">
+                <span class="inline-flex h-4 w-4 items-center justify-center rounded-md bg-white text-[9px] shadow-sm">🛠</span>
+                <span>智能修复建议</span>
+            </div>
+            <div class="text-[10px] leading-relaxed text-sky-700">
+                {{ .RepairHint }}
+            </div>
+            <div class="flex flex-wrap gap-2">
+                {{ if .CanRetryScrape }}
+                <button hx-post="/api/local-anime/{{ .ID }}/refresh-metadata" hx-swap="outerHTML"
+                    hx-target="#local-card-{{.ID}}" hx-swap="outerHTML swap:120ms settle:220ms" @click.stop
+                    class="h-7 px-2.5 rounded-lg border border-sky-200 bg-white text-[10px] font-bold text-sky-700 hover:bg-sky-50 transition">
+                    重新抓取
+                </button>
+                {{ end }}
+                {{ if .CanFixMatch }}
+                <button type="button" @click.stop="openFixMatchForIssue({{ .ID }}, {{ .Title | json }})"
+                    class="h-7 px-2.5 rounded-lg border border-indigo-200 bg-white text-[10px] font-bold text-indigo-700 hover:bg-indigo-50 transition">
+                    修正匹配
+                </button>
+                {{ end }}
+            </div>
+        </div>
+        {{ end }}
+
+        <!-- Source Toggles and Actions -->
+        <div class="mt-auto flex items-center justify-between gap-2 pt-2 border-t border-gray-50">
+            <div class="flex items-center gap-1">
+                <!-- Bangumi Toggle -->
+                {{ if and .Metadata (gt .Metadata.BangumiID 0) }}
+                <button hx-post="/api/local-anime/{{.ID}}/switch-source?source=bangumi" hx-swap="outerHTML"
+                    hx-target="#local-card-{{.ID}}" hx-swap="outerHTML swap:120ms settle:220ms" @click.stop
+                    class="h-6 px-2 rounded flex items-center justify-center text-[10px] font-bold transition-all border
+                    {{ if eq .Title .Metadata.BangumiTitle }}bg-pink-50 text-pink-600 border-pink-200 shadow-sm{{ else }}bg-white text-gray-400 border-gray-200 hover:border-pink-300 hover:text-pink-500{{ end }}"
+                    title="切换到 Bangumi">
+                    BGM
+                </button>
+                {{ end }}
+
+                <!-- TMDB Toggle -->
+                {{ if and .Metadata (gt .Metadata.TMDBID 0) }}
+                <button hx-post="/api/local-anime/{{.ID}}/switch-source?source=tmdb" hx-swap="outerHTML"
+                    hx-target="#local-card-{{.ID}}" hx-swap="outerHTML swap:120ms settle:220ms" @click.stop
+                    class="h-6 px-2 rounded flex items-center justify-center text-[10px] font-bold transition-all border
+                    {{ if eq .Title .Metadata.TMDBTitle }}bg-blue-50 text-blue-600 border-blue-200 shadow-sm{{ else }}bg-white text-gray-400 border-gray-200 hover:border-blue-300 hover:text-blue-500{{ end }}"
+                    title="切换到 TMDB">
+                    TMDB
+                </button>
+                {{ end }}
+
+                <!-- AniList Toggle -->
+                {{ if and .Metadata (gt .Metadata.AniListID 0) }}
+                <button hx-post="/api/local-anime/{{.ID}}/switch-source?source=anilist" hx-swap="outerHTML"
+                    hx-target="#local-card-{{.ID}}" hx-swap="outerHTML swap:120ms settle:220ms" @click.stop
+                    class="h-6 px-2 rounded flex items-center justify-center text-[10px] font-bold transition-all border
+                    {{ if eq .Title .Metadata.AniListTitle }}bg-indigo-50 text-indigo-600 border-indigo-200 shadow-sm{{ else }}bg-white text-gray-400 border-gray-200 hover:border-indigo-300 hover:text-indigo-500{{ end }}"
+                    title="切换到 AniList">
+                    AL
+                </button>
+                {{ end }}
+
+                <!-- Unlinked -->
+                {{ if or (not .Metadata) (and (eq .Metadata.BangumiID 0) (eq .Metadata.TMDBID 0) (eq .Metadata.AniListID
+                0)) }}
+                <span
+                    class="h-6 px-2 rounded flex items-center justify-center text-[10px] bg-gray-50 text-gray-400 border border-gray-100 cursor-help"
+                    title="未关联元数据">
+                    N/A
+                </span>
+                {{ end }}
+            </div>
+
+            <div class="flex items-center gap-1">
+                <!-- Folder Info Tooltip -->
+                <div class="group/path relative">
+                    <div
+                        class="w-8 h-8 md:w-6 md:h-6 flex items-center justify-center text-gray-300 hover:text-gray-500 cursor-help transition-colors rounded hover:bg-gray-100">
+                        📁
+                    </div>
+                    <div
+                        class="absolute bottom-full right-0 mb-2 hidden md:group-hover/path:block w-max max-w-[200px] z-20">
+                        <div class="bg-gray-800 text-white text-xs rounded px-2 py-1 break-all shadow-lg">
+                            <div class="font-mono opacity-75 mb-0.5 text-[10px] uppercase">Path</div>
+                            {{ .Path }}
+                        </div>
+                        <!-- Arrow -->
+                        <div class="w-2 h-2 bg-gray-800 rotate-45 absolute -bottom-1 right-2"></div>
+                    </div>
+                </div>
+
+                <!-- Refresh Button -->
+                <button hx-post="/api/local-anime/{{ .ID }}/refresh-metadata" hx-swap="outerHTML"
+                    hx-target="#local-card-{{.ID}}" hx-swap="outerHTML swap:120ms settle:220ms"
+                    class="w-8 h-8 md:w-6 md:h-6 flex items-center justify-center text-gray-400 hover:text-primary hover:bg-primary/10 rounded transition-colors"
+                    title="刷新元数据" @click.stop>
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15">
+                        </path>
+                    </svg>
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{{ end }}
+{{/* Legacy UI fixture used only by compatibility tests. */}}

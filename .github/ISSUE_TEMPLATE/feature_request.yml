@@ -1,0 +1,61 @@
+name: 功能建议
+description: 提议一个新功能或改进
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        提议较大改动前,建议先在此 Issue 讨论方向,避免直接写代码后发现思路不符。
+
+  - type: checkboxes
+    id: prechecks
+    attributes:
+      label: 提交前检查
+      options:
+        - label: 我已经搜索过 Issues,没有发现重复或类似建议
+          required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: 想解决的问题
+      description: 不是"我想要 XX 按钮",而是"我现在遇到了 XX 不便"
+      placeholder: |
+        每次新增一批订阅,我都需要逐个点击,希望可以...
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 你期望的方案
+      description: 可以是 UI 草图、流程、API 设计、配置示例
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 考虑过的其他方案
+      description: 有没有别的工具或路径已经解决了类似问题?为什么本项目应该做?
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: 影响范围
+      options:
+        - 仅 UI / 前端
+        - 仅后端 / API
+        - 全栈
+        - 部署 / 运维 / 配置
+        - 文档
+        - 其他
+    validations:
+      required: true
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: 其他上下文
+      description: 截图、参考链接、相关 Issue 等

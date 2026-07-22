@@ -19,10 +19,52 @@ func NewNFOGeneratorService() *NFOGeneratorService {
 	return &NFOGeneratorService{}
 }
 
+func (s *NFOGeneratorService) checkAndReportWritability(anime *model.LocalAnime) bool {
+	if anime == nil {
+		return false
+	}
+	writable := isDirWritable(anime.Path)
+	issueKey := "readonly:" + strconv.FormatUint(uint64(anime.ID), 10)
+	if !writable {
+		log.Printf("NFO: Directory %s is not writable. Reporting LibraryIssue...", anime.Path)
+		_ = ReportLibraryIssue(LibraryIssueInput{
+			IssueKey:      issueKey,
+			IssueType:     LibraryIssueTypeScrape,
+			Title:         "媒体目录只读 (Directory Read-Only)",
+			DirectoryPath: anime.Path,
+			LocalAnimeID:  &anime.ID,
+			Message:       fmt.Sprintf("动漫《%s》的本地存放路径没有写权限，无法生成 NFO 元数据或本地海报缓存。", anime.Title),
+			Hint:          "请检查您的系统权限、挂载点属性（如只读 SMB/NFS 或 Docker 卷映射只读），并确保给该路径授予读写权限。",
+		})
+		return false
+	}
+
+	// Writable, resolve any previous read-only issue
+	_ = ResolveLibraryIssue(issueKey)
+	return true
+}
+
+func isDirWritable(dir string) bool {
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		return false
+	}
+	testFile := filepath.Join(dir, ".animate_write_test")
+	err := os.WriteFile(testFile, []byte{1}, 0644)
+	if err != nil {
+		return false
+	}
+	_ = os.Remove(testFile)
+	return true
+}
+
 // GenerateTVShowNFO generates tvshow.nfo for the series
 func (s *NFOGeneratorService) GenerateTVShowNFO(anime *model.LocalAnime) error {
 	if anime.Metadata == nil {
 		return fmt.Errorf("metadata is nil")
+	}
+
+	if !s.checkAndReportWritability(anime) {
+		return fmt.Errorf("directory %s is read-only", anime.Path)
 	}
 
 	meta := anime.Metadata
@@ -81,6 +123,14 @@ func (s *NFOGeneratorService) GenerateTVShowNFO(anime *model.LocalAnime) error {
 
 // GenerateEpisodeNFO generates {filename}.nfo for an episode
 func (s *NFOGeneratorService) GenerateEpisodeNFO(ep *model.LocalEpisode, anime *model.LocalAnime) error {
+	if ep == nil || anime == nil {
+		return fmt.Errorf("nil argument")
+	}
+
+	if !s.checkAndReportWritability(anime) {
+		return fmt.Errorf("directory %s is read-only", anime.Path)
+	}
+
 	nfo := parser.EpisodeNFO{
 		Title:     ep.Title,
 		Season:    ep.SeasonNum,
@@ -108,6 +158,10 @@ func (s *NFOGeneratorService) GenerateEpisodeNFO(ep *model.LocalEpisode, anime *
 func (s *NFOGeneratorService) SaveLocalImages(anime *model.LocalAnime) error {
 	if anime.Metadata == nil {
 		return nil
+	}
+
+	if !s.checkAndReportWritability(anime) {
+		return fmt.Errorf("directory %s is read-only", anime.Path)
 	}
 
 	// Helper to write blob

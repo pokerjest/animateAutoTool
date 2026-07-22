@@ -1,0 +1,1635 @@
+{{ if not .SkipLayout }}{{ template "header.html" . }}{{ end }}
+
+<div class="space-y-6" x-data="{ 
+    activeTab: 'download',
+    pickingDirectory: false,
+    minimumActionDelay: 320,
+    tabs: [
+        { id: 'download', name: '下载管理', icon: '📥' },
+        { id: 'metadata', name: '数据源', icon: '🏷️' },
+        { id: 'media', name: '媒体/同步', icon: '🎬' },
+        { id: 'network', name: '网络', icon: '🌐' },
+        { id: 'backup', name: '备份还原', icon: '📦' },
+        { id: 'security', name: '账户安全', icon: '🔐' },
+        { id: 'ai', name: 'AI助手', icon: '🤖' }
+    ],
+    async waitMinimum(startedAt, minimum = this.minimumActionDelay) {
+        const elapsed = Date.now() - startedAt;
+        if (elapsed < minimum) {
+            await new Promise(resolve => setTimeout(resolve, minimum - elapsed));
+        }
+    },
+    beginFormAction(form) {
+        if (!form) return;
+        form.dataset.startedAt = String(Date.now());
+    },
+    async finishFormAction(form) {
+        const startedAt = Number(form?.dataset?.startedAt || Date.now());
+        await this.waitMinimum(startedAt);
+    },
+    async pickDirectoryForInput(inputName, title = '选择目录') {
+        if (this.pickingDirectory) return;
+        this.pickingDirectory = true;
+        try {
+            const input = document.querySelector('input[name=' + inputName + ']');
+            const defaultPath = input ? input.value.trim() : '';
+            const response = await fetch('/api/system/pick-directory', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    title: title,
+                    default_path: defaultPath
+                })
+            });
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data.error || '目录选择失败');
+            }
+            if (data.cancelled) {
+                return;
+            }
+            if (input) {
+                input.value = data.path || '';
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+            }
+            window.dispatchEvent(new CustomEvent('toast', { detail: { msg: '已选择目录: ' + (data.path || ''), type: 'success' } }));
+        } catch (err) {
+            window.dispatchEvent(new CustomEvent('toast', { detail: { msg: err.message || '目录选择失败', type: 'error' } }));
+        } finally {
+            this.pickingDirectory = false;
+        }
+    }
+}">
+    <div class="flex flex-col gap-4 border-b border-gray-200/50 pb-4 md:flex-row md:items-end md:justify-between">
+        <h2 class="text-2xl font-black text-gray-800 tracking-tight md:text-3xl">系统设置</h2>
+        <div class="-mx-1 overflow-x-auto px-1 pb-1">
+            <div class="flex min-w-max gap-2 rounded-xl bg-gray-100/50 p-1">
+            <template x-for="tab in tabs" :key="tab.id">
+                <button @click="activeTab = tab.id; $nextTick(() => $dispatch('tab-' + tab.id))"
+                    :class="activeTab === tab.id ? 'bg-white text-primary shadow-sm ring-1 ring-black/5' : 'text-gray-500 hover:text-gray-700'"
+                    class="shrink-0 whitespace-nowrap px-4 py-2 rounded-lg text-sm font-bold transition-all flex items-center gap-2">
+                    <span x-text="tab.icon"></span>
+                    <span x-text="tab.name"></span>
+                </button>
+            </template>
+            </div>
+        </div>
+    </div>
+
+    <div id="save-result" class="hidden"></div>
+
+    <!-- Download Tab -->
+    <div x-show="activeTab === 'download'" x-transition class="space-y-6">
+        <form hx-post="/api/settings" hx-target="#save-result" hx-swap="innerHTML" @htmx:before-request="beginFormAction($el)" @htmx:after-request="(async () => { await finishFormAction($el); })()">
+            <input type="hidden" name="settings_scope" value="download">
+            <div class="glass-panel p-5 md:p-8">
+                <h3 class="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2">
+                    <span class="w-2 h-6 bg-primary rounded-full"></span>
+                    qBittorrent 设置
+                </h3>
+                <div class="mb-6 rounded-2xl border border-gray-200 bg-gray-50/80 p-4">
+                    <p class="text-xs font-bold uppercase tracking-wider text-gray-500">运行模式</p>
+                    <div class="mt-3 flex flex-col gap-3 md:flex-row">
+                        <label class="flex flex-1 items-start gap-3 rounded-xl border border-gray-200 bg-white px-4 py-3">
+                            <input type="radio" name="qb_mode" value="managed"
+                                class="mt-1 h-4 w-4 text-primary focus:ring-primary"
+                                {{ if ne (index .Config "qb_mode") "external" }}checked{{ end }}>
+                            <span>
+                                <span class="block font-bold text-gray-800">托管模式</span>
+                                <span class="block text-sm text-gray-500">使用项目管理本地已安装的 qBittorrent；如果本机没有二进制，系统会提示你先安装。</span>
+                            </span>
+                        </label>
+                        <label class="flex flex-1 items-start gap-3 rounded-xl border border-gray-200 bg-white px-4 py-3">
+                            <input type="radio" name="qb_mode" value="external"
+                                class="mt-1 h-4 w-4 text-primary focus:ring-primary"
+                                {{ if eq (index .Config "qb_mode") "external" }}checked{{ end }}>
+                            <span>
+                                <span class="block font-bold text-gray-800">外部 WebUI</span>
+                                <span class="block text-sm text-gray-500">连接你已经单独安装并开启 WebUI 的 qBittorrent 实例。</span>
+                            </span>
+                        </label>
+                    </div>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div class="space-y-1.5">
+                        <label class="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">Web UI 地址</label>
+                        <input type="text" name="qb_url" value='{{ index .Config "qb_url" }}'
+                            class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 focus:bg-white focus:border-primary focus:ring-4 focus:ring-primary/10 outline-none transition-all font-medium"
+                            placeholder="http://localhost:8080">
+                        <p class="text-xs text-gray-400 ml-1">托管模式下这里可以留空；只有外部 WebUI 模式才需要填写地址和凭据。</p>
+                    </div>
+                    <div class="space-y-1.5">
+                        <label class="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">下载保存目录</label>
+                        <div class="flex items-center gap-2">
+                            <input type="text" name="base_download_dir" value='{{ index .Config "base_download_dir" }}'
+                                class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 focus:bg-white focus:border-primary focus:ring-4 focus:ring-primary/10 outline-none transition-all font-medium"
+                                placeholder="/downloads/anime">
+                            <button type="button" @click="pickDirectoryForInput('base_download_dir', '选择默认下载目录')"
+                                :disabled="pickingDirectory"
+                                class="shrink-0 px-4 py-3 rounded-2xl border border-gray-200 bg-white/70 text-sm font-bold text-gray-600 hover:bg-white hover:text-primary transition-all disabled:cursor-not-allowed disabled:opacity-50">
+                                <span x-text="pickingDirectory ? '选择中...' : '浏览…'"></span>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="space-y-1.5">
+                        <label class="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">用户名</label>
+                        <input type="text" name="qb_username" value='{{ index .Config "qb_username" }}'
+                            class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 focus:bg-white focus:border-primary focus:ring-4 focus:ring-primary/10 outline-none transition-all font-medium">
+                    </div>
+                    <div class="space-y-1.5">
+                        <label class="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">密码</label>
+                        <div class="relative" x-data="{ show: false }">
+                            <input :type="show ? 'text' : 'password'" name="qb_password"
+                                value='{{ index .Config "qb_password" }}'
+                                class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 focus:bg-white focus:border-primary focus:ring-4 focus:ring-primary/10 outline-none transition-all font-medium pr-12">
+                            <button type="button" @click="show = !show"
+                                class="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                                <span x-text="show ? '🙈' : '👁️'"></span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="relative">
+                    <div id="qb-status"
+                        class="mt-6 p-4 rounded-xl bg-gray-50/50 border border-gray-100 min-h-[50px] relative group"
+                        hx-get="/api/settings/qb-status" hx-trigger="revealed, load delay:500ms" hx-target="this"
+                        hx-swap="innerHTML">
+                        <span class="text-sm text-gray-400 flex items-center gap-2">
+                            <span class="animate-spin text-xs">⌛</span> 等待检查...
+                        </span>
+                        <button type="button" hx-get="/api/settings/qb-status" hx-target="#qb-status"
+                            hx-indicator="#qb-status"
+                            class="absolute right-2 top-2 p-1.5 text-gray-400 hover:text-primary hover:bg-white rounded-lg opacity-0 group-hover:opacity-100 transition-all"
+                            title="刷新状态">
+                            🔄
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Save Button for Download Tab -->
+                <div class="mt-6 flex justify-end">
+                    <button type="submit"
+                        class="w-full md:w-auto justify-center bg-primary text-white px-8 py-3 rounded-xl font-bold hover:bg-accent transition-all shadow-lg active:scale-95 flex items-center gap-2">
+                        <span class="[.htmx-request_&]:hidden">💾 保存更改</span>
+                        <span class="hidden [.htmx-request_&]:inline animate-spin">⌛</span>
+                    </button>
+                </div>
+            </div>
+        </form>
+    </div>
+
+    <!-- Metadata Tab -->
+    <div x-show="activeTab === 'metadata'" x-transition x-cloak class="space-y-6">
+        <form hx-post="/api/settings" hx-target="#save-result" hx-swap="innerHTML" @htmx:before-request="beginFormAction($el)" @htmx:after-request="(async () => { await finishFormAction($el); })()">
+            <input type="hidden" name="settings_scope" value="data-sources">
+            <div class="glass-panel p-5 md:p-8 space-y-8">
+
+                <!-- Bangumi Section -->
+                <div>
+                    <h3 class="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
+                        <span class="w-2 h-6 bg-pink-400 rounded-full"></span>
+                        Bangumi (主数据源)
+                    </h3>
+                    <div class="space-y-4">
+                        <div class="space-y-1.5 mb-4">
+                            <label class="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">Access Token
+                                (手动填入)</label>
+                            <input type="password" name="bangumi_access_token"
+                                value='{{ index .Config "bangumi_access_token" }}'
+                                class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 focus:bg-white focus:border-pink-300 focus:ring-4 focus:ring-pink-500/10 outline-none transition-all font-medium"
+                                placeholder="如果已有 Access Token 可直接在此填入，无需 App ID">
+                        </div>
+
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div class="space-y-1.5">
+                                <label class="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">App
+                                    ID</label>
+                                <input type="text" name="bangumi_app_id" value='{{ index .Config "bangumi_app_id" }}'
+                                    class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 focus:bg-white focus:border-pink-300 focus:ring-4 focus:ring-pink-500/10 outline-none transition-all font-medium"
+                                    placeholder="Bangumi App ID">
+                            </div>
+                            <div class="space-y-1.5">
+                                <label class="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">App
+                                    Secret</label>
+                                <input type="password" name="bangumi_app_secret"
+                                    value='{{ index .Config "bangumi_app_secret" }}'
+                                    class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 focus:bg-white focus:border-pink-300 focus:ring-4 focus:ring-pink-500/10 outline-none transition-all font-medium"
+                                    placeholder="Bangumi App Secret">
+                            </div>
+                        </div>
+
+                        <div class="flex flex-col items-stretch gap-4 md:flex-row md:items-center">
+                            <div id="bangumi-status" hx-get="/api/bangumi/profile"
+                                hx-trigger="load delay:500ms, tab-metadata from:window" hx-target="#bangumi-status"
+                                hx-swap="innerHTML"
+                                class="flex-grow p-4 rounded-xl bg-pink-50/30 border border-pink-100/50 min-h-[50px] relative group px-4">
+                                <span class="text-xs text-gray-400 flex items-center gap-2">
+                                    <span class="animate-spin">⌛</span> 等待加载 Bangumi 状态...
+                                </span>
+                                <button type="button" hx-get="/api/bangumi/profile" hx-target="#bangumi-status"
+                                    hx-swap="innerHTML"
+                                    class="absolute right-2 top-2 p-1.5 text-pink-300 hover:text-pink-500 hover:bg-white rounded-lg opacity-0 group-hover:opacity-100 transition-all"
+                                    title="刷新状态">
+                                    🔄
+                                </button>
+                            </div>
+                            <a href="/api/bangumi/login" target="_blank"
+                                class="w-full md:w-auto justify-center px-6 py-3 bg-pink-500 text-white rounded-xl font-bold hover:bg-pink-600 transition-all shadow-lg shadow-pink-200/50 flex items-center gap-2 whitespace-nowrap">
+                                🚀 登录/授权
+                            </a>
+                        </div>
+                        <p class="text-xs text-gray-400 ml-1">注：如果填写了 Token，可忽略 App ID/Secret 和登录按钮。</p>
+                    </div>
+                </div>
+
+                <hr class="border-gray-200/50">
+
+                <!-- TMDB Section -->
+                <div>
+                    <h3 class="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
+                        <span class="w-2 h-6 bg-blue-400 rounded-full"></span>
+                        TMDB (元数据增强)
+                    </h3>
+                    <div class="space-y-4">
+                        <div class="space-y-1.5" x-data="{ show: false }">
+                            <label class="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">API Read Access
+                                Token</label>
+                            <div class="relative">
+                                <input :type="show ? 'text' : 'password'" name="tmdb_token"
+                                    value='{{ index .Config "tmdb_token" }}'
+                                    class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 focus:bg-white focus:border-blue-300 focus:ring-4 focus:ring-blue-500/10 outline-none transition-all font-medium pr-12"
+                                    placeholder="eyJhbGciOiJIUzI1Ni...">
+                                <button type="button" @click="show = !show"
+                                    class="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                                    <span x-text="show ? '🙈' : '👁️'"></span>
+                                </button>
+                            </div>
+                        </div>
+                        <div id="tmdb-status" hx-get="/api/settings/tmdb-status"
+                            hx-trigger="load delay:500ms, tab-metadata from:window" hx-target="#tmdb-status"
+                            hx-swap="innerHTML"
+                            class="p-4 rounded-xl bg-blue-50/30 border border-blue-100/50 min-h-[50px] relative group">
+                            <span class="text-xs text-gray-400 flex items-center gap-2">
+                                <span class="animate-spin">⌛</span> 等待加载 TMDB 状态...
+                            </span>
+                            <button type="button" hx-get="/api/settings/tmdb-status" hx-target="#tmdb-status"
+                                hx-swap="innerHTML"
+                                class="absolute right-2 top-2 p-1.5 text-blue-300 hover:text-blue-500 hover:bg-white rounded-lg opacity-0 group-hover:opacity-100 transition-all"
+                                title="刷新状态">
+                                🔄
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <hr class="border-gray-200/50">
+
+                <!-- AniList Section -->
+                <div>
+                    <h3 class="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
+                        <span class="w-2 h-6 bg-cyan-400 rounded-full"></span>
+                        AniList (备用数据源)
+                    </h3>
+                    <div class="space-y-4">
+                        <div class="space-y-1.5" x-data="{ show: false }">
+                            <label class="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">Personal Access
+                                Token</label>
+                            <div class="relative">
+                                <input :type="show ? 'text' : 'password'" name="anilist_token"
+                                    value='{{ index .Config "anilist_token" }}'
+                                    class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 focus:bg-white focus:border-cyan-300 focus:ring-4 focus:ring-cyan-500/10 outline-none transition-all font-medium pr-12"
+                                    placeholder="Paste AniList Token Here">
+                                <button type="button" @click="show = !show"
+                                    class="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                                    <span x-text="show ? '🙈' : '👁️'"></span>
+                                </button>
+                            </div>
+                        </div>
+                        <div id="anilist-status" hx-get="/api/settings/anilist-status"
+                            hx-trigger="load delay:500ms, tab-metadata from:window" hx-target="#anilist-status"
+                            hx-swap="innerHTML"
+                            class="p-4 rounded-xl bg-cyan-50/30 border border-cyan-100/50 min-h-[50px] relative group">
+                            <span class="text-xs text-gray-400 flex items-center gap-2">
+                                <span class="animate-spin">⌛</span> 等待加载 AniList 状态...
+                            </span>
+                            <button type="button" hx-get="/api/settings/anilist-status" hx-target="#anilist-status"
+                                hx-swap="innerHTML"
+                                class="absolute right-2 top-2 p-1.5 text-cyan-300 hover:text-cyan-500 hover:bg-white rounded-lg opacity-0 group-hover:opacity-100 transition-all"
+                                title="刷新状态">
+                                🔄
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- Data Sources Save Button -->
+            <div class="mt-6 flex justify-end">
+                <button type="submit"
+                    class="w-full md:w-auto justify-center bg-pink-500 text-white px-8 py-3 rounded-xl font-bold hover:bg-pink-600 transition-all shadow-lg shadow-pink-200 active:scale-95 flex items-center gap-2">
+                    <span class="[.htmx-request_&]:hidden">💾 保存数据源设置</span>
+                    <span class="hidden [.htmx-request_&]:inline animate-spin">⌛</span>
+                </button>
+            </div>
+        </form>
+    </div>
+
+    <!-- Media & Sync Tab -->
+    <div x-show="activeTab === 'media'" x-transition x-cloak class="space-y-6">
+
+        <!-- Jellyfin Config Form -->
+        <form hx-post="/api/settings" hx-target="#save-result" hx-swap="innerHTML" @htmx:before-request="beginFormAction($el)" @htmx:after-request="(async () => { await finishFormAction($el); })()">
+            <input type="hidden" name="settings_scope" value="media">
+            <div class="glass-panel p-5 md:p-8">
+                <h3 class="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2">
+                    <span class="w-2 h-6 bg-purple-400 rounded-full"></span>
+                    Jellyfin 集成
+                </h3>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div class="space-y-1.5">
+                        <label class="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">服务器地址</label>
+                        <div class="flex gap-2">
+                            <input type="text" id="jellyfin_url_input" name="jellyfin_url"
+                                value='{{ index .Config "jellyfin_url" }}'
+                                class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 focus:bg-white focus:border-purple-300 focus:ring-4 focus:ring-purple-500/10 outline-none transition-all font-medium"
+                                placeholder="http://localhost:8096">
+                            <button type="button" onclick="openJellyfin()"
+                                class="bg-gray-100 text-gray-600 px-4 rounded-xl hover:bg-gray-200 transition">↗</button>
+                        </div>
+                    </div>
+                    <div class="space-y-1.5">
+                        <label class="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">API Key</label>
+                        <input id="jellyfin_api_key_input" type="text" name="jellyfin_api_key" value='{{ index .Config "jellyfin_api_key" }}'
+                            class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 focus:bg-white focus:border-purple-300 focus:ring-4 focus:ring-purple-500/10 outline-none transition-all font-medium"
+                            placeholder="留空则自动获取">
+                    </div>
+
+                    <!-- New Username/Password Fields -->
+                    <div class="space-y-1.5">
+                        <label class="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">用户名</label>
+                        <input type="text" name="jellyfin_username" value='{{ index .Config "jellyfin_username" }}'
+                            class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 focus:bg-white focus:border-purple-300 focus:ring-4 focus:ring-purple-500/10 outline-none transition-all font-medium"
+                            placeholder="Admin User">
+                    </div>
+                    <div class="space-y-1.5">
+                        <label class="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">密码</label>
+                        <div class="relative" x-data="{ show: false }">
+                            <input :type="show ? 'text' : 'password'" name="jellyfin_password"
+                                value='{{ index .Config "jellyfin_password" }}'
+                                class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 focus:bg-white focus:border-purple-300 focus:ring-4 focus:ring-purple-500/10 outline-none transition-all font-medium pr-12">
+                            <button type="button" @click="show = !show"
+                                class="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                                <span x-text="show ? '🙈' : '👁️'"></span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Jellyfin Save Button -->
+                <div class="mt-6 flex justify-end">
+                    <button type="submit"
+                        class="w-full md:w-auto justify-center bg-purple-500 text-white px-6 py-2 rounded-xl font-bold hover:bg-purple-600 transition-all shadow-md active:scale-95 flex items-center gap-2">
+                        <span class="[.htmx-request_&]:hidden">💾 保存 Jellyfin 设置</span>
+                        <span class="hidden [.htmx-request_&]:inline animate-spin">⌛</span>
+                    </button>
+                </div>
+
+                <div class="relative mt-4">
+                    <div id="jellyfin-status" hx-get="/api/settings/jellyfin-status"
+                        hx-trigger="revealed, load delay:500ms" hx-target="this"
+                        class="p-4 rounded-xl bg-purple-50/50 border border-purple-100 min-h-[50px] relative group">
+                        <span class="text-sm text-purple-400 flex items-center gap-2">
+                            <span class="animate-spin text-xs">⌛</span> 检查连接...
+                        </span>
+                        <button type="button" hx-get="/api/settings/jellyfin-status" hx-target="#jellyfin-status"
+                            class="absolute right-2 top-2 p-1.5 text-purple-300 hover:text-purple-500 hover:bg-white rounded-lg opacity-0 group-hover:opacity-100 transition-all"
+                            title="刷新状态">
+                            🔄
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </form>
+
+        <!-- PikPak Config Form -->
+        <form hx-post="/api/settings" hx-target="#save-result" hx-swap="innerHTML" @htmx:before-request="beginFormAction($el)" @htmx:after-request="(async () => { await finishFormAction($el); })()">
+            <input type="hidden" name="settings_scope" value="pikpak">
+            <div class="glass-panel p-5 md:p-8">
+                <h3 class="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2">
+                    <span class="w-2 h-6 bg-purple-600 rounded-full"></span>
+                    PikPak & AList
+                </h3>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div class="space-y-1.5">
+                        <label class="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">PikPak 用户名</label>
+                        <input type="text" name="pikpak_username" value='{{ index .Config "pikpak_username" }}'
+                            class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 focus:bg-white focus:border-purple-300 focus:ring-4 focus:ring-purple-500/10 outline-none transition-all font-medium">
+                    </div>
+                    <div class="space-y-1.5">
+                        <label class="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">PikPak 密码</label>
+                        <div class="relative" x-data="{ show: false }">
+                            <input :type="show ? 'text' : 'password'" name="pikpak_password"
+                                value='{{ index .Config "pikpak_password" }}'
+                                class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 focus:bg-white focus:border-purple-300 focus:ring-4 focus:ring-purple-500/10 outline-none transition-all font-medium pr-12">
+                            <button type="button" @click="show = !show"
+                                class="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                                <span x-text="show ? '🙈' : '👁️'"></span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Separate logic for Tokens which are long -->
+                <div class="mt-4 space-y-4">
+                    <div class="space-y-1.5">
+                        <label class="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">Refresh Token (可选,
+                            推荐)</label>
+                        <div class="relative" x-data="{ show: false }">
+                            <input :type="show ? 'text' : 'password'" name="pikpak_refresh_token"
+                                value='{{ index .Config "pikpak_refresh_token" }}'
+                                class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 focus:bg-white focus:border-purple-300 focus:ring-4 focus:ring-purple-500/10 outline-none transition-all font-medium pr-12"
+                                placeholder="填入 Refresh Token 可避免频繁重新登录">
+                            <button type="button" @click="show = !show"
+                                class="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                                <span x-text="show ? '🙈' : '👁️'"></span>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="space-y-1.5">
+                        <label class="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">Captcha Token
+                            (验证码报错时填)</label>
+                        <div class="relative" x-data="{ show: false }">
+                            <input :type="show ? 'text' : 'password'" name="pikpak_captcha_token"
+                                value='{{ index .Config "pikpak_captcha_token" }}'
+                                class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 focus:bg-white focus:border-purple-300 focus:ring-4 focus:ring-purple-500/10 outline-none transition-all font-medium pr-12"
+                                placeholder="如果 Alist 报错 'captcha_token expired'，请在此填写">
+                            <button type="button" @click="show = !show"
+                                class="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                                <span x-text="show ? '🙈' : '👁️'"></span>
+                            </button>
+                        </div>
+                        <p class="text-xs text-gray-400 ml-1">从浏览器控制台获取，或在 Alist 网页版登录后抓包获取。</p>
+                    </div>
+                </div>
+
+                <div
+                    class="flex items-center justify-between gap-4 p-4 rounded-xl bg-purple-50/30 border border-purple-100/50 mt-4">
+                    <div class="relative flex-1 group">
+                        <div id="pikpak-status" hx-get="/api/settings/pikpak-status"
+                            hx-trigger="revealed, load delay:500ms" hx-target="this" hx-swap="innerHTML"
+                            class="text-sm font-medium text-purple-700 min-h-[24px]">
+                            等待检查...
+                        </div>
+                        <button type="button" hx-get="/api/settings/pikpak-status" hx-target="#pikpak-status"
+                            class="absolute right-0 top-1/2 -translate-y-1/2 p-1 text-purple-300 hover:text-purple-500 rounded-lg opacity-0 group-hover:opacity-100 transition-all"
+                            title="刷新状态">
+                            🔄
+                        </button>
+                    </div>
+                    <div class="flex gap-2">
+                        <button type="submit"
+                            class="bg-gray-700 text-white px-4 py-2.5 rounded-xl font-bold hover:bg-gray-800 transition-all shadow-md active:scale-95 flex items-center gap-2">
+                            <span class="[.htmx-request_&]:hidden">💾 仅保存</span>
+                            <span class="hidden [.htmx-request_&]:inline animate-spin">⌛</span>
+                        </button>
+                        <button type="button" hx-post="/api/settings/pikpak-sync" hx-target="#pikpak-sync-status"
+                            class="bg-purple-600 text-white px-4 py-2.5 rounded-xl font-bold hover:bg-purple-700 transition-all shadow-md active:scale-95 flex items-center gap-2">
+                            <span class="htmx-indicator animate-spin text-xs">⌛</span>
+                            <span>🔄 保存并同步</span>
+                        </button>
+                    </div>
+                </div>
+                <div id="pikpak-sync-status" class="text-xs font-bold text-purple-400 text-right mt-1">
+                </div>
+
+                <!-- Token Guide -->
+                <div
+                    class="mt-4 p-4 rounded-xl bg-purple-50/50 border border-purple-100/50 text-sm text-purple-900 space-y-3">
+                    <h4 class="font-bold flex items-center gap-2">📚 如何获取 Token?</h4>
+                    <ul class="list-disc list-inside space-y-1.5 opacity-90 text-xs">
+                        <li>
+                            <span class="font-bold">Refresh Token (推荐):</span>
+                            登录 <a href="https://mypikpak.com" target="_blank"
+                                class="underline hover:text-purple-600 font-bold">PikPak 网页版</a>，按 F12
+                            打开开发者工具 →
+                            Application (应用) → Local Storage → 找到 <code
+                                class="bg-purple-100 px-1 rounded">refresh_token</code>。
+                        </li>
+                        <li>
+                            <span class="font-bold">Captcha Token:</span>
+                            仅在 Alist 报错 <code class="bg-red-50 text-red-600 px-1 rounded">captcha_token expired</code>
+                            时需要。
+                            <a href="https://alist.nn.ci/zh/guide/drivers/pikpak.html" target="_blank"
+                                class="underline hover:text-purple-600 font-bold">👉 查看 Alist 官方文档</a>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        </form>
+    </div>
+
+    <!-- Network Tab -->
+    <div x-show="activeTab === 'network'" x-transition:enter="transition ease-out duration-300"
+        x-transition:enter-start="opacity-0 translate-y-4" x-transition:enter-end="opacity-100 translate-y-0"
+        class="space-y-6">
+
+        <form hx-post="/api/settings" hx-target="#save-result" hx-swap="innerHTML" @htmx:before-request="beginFormAction($el)" @htmx:after-request="(async () => { await finishFormAction($el); })()">
+            <input type="hidden" name="settings_scope" value="network">
+            <div class="bg-white/60 p-6 rounded-xl border border-white/70 shadow-sm relative overflow-hidden group">
+                <div class="relative z-10">
+                    <h3 class="text-lg font-semibold mb-4 text-gray-800 flex items-center gap-2">
+                        <span>🌐</span> 网络设置
+                    </h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div class="col-span-2">
+                            <label class="block text-sm font-medium text-gray-700 mb-1">HTTP/S Proxy URL</label>
+                            <input type="text" name="proxy_url" value="{{ .Config.proxy_url }}"
+                                placeholder="http://127.0.0.1:7890"
+                                class="w-full px-4 py-2 bg-white/50 rounded-lg border border-gray-300 focus:ring-2 focus:ring-primary focus:border-primary outline-none transition-all hover:bg-white/80">
+                            <p class="mt-1 text-xs text-gray-500">
+                                格式: http://ip:port 或 socks5://ip:port. 留空则不使用代理。
+                            </p>
+                        </div>
+
+                        <!-- Proxy Scope -->
+                        <div class="col-span-2">
+                            <label class="block text-sm font-medium text-gray-700 mb-2">应用范围</label>
+                            <div class="flex flex-wrap gap-4">
+                                <label class="inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" name="proxy_bangumi_enabled" value="true" {{ if eq
+                                        .Config.proxy_bangumi_enabled "true" }}checked{{ end }}
+                                        class="form-checkbox h-5 w-5 text-primary rounded border-gray-300 focus:ring-primary">
+                                    <span class="ml-2 text-gray-700">Bangumi API</span>
+                                </label>
+                                <label class="inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" name="proxy_tmdb_enabled" value="true" {{ if eq
+                                        .Config.proxy_tmdb_enabled "true" }}checked{{ end }}
+                                        class="form-checkbox h-5 w-5 text-primary rounded border-gray-300 focus:ring-primary">
+                                    <span class="ml-2 text-gray-700">TMDB API</span>
+                                </label>
+                                <label class="inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" name="proxy_anilist_enabled" value="true" {{ if eq
+                                        .Config.proxy_anilist_enabled "true" }}checked{{ end }}
+                                        class="form-checkbox h-5 w-5 text-primary rounded border-gray-300 focus:ring-primary">
+                                    <span class="ml-2 text-gray-700">AniList API</span>
+                                </label>
+                                <label class="inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" name="proxy_jellyfin_enabled" value="true" {{ if eq
+                                        .Config.proxy_jellyfin_enabled "true" }}checked{{ end }}
+                                        class="form-checkbox h-5 w-5 text-primary rounded border-gray-300 focus:ring-primary">
+                                    <span class="ml-2 text-gray-700">Jellyfin API</span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="col-span-2 border-t border-blue-100 pt-5 mt-1">
+                            <label class="block text-sm font-medium text-gray-700 mb-2">仓库自动更新</label>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <label class="inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" name="repo_update_enabled" value="true" {{ if eq
+                                        .Config.repo_update_enabled "true" }}checked{{ end }}
+                                        class="form-checkbox h-5 w-5 text-primary rounded border-gray-300 focus:ring-primary">
+                                    <span class="ml-2 text-gray-700">启用自动检查 GitHub 更新</span>
+                                </label>
+                                <label class="inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" name="repo_auto_pull_enabled" value="true" {{ if eq
+                                        .Config.repo_auto_pull_enabled "true" }}checked{{ end }}
+                                        class="form-checkbox h-5 w-5 text-primary rounded border-gray-300 focus:ring-primary">
+                                    <span class="ml-2 text-gray-700">检测到新版本时自动更新并重启</span>
+                                </label>
+                                <label class="inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" name="repo_update_require_checksum" value="true" {{ if ne
+                                        .Config.repo_update_require_checksum "false" }}checked{{ end }}
+                                        class="form-checkbox h-5 w-5 text-primary rounded border-gray-300 focus:ring-primary">
+                                    <span class="ml-2 text-gray-700">仅允许校验通过的安装包（推荐）</span>
+                                </label>
+                                <div class="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">Release 仓库 Owner</label>
+                                        <input type="text" name="repo_update_owner"
+                                            value="{{ if .Config.repo_update_owner }}{{ .Config.repo_update_owner }}{{ else }}pokerjest{{ end }}"
+                                            class="w-full px-4 py-2 bg-white/50 rounded-lg border border-gray-300 focus:ring-2 focus:ring-primary focus:border-primary outline-none transition-all hover:bg-white/80">
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">Release 仓库名称</label>
+                                        <input type="text" name="repo_update_name"
+                                            value="{{ if .Config.repo_update_name }}{{ .Config.repo_update_name }}{{ else }}animateAutoTool{{ end }}"
+                                            class="w-full px-4 py-2 bg-white/50 rounded-lg border border-gray-300 focus:ring-2 focus:ring-primary focus:border-primary outline-none transition-all hover:bg-white/80">
+                                    </div>
+                                </div>
+                                <div class="md:col-span-2">
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">检查间隔（分钟）</label>
+                                    <input type="number" name="repo_update_interval_minutes"
+                                        value="{{ if .Config.repo_update_interval_minutes }}{{ .Config.repo_update_interval_minutes }}{{ else }}30{{ end }}"
+                                        min="1" max="1440"
+                                        class="w-full md:w-64 px-4 py-2 bg-white/50 rounded-lg border border-gray-300 focus:ring-2 focus:ring-primary focus:border-primary outline-none transition-all hover:bg-white/80">
+                                    <p class="mt-1 text-xs text-gray-500">建议 15-60 分钟。会检查 GitHub Release；启用自动更新后，检测到新版本会自动下载并重启应用。遇到限流会自动退避重试。</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Network Save Button -->
+                    <div class="mt-6 flex justify-end">
+                        <button type="submit"
+                            class="w-full md:w-auto justify-center bg-blue-600 text-white px-8 py-3 rounded-xl font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 active:scale-95 flex items-center gap-2">
+                            <span class="[.htmx-request_&]:hidden">💾 保存网络设置</span>
+                            <span class="hidden [.htmx-request_&]:inline animate-spin">⌛</span>
+                        </button>
+                    </div>
+                </div>
+                <!-- Decor -->
+                <div
+                    class="absolute -right-6 -bottom-6 text-9xl text-blue-100 opacity-50 group-hover:scale-110 transition duration-500 select-none">
+                    🌐
+                </div>
+            </div>
+        </form>
+
+        <div id="deployment-check-container"
+            hx-get="/api/settings/deployment-check"
+            hx-trigger="revealed, tab-network from:body"
+            hx-target="this"
+            hx-swap="innerHTML"
+            class="min-h-[120px]">
+            <div class="bg-white/40 rounded-xl border border-white/70 p-6 text-sm text-gray-400 flex items-center gap-2">
+                <span class="animate-spin text-xs">⌛</span> 正在检查部署配置...
+            </div>
+        </div>
+
+        <div id="repo-update-container"
+            hx-get="/api/settings/repo-update-status"
+            hx-trigger="revealed, tab-network from:body"
+            hx-target="this"
+            hx-swap="innerHTML"
+            class="min-h-[120px]">
+            <div class="bg-white/40 rounded-xl border border-white/70 p-6 text-sm text-gray-400 flex items-center gap-2">
+                <span class="animate-spin text-xs">⌛</span> 正在加载仓库更新状态...
+            </div>
+        </div>
+    </div>
+
+    <!-- Backup Tab -->
+    <div x-show="activeTab === 'backup'" x-transition:enter="transition ease-out duration-300"
+        x-transition:enter-start="opacity-0 translate-y-4" x-transition:enter-end="opacity-100 translate-y-0"
+        class="space-y-6">
+
+        <script>
+            window.settingsR2BackupData = function () {
+                return {
+                    config: { endpoint: '', access_key: '', secret_key: '', bucket: '' },
+                    backups: [],
+                    loading: true,
+
+                    init() {
+                        this.loadConfig();
+                        this.loadBackups();
+                    },
+
+                    loadConfig() {
+                        fetch('/api/backup/r2/config')
+                            .then(r => r.json())
+                            .then(data => {
+                                this.config = data;
+                            });
+                    },
+
+                    testMessage: '',
+                    testError: false,
+                    testConnection() {
+                        this.loading = true;
+                        this.testMessage = '测试中...';
+                        this.testError = false;
+
+                        fetch('/api/backup/r2/test', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(this.config)
+                        })
+                            .then(r => r.json())
+                            .then(data => {
+                                this.loading = false;
+                                if (data.error) {
+                                    this.testError = true;
+                                    this.testMessage = '连接失败: ' + data.error;
+                                } else {
+                                    this.testError = false;
+                                    this.testMessage = '连接成功: ' + data.message;
+                                }
+                                setTimeout(() => this.testMessage = '', 5000);
+                            })
+                            .catch(e => {
+                                this.loading = false;
+                                this.testError = true;
+                                this.testMessage = '请求错误: ' + e;
+                                setTimeout(() => this.testMessage = '', 5000);
+                            });
+                    },
+
+                    saveConfig() {
+                        this.testMessage = '保存中...';
+                        fetch('/api/backup/r2/config', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(this.config)
+                        })
+                            .then(r => r.json())
+                            .then(() => {
+                                this.testError = false;
+                                this.testMessage = '配置已保存';
+                                this.loadBackups();
+                                setTimeout(() => this.testMessage = '', 3000);
+                            })
+                            .catch(e => {
+                                this.testError = true;
+                                this.testMessage = '保存失败: ' + e;
+                                setTimeout(() => this.testMessage = '', 5000);
+                            });
+                    },
+
+                    uploadMessage: '',
+                    uploadError: false,
+                    upload() {
+                        this.loading = true;
+                        this.uploadMessage = '上传中...';
+                        this.uploadError = false;
+
+                        fetch('/api/backup/r2/upload', { method: 'POST' })
+                            .then(r => r.json())
+                            .then(data => {
+                                if (data.error) {
+                                    this.uploadError = true;
+                                    this.uploadMessage = '上传失败: ' + data.error;
+                                } else {
+                                    this.uploadError = false;
+                                    this.uploadMessage = '上传成功';
+                                    this.loadBackups();
+                                }
+                                setTimeout(() => this.uploadMessage = '', 5000);
+                            })
+                            .catch(e => {
+                                this.uploadError = true;
+                                this.uploadMessage = '上传错误: ' + e;
+                                setTimeout(() => this.uploadMessage = '', 5000);
+                            })
+                            .finally(() => this.loading = false);
+                    },
+
+                    loadBackups() {
+                        // Only show global loading if we have no data
+                        if (this.backups.length === 0) {
+                            this.loading = true;
+                        }
+
+                        fetch('/api/backup/r2/list')
+                            .then(r => r.json())
+                            .then(data => {
+                                if (data.error) console.error(data.error);
+                                else this.backups = data.backups || [];
+                            })
+                            .catch(console.error)
+                            .finally(() => this.loading = false);
+                    },
+
+                    showConfirm: false,
+                    confirmTitle: '',
+                    confirmMessage: '',
+                    confirmButtonText: '',
+                    confirmType: '',
+                    currentKey: '',
+                    modalLoading: false,
+
+                    confirmRestore(key) {
+                        // Scroll to preview area
+                        const previewEl = document.getElementById('restore-preview');
+                        if (previewEl) previewEl.scrollIntoView({ behavior: 'smooth' });
+
+                        // Initial State
+                        this.renderProgress(previewEl, key, 0, 'starting');
+
+                        const formData = new FormData();
+                        formData.append('key', key);
+
+                        fetch('/api/backup/r2/stage', {
+                            method: 'POST',
+                            body: formData
+                        })
+                            .then(r => r.json())
+                            .then(data => {
+                                if (data.error) throw new Error(data.error);
+                                if (!data.task_id) throw new Error("No Task ID returned");
+                                this.startPolling(data.task_id, key, previewEl);
+                            })
+                            .catch(e => {
+                                this.renderError(previewEl, e);
+                            });
+                    },
+
+                    startPolling(taskId, key, previewEl) {
+                        const interval = setInterval(() => {
+                            fetch('/api/backup/r2/progress/' + taskId)
+                                .then(r => r.json())
+                                .then(data => {
+                                    if (data.status === 'completed') {
+                                        clearInterval(interval);
+                                        if (previewEl) {
+                                            previewEl.innerHTML = data.result_html;
+                                            if (window.htmx) htmx.process(previewEl);
+                                        }
+                                    } else if (data.status === 'error') {
+                                        clearInterval(interval);
+                                        this.renderError(previewEl, data.error || 'Unknown error');
+                                    } else {
+                                        // Update Progress
+                                        let percent = 0;
+                                        if (data.total_bytes > 0) {
+                                            percent = (data.downloaded / data.total_bytes) * 100;
+                                        }
+                                        this.renderProgress(previewEl, key, percent, data.status);
+                                    }
+                                })
+                                .catch(e => {
+                                    clearInterval(interval);
+                                    this.renderError(previewEl, "Progress check failed: " + e);
+                                });
+                        }, 1000);
+                    },
+
+                    renderProgress(el, key, percent, status) {
+                        if (!el) return;
+                        const statusText = status === 'analyzing' ? '正在分析数据...' : (status === 'starting' ? '正在启动任务...' : `已下载 ${percent.toFixed(1)}%`);
+                        const safeKey = this.escapeHTML(key || '');
+                        const safeStatusText = this.escapeHTML(statusText);
+
+                        el.innerHTML = `
+                        <div class="bg-blue-50 border border-blue-200 rounded-lg p-6 text-center animate-fade-in-up">
+                            <div class="mb-3">
+                                <span class="inline-block animate-bounce text-3xl">☁️</span>
+                            </div>
+                            <h4 class="text-blue-800 font-bold text-lg mb-1">正在从云端下载备份...</h4>
+                            <p class="text-blue-600 text-sm mb-4">文件名: ${safeKey}</p>
+                            
+                            <div class="w-full max-w-xs mx-auto bg-blue-200 rounded-full h-4 overflow-hidden relative">
+                                <div class="bg-blue-500 h-full rounded-full transition-all duration-500 ease-out" style="width: ${percent}%"></div>
+                            </div>
+                            <div class="mt-2 flex justify-between text-xs text-blue-500 max-w-xs mx-auto">
+                                <span>${safeStatusText}</span>
+                                <span>${percent.toFixed(0)}%</span>
+                            </div>
+                        </div>
+                    `;
+                    },
+
+                    renderError(el, error) {
+                        if (!el) return;
+                        const safeError = this.escapeHTML(String(error || 'Unknown error'));
+                        el.innerHTML = `
+                        <div class="bg-red-50 border border-red-200 rounded-lg p-4 text-center">
+                            <div class="text-red-500 font-bold mb-1">下载/分析失败</div>
+                            <div class="text-sm text-red-600">${safeError}</div>
+                        </div>
+                    `;
+                    },
+
+                    escapeHTML(value) {
+                        return String(value)
+                            .replace(/&/g, '&amp;')
+                            .replace(/</g, '&lt;')
+                            .replace(/>/g, '&gt;')
+                            .replace(/"/g, '&quot;')
+                            .replace(/'/g, '&#39;');
+                    },
+
+                    confirmDelete(key) {
+                        this.currentKey = key;
+                        this.confirmType = 'delete';
+                        this.confirmTitle = '确认删除';
+                        this.confirmMessage = '确定要删除备份 ' + key + ' 吗？此操作不可逆！';
+                        this.confirmButtonText = '确认删除';
+                        this.showConfirm = true;
+                    },
+
+                    executeConfirmAction() {
+                        this.modalLoading = true;
+                        if (this.confirmType === 'delete') {
+                            this.doDelete();
+                        }
+                    },
+
+                    doDelete() {
+                        const formData = new FormData();
+                        formData.append('key', this.currentKey);
+                        fetch('/api/backup/r2/delete', { method: 'POST', body: formData })
+                            .then(r => r.json())
+                            .then(data => {
+                                if (data.error) {
+                                    this.confirmMessage = '删除失败: ' + data.error;
+                                    this.confirmTitle = '错误';
+                                } else {
+                                    this.showConfirm = false;
+                                    this.loadBackups();
+                                }
+                            })
+                            .catch(e => {
+                                this.confirmMessage = '删除错误: ' + e;
+                                this.confirmTitle = '错误';
+                            })
+                            .finally(() => this.modalLoading = false);
+                    }
+                };
+            };
+        </script>
+
+        <!-- Backup UI -->
+        <div class="space-y-6 text-gray-800">
+            <!-- Backup Section -->
+            <div class="bg-white/60 p-4 md:p-6 rounded-xl border border-white/70 shadow-sm relative overflow-hidden group">
+                <div class="relative z-10">
+                    <h3 class="text-lg font-semibold mb-2 flex items-center gap-2">
+                        <span>📦</span> 备份数据
+                    </h3>
+                    <div class="mb-4 text-sm text-gray-600 space-y-1 bg-white/50 p-3 rounded-lg border border-gray-100">
+                        <div class="flex justify-between"><span>系统设置:</span> <span class="font-bold">{{
+                                .Stats.GlobalConfigCount }}</span></div>
+                        <div class="flex justify-between"><span>订阅总数:</span> <span class="font-bold">{{
+                                .Stats.SubscriptionCount }}</span></div>
+                        <div class="flex justify-between"><span>历史记录:</span> <span class="font-bold">{{
+                                .Stats.DownloadLogCount }}</span></div>
+                        <div class="flex justify-between"><span>用户账号:</span> <span class="font-bold">{{ .Stats.UserCount
+                                }}</span></div>
+                        <div class="flex justify-between text-gray-400"><span>本地番剧:</span> <span class="font-bold">{{
+                                .Stats.LocalAnimeCount }} (仅本地)</span></div>
+                        <div class="flex justify-between"><span>数据库大小:</span> <span class="font-bold">{{
+                                .Stats.DatabaseSize }}</span></div>
+                        <div class="flex justify-between"><span>最后修改:</span> <span class="font-mono text-xs">{{
+                                .Stats.LastModified }}</span></div>
+
+                        {{ if .Stats.SubscriptionTitles }}
+                        <div class="mt-2 pt-2 border-t border-gray-200">
+                            <div class="text-xs text-gray-500 mb-1">包含的订阅:</div>
+                            <div class="max-h-[100px] overflow-y-auto space-y-1 pr-1 custom-scrollbar">
+                                {{ range .Stats.SubscriptionTitles }}
+                                <div class="text-xs bg-white px-2 py-1 rounded border border-gray-100 truncate">{{ . }}
+                                </div>
+                                {{ end }}
+                            </div>
+                        </div>
+                        {{ end }}
+                    </div>
+                    <p class="text-sm text-gray-600 mb-4">
+                        支持三种备份模式：全量数据库、仅系统设置，以及只导出 Cloudflare R2 云存档配置。
+                    </p>
+                    <div class="grid gap-3 md:grid-cols-3">
+                        <a href="/api/backup/export?mode=full" target="_blank"
+                            class="rounded-xl border border-emerald-200 bg-emerald-50 p-4 hover:bg-emerald-100 transition">
+                            <div class="font-semibold text-emerald-700 mb-1">全量备份</div>
+                            <div class="text-xs text-emerald-600">完整导出当前数据库中的所有数据。</div>
+                        </a>
+                        <a href="/api/backup/export?mode=settings" target="_blank"
+                            class="rounded-xl border border-blue-200 bg-blue-50 p-4 hover:bg-blue-100 transition">
+                            <div class="font-semibold text-blue-700 mb-1">系统设置备份</div>
+                            <div class="text-xs text-blue-600">只导出系统设置中的配置数据，适合迁移环境参数。</div>
+                        </a>
+                        <a href="/api/backup/export?mode=cloudflare" target="_blank"
+                            class="rounded-xl border border-orange-200 bg-orange-50 p-4 hover:bg-orange-100 transition">
+                            <div class="font-semibold text-orange-700 mb-1">Cloudflare 云存档凭据</div>
+                            <div class="text-xs text-orange-600">当完整数据已经上传到云端时，只导出 R2 连接配置。</div>
+                        </a>
+                    </div>
+                </div>
+                <div
+                    class="absolute -right-10 -bottom-10 text-9xl text-emerald-100 opacity-50 group-hover:scale-110 transition duration-500 select-none">
+                    💾
+                </div>
+            </div>
+
+            <!-- Restore Section -->
+            <div class="bg-white/60 p-4 md:p-6 rounded-xl border border-white/70 shadow-sm relative overflow-hidden group">
+                <div class="relative z-10">
+                    <h3 class="text-lg font-semibold mb-2 flex items-center gap-2 text-red-600">
+                        <span>⚠️</span> 还原数据
+                    </h3>
+                    <p class="text-sm text-gray-600 mb-4">
+                        上传备份文件进行分析，预览数据后再确认还原。
+                    </p>
+
+                    <form hx-post="/api/backup/analyze" hx-encoding="multipart/form-data" hx-target="#restore-preview"
+                        hx-indicator="#analyze-btn" class="mb-4 flex flex-col gap-4 md:flex-row md:items-end">
+                        <div class="flex-1">
+                            <label class="block text-sm font-medium text-gray-700 mb-1">选择备份文件 (.db)</label>
+                            <input type="file" name="backup_file" accept=".db" required
+                                class="w-full px-4 py-2 bg-white/50 rounded-lg border border-gray-300 focus:ring-2 focus:ring-red-500 focus:border-red-500 outline-none file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-red-50 file:text-red-700 hover:file:bg-red-100">
+                        </div>
+                        <div class="md:shrink-0">
+                            <button type="submit" id="analyze-btn"
+                                class="inline-flex w-full md:w-auto items-center justify-center gap-2 px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition shadow-lg shadow-blue-200 cursor-pointer h-[42px]">
+                                <span class="[.htmx-request_&]:hidden">🔍</span>
+                                <span class="hidden [.htmx-request_&]:inline animate-spin">⌛</span>
+                                分析文件
+                            </button>
+                        </div>
+                    </form>
+
+                    <!-- Preview Container -->
+                    <div id="restore-preview" class="mt-4"></div>
+                </div>
+                <div
+                    class="absolute -right-6 -bottom-6 text-9xl text-red-100 opacity-50 group-hover:rotate-12 transition duration-500 select-none">
+                    ♻️
+                </div>
+            </div>
+
+            <!-- Cloudflare R2 Section -->
+            <div class="bg-white/60 p-4 md:p-6 rounded-xl border border-white/70 shadow-sm relative overflow-hidden group">
+                <div class="relative z-10">
+                    <h3 class="text-lg font-semibold mb-2 flex items-center gap-2 text-orange-600">
+                        <span>☁️</span> Cloudflare R2 云备份
+                    </h3>
+
+                    <div x-data="settingsR2BackupData()" @tab-backup.window="loadBackups()" class="space-y-4">
+
+                        <!-- Config Form -->
+                        <div
+                            class="grid grid-cols-1 md:grid-cols-2 gap-4 bg-white/50 p-4 rounded-lg border border-gray-100">
+                            <div>
+                                <label class="block text-xs font-semibold text-gray-500 mb-1">R2 Endpoint (端点地址)</label>
+                                <input type="text" x-model="config.endpoint"
+                                    placeholder="https://<account>.r2.cloudflarestorage.com"
+                                    class="w-full text-sm px-3 py-2 bg-white rounded border border-gray-200 focus:border-orange-500 outline-none">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-gray-500 mb-1">Bucket Name
+                                    (存储桶名称)</label>
+                                <input type="text" x-model="config.bucket" placeholder="animate-backup"
+                                    class="w-full text-sm px-3 py-2 bg-white rounded border border-gray-200 focus:border-orange-500 outline-none">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-gray-500 mb-1">Access Key ID</label>
+                                <input type="text" x-model="config.access_key"
+                                    class="w-full text-sm px-3 py-2 bg-white rounded border border-gray-200 focus:border-orange-500 outline-none">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-gray-500 mb-1">Secret Access Key</label>
+                                <input type="password" x-model="config.secret_key" placeholder="********"
+                                    class="w-full text-sm px-3 py-2 bg-white rounded border border-gray-200 focus:border-orange-500 outline-none">
+                            </div>
+                            <div class="md:col-span-2 flex flex-col gap-2 md:flex-row md:items-center md:justify-end">
+                                <span x-show="testMessage" x-text="testMessage"
+                                    :class="testError ? 'text-red-500' : 'text-green-500'"
+                                    class="text-xs font-semibold transition-opacity duration-500"></span>
+                                <button @click="testConnection" :disabled="loading"
+                                    :class="loading ? 'bg-blue-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-500'"
+                                    class="text-xs text-white px-3 py-1.5 rounded transition flex items-center justify-center gap-1 w-full md:w-auto">
+                                    <span x-show="loading && testMessage === '测试中...'"
+                                        class="animate-spin h-3 w-3 border-2 border-white rounded-full border-t-transparent"></span>
+                                    <span x-text="loading && testMessage === '测试中...' ? '测试中...' : '测试连接'"></span>
+                                </button>
+                                <button @click="saveConfig"
+                                    class="text-xs bg-gray-800 text-white px-3 py-1.5 rounded hover:bg-gray-700 transition w-full md:w-auto">保存配置</button>
+                            </div>
+                        </div>
+
+                        <!-- Actions -->
+                        <div class="flex flex-col gap-3 border-b border-gray-200 pb-2 md:flex-row md:items-center md:justify-between">
+                            <h4 class="text-sm font-semibold text-gray-700">云端备份列表</h4>
+                            <div class="flex flex-col gap-2 md:flex-row md:items-center">
+                                <span x-show="uploadMessage" x-text="uploadMessage"
+                                    :class="uploadError ? 'text-red-500' : 'text-green-500'"
+                                    class="text-xs font-semibold transition-opacity duration-500"></span>
+                                <button @click="upload" :disabled="loading"
+                                    :class="loading ? 'bg-orange-400 cursor-not-allowed' : 'bg-orange-500 hover:bg-orange-600'"
+                                    class="text-sm flex items-center justify-center gap-1 text-white px-4 py-1.5 rounded-lg transition shadow-lg shadow-orange-200 w-full md:w-auto">
+                                    <span x-show="loading && uploadMessage === '上传中...'"
+                                        class="animate-spin h-3 w-3 border-2 border-white rounded-full border-t-transparent inline-block"></span>
+                                    <span x-show="!(loading && uploadMessage === '上传中...')">☁️</span>
+                                    立即上传
+                                </button>
+                            </div>
+                        </div>
+                        <p class="text-xs text-gray-500 -mt-1">
+                            “立即上传”会把一份全量备份传到 R2；如果数据已经在云端，只需要迁移连接配置，请使用上面的“Cloudflare 云存档凭据”导出。
+                        </p>
+
+                        <!-- Backup List -->
+                        <div
+                            class="bg-white/50 rounded-lg border border-gray-100 min-h-[100px] max-h-[300px] overflow-y-auto custom-scrollbar p-2">
+                            <template x-if="loading">
+                                <div class="flex items-center justify-center h-20 text-gray-400 text-sm">加载中...</div>
+                            </template>
+                            <template x-if="!loading && backups.length === 0">
+                                <div class="flex items-center justify-center h-20 text-gray-400 text-sm">暂无备份</div>
+                            </template>
+
+                            <div class="space-y-2">
+                                <template x-for="file in backups" :key="file.key">
+                                    <div
+                                        class="flex flex-col gap-3 bg-white p-3 rounded border border-gray-100 hover:border-orange-200 transition md:flex-row md:items-center md:justify-between">
+                                        <div class="flex items-center gap-3 min-w-0">
+                                            <div class="text-xl">📦</div>
+                                            <div class="min-w-0">
+                                                <div class="text-sm font-medium text-gray-800"
+                                                    x-text="file.key.replace('animate_backup_', '').replace('.db', '')">
+                                                </div>
+                                                <div class="text-xs text-gray-400 mt-0.5">
+                                                    <span x-text="file.last_modified"></span> • <span
+                                                        x-text="(file.size / 1024 / 1024).toFixed(2) + ' MB'"></span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="flex items-center gap-2 md:shrink-0">
+                                            <button @click="confirmRestore(file.key)"
+                                                class="flex-1 md:flex-none text-xs bg-blue-50 text-blue-600 px-3 py-1.5 rounded hover:bg-blue-100 transition border border-blue-200">
+                                                预览 / 还原
+                                            </button>
+                                            <button @click="confirmDelete(file.key)"
+                                                class="text-xs bg-red-50 text-red-600 px-2 py-1.5 rounded hover:bg-red-100 transition border border-red-200"
+                                                title="删除">
+                                                🗑️
+                                            </button>
+                                        </div>
+                                    </div>
+                                </template>
+                            </div>
+                        </div>
+
+                        <!-- Delete Confirm Modal (Simplified, only for Delete) -->
+                        <div x-show="showConfirm" style="display: none;"
+                            class="fixed inset-0 bg-black/50 z-50 flex items-end justify-center p-0 md:items-center md:p-4"
+                            x-transition.opacity>
+                            <div class="bg-white rounded-t-2xl md:rounded-lg shadow-xl max-w-md w-full p-6 space-y-4"
+                                @click.outside="showConfirm = false">
+                                <h3 class="text-lg font-bold text-gray-800" x-text="confirmTitle"></h3>
+                                <p class="text-sm text-gray-600" x-text="confirmMessage"></p>
+
+                                <!-- Loading Spinner inside Modal -->
+                                <div x-show="modalLoading" class="flex justify-center py-2">
+                                    <span
+                                        class="animate-spin h-6 w-6 border-2 border-orange-500 rounded-full border-t-transparent"></span>
+                                </div>
+
+                                <div x-show="!modalLoading" class="flex flex-col-reverse gap-3 pt-2 md:flex-row md:justify-end">
+                                    <button @click="showConfirm = false"
+                                        class="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded transition">取消</button>
+                                    <button @click="executeConfirmAction"
+                                        class="bg-red-500 hover:bg-red-600 px-4 py-2 text-sm text-white rounded transition shadow-md"
+                                        x-text="confirmButtonText"></button>
+                                </div>
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+                <div
+                    class="absolute -right-8 -bottom-8 text-9xl text-orange-100 opacity-50 group-hover:scale-105 transition duration-500 select-none">
+                    ☁️
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Security Tab -->
+    <div x-show="activeTab === 'security'" x-transition:enter="transition ease-out duration-300"
+        x-transition:enter-start="opacity-0 translate-y-4" x-transition:enter-end="opacity-100 translate-y-0"
+        class="space-y-6">
+        <div class="glass-panel p-5 md:p-8" x-data="runtimeStatsCard()" x-init="init()">
+            <div class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                <h3 class="text-xl font-bold text-gray-800 flex items-center gap-2">
+                    <span class="w-2 h-6 bg-slate-500 rounded-full"></span>
+                    运行时状态
+                </h3>
+                <div class="flex w-full flex-col gap-2 md:w-auto md:flex-row md:items-center">
+                    <span x-show="stats && !error"
+                        class="inline-flex items-center justify-center rounded-xl border px-3 py-2 text-xs font-bold"
+                        :class="healthPillClass()"
+                        x-text="healthText()"></span>
+                    <button type="button" @click="refresh()" :disabled="loading"
+                        class="w-full md:w-auto inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-60">
+                        <span x-show="!loading">🔄 刷新</span>
+                        <span x-show="loading" class="inline-flex items-center gap-2">
+                            <span class="animate-spin text-xs">⌛</span> 加载中...
+                        </span>
+                    </button>
+                </div>
+            </div>
+
+            <p class="mt-2 text-xs text-gray-500">仅本地登录用户可查看，用于观察当前运行负载。</p>
+
+            <div x-show="error" class="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700" x-text="error"></div>
+
+            <template x-if="stats && !error">
+                <div class="mt-4 space-y-4">
+                    <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                        <div class="rounded-xl border px-4 py-3 transition-colors" :class="metricCardClass('goroutines')">
+                            <p class="text-xs font-bold uppercase tracking-wider text-slate-500">Goroutines</p>
+                            <p class="mt-1 text-2xl font-black" :class="metricValueClass('goroutines')" x-text="stats.go?.goroutines ?? '-'"></p>
+                        </div>
+                        <div class="rounded-xl border px-4 py-3 transition-colors" :class="metricCardClass('heap')">
+                            <p class="text-xs font-bold uppercase tracking-wider text-slate-500">Heap Alloc</p>
+                            <p class="mt-1 text-2xl font-black" :class="metricValueClass('heap')" x-text="formatMB(stats.memory?.heap_alloc_bytes)"></p>
+                        </div>
+                        <div class="rounded-xl border px-4 py-3 transition-colors" :class="metricCardClass('gc_rate')">
+                            <p class="text-xs font-bold uppercase tracking-wider text-slate-500">GC / Hour</p>
+                            <p class="mt-1 text-2xl font-black" :class="metricValueClass('gc_rate')" x-text="gcPerHour()"></p>
+                        </div>
+                        <div class="rounded-xl border border-slate-200 bg-white px-4 py-3">
+                            <p class="text-xs font-bold uppercase tracking-wider text-slate-500">Num GC</p>
+                            <p class="mt-1 text-2xl font-black text-slate-800" x-text="stats.gc?.num_gc ?? '-'"></p>
+                        </div>
+                        <div class="rounded-xl border border-slate-200 bg-white px-4 py-3 sm:col-span-2 lg:col-span-4">
+                            <p class="text-xs font-bold uppercase tracking-wider text-slate-500">运行时长</p>
+                            <p class="mt-1 text-lg font-black text-slate-800" x-text="formatUptime(stats.uptime_seconds)"></p>
+                        </div>
+                    </div>
+
+                    <div class="rounded-xl border border-slate-200 bg-white px-4 py-3 text-xs text-slate-600">
+                        <p>GOMAXPROCS: <span class="font-bold text-slate-800" x-text="stats.go?.gomaxprocs ?? '-'"></span></p>
+                        <p class="mt-1">Num CPU: <span class="font-bold text-slate-800" x-text="stats.go?.num_cpu ?? '-'"></span></p>
+                        <p class="mt-1">最后 GC: <span class="font-bold text-slate-800" x-text="formatUnix(stats.gc?.last_gc_unix)"></span></p>
+                        <p class="mt-1">最后刷新: <span class="font-bold text-slate-800" x-text="lastUpdated || '-'"></span></p>
+                        <p class="mt-2 text-[11px] text-slate-500" x-text="healthHint()"></p>
+                    </div>
+                </div>
+            </template>
+        </div>
+
+        <div class="glass-panel p-5 md:p-8" x-data="{
+                        oldPwd: '', newPwd: '', confirmPwd: '', loading: false,
+                        async submit() {
+                            if (this.newPwd !== this.confirmPwd) {
+                                window.dispatchEvent(new CustomEvent('toast', { detail: { msg: '新密码不一致', type: 'error' } }));
+                                return;
+                            }
+                            this.loading = true;
+                            try {
+                                const res = await fetch('/api/change-password', {
+                                    method: 'POST',
+                                    headers: {'Content-Type': 'application/json'},
+                                    body: JSON.stringify({ old_password: this.oldPwd, new_password: this.newPwd })
+                                });
+                                const data = await res.json();
+                                if (res.ok) {
+                                    window.dispatchEvent(new CustomEvent('toast', { detail: { msg: '密码已更新', type: 'success' } }));
+                                    this.oldPwd = ''; this.newPwd = ''; this.confirmPwd = '';
+                                } else {
+                                    window.dispatchEvent(new CustomEvent('toast', { detail: { msg: data.error || '更新失败', type: 'error' } }));
+                                }
+                            } catch (e) { console.error(e); }
+                            finally { this.loading = false; }
+                        }
+                    }">
+            <h3 class="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2">
+                <span class="w-2 h-6 bg-gray-800 rounded-full"></span>
+                更换密码
+            </h3>
+            <div class="max-w-md space-y-4">
+                <input type="password" x-model="oldPwd" placeholder="当前密码"
+                    class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 outline-none font-medium">
+                <input type="password" x-model="newPwd" placeholder="新密码"
+                    class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 outline-none font-medium">
+                <input type="password" x-model="confirmPwd" placeholder="确认新密码"
+                    class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 outline-none font-medium">
+                <button type="button" @click="submit" :disabled="loading"
+                    class="w-full bg-gray-800 text-white py-3 rounded-2xl font-bold hover:bg-black transition-all shadow-xl active:scale-95 disabled:opacity-50">
+                    <span x-show="!loading">更新安全凭证</span>
+                    <span x-show="loading">优化中...</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- AI Tab -->
+    <div x-show="activeTab === 'ai'" x-transition:enter="transition ease-out duration-300"
+        x-transition:enter-start="opacity-0 translate-y-4" x-transition:enter-end="opacity-100 translate-y-0"
+        class="space-y-6" x-cloak
+        x-data="{
+            baseUrl: '{{ index .Config "ai_base_url" }}',
+            apiKey: '{{ index .Config "ai_api_key" }}',
+            modelName: '{{ index .Config "ai_model" }}',
+            provider: 'custom',
+            availableModels: [],
+            loadingModels: false,
+            providers: {
+                gemini: { name: 'Google Gemini', url: 'https://generativelanguage.googleapis.com/v1beta/openai/' },
+                deepseek: { name: 'DeepSeek', url: 'https://api.deepseek.com/v1' },
+                openai: { name: 'OpenAI', url: 'https://api.openai.com/v1' },
+                custom: { name: '自定义 (Custom)', url: '' }
+            },
+            init() {
+                if (!this.baseUrl) this.baseUrl = 'https://generativelanguage.googleapis.com/v1beta/openai/';
+                // Detect provider based on initial baseUrl
+                let found = false;
+                for (const [key, p] of Object.entries(this.providers)) {
+                    if (p.url === this.baseUrl && key !== 'custom') {
+                        this.provider = key;
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) this.provider = 'custom';
+                if (this.apiKey) this.fetchModels();
+            },
+            updateProvider(pKey) {
+                this.provider = pKey;
+                if (pKey !== 'custom') {
+                    this.baseUrl = this.providers[pKey].url;
+                }
+                this.fetchModels();
+            },
+            async fetchModels() {
+                if (!this.apiKey || !this.baseUrl) return;
+                this.loadingModels = true;
+                try {
+                    const res = await fetch(`/api/ai/models?base_url=${encodeURIComponent(this.baseUrl)}&api_key=${encodeURIComponent(this.apiKey)}`);
+                    const data = await res.json();
+                    if (data.models) {
+                        this.availableModels = data.models;
+                        if (this.availableModels.length > 0 && !this.availableModels.includes(this.modelName)) {
+                            // Optionally auto-select first model if current is invalid
+                            // this.modelName = this.availableModels[0];
+                        }
+                    } else if (data.error) {
+                        // Silent error or toast? Toast is better if manual trigger, but this is auto.
+                        console.warn('Failed to fetch models:', data.error);
+                    }
+                } catch (e) {
+                    console.error('Fetch models error:', e);
+                } finally {
+                    this.loadingModels = false;
+                }
+            }
+        }">
+
+        <form hx-post="/api/ai/config" hx-target="#save-result" hx-swap="innerHTML" @htmx:before-request="beginFormAction($el)" @htmx:after-request="(async () => { await finishFormAction($el); })()">
+            <div class="glass-panel p-5 md:p-8">
+                <h3 class="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2">
+                    <span class="w-2 h-6 bg-accent rounded-full"></span>
+                    AI 助手设置
+                </h3>
+
+                <div class="grid grid-cols-1 gap-6">
+                    <!-- Provider Selection -->
+                    <div class="space-y-1.5">
+                        <label class="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">服务商 (Provider)</label>
+                        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+                            <template x-for="(p, key) in providers" :key="key">
+                                <button type="button" @click="updateProvider(key)"
+                                    :class="provider === key ? 'bg-accent text-white ring-2 ring-accent ring-offset-2' : 'bg-white border border-gray-200 text-gray-600 hover:border-accent'"
+                                    class="px-4 py-3 rounded-xl text-sm font-bold transition-all shadow-sm">
+                                    <span x-text="p.name"></span>
+                                </button>
+                            </template>
+                        </div>
+                    </div>
+
+                    <!-- Base URL (conditional show) -->
+                    <div class="space-y-1.5" x-show="provider === 'custom'">
+                        <label class="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">API Base URL</label>
+                        <input type="text" name="ai_base_url" x-model="baseUrl" @input.debounce.500ms="fetchModels()"
+                            class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 focus:bg-white focus:border-accent focus:ring-4 focus:ring-accent/10 outline-none transition-all font-medium"
+                            placeholder="例如: https://api.openai.com/v1">
+                    </div>
+                    <template x-if="provider !== 'custom'">
+                        <input type="hidden" name="ai_base_url" :value="baseUrl">
+                    </template>
+
+                    <!-- API Key -->
+                    <div class="space-y-1.5">
+                        <label class="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">API Key</label>
+                        <div class="relative" x-data="{ show: false }">
+                            <input :type="show ? 'text' : 'password'" name="ai_api_key" x-model="apiKey" @input.debounce.500ms="fetchModels()"
+                                class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 focus:bg-white focus:border-accent focus:ring-4 focus:ring-accent/10 outline-none transition-all font-medium pr-12">
+                            <button type="button" @click="show = !show"
+                                class="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                                <span x-text="show ? '🙈' : '👁️'"></span>
+                            </button>
+                        </div>
+                        <p class="text-[10px] text-gray-400 ml-1">输入 Key 后将自动尝试获取可用模型列表</p>
+                    </div>
+
+                    <!-- Model Selection -->
+                    <div class="space-y-1.5">
+                        <label class="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1 flex items-center justify-between">
+                            <span>模型名称 (Model)</span>
+                            <span x-show="loadingModels" class="animate-spin text-xs">⌛</span>
+                        </label>
+
+                        <div class="relative">
+                            <!-- Dropdown for discovered models -->
+                            <template x-if="availableModels.length > 0">
+                                <select name="ai_model" x-model="modelName"
+                                    class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 focus:bg-white focus:border-accent focus:ring-4 focus:ring-accent/10 outline-none transition-all font-medium appearance-none">
+                                    <template x-for="m in availableModels" :key="m">
+                                        <option :value="m" x-text="m" :selected="m === modelName"></option>
+                                    </template>
+                                </select>
+                            </template>
+
+                            <!-- Fallback input if no models found or error -->
+                            <template x-if="availableModels.length === 0">
+                                <input type="text" name="ai_model" x-model="modelName"
+                                    class="w-full px-5 py-3 rounded-2xl bg-white/50 border border-gray-200 focus:bg-white focus:border-accent focus:ring-4 focus:ring-accent/10 outline-none transition-all font-medium"
+                                    placeholder="例如: gpt-4o-mini 或 gemini-1.5-flash">
+                            </template>
+
+                            <div x-show="availableModels.length > 0" class="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400">
+                                ▾
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mt-8 flex items-center justify-between border-t border-gray-100 pt-6">
+                    <div class="text-xs text-gray-400">
+                        提示: Gemini 建议填 <code class="bg-gray-100 px-1 rounded">gemini-1.5-flash</code>
+                    </div>
+                    <button type="submit"
+                        class="w-full md:w-auto justify-center bg-accent text-white px-10 py-3 rounded-xl font-bold hover:bg-accent/90 transition-all shadow-lg active:scale-95 flex items-center gap-2">
+                        <span class="[.htmx-request_&]:hidden">💾 保存并应用</span>
+                        <span class="hidden [.htmx-request_&]:inline animate-spin">⌛</span>
+                    </button>
+                </div>
+            </div>
+        </form>
+    </div>
+
+    <!-- Global Save FAB -->
+
+
+    <div id="save-result" class="hidden"></div>
+
+    <script>
+        const jellyfinServerId = '{{.JellyfinServerID}}';
+
+        function openAniListAuth() {
+            const clientId = document.getElementById('anilist_client_id').value;
+            if (!clientId) {
+                alert('请先输入 Client ID');
+                return;
+            }
+            const url = `https://anilist.co/api/v2/oauth/authorize?client_id=${clientId}&response_type=token`;
+            window.open(url, '_blank');
+        }
+
+        function openJellyfin() {
+            let url = document.getElementById('jellyfin_url_input').value;
+            if (!url) {
+                console.error('请先输入 Jellyfin URL');
+                return;
+            }
+            url = url.replace(/\/$/, '');
+            let targetUrl = url;
+            if (jellyfinServerId) {
+                targetUrl = url + "/web/index.html?serverId=" + jellyfinServerId;
+            }
+            window.open(targetUrl, '_blank');
+        }
+
+        function runtimeStatsCard() {
+            return {
+                stats: null,
+                loading: false,
+                error: '',
+                hasLoaded: false,
+                lastUpdated: '',
+                init() {
+                    this.refresh();
+                    window.addEventListener('tab-security', () => {
+                        if (!this.hasLoaded) this.refresh();
+                    });
+                },
+                async refresh() {
+                    this.loading = true;
+                    this.error = '';
+                    try {
+                        const res = await fetch('/api/runtime/stats', {
+                            method: 'GET',
+                            headers: { 'Accept': 'application/json' }
+                        });
+                        let data = {};
+                        try {
+                            data = await res.json();
+                        } catch (_) {
+                            data = {};
+                        }
+                        if (!res.ok) {
+                            throw new Error(data.error || `请求失败 (${res.status})`);
+                        }
+                        this.stats = data;
+                        this.hasLoaded = true;
+                        this.lastUpdated = new Date().toLocaleString();
+                    } catch (e) {
+                        this.error = e?.message || '加载失败';
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+                formatMB(bytes) {
+                    if (typeof bytes !== 'number') return '-';
+                    return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+                },
+                formatUptime(seconds) {
+                    if (typeof seconds !== 'number') return '-';
+                    const d = Math.floor(seconds / 86400);
+                    const h = Math.floor((seconds % 86400) / 3600);
+                    const m = Math.floor((seconds % 3600) / 60);
+                    const s = Math.floor(seconds % 60);
+                    if (d > 0) return `${d}d ${h}h ${m}m`;
+                    if (h > 0) return `${h}h ${m}m ${s}s`;
+                    if (m > 0) return `${m}m ${s}s`;
+                    return `${s}s`;
+                },
+                formatUnix(unixTs) {
+                    if (!unixTs || typeof unixTs !== 'number') return '-';
+                    return new Date(unixTs * 1000).toLocaleString();
+                },
+                gcPerHour() {
+                    const numGC = this.stats?.gc?.num_gc;
+                    const uptime = this.stats?.uptime_seconds;
+                    if (typeof numGC !== 'number' || typeof uptime !== 'number' || uptime <= 0) return '-';
+                    const rate = (numGC * 3600) / uptime;
+                    return Number.isFinite(rate) ? rate.toFixed(1) : '-';
+                },
+                metricLevel(metric) {
+                    const goroutines = this.stats?.go?.goroutines ?? 0;
+                    const heapAlloc = this.stats?.memory?.heap_alloc_bytes ?? 0;
+                    const gcRateRaw = Number(this.gcPerHour());
+                    const gcRate = Number.isFinite(gcRateRaw) ? gcRateRaw : 0;
+
+                    if (metric === 'goroutines') {
+                        if (goroutines >= 1200) return 'danger';
+                        if (goroutines >= 500) return 'warn';
+                        return 'ok';
+                    }
+                    if (metric === 'heap') {
+                        if (heapAlloc >= 2 * 1024 * 1024 * 1024) return 'danger';
+                        if (heapAlloc >= 1 * 1024 * 1024 * 1024) return 'warn';
+                        return 'ok';
+                    }
+                    if (metric === 'gc_rate') {
+                        if (gcRate >= 900) return 'danger';
+                        if (gcRate >= 300) return 'warn';
+                        return 'ok';
+                    }
+                    return 'ok';
+                },
+                healthLevel() {
+                    const levels = ['goroutines', 'heap', 'gc_rate'].map((m) => this.metricLevel(m));
+                    if (levels.includes('danger')) return 'danger';
+                    if (levels.includes('warn')) return 'warn';
+                    return 'ok';
+                },
+                metricCardClass(metric) {
+                    const level = this.metricLevel(metric);
+                    if (level === 'danger') return 'border-red-200 bg-red-50';
+                    if (level === 'warn') return 'border-amber-200 bg-amber-50';
+                    return 'border-emerald-200 bg-emerald-50';
+                },
+                metricValueClass(metric) {
+                    const level = this.metricLevel(metric);
+                    if (level === 'danger') return 'text-red-700';
+                    if (level === 'warn') return 'text-amber-700';
+                    return 'text-emerald-700';
+                },
+                healthPillClass() {
+                    const level = this.healthLevel();
+                    if (level === 'danger') return 'border-red-200 bg-red-50 text-red-700';
+                    if (level === 'warn') return 'border-amber-200 bg-amber-50 text-amber-700';
+                    return 'border-emerald-200 bg-emerald-50 text-emerald-700';
+                },
+                healthText() {
+                    const level = this.healthLevel();
+                    if (level === 'danger') return '告警：负载偏高';
+                    if (level === 'warn') return '关注：负载上升';
+                    return '正常：运行平稳';
+                },
+                healthHint() {
+                    const level = this.healthLevel();
+                    if (level === 'danger') return '建议检查是否有异常任务、重复页面连接或长时间堆积的后台处理。';
+                    if (level === 'warn') return '当前负载有上升趋势，建议观察一段时间并结合下载/扫描任务确认。';
+                    return '当前指标在单人自用场景下表现正常。';
+                }
+            };
+        }
+    </script>
+</div>
+
+<style>
+    [x-cloak] {
+        display: none !important;
+    }
+
+    .htmx-indicator {
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 200ms ease-in;
+    }
+
+    .htmx-indicator.htmx-request {
+        opacity: 1;
+        pointer-events: auto;
+    }
+</style>
+{{ if not .SkipLayout }}{{ template "footer.html" . }}{{ end }}
+{{/* Legacy UI fixture used only by compatibility tests. */}}

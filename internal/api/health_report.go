@@ -9,26 +9,26 @@ import (
 )
 
 type HealthReport struct {
-	GeneratedAt              time.Time
-	Configs                  map[string]bool
-	SubscriptionTotal        int64
-	SubscriptionActive       int64
-	AutoDisabledOnDone       int64
-	DownloadCompleted        int64
-	DownloadDownloading      int64
-	DownloadFailed           int64
-	DownloadArchived         int64
-	LocalAnimeCount          int64
-	LocalEpisodeCount        int64
-	OpenLibraryIssues        int64
-	JellyfinSeriesCount      int64
-	JellyfinEpisodeCount     int64
-	SubscriptionsPlayable    int64
-	SubscriptionsPendingSync int64
-	StaleSubscriptions72H    int64
-	HealthTone               string
-	Summary                  string
-	Recommendations          []string
+	GeneratedAt              time.Time       `json:"generated_at"`
+	Configs                  map[string]bool `json:"configs"`
+	SubscriptionTotal        int64           `json:"subscription_total"`
+	SubscriptionActive       int64           `json:"subscription_active"`
+	AutoDisabledOnDone       int64           `json:"auto_disabled_on_done"`
+	DownloadCompleted        int64           `json:"download_completed"`
+	DownloadDownloading      int64           `json:"download_downloading"`
+	DownloadFailed           int64           `json:"download_failed"`
+	DownloadArchived         int64           `json:"download_archived"`
+	LocalAnimeCount          int64           `json:"local_anime_count"`
+	LocalEpisodeCount        int64           `json:"local_episode_count"`
+	OpenLibraryIssues        int64           `json:"open_library_issues"`
+	JellyfinSeriesCount      int64           `json:"jellyfin_series_count"`
+	JellyfinEpisodeCount     int64           `json:"jellyfin_episode_count"`
+	SubscriptionsPlayable    int64           `json:"subscriptions_playable"`
+	SubscriptionsPendingSync int64           `json:"subscriptions_pending_sync"`
+	StaleSubscriptions72H    int64           `json:"stale_subscriptions_72h"`
+	HealthTone               string          `json:"health_tone"`
+	Summary                  string          `json:"summary"`
+	Recommendations          []string        `json:"recommendations"`
 }
 
 func buildHealthReport() HealthReport {

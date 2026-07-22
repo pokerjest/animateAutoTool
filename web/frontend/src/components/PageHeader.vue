@@ -1,0 +1,2 @@
+<script setup lang="ts">defineProps<{ eyebrow?: string; title: string; description?: string }>();</script>
+<template><header class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between"><div class="max-w-3xl"><p v-if="eyebrow" class="eyebrow mb-2">{{ eyebrow }}</p><h2 class="page-title">{{ title }}</h2><p v-if="description" class="muted mt-2 text-sm leading-6">{{ description }}</p></div><div class="flex flex-wrap gap-2"><slot /></div></header></template>

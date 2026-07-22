@@ -7,7 +7,7 @@ APP_DISPLAY_NAME="Animate Auto Tool"
 APP_BUNDLE_NAME="${APP_DISPLAY_NAME}.app"
 APP_IDENTIFIER="com.pokerjest.animateautotool"
 VERSION_FILE="./VERSION"
-DEFAULT_VERSION="v0.5.4"
+DEFAULT_VERSION="v0.6.0"
 DIST_DIR="./dist"
 SRC_PATH="cmd/server/main.go"
 
@@ -29,6 +29,10 @@ else
     FILE_VERSION="$DEFAULT_VERSION"
 fi
 VERSION=${1:-"$FILE_VERSION"}
+
+echo "Building embedded Vue frontend..."
+npm --prefix web/frontend ci
+npm --prefix web/frontend run build
 
 PACKAGE_INCLUDE_ARCHIVES=${PACKAGE_INCLUDE_ARCHIVES:-1}
 PACKAGE_INCLUDE_WINDOWS_STANDALONE=${PACKAGE_INCLUDE_WINDOWS_STANDALONE:-1}
@@ -82,7 +86,6 @@ package_archive() {
     mkdir -p "$platform_dir/bin" "$platform_dir/scripts" "$platform_dir/logs" "$platform_dir/data"
 
     cp "$binary_path" "$platform_dir/bin/$output_name"
-    cp -r web "$platform_dir/"
     cp config.yaml.example "$platform_dir/"
     cp config.yaml.example "$platform_dir/config.yaml"
     cp README.md "$platform_dir/"

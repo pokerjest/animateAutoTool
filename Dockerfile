@@ -1,4 +1,13 @@
-# Build Stage
+# Frontend Build Stage
+FROM node:22-alpine AS web-builder
+
+WORKDIR /app/web/frontend
+COPY web/frontend/package.json web/frontend/package-lock.json ./
+RUN npm ci
+COPY web/frontend/ ./
+RUN npm run build
+
+# Go Build Stage
 FROM golang:1.25.9-alpine AS builder
 
 # Set working directory
@@ -15,6 +24,7 @@ RUN go mod download
 
 # Copy source code
 COPY . .
+COPY --from=web-builder /app/web/dist ./web/dist
 
 # Build the application
 # CGO_ENABLED=0 for static binary
@@ -31,9 +41,6 @@ WORKDIR /app
 
 # Copy binary from builder
 COPY --from=builder /app/animate-server .
-
-# Copy web templates and static files
-COPY --from=builder /app/web ./web
 
 # Create data directory
 RUN mkdir -p data

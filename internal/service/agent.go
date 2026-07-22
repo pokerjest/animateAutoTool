@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/parser"
+	"gorm.io/gorm"
 )
 
 type AgentService struct {
@@ -31,12 +33,6 @@ func NewAgentService() *AgentService {
 func (s *AgentService) RunAgentForLibrary() {
 	log.Println("Agent: Starting metadata enrichment (Agent Phase)...")
 
-	var animes []model.LocalAnime
-	if err := db.DB.Preload("Metadata").Find(&animes).Error; err != nil {
-		log.Printf("Agent: Failed to load library: %v", err)
-		return
-	}
-
 	networkQueue := make(chan uint, 1000)
 	var wg sync.WaitGroup
 
@@ -51,31 +47,39 @@ func (s *AgentService) RunAgentForLibrary() {
 
 	// Producer
 	go func() {
-		for _, anime := range animes {
-			// 1. Level 0: Local Assets (NFO/Images) - Fast, Sync
-			s.scanLocalAssets(&anime)
+		var animes []model.LocalAnime
+		batchSize := 100
+		err := db.DB.Preload("Metadata").FindInBatches(&animes, batchSize, func(tx *gorm.DB, batch int) error {
+			for _, anime := range animes {
+				// 1. Level 0: Local Assets (NFO/Images) - Fast, Sync
+				s.scanLocalAssets(&anime)
 
-			// 2. Decide if Network Needed
-			// If missing IDs or Summary, queue it
-			needsNetwork := false
-			if anime.MetadataID == nil || *anime.MetadataID == 0 {
-				needsNetwork = true
-			} else {
-				if anime.Metadata.BangumiID == 0 && anime.Metadata.TMDBID == 0 {
+				// 2. Decide if Network Needed
+				// If missing IDs or Summary, queue it
+				needsNetwork := false
+				if anime.MetadataID == nil || *anime.MetadataID == 0 {
 					needsNetwork = true
-				} else if anime.Metadata.TMDBID != 0 {
-					// Check if any episode is missing metadata (handle NULL or empty)
-					var count int64
-					db.DB.Model(&model.LocalEpisode{}).Where("local_anime_id = ? AND (image IS NULL OR image = '')", anime.ID).Count(&count)
-					if count > 0 {
+				} else {
+					if anime.Metadata.BangumiID == 0 && anime.Metadata.TMDBID == 0 {
 						needsNetwork = true
+					} else if anime.Metadata.TMDBID != 0 {
+						// Check if any episode is missing metadata (handle NULL or empty)
+						var count int64
+						db.DB.Model(&model.LocalEpisode{}).Where("local_anime_id = ? AND (image IS NULL OR image = '')", anime.ID).Count(&count)
+						if count > 0 {
+							needsNetwork = true
+						}
 					}
 				}
-			}
 
-			if needsNetwork {
-				networkQueue <- anime.ID
+				if needsNetwork {
+					networkQueue <- anime.ID
+				}
 			}
+			return nil
+		}).Error
+		if err != nil {
+			log.Printf("Agent: FindInBatches failed: %v", err)
 		}
 		close(networkQueue)
 	}()
@@ -163,12 +167,24 @@ func (s *AgentService) networkWorker(queue <-chan uint) {
 			continue
 		}
 
-		// Re-use existing Enrich Logic
+		// Re-use existing Enrich Logic with isolated context timeout
 		log.Printf("Agent: Network enriching %s", anime.Title)
-		if err := s.metaSvc.EnrichAnime(&anime); err != nil {
-			log.Printf("Agent: Failed to enrich anime %s: %v", anime.Title, err)
-		}
 
-		// Save result handled inside EnrichAnimeMetadata
+		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+		done := make(chan error, 1)
+
+		go func(a *model.LocalAnime) {
+			done <- s.metaSvc.EnrichAnime(a)
+		}(&anime)
+
+		select {
+		case err := <-done:
+			if err != nil {
+				log.Printf("Agent: Failed to enrich anime %s: %v", anime.Title, err)
+			}
+		case <-ctx.Done():
+			log.Printf("Agent: Timeout enriching anime %s after 45s", anime.Title)
+		}
+		cancel()
 	}
 }

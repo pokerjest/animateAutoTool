@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 安全漏洞报告
+    url: https://github.com/pokerjest/animateAutoTool/blob/main/SECURITY.md
+    about: 安全问题请走 SECURITY.md 的私密渠道,不要在公开 Issue 报告
+  - name: 使用问题 / 讨论
+    url: https://github.com/pokerjest/animateAutoTool/discussions
+    about: 使用问题、配置疑问、经验分享请到 Discussions(如未开启,可在 Issue 用 question 标签)

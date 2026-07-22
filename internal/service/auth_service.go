@@ -10,6 +10,7 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/security"
+	"github.com/pokerjest/animateAutoTool/internal/store"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -21,10 +22,21 @@ func NewAuthService() *AuthService {
 	return &AuthService{}
 }
 
+func userStore() *store.UserStore {
+	if db.DB == nil {
+		return nil
+	}
+	return store.NewUserStore(db.DB)
+}
+
 // Login verifies username and password
 func (s *AuthService) Login(username, password string) (*model.User, error) {
-	var user model.User
-	if err := db.DB.Where("username = ?", username).First(&user).Error; err != nil {
+	st := userStore()
+	if st == nil {
+		return nil, errors.New("invalid username or password")
+	}
+	user, err := st.GetByUsername(username)
+	if err != nil {
 		return nil, errors.New("invalid username or password")
 	}
 
@@ -32,7 +44,7 @@ func (s *AuthService) Login(username, password string) (*model.User, error) {
 		return nil, errors.New("invalid username or password")
 	}
 
-	return &user, nil
+	return user, nil
 }
 
 // CreateUser registers a new user (internal use mostly)
@@ -47,7 +59,11 @@ func (s *AuthService) CreateUser(username, password string) (*model.User, error)
 		PasswordHash: string(hashedPassword),
 	}
 
-	if err := db.DB.Create(&user).Error; err != nil {
+	st := userStore()
+	if st == nil {
+		return nil, errors.New("invalid database")
+	}
+	if err := st.Create(&user); err != nil {
 		return nil, err
 	}
 
@@ -58,8 +74,15 @@ func (s *AuthService) CreateUser(username, password string) (*model.User, error)
 func (s *AuthService) EnsureDefaultUser() {
 	s.removeLegacyRecoveryAccount()
 
-	var count int64
-	db.DB.Model(&model.User{}).Count(&count)
+	st := userStore()
+	if st == nil {
+		return
+	}
+	count, err := st.Count()
+	if err != nil {
+		log.Printf("Failed to count users: %v", err)
+		return
+	}
 	if count == 0 {
 		password, err := security.RandomPassword(24)
 		if err != nil {
@@ -84,15 +107,23 @@ func (s *AuthService) EnsureDefaultUser() {
 }
 
 func (s *AuthService) removeLegacyRecoveryAccount() {
-	if err := db.DB.Where("username = ?", "backup_admin").Delete(&model.User{}).Error; err != nil {
+	st := userStore()
+	if st == nil {
+		return
+	}
+	if err := st.DeleteByUsername("backup_admin"); err != nil {
 		log.Printf("Failed to remove legacy recovery account: %v", err)
 	}
 }
 
 // ChangePassword updates the password for a given user
 func (s *AuthService) ChangePassword(userID uint, oldPassword, newPassword string) error {
-	var user model.User
-	if err := db.DB.First(&user, userID).Error; err != nil {
+	st := userStore()
+	if st == nil {
+		return errors.New("user not found")
+	}
+	user, err := st.GetByID(userID)
+	if err != nil {
 		return errors.New("user not found")
 	}
 
@@ -101,16 +132,20 @@ func (s *AuthService) ChangePassword(userID uint, oldPassword, newPassword strin
 		return errors.New("incorrect old password")
 	}
 
-	return s.updatePassword(&user, newPassword)
+	return s.updatePassword(user, newPassword)
 }
 
 func (s *AuthService) SetPassword(userID uint, newPassword string) error {
-	var user model.User
-	if err := db.DB.First(&user, userID).Error; err != nil {
+	st := userStore()
+	if st == nil {
+		return errors.New("user not found")
+	}
+	user, err := st.GetByID(userID)
+	if err != nil {
 		return errors.New("user not found")
 	}
 
-	return s.updatePassword(&user, newPassword)
+	return s.updatePassword(user, newPassword)
 }
 
 func (s *AuthService) ResetPasswordByUsername(username, newPassword string) error {
@@ -119,12 +154,16 @@ func (s *AuthService) ResetPasswordByUsername(username, newPassword string) erro
 		return errors.New("user not found")
 	}
 
-	var user model.User
-	if err := db.DB.Where("username = ?", username).First(&user).Error; err != nil {
+	st := userStore()
+	if st == nil {
+		return errors.New("user not found")
+	}
+	user, err := st.GetByUsername(username)
+	if err != nil {
 		return errors.New("user not found")
 	}
 
-	return s.updatePassword(&user, newPassword)
+	return s.updatePassword(user, newPassword)
 }
 
 func (s *AuthService) updatePassword(user *model.User, newPassword string) error {
@@ -134,7 +173,11 @@ func (s *AuthService) updatePassword(user *model.User, newPassword string) error
 	}
 
 	user.PasswordHash = string(hashedPassword)
-	if err := db.DB.Save(user).Error; err != nil {
+	st := userStore()
+	if st == nil {
+		return errors.New("invalid database")
+	}
+	if err := st.Save(user); err != nil {
 		return err
 	}
 

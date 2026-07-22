@@ -1,0 +1,110 @@
+name: Bug 报告
+description: 报告一个可以稳定复现的问题
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢花时间报告 Bug!请尽量按模板填写,信息越完整定位越快。
+
+        **安全漏洞请勿在此提交**,请参考 [SECURITY.md](../blob/main/SECURITY.md)。
+
+  - type: checkboxes
+    id: prechecks
+    attributes:
+      label: 提交前检查
+      options:
+        - label: 我已经在 [Issues](https://github.com/pokerjest/animateAutoTool/issues?q=is%3Aissue) 中搜索过,没有发现重复
+          required: true
+        - label: 我使用的是最新版本(可在 Release 页面查看)
+          required: true
+        - label: 这不是一个安全漏洞(如果是,请走 SECURITY.md 流程)
+          required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: 版本
+      description: 在 Web 界面右下角或 `./server -version` 查看
+      placeholder: "v0.6.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: 操作系统
+      options:
+        - Windows (exe / zip)
+        - Windows (WSL)
+        - macOS (dmg)
+        - macOS (tar.gz)
+        - Linux (tar.gz)
+        - Linux (从源码编译)
+        - Docker
+    validations:
+      required: true
+
+  - type: input
+    id: arch
+    attributes:
+      label: 架构
+      placeholder: "amd64 / arm64"
+    validations:
+      required: true
+
+  - type: textarea
+    id: describe
+    attributes:
+      label: 问题描述
+      description: 简明描述出了什么问题
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 复现步骤
+      placeholder: |
+        1. 打开 /subscriptions
+        2. 点击 ...
+        3. 看到 ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期行为
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际行为
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 相关日志
+      description: |
+        从 `logs/server.log` 或 Web 设置页运行时状态卡片粘贴相关片段。
+        **请先脱敏**:Token、密码、Cookie、内网 IP 等不要直接贴。
+      render: shell
+
+  - type: textarea
+    id: config
+    attributes:
+      label: 相关配置片段(可选,脱敏后)
+      description: 比如 config.yaml 关键段、qB 设置、反向代理头等
+      render: yaml
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: 其他上下文
+      description: 截图、视频、网络环境(公网/内网/反向代理)、是否使用代理等
