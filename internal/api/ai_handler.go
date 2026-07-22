@@ -25,6 +25,7 @@ var (
 
 const (
 	aiChatSessionKey = "ai_chat_id"
+	defaultAIModel   = "gpt-4o-mini"
 	maxChatMessages  = 25
 	aiSystemPrompt   = "You are a helpful assistant integrated into AnimateAutoTool, an anime downloading and management application. Use tools to help the user manage their system. Be concise."
 )
@@ -105,7 +106,7 @@ func AIChatHandler(c *gin.Context) {
 		return
 	}
 	if modelName == "" {
-		modelName = "gpt-4o-mini" // fallback
+		modelName = defaultAIModel // fallback
 	}
 
 	client := ai.NewClient(baseURL, apiKey, modelName)
@@ -272,7 +273,7 @@ func GetAIStatusHandler(c *gin.Context) {
 		baseUrl = "https://api.openai.com/v1"
 	}
 	if modelName == "" {
-		modelName = "gpt-4o-mini"
+		modelName = defaultAIModel
 	}
 
 	c.JSON(http.StatusOK, gin.H{

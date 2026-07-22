@@ -104,7 +104,9 @@ func TestV1PaginationUsesStandardMeta(t *testing.T) {
 	r.ServeHTTP(w, req)
 	require.Equal(t, http.StatusOK, w.Code)
 	var payload struct {
-		Data struct{ Items []model.Subscription `json:"items"` } `json:"data"`
+		Data struct {
+			Items []model.Subscription `json:"items"`
+		} `json:"data"`
 		Meta struct {
 			Page     int   `json:"page"`
 			PageSize int   `json:"page_size"`

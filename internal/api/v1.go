@@ -724,7 +724,7 @@ func V1AssistantMessageHandler(c *gin.Context) {
 		return
 	}
 	if modelName == "" {
-		modelName = "gpt-4o-mini"
+		modelName = defaultAIModel
 	}
 	historyKey := aiChatHistoryKey(c)
 	chatMutex.Lock()
