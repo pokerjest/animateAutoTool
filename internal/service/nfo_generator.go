@@ -49,7 +49,7 @@ func isDirWritable(dir string) bool {
 		return false
 	}
 	testFile := filepath.Join(dir, ".animate_write_test")
-	err := os.WriteFile(testFile, []byte{1}, 0644)
+	err := os.WriteFile(testFile, []byte{1}, 0o600)
 	if err != nil {
 		return false
 	}

@@ -65,14 +65,6 @@ func consumeRestoreArtifact(token string) (string, error) {
 	return path, nil
 }
 
-func discardRestoreArtifact(token string) {
-	path, err := consumeRestoreArtifact(token)
-	if err != nil {
-		return
-	}
-	_ = os.Remove(path)
-}
-
 func ensureRestoreArtifactJanitor() {
 	restoreArtifactsJanitorOnce.Do(func() {
 		go func() {

@@ -64,8 +64,8 @@ func fetchJellyfinProgress(anime *model.LocalAnime) (map[string]JfEpisodeData, s
 		targetProvider := SourceBangumi
 		targetID := strconv.Itoa(anime.Metadata.BangumiID)
 
-		if dataSource == "tmdb" && anime.Metadata.TMDBID != 0 {
-			targetProvider = "tmdb"
+		if dataSource == SourceTMDB && anime.Metadata.TMDBID != 0 {
+			targetProvider = SourceTMDB
 			targetID = strconv.Itoa(anime.Metadata.TMDBID)
 		}
 
@@ -84,7 +84,7 @@ func fetchJellyfinProgress(anime *model.LocalAnime) (map[string]JfEpisodeData, s
 
 		// If strictly failed, try fallback
 		if seriesId == "" && anime.Metadata.TMDBID != 0 {
-			sid, err := client.GetItemByProviderID("tmdb", strconv.Itoa(anime.Metadata.TMDBID))
+			sid, err := client.GetItemByProviderID(SourceTMDB, strconv.Itoa(anime.Metadata.TMDBID))
 			if err == nil {
 				seriesId = sid
 			}
@@ -133,7 +133,7 @@ func fetchBangumiProgress(anime *model.LocalAnime, effectiveSource string) (int,
 	bangumiWatchedCount := -1
 	bangumiCollectionStatus := 0 // 0=not collected, 1=想看, 2=看过, 3=在看, 4=搁置, 5=抛弃
 
-	if anime.Metadata != nil && effectiveSource == "bangumi" && anime.Metadata.BangumiID != 0 {
+	if anime.Metadata != nil && effectiveSource == SourceBangumi && anime.Metadata.BangumiID != 0 {
 		log.Printf("DEBUG: Attempting to fetch Bangumi progress for BangumiID=%d", anime.Metadata.BangumiID)
 		bgmToken := configValue(model.ConfigKeyBangumiAccessToken)
 		appID := configValue(model.ConfigKeyBangumiAppID)
@@ -166,7 +166,7 @@ func fetchBangumiProgress(anime *model.LocalAnime, effectiveSource string) (int,
 	} else {
 		if anime.Metadata == nil {
 			log.Printf("DEBUG: Skipping Bangumi fetch: no metadata")
-		} else if effectiveSource != "bangumi" {
+		} else if effectiveSource != SourceBangumi {
 			log.Printf("DEBUG: Skipping Bangumi fetch: effectiveSource is '%s', not 'bangumi'", effectiveSource)
 		} else if anime.Metadata.BangumiID == 0 {
 			log.Printf("DEBUG: Skipping Bangumi fetch: BangumiID is 0")

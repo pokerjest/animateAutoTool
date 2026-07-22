@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -108,7 +109,7 @@ func TestUnzipExtractsFiles(t *testing.T) {
 	require.NoError(t, unzip(zipPath, dest))
 
 	for name, want := range files {
-		got, err := os.ReadFile(filepath.Join(dest, name))
+		got, err := fs.ReadFile(os.DirFS(dest), filepath.ToSlash(name))
 		require.NoError(t, err, "missing extracted file: %s", name)
 		assert.Equal(t, want, string(got))
 	}
@@ -173,7 +174,7 @@ func TestUntarExtractsTarGz(t *testing.T) {
 	require.NoError(t, os.MkdirAll(dest, 0o755))
 	require.NoError(t, untar(archivePath, dest))
 
-	got, err := os.ReadFile(filepath.Join(dest, "dir/file.txt"))
+	got, err := fs.ReadFile(os.DirFS(dest), "dir/file.txt")
 	require.NoError(t, err)
 	assert.Equal(t, "hello world", string(got))
 }
