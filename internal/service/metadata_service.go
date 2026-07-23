@@ -410,7 +410,7 @@ func (s *MetadataService) setActiveFields(m *model.AnimeMetadata, rawQueryTitle 
 	}
 
 	if m.ID != 0 {
-		m.Image = fmt.Sprintf("/api/posters/%d", m.ID)
+		m.Image = fmt.Sprintf("/api/v1/posters/%d", m.ID)
 	}
 	if m.Title == "" {
 		m.Title = rawQueryTitle

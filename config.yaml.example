@@ -23,3 +23,8 @@ auth:
 # Managed sidecars
 managed_services:
   download_missing: false # set true if you want AList/Jellyfin to auto-download when missing
+
+# Web settings mirror
+# Values saved from the settings page are synchronized here. This section can
+# contain service passwords and API keys, so do not share or commit config.yaml.
+system_settings: {}

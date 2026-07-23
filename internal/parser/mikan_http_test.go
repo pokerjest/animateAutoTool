@@ -117,3 +117,28 @@ func TestMikanSearchAndSubgroups(t *testing.T) {
 		t.Fatalf("unexpected subgroups: %+v", subgroups)
 	}
 }
+
+func TestMikanIDFromRSSURLOnlyAcceptsOfficialBangumiFeeds(t *testing.T) {
+	tests := []struct {
+		name string
+		url  string
+		id   string
+		ok   bool
+	}{
+		{name: "base feed", url: "https://mikanani.me/RSS/Bangumi?bangumiId=3141", id: "3141", ok: true},
+		{name: "subgroup feed", url: "https://mikanani.me/RSS/Bangumi?bangumiId=3141&subgroupid=583", id: "3141", ok: true},
+		{name: "official www host", url: "https://www.mikanani.me/rss/bangumi/?bangumiId=9", id: "9", ok: true},
+		{name: "lookalike host", url: "https://mikanani.me.example/RSS/Bangumi?bangumiId=3141", ok: false},
+		{name: "wrong path", url: "https://mikanani.me/Home/Bangumi/3141?bangumiId=3141", ok: false},
+		{name: "non numeric", url: "https://mikanani.me/RSS/Bangumi?bangumiId=abc", ok: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			id, ok := MikanIDFromRSSURL(tt.url)
+			if ok != tt.ok || id != tt.id {
+				t.Fatalf("MikanIDFromRSSURL(%q) = %q, %v; want %q, %v", tt.url, id, ok, tt.id, tt.ok)
+			}
+		})
+	}
+}

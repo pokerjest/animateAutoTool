@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -131,6 +130,10 @@ var runSubscriptionCheck = func(sub *model.Subscription, source string) error {
 	return nil
 }
 
+var enrichSubscriptionMetadata = func(metadata *model.AnimeMetadata, title string) {
+	service.NewMetadataService().EnrichMetadata(metadata, title)
+}
+
 func SubscriptionsHandler(c *gin.Context) {
 	skip := IsHTMX(c)
 	subs, err := listSubscriptionsWithMetadata()
@@ -170,6 +173,7 @@ func CreateSubscriptionHandler(c *gin.Context) {
 }
 
 func createSubscriptionInternal(sub *model.Subscription) error {
+	normalizeMikanAssociation(sub)
 	normalizeSubscriptionStrategy(sub)
 
 	if sub.Metadata == nil {
@@ -179,26 +183,13 @@ func createSubscriptionInternal(sub *model.Subscription) error {
 		sub.Metadata.Title = parser.CleanTitle(sub.Title)
 	}
 
-	// Try to extract BangumiID from RSS URL
-	if sub.RSSUrl != "" {
-		if u, err := url.Parse(sub.RSSUrl); err == nil {
-			q := u.Query()
-			if bidStr := q.Get("bangumiId"); bidStr != "" {
-				if bid, err := strconv.Atoi(bidStr); err == nil {
-					sub.Metadata.BangumiID = bid
-				}
-			}
-		}
-	}
-
 	// Auto-fill FilterRule from SubtitleGroup if FilterRule is empty
 	if sub.FilterRule == "" && sub.SubtitleGroup != "" && !sub.AllowMultiSubgroup {
 		sub.FilterRule = sub.SubtitleGroup
 	}
 
 	// Enrich Metadata (Bangumi & TMDB)
-	metaSvc := service.NewMetadataService()
-	metaSvc.EnrichMetadata(sub.Metadata, sub.Title)
+	enrichSubscriptionMetadata(sub.Metadata, sub.Title)
 
 	sub.IsActive = true
 
@@ -210,6 +201,10 @@ func createSubscriptionInternal(sub *model.Subscription) error {
 			// Restore it
 			existing.DeletedAt = gorm.DeletedAt{} // Restore
 			existing.Title = sub.Title
+			existing.MikanID = sub.MikanID
+			existing.Image = sub.Image
+			existing.SubtitleGroup = sub.SubtitleGroup
+			existing.Season = sub.Season
 			existing.FilterRule = sub.FilterRule
 			existing.ExcludeRule = sub.ExcludeRule
 			existing.BackupRSSUrl = sub.BackupRSSUrl
@@ -241,6 +236,21 @@ func createSubscriptionInternal(sub *model.Subscription) error {
 	}()
 
 	return nil
+}
+
+func normalizeMikanAssociation(sub *model.Subscription) {
+	if sub == nil {
+		return
+	}
+	sub.MikanID = strings.TrimSpace(sub.MikanID)
+	sub.SubtitleGroup = strings.TrimSpace(sub.SubtitleGroup)
+	sub.Image = strings.TrimSpace(sub.Image)
+	sub.Season = strings.TrimSpace(sub.Season)
+	if sub.MikanID == "" {
+		if mikanID, ok := parser.MikanIDFromRSSURL(sub.RSSUrl); ok {
+			sub.MikanID = mikanID
+		}
+	}
 }
 
 func normalizeSubscriptionStrategy(sub *model.Subscription) {

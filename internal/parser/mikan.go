@@ -8,6 +8,8 @@ import (
 	"log"
 	"net/url"
 	"regexp"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-resty/resty/v2"
@@ -24,6 +26,37 @@ func NewMikanParser() *MikanParser {
 	return &MikanParser{
 		client: client,
 	}
+}
+
+// MikanIDFromRSSURL extracts the Mikan bangumi identifier from an official
+// Bangumi RSS URL. Mikan calls this query parameter "bangumiId", but it is
+// unrelated to the subject identifier used by bgm.tv.
+func MikanIDFromRSSURL(raw string) (string, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", false
+	}
+
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return "", false
+	}
+	host := strings.ToLower(parsed.Hostname())
+	if host != "mikanani.me" && host != "www.mikanani.me" {
+		return "", false
+	}
+	if !strings.EqualFold(strings.TrimSuffix(parsed.Path, "/"), "/RSS/Bangumi") {
+		return "", false
+	}
+
+	id := strings.TrimSpace(parsed.Query().Get("bangumiId"))
+	if id == "" {
+		return "", false
+	}
+	if _, err := strconv.ParseUint(id, 10, 64); err != nil {
+		return "", false
+	}
+	return id, true
 }
 
 // SetProxy sets the proxy for the Mikan parser client

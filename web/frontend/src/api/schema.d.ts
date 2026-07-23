@@ -148,6 +148,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listTasks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tasks/{task_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getTask"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tasks/sync": {
         parameters: {
             query?: never;
@@ -1061,6 +1093,11 @@ export interface components {
             title: string;
             /** Format: uri */
             rss_url: string;
+            mikan_id?: string;
+            /** Format: uri */
+            image?: string;
+            subtitle_group?: string;
+            season?: string;
             /** Format: uri */
             backup_rss_url?: string;
             filter_rule?: string;
@@ -1069,6 +1106,40 @@ export interface components {
             allow_multi_subgroup?: boolean;
             auto_disable_on_done?: boolean;
             stale_after_hours?: number;
+        };
+        MikanDiscoveryItem: {
+            mikan_id: string;
+            title: string;
+            image: string;
+        };
+        MikanDashboard: {
+            season: string;
+            days: {
+                [key: string]: components["schemas"]["MikanDiscoveryItem"][];
+            };
+        };
+        MikanSubgroup: {
+            id: string;
+            name: string;
+            is_all: boolean;
+        };
+        MikanEpisode: {
+            title: string;
+            anime_identify?: string;
+            episode_num: string;
+            season?: string;
+            magnet?: string;
+            torrent_url?: string;
+            size?: string;
+            /** Format: date-time */
+            pub_date: string;
+            sub_group: string;
+            resolution: string;
+        };
+        MikanEpisodePreview: {
+            mikan_id: string;
+            items: components["schemas"]["MikanEpisode"][];
+            total: number;
         };
         Envelope: {
             data: unknown;
@@ -1085,11 +1156,26 @@ export interface components {
             };
         };
         TaskEnvelope: components["schemas"]["Envelope"] & {
-            data?: {
-                task_id: string;
-                /** @constant */
-                status: "running";
-            };
+            data?: components["schemas"]["TaskAccepted"];
+        };
+        TaskAccepted: {
+            task_id: string;
+            /** @enum {string} */
+            status: "queued" | "running";
+        };
+        TaskUpdate: {
+            task_id: string;
+            kind: string;
+            title: string;
+            /** @enum {string} */
+            status: "queued" | "running" | "completed" | "error";
+            message: string;
+            /** Format: int64 */
+            current?: number;
+            /** Format: int64 */
+            total?: number;
+            /** Format: date-time */
+            updated_at: string;
         };
         Error: {
             error: {
@@ -1278,6 +1364,55 @@ export interface operations {
             200: components["responses"]["Success"];
         };
     };
+    listTasks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current in-process task snapshot */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: {
+                            items: components["schemas"]["TaskUpdate"][];
+                        };
+                    };
+                };
+            };
+        };
+    };
+    getTask: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current task state */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["TaskUpdate"];
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+        };
+    };
     startSync: {
         parameters: {
             query?: never;
@@ -1408,7 +1543,10 @@ export interface operations {
     };
     getMikanDashboard: {
         parameters: {
-            query?: never;
+            query?: {
+                year?: string;
+                season?: "春" | "夏" | "秋" | "冬";
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1416,11 +1554,15 @@ export interface operations {
         requestBody?: never;
         responses: {
             200: components["responses"]["Success"];
+            400: components["responses"]["Error"];
         };
     };
     getMikanEpisodes: {
         parameters: {
-            query?: never;
+            query: {
+                mikan_id: string;
+                subgroup_id?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1428,11 +1570,14 @@ export interface operations {
         requestBody?: never;
         responses: {
             200: components["responses"]["Success"];
+            400: components["responses"]["Error"];
         };
     };
     getMikanSubgroups: {
         parameters: {
-            query?: never;
+            query: {
+                mikan_id: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1440,6 +1585,7 @@ export interface operations {
         requestBody?: never;
         responses: {
             200: components["responses"]["Success"];
+            400: components["responses"]["Error"];
         };
     };
     updateSubscription: {
@@ -1672,7 +1818,7 @@ export interface operations {
         };
         requestBody: components["requestBodies"]["JsonObject"];
         responses: {
-            201: components["responses"]["Success"];
+            202: components["responses"]["TaskAccepted"];
         };
     };
     deleteLocalDirectory: {

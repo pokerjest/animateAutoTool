@@ -28,9 +28,26 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
 
 export const jsonBody = (value: unknown): RequestInit => ({ body: JSON.stringify(value) })
 
+const noPosterURL = '/static/img/no_poster.svg'
+
+export function normalizePosterURL(image?: string) {
+  const value = image?.trim()
+  if (!value) return noPosterURL
+  if (value.startsWith('/api/posters/')) return `/api/v1/posters/${value.slice('/api/posters/'.length)}`
+  return value
+}
+
 export function posterURL(item: { ID?: number; id?: number; image?: string; Image?: string }) {
   const id = item.ID ?? item.id
   const image = item.image ?? item.Image
   if (id) return `/api/v1/posters/${id}`
-  return image || '/static/img/no_poster.svg'
+  return normalizePosterURL(image)
+}
+
+export function handlePosterError(event: Event, ...fallbacks: Array<string | undefined>) {
+  const image = event.currentTarget
+  if (!(image instanceof HTMLImageElement)) return
+  const current = image.getAttribute('src') || ''
+  const next = [...fallbacks.map(normalizePosterURL), noPosterURL].find(candidate => candidate !== current)
+  if (next) image.src = next
 }

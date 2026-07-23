@@ -18,15 +18,13 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/qbutil"
 	"github.com/pokerjest/animateAutoTool/internal/service"
 	"github.com/pokerjest/animateAutoTool/internal/store"
+	"github.com/pokerjest/animateAutoTool/internal/taskstate"
 	"github.com/pokerjest/animateAutoTool/internal/updater"
 )
 
 func V1BatchPreviewHandler(c *gin.Context)    { v1RunJSONHandler(c, BatchPreviewHandler) }
 func V1BatchCreateHandler(c *gin.Context)     { v1RunJSONHandler(c, CreateBatchSubscriptionHandler) }
 func V1ValidateRSSHandler(c *gin.Context)     { v1RunJSONHandler(c, ValidateSubscriptionRSSHandler) }
-func V1MikanDashboardHandler(c *gin.Context)  { v1RunJSONHandler(c, GetMikanDashboardHandler) }
-func V1MikanEpisodesHandler(c *gin.Context)   { v1RunJSONHandler(c, GetMikanEpisodesHandler) }
-func V1MikanSubgroupsHandler(c *gin.Context)  { v1RunJSONHandler(c, GetSubgroupsHandler) }
 func V1MetadataSearchHandler(c *gin.Context)  { v1RunJSONHandler(c, SearchMetadataHandler) }
 func V1FixMatchHandler(c *gin.Context)        { v1RunJSONHandler(c, FixMatchHandler) }
 func V1RenamePreviewHandler(c *gin.Context)   { v1RunJSONHandler(c, PreviewDirectoryRenameHandler) }
@@ -34,18 +32,77 @@ func V1RenameApplyHandler(c *gin.Context)     { v1RunJSONHandler(c, ApplyDirecto
 func V1LocalAnimeFilesHandler(c *gin.Context) { v1RunJSONHandler(c, GetLocalAnimeFilesHandler) }
 func V1PickDirectoryHandler(c *gin.Context)   { v1RunJSONHandler(c, PickDirectoryHandler) }
 
+type v1MikanClient interface {
+	ParseContext(context.Context, string) ([]parser.Episode, error)
+	SearchContext(context.Context, string) ([]parser.SearchResult, error)
+	GetSubgroupsContext(context.Context, string) ([]parser.Subgroup, error)
+	GetDashboardContext(context.Context, string, string) (*parser.MikanDashboard, error)
+}
+
+type v1MikanDiscoveryItem struct {
+	MikanID string `json:"mikan_id"`
+	Title   string `json:"title"`
+	Image   string `json:"image"`
+}
+
+type v1MikanSubgroup struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	IsAll bool   `json:"is_all"`
+}
+
+var newV1MikanClient = func() v1MikanClient {
+	client := parser.NewMikanParser()
+	if db.DB != nil {
+		var proxyConfig model.GlobalConfig
+		if err := db.DB.Where("key = ?", model.ConfigKeyProxyURL).First(&proxyConfig).Error; err == nil {
+			client.SetProxy(proxyConfig.Value)
+		}
+	}
+	return client
+}
+
+func mikanDiscoveryItems(items []parser.SearchResult) []v1MikanDiscoveryItem {
+	result := make([]v1MikanDiscoveryItem, 0, len(items))
+	for _, item := range items {
+		result = append(result, v1MikanDiscoveryItem{
+			MikanID: strings.TrimSpace(item.MikanID),
+			Title:   strings.TrimSpace(item.Title),
+			Image:   strings.TrimSpace(item.Image),
+		})
+	}
+	return result
+}
+
+func firstQuery(c *gin.Context, names ...string) string {
+	for _, name := range names {
+		if value := strings.TrimSpace(c.Query(name)); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func validMikanNumericID(value string) bool {
+	if value == "" {
+		return false
+	}
+	_, err := strconv.ParseUint(value, 10, 64)
+	return err == nil
+}
+
 func V1MikanSearchHandler(c *gin.Context) {
 	keyword := strings.TrimSpace(c.Query("q"))
 	if keyword == "" {
 		v1Error(c, http.StatusBadRequest, "search_query_required", "请输入搜索关键词")
 		return
 	}
-	results, err := parser.NewMikanParser().Search(keyword)
+	results, err := newV1MikanClient().SearchContext(c.Request.Context(), keyword)
 	if err != nil {
 		v1Error(c, http.StatusBadGateway, "mikan_search_failed", humanizeOperationError(err.Error()))
 		return
 	}
-	v1Data(c, http.StatusOK, gin.H{"items": results})
+	v1Data(c, http.StatusOK, gin.H{"items": mikanDiscoveryItems(results)})
 }
 
 func V1RSSPreviewHandler(c *gin.Context) {
@@ -54,7 +111,7 @@ func V1RSSPreviewHandler(c *gin.Context) {
 		v1Error(c, http.StatusBadRequest, "rss_required", "请输入 RSS 地址")
 		return
 	}
-	episodes, err := parser.NewMikanParser().ParseContext(c.Request.Context(), rssURL)
+	episodes, err := newV1MikanClient().ParseContext(c.Request.Context(), rssURL)
 	if err != nil {
 		v1Error(c, http.StatusBadGateway, "rss_preview_failed", humanizeOperationError(err.Error()))
 		return
@@ -63,6 +120,91 @@ func V1RSSPreviewHandler(c *gin.Context) {
 		episodes = episodes[:20]
 	}
 	v1Data(c, http.StatusOK, gin.H{"items": episodes, "total": len(episodes)})
+}
+
+func V1MikanDashboardHandler(c *gin.Context) {
+	year := strings.TrimSpace(c.Query("year"))
+	season := strings.TrimSpace(c.Query("season"))
+	if (year == "") != (season == "") {
+		v1Error(c, http.StatusBadRequest, "invalid_mikan_season", "年份和季度必须同时提供")
+		return
+	}
+	if year != "" {
+		if _, err := strconv.Atoi(year); err != nil {
+			v1Error(c, http.StatusBadRequest, "invalid_mikan_year", "Mikan 年份无效")
+			return
+		}
+		switch season {
+		case "春", "夏", "秋", "冬":
+		default:
+			v1Error(c, http.StatusBadRequest, "invalid_mikan_season", "Mikan 季度无效")
+			return
+		}
+	}
+
+	dashboard, err := newV1MikanClient().GetDashboardContext(c.Request.Context(), year, season)
+	if err != nil {
+		v1Error(c, http.StatusBadGateway, "mikan_dashboard_failed", humanizeOperationError(err.Error()))
+		return
+	}
+	days := make(map[string][]v1MikanDiscoveryItem, len(dashboard.Days))
+	for day, items := range dashboard.Days {
+		days[day] = mikanDiscoveryItems(items)
+	}
+	v1Data(c, http.StatusOK, gin.H{"season": strings.TrimSpace(dashboard.Season), "days": days})
+}
+
+func V1MikanSubgroupsHandler(c *gin.Context) {
+	mikanID := firstQuery(c, "mikan_id", "id", "bangumiId")
+	if !validMikanNumericID(mikanID) {
+		v1Error(c, http.StatusBadRequest, "invalid_mikan_id", "Mikan 番剧 ID 无效")
+		return
+	}
+
+	groups, err := newV1MikanClient().GetSubgroupsContext(c.Request.Context(), mikanID)
+	if err != nil {
+		v1Error(c, http.StatusBadGateway, "mikan_subgroups_failed", humanizeOperationError(err.Error()))
+		return
+	}
+	items := make([]v1MikanSubgroup, 0, len(groups))
+	for _, group := range groups {
+		id := strings.TrimSpace(group.ID)
+		name := strings.TrimSpace(group.Name)
+		if id == "" {
+			name = "全部字幕组"
+		}
+		items = append(items, v1MikanSubgroup{ID: id, Name: name, IsAll: id == ""})
+	}
+	v1Data(c, http.StatusOK, gin.H{"items": items})
+}
+
+func V1MikanEpisodesHandler(c *gin.Context) {
+	mikanID := firstQuery(c, "mikan_id", "bangumiId", "id")
+	if !validMikanNumericID(mikanID) {
+		v1Error(c, http.StatusBadRequest, "invalid_mikan_id", "Mikan 番剧 ID 无效")
+		return
+	}
+	subgroupID := firstQuery(c, "subgroup_id", "subgroupId")
+	if subgroupID != "" && !validMikanNumericID(subgroupID) {
+		v1Error(c, http.StatusBadRequest, "invalid_mikan_subgroup_id", "Mikan 字幕组 ID 无效")
+		return
+	}
+
+	values := url.Values{"bangumiId": []string{mikanID}}
+	if subgroupID != "" {
+		values.Set("subgroupid", subgroupID)
+	}
+	rssURL := "https://mikanani.me/RSS/Bangumi?" + values.Encode()
+	episodes, err := newV1MikanClient().ParseContext(c.Request.Context(), rssURL)
+	if err != nil {
+		v1Error(c, http.StatusBadGateway, "mikan_episodes_failed", humanizeOperationError(err.Error()))
+		return
+	}
+	total := len(episodes)
+	if total > 20 {
+		episodes = episodes[:20]
+	}
+	v1Data(c, http.StatusOK, gin.H{"mikan_id": mikanID, "items": episodes, "total": total})
 }
 
 func V1UpdateSubscriptionHandler(c *gin.Context) {
@@ -74,6 +216,10 @@ func V1UpdateSubscriptionHandler(c *gin.Context) {
 	var input struct {
 		Title              string `json:"title"`
 		RSSURL             string `json:"rss_url"`
+		MikanID            string `json:"mikan_id"`
+		Image              string `json:"image"`
+		SubtitleGroup      string `json:"subtitle_group"`
+		Season             string `json:"season"`
 		FilterRule         string `json:"filter_rule"`
 		ExcludeRule        string `json:"exclude_rule"`
 		BackupRSSURL       string `json:"backup_rss_url"`
@@ -88,6 +234,10 @@ func V1UpdateSubscriptionHandler(c *gin.Context) {
 	}
 	sub.Title = strings.TrimSpace(input.Title)
 	sub.RSSUrl = strings.TrimSpace(input.RSSURL)
+	sub.MikanID = strings.TrimSpace(input.MikanID)
+	sub.Image = strings.TrimSpace(input.Image)
+	sub.SubtitleGroup = strings.TrimSpace(input.SubtitleGroup)
+	sub.Season = strings.TrimSpace(input.Season)
 	sub.FilterRule = strings.TrimSpace(input.FilterRule)
 	sub.ExcludeRule = strings.TrimSpace(input.ExcludeRule)
 	sub.BackupRSSUrl = strings.TrimSpace(input.BackupRSSURL)
@@ -95,6 +245,7 @@ func V1UpdateSubscriptionHandler(c *gin.Context) {
 	sub.AllowMultiSubgroup = input.AllowMultiSubgroup
 	sub.AutoDisableOnDone = input.AutoDisableOnDone
 	sub.StaleAfterHours = input.StaleAfterHours
+	normalizeMikanAssociation(sub)
 	normalizeSubscriptionStrategy(sub)
 	if err := saveSubscription(sub); err != nil {
 		v1Error(c, http.StatusInternalServerError, "subscription_save_failed", err.Error())
@@ -117,6 +268,7 @@ func V1SubscriptionRepairHandler(c *gin.Context) {
 		return
 	}
 	taskID := fmt.Sprintf("subscription-%d-%s", sub.ID, action)
+	taskstate.Global.Start(taskID, "subscription-repair", "订阅修复", "正在修复 "+sub.Title)
 	go func(target *model.Subscription, requested string) {
 		var runErr error
 		switch requested {
@@ -147,7 +299,10 @@ func V1SubscriptionRepairHandler(c *gin.Context) {
 			target.LastError = runErr.Error()
 			target.LastRunSummary = "修复操作未完成"
 			_ = saveSubscription(target)
+			taskstate.Global.Fail(taskID, runErr)
+			return
 		}
+		taskstate.Global.Complete(taskID, "订阅修复完成")
 	}(sub, action)
 	v1Message(c, http.StatusAccepted, "修复任务已经启动", gin.H{"task_id": taskID, "status": "running"})
 }
@@ -158,13 +313,18 @@ func V1RefreshSubscriptionMetadataHandler(c *gin.Context) {
 		v1Error(c, http.StatusNotFound, "subscription_not_found", "未找到对应订阅")
 		return
 	}
+	taskID := "subscription-metadata-" + c.Param("id")
+	taskstate.Global.Start(taskID, "metadata", "刷新订阅元数据", "正在刷新 "+sub.Title)
 	go func(target *model.Subscription) {
 		service.NewMetadataService().EnrichMetadata(target.Metadata, target.Title)
 		if err := saveSubscription(target); err != nil {
 			log.Printf("subscription metadata refresh failed for %d: %v", target.ID, err)
+			taskstate.Global.Fail(taskID, err)
+			return
 		}
+		taskstate.Global.Complete(taskID, "订阅元数据刷新完成")
 	}(sub)
-	v1Message(c, http.StatusAccepted, "元数据刷新已经启动", gin.H{"task_id": "subscription-metadata-" + c.Param("id"), "status": "running"})
+	v1Message(c, http.StatusAccepted, "元数据刷新已经启动", gin.H{"task_id": taskID, "status": "running"})
 }
 
 func applyV1MetadataSource(metadata *model.AnimeMetadata, source string) error {
@@ -217,12 +377,17 @@ func V1RefreshMetadataItemHandler(c *gin.Context) {
 		v1Error(c, http.StatusBadRequest, "invalid_id", "元数据 ID 无效")
 		return
 	}
+	taskID := "metadata-" + c.Param("id")
+	taskstate.Global.Start(taskID, "metadata", "刷新元数据", "正在刷新单条元数据")
 	go func() {
 		if err := service.NewMetadataService().RefreshSingleMetadata(uint(id)); err != nil {
 			log.Printf("metadata refresh failed for %d: %v", id, err)
+			taskstate.Global.Fail(taskID, err)
+			return
 		}
+		taskstate.Global.Complete(taskID, "元数据刷新完成")
 	}()
-	v1Message(c, http.StatusAccepted, "元数据刷新已经启动", gin.H{"task_id": "metadata-" + c.Param("id"), "status": "running"})
+	v1Message(c, http.StatusAccepted, "元数据刷新已经启动", gin.H{"task_id": taskID, "status": "running"})
 }
 
 func V1DeleteLocalDirectoryHandler(c *gin.Context) {
@@ -252,13 +417,21 @@ func V1RefreshLocalMetadataHandler(c *gin.Context) {
 		v1Error(c, http.StatusNotFound, "anime_not_found", "未找到本地番剧")
 		return
 	}
+	taskID := "local-metadata-" + c.Param("id")
+	taskstate.Global.Start(taskID, "metadata", "刷新本地番剧元数据", "正在刷新 "+anime.Title)
 	go func(target *model.LocalAnime) {
 		if err := service.NewMetadataService().EnrichAnime(target); err != nil {
 			log.Printf("local metadata refresh failed for %d: %v", target.ID, err)
+			taskstate.Global.Fail(taskID, err)
+			return
 		}
-		_ = db.DB.Save(target).Error
+		if err := db.DB.Save(target).Error; err != nil {
+			taskstate.Global.Fail(taskID, err)
+			return
+		}
+		taskstate.Global.Complete(taskID, "本地番剧元数据刷新完成")
 	}(anime)
-	v1Message(c, http.StatusAccepted, "本地番剧元数据刷新已经启动", gin.H{"task_id": "local-metadata-" + c.Param("id"), "status": "running"})
+	v1Message(c, http.StatusAccepted, "本地番剧元数据刷新已经启动", gin.H{"task_id": taskID, "status": "running"})
 }
 
 func V1LocalAnimeSourceHandler(c *gin.Context) {
@@ -350,17 +523,32 @@ func V1MaintenanceHandler(c *gin.Context) {
 
 func V1UpdaterActionHandler(c *gin.Context) {
 	action := c.Param("action")
-	var status any
+	taskID := "repo-update-" + action
+	var title string
 	switch action {
 	case "check":
-		status = updater.TriggerCheckNow("api-v1")
+		title = "检查应用更新"
 	case "apply":
-		status = updater.TriggerCheckAndPullNow("api-v1")
+		title = "下载并应用更新"
 	default:
 		v1Error(c, http.StatusBadRequest, "invalid_update_action", "不支持的更新操作")
 		return
 	}
-	v1Message(c, http.StatusAccepted, "更新任务已经启动", gin.H{"task_id": "repo-update-" + action, "status": "running", "snapshot": status})
+	taskstate.Global.Start(taskID, "updater", title, title+"进行中")
+	go func() {
+		var status updater.Status
+		if action == "check" {
+			status = updater.CheckNow("api-v1")
+		} else {
+			status = updater.CheckAndPullNow("api-v1")
+		}
+		if strings.TrimSpace(status.LastError) != "" {
+			taskstate.Global.Fail(taskID, fmt.Errorf("%s", status.LastError))
+			return
+		}
+		taskstate.Global.Complete(taskID, status.LastMessage)
+	}()
+	v1Message(c, http.StatusAccepted, "更新任务已经启动", gin.H{"task_id": taskID, "status": "running"})
 }
 
 func V1R2ListHandler(c *gin.Context) { v1RunJSONHandler(c, ListR2BackupsHandler) }

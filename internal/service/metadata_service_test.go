@@ -27,6 +27,18 @@ func TestSetActiveFieldsPrefersMatchingTMDBOverMismatchedBangumi(t *testing.T) {
 	}
 }
 
+func TestSetActiveFieldsUsesV1PosterURL(t *testing.T) {
+	svc := &MetadataService{}
+	meta := &model.AnimeMetadata{Title: "Poster Test"}
+	meta.ID = 42
+
+	svc.setActiveFields(meta, "Poster Test")
+
+	if meta.Image != "/api/v1/posters/42" {
+		t.Fatalf("expected v1 poster URL, got %q", meta.Image)
+	}
+}
+
 func TestShouldApplyBangumiSubjectRejectsMismatchWhenOtherSourceExists(t *testing.T) {
 	meta := &model.AnimeMetadata{
 		TMDBID:    312383,

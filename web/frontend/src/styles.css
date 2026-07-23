@@ -70,6 +70,7 @@ button { cursor: pointer; }
 .btn { min-height: 2.75rem; display: inline-flex; align-items: center; justify-content: center; gap: .5rem; border-radius: .85rem; border: 1px solid var(--line); padding: .65rem 1rem; font-weight: 750; transition: transform .18s, border-color .18s, background .18s; }
 .btn:hover { transform: translateY(-1px); border-color: color-mix(in srgb, var(--brand) 45%, var(--line)); }
 .btn:active { transform: translateY(0); }
+.btn:disabled { cursor: not-allowed; opacity: .62; transform: none; }
 .btn-primary { color: white; border-color: transparent; background: linear-gradient(135deg, var(--brand), var(--brand-strong)); box-shadow: 0 10px 22px color-mix(in srgb, var(--brand) 22%, transparent); }
 .btn-secondary { color: var(--ink); background: var(--surface-solid); }
 .btn-quiet { color: var(--ink-muted); border-color: transparent; background: transparent; }
@@ -86,5 +87,14 @@ button { cursor: pointer; }
 .skip-link { position: fixed; left: .75rem; top: .75rem; z-index: 200; transform: translateY(-150%); border-radius: .75rem; background: var(--ink); color: var(--canvas); padding: .75rem 1rem; }
 .skip-link:focus { transform: none; }
 @keyframes shimmer { to { background-position: -200% 0; } }
-@media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; } }
+.page-enter-active { transition: opacity .2s ease-out, transform .2s ease-out; }
+.page-leave-active { transition: opacity .12s ease-in, transform .12s ease-in; }
+.page-enter-from { opacity: 0; transform: translateY(8px); }
+.page-leave-to { opacity: 0; transform: translateY(-3px); }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
+  .page-enter-active, .page-leave-active { transition: none !important; }
+  .page-enter-from, .page-leave-to { opacity: 1 !important; transform: none !important; }
+  .animate-spin { animation: none !important; }
+}
 @media (min-width: 768px) { .poster-grid { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 1.25rem; } }

@@ -68,6 +68,9 @@ func runServer() {
 	log.Printf("Initializing database at: %s", absPath)
 
 	db.InitDB(config.AppConfig.Database.Path)
+	if err := db.SyncGlobalConfigsWithConfigFile(); err != nil {
+		log.Printf("Failed to synchronize system settings with %s: %v", config.ConfigFilePath(), err)
+	}
 	startup.Run()
 
 	r := gin.Default()

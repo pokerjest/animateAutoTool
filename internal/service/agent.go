@@ -145,7 +145,7 @@ func (s *AgentService) scanLocalAssets(anime *model.LocalAnime) {
 				// Let's set it to TMDBImageRaw as a hacky "Local/Default" slot if empty
 				if len(anime.Metadata.TMDBImageRaw) == 0 {
 					anime.Metadata.TMDBImageRaw = data
-					anime.Metadata.Image = fmt.Sprintf("/api/posters/%d", anime.Metadata.ID)
+					anime.Metadata.Image = fmt.Sprintf("/api/v1/posters/%d", anime.Metadata.ID)
 
 					db.DB.Save(anime.Metadata)
 					s.metaSvc.SyncMetadataToModels(anime.Metadata)
