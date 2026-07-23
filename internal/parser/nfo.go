@@ -65,3 +65,16 @@ func ParseTVShowNFO(path string) (*TVShowNFO, error) {
 	}
 	return &nfo, nil
 }
+
+func ParseEpisodeNFO(path string) (*EpisodeNFO, error) {
+	cleanPath := filepath.Clean(path)
+	data, err := os.ReadFile(cleanPath) //nolint:gosec // path is a local NFO discovered during library scanning.
+	if err != nil {
+		return nil, err
+	}
+	var nfo EpisodeNFO
+	if err := xml.Unmarshal(data, &nfo); err != nil {
+		return nil, err
+	}
+	return &nfo, nil
+}

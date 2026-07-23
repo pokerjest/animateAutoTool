@@ -179,6 +179,17 @@ func (s *LocalAnimeStore) ListAnimesByDirectory(directoryID uint) ([]model.Local
 	return animes, nil
 }
 
+func (s *LocalAnimeStore) ListAnimesByDirectoryWithEpisodes(directoryID uint) ([]model.LocalAnime, error) {
+	if s == nil || s.db == nil {
+		return nil, gorm.ErrInvalidDB
+	}
+	var animes []model.LocalAnime
+	if err := s.db.Preload("Episodes").Where("directory_id = ?", directoryID).Find(&animes).Error; err != nil {
+		return nil, err
+	}
+	return animes, nil
+}
+
 // ListEpisodesByAnimeIDOrdered returns episodes ordered by season then episode.
 func (s *LocalAnimeStore) ListEpisodesByAnimeIDOrdered(animeID uint) ([]model.LocalEpisode, error) {
 	if s == nil || s.db == nil {
@@ -254,6 +265,17 @@ func (s *LocalAnimeStore) FindEpisodeByPath(path string) (*model.LocalEpisode, e
 	return &ep, nil
 }
 
+func (s *LocalAnimeStore) FindEpisodeByPathIncludingDeleted(path string) (*model.LocalEpisode, error) {
+	if s == nil || s.db == nil {
+		return nil, gorm.ErrInvalidDB
+	}
+	var ep model.LocalEpisode
+	if err := s.db.Unscoped().Where("path = ?", path).First(&ep).Error; err != nil {
+		return nil, err
+	}
+	return &ep, nil
+}
+
 func (s *LocalAnimeStore) CreateEpisode(ep *model.LocalEpisode) error {
 	if s == nil || s.db == nil {
 		return gorm.ErrInvalidDB
@@ -266,6 +288,13 @@ func (s *LocalAnimeStore) SaveEpisode(ep *model.LocalEpisode) error {
 		return gorm.ErrInvalidDB
 	}
 	return retrySQLiteBusy(func() error { return s.db.Save(ep).Error })
+}
+
+func (s *LocalAnimeStore) SaveEpisodeIncludingDeleted(ep *model.LocalEpisode) error {
+	if s == nil || s.db == nil {
+		return gorm.ErrInvalidDB
+	}
+	return retrySQLiteBusy(func() error { return s.db.Unscoped().Save(ep).Error })
 }
 
 // DeleteEpisodesNotInPaths removes any episode rows under animeID whose path
@@ -300,6 +329,15 @@ func (s *LocalAnimeStore) CleanupOrphans() error {
 		return s.db.Unscoped().Where("directory_id NOT IN ?", dirIDs).Delete(&model.LocalAnime{}).Error
 	}
 	return s.db.Unscoped().Where("1 = 1").Delete(&model.LocalAnime{}).Error
+}
+
+func (s *LocalAnimeStore) CleanupOrphansByDirectory(directoryID uint) error {
+	if s == nil || s.db == nil {
+		return gorm.ErrInvalidDB
+	}
+	return s.db.Unscoped().
+		Where("directory_id = ? AND id NOT IN (?)", directoryID, s.db.Model(&model.LocalEpisode{}).Select("DISTINCT local_anime_id")).
+		Delete(&model.LocalAnime{}).Error
 }
 
 // EpisodePathByMetadata is the join used by download log repair.

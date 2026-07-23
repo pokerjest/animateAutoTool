@@ -68,6 +68,7 @@ func resolveSettingsScopeSpec(scope string) settingsScopeSpec {
 		return settingsScopeSpec{
 			keys: []string{
 				model.ConfigKeyJellyfinUrl,
+				model.ConfigKeyJellyfinDirectUrl,
 				model.ConfigKeyJellyfinApiKey,
 				model.ConfigKeyJellyfinUsername,
 				model.ConfigKeyJellyfinPassword,
@@ -107,6 +108,7 @@ func resolveSettingsScopeSpec(scope string) settingsScopeSpec {
 				model.ConfigKeyRepoUpdateName,
 				model.ConfigKeyRepoRequireChecksum,
 				model.ConfigKeyJellyfinUrl,
+				model.ConfigKeyJellyfinDirectUrl,
 				model.ConfigKeyJellyfinApiKey,
 				model.ConfigKeyJellyfinUsername,
 				model.ConfigKeyJellyfinPassword,

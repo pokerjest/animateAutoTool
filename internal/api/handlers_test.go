@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -22,7 +23,13 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/scheduler"
 	"github.com/pokerjest/animateAutoTool/internal/service"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
+)
+
+const (
+	testJellyfinUsersPath = "/Users"
+	testJellyfinItemsPath = "/Items"
 )
 
 func TestMain(m *testing.M) {
@@ -1222,10 +1229,10 @@ func TestGetPlayInfoReturnsDiagnosticWhenSeriesMissingInJellyfin(t *testing.T) {
 
 	jf := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		switch {
-		case req.Method == http.MethodGet && req.URL.Path == "/Users":
+		case req.Method == http.MethodGet && req.URL.Path == testJellyfinUsersPath:
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`[{"Id":"user-1","Name":"admin"}]`))
-		case req.Method == http.MethodGet && req.URL.Path == "/Items":
+		case req.Method == http.MethodGet && req.URL.Path == testJellyfinItemsPath:
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"Items":[]}`))
 		default:
@@ -1282,10 +1289,10 @@ func TestGetPlayInfoReturnsDiagnosticWhenLocalMediaMissing(t *testing.T) {
 
 	jf := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		switch {
-		case req.Method == http.MethodGet && req.URL.Path == "/Users":
+		case req.Method == http.MethodGet && req.URL.Path == testJellyfinUsersPath:
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`[{"Id":"user-1","Name":"admin"}]`))
-		case req.Method == http.MethodGet && req.URL.Path == "/Items":
+		case req.Method == http.MethodGet && req.URL.Path == testJellyfinItemsPath:
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"Items":[{"Id":"series-1","ProviderIds":{"bangumi":"3333"}}]}`))
 		case req.Method == http.MethodGet && strings.HasPrefix(req.URL.Path, "/Users/user-1/Items"):
@@ -1336,6 +1343,59 @@ func TestGetPlayInfoReturnsDiagnosticWhenLocalMediaMissing(t *testing.T) {
 
 	assert.Contains(t, w.Body.String(), `"code":"local_media_missing"`)
 	assert.Contains(t, w.Body.String(), "重新扫描本地库")
+}
+
+func TestGetPlayInfoUsesConfiguredDirectJellyfinURL(t *testing.T) {
+	resetAuthFixtures(t)
+	r := setupRouter()
+
+	jf := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		switch {
+		case req.Method == http.MethodGet && req.URL.Path == testJellyfinUsersPath:
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[{"Id":"user-1","Name":"admin"}]`))
+		case req.Method == http.MethodGet && req.URL.Path == testJellyfinItemsPath:
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"Items":[{"Id":"series-1","ProviderIds":{"bangumi":"4444"}}]}`))
+		case req.Method == http.MethodGet && strings.HasPrefix(req.URL.Path, "/Users/user-1/Items"):
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"Items":[{"Id":"episode-1","UserData":{"PlaybackPositionTicks":900000000,"Played":false}}]}`))
+		default:
+			http.NotFound(w, req)
+		}
+	}))
+	defer jf.Close()
+
+	for _, cfg := range []model.GlobalConfig{
+		{Key: model.ConfigKeyJellyfinUrl, Value: jf.URL},
+		{Key: model.ConfigKeyJellyfinDirectUrl, Value: "https://media.example-tailnet.ts.net/jellyfin/"},
+		{Key: model.ConfigKeyJellyfinApiKey, Value: "test-key"},
+	} {
+		require.NoError(t, db.DB.Save(&cfg).Error)
+	}
+
+	metadata := model.AnimeMetadata{Title: "Tailscale Show", BangumiID: 4444}
+	require.NoError(t, db.DB.Create(&metadata).Error)
+	anime := model.LocalAnime{Title: metadata.Title, Path: t.TempDir(), MetadataID: &metadata.ID}
+	require.NoError(t, db.DB.Create(&anime).Error)
+	episodePath := filepath.Join(anime.Path, "01.mkv")
+	require.NoError(t, os.WriteFile(episodePath, []byte("video"), 0o600))
+	ep := model.LocalEpisode{LocalAnimeID: anime.ID, Title: "Episode 1", EpisodeNum: 1, SeasonNum: 1, Path: episodePath}
+	require.NoError(t, db.DB.Create(&ep).Error)
+
+	cookie, _ := loginCookie(t, r, "admin")
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/jellyfin/play/%d", ep.ID), nil)
+	req.Header.Set("Cookie", cookie)
+	markLocalRequest(req)
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	var payload PlayInfoResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &payload))
+	assert.Equal(t, fmt.Sprintf("/api/v1/jellyfin/stream/%d", ep.ID), payload.StreamURL)
+	assert.Equal(t, "https://media.example-tailnet.ts.net/jellyfin/Videos/episode-1/stream?api_key=test-key&static=true", payload.DirectStreamURL)
+	assert.Equal(t, int64(900000000), payload.ResumeTicks)
 }
 
 func TestDashboardTaskOverviewEndpointRendersStatuses(t *testing.T) {

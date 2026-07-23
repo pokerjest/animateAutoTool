@@ -32,6 +32,9 @@ func TestLocalAnimeStoreExtraNilSafety(t *testing.T) {
 	if _, err := s.ListAnimesByDirectory(1); err != gorm.ErrInvalidDB {
 		t.Errorf("ListAnimesByDirectory nil: got %v", err)
 	}
+	if _, err := s.ListAnimesByDirectoryWithEpisodes(1); err != gorm.ErrInvalidDB {
+		t.Errorf("ListAnimesByDirectoryWithEpisodes nil: got %v", err)
+	}
 	if _, err := s.ListEpisodesByAnimeIDOrdered(1); err != gorm.ErrInvalidDB {
 		t.Errorf("ListEpisodesByAnimeIDOrdered nil: got %v", err)
 	}

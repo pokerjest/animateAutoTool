@@ -776,6 +776,55 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/jellyfin/play/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getJellyfinPlayInfo"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/jellyfin/stream/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Proxies a Jellyfin static stream while preserving Range requests. */
+        get: operations["streamJellyfinEpisode"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/jellyfin/progress": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["reportJellyfinProgress"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/bangumi/subject/{id}/collection": {
         parameters: {
             query?: never;
@@ -1216,6 +1265,33 @@ export interface components {
             mikan_id: string;
             items: components["schemas"]["MikanEpisode"][];
             total: number;
+        };
+        PlaybackDiagnostic: {
+            code: string;
+            summary: string;
+            hint: string;
+            detail?: string;
+            can_use_direct_link: boolean;
+            primary_action?: string;
+            primary_target?: string;
+        };
+        JellyfinPlayInfo: {
+            stream_url: string;
+            /** @description Browser-reachable Jellyfin stream URL; empty when direct playback is not configured. */
+            direct_stream_url: string;
+            /** Format: int64 */
+            resume_ticks: number;
+            poster_url: string;
+            title: string;
+            episode_title: string;
+            diagnostic?: components["schemas"]["PlaybackDiagnostic"];
+        };
+        PlaybackProgressInput: {
+            episode_id: number;
+            /** @enum {string} */
+            event: "timeupdate" | "pause" | "ended" | "destroy";
+            /** Format: int64 */
+            ticks: number;
         };
         Envelope: {
             data: unknown;
@@ -2094,6 +2170,92 @@ export interface operations {
         requestBody?: never;
         responses: {
             200: components["responses"]["Success"];
+        };
+    };
+    getJellyfinPlayInfo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Resolved proxy and optional browser-direct Jellyfin playback URLs */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JellyfinPlayInfo"];
+                };
+            };
+            404: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    streamJellyfinEpisode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Proxied video stream */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "video/*": string;
+                };
+            };
+            /** @description Partial proxied video stream */
+            206: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "video/*": string;
+                };
+            };
+            /** @description Episode or Jellyfin item not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    reportJellyfinProgress: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlaybackProgressInput"];
+            };
+        };
+        responses: {
+            /** @description Playback progress accepted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
         };
     };
     updateBangumiCollection: {

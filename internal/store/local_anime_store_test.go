@@ -60,11 +60,20 @@ func TestLocalAnimeStoreNilSafety(t *testing.T) {
 	if err := s.SaveEpisode(&model.LocalEpisode{}); err != gorm.ErrInvalidDB {
 		t.Errorf("SaveEpisode nil: got %v", err)
 	}
+	if _, err := s.FindEpisodeByPathIncludingDeleted("/x"); err != gorm.ErrInvalidDB {
+		t.Errorf("FindEpisodeByPathIncludingDeleted nil: got %v", err)
+	}
+	if err := s.SaveEpisodeIncludingDeleted(&model.LocalEpisode{}); err != gorm.ErrInvalidDB {
+		t.Errorf("SaveEpisodeIncludingDeleted nil: got %v", err)
+	}
 	if err := s.DeleteEpisodesNotInPaths(1, []string{"a"}); err != gorm.ErrInvalidDB {
 		t.Errorf("DeleteEpisodesNotInPaths nil: got %v", err)
 	}
 	if err := s.CleanupOrphans(); err != gorm.ErrInvalidDB {
 		t.Errorf("CleanupOrphans nil: got %v", err)
+	}
+	if err := s.CleanupOrphansByDirectory(1); err != gorm.ErrInvalidDB {
+		t.Errorf("CleanupOrphansByDirectory nil: got %v", err)
 	}
 	if _, err := s.EpisodePathsByMetadata(1, 1); err != gorm.ErrInvalidDB {
 		t.Errorf("EpisodePathsByMetadata nil: got %v", err)
@@ -234,6 +243,33 @@ func TestLocalAnimeStoreDeleteEpisodesNotInPaths(t *testing.T) {
 	}
 	if eps, _ := s.ListEpisodesByAnimeID(anime.ID); len(eps) != 0 {
 		t.Fatalf("expected all gone, got %+v", eps)
+	}
+}
+
+func TestLocalAnimeStoreCanRestoreSoftDeletedEpisode(t *testing.T) {
+	s := setupLocalAnimeStore(t)
+	anime := &model.LocalAnime{Title: "Show", Path: "/p/s"}
+	if err := s.CreateAnime(anime); err != nil {
+		t.Fatalf("CreateAnime: %v", err)
+	}
+	episodePath := "/p/s/01.mkv"
+	if err := s.CreateEpisode(&model.LocalEpisode{LocalAnimeID: anime.ID, Path: episodePath, EpisodeNum: 1}); err != nil {
+		t.Fatalf("CreateEpisode: %v", err)
+	}
+	if err := s.DeleteEpisodesNotInPaths(anime.ID, nil); err != nil {
+		t.Fatalf("DeleteEpisodesNotInPaths: %v", err)
+	}
+
+	episode, err := s.FindEpisodeByPathIncludingDeleted(episodePath)
+	if err != nil {
+		t.Fatalf("FindEpisodeByPathIncludingDeleted: %v", err)
+	}
+	episode.DeletedAt = gorm.DeletedAt{}
+	if err := s.SaveEpisodeIncludingDeleted(episode); err != nil {
+		t.Fatalf("SaveEpisodeIncludingDeleted: %v", err)
+	}
+	if _, err := s.FindEpisodeByPath(episodePath); err != nil {
+		t.Fatalf("expected restored episode to be visible: %v", err)
 	}
 }
 

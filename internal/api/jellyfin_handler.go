@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -120,16 +121,33 @@ func episodeNotFoundDiagnostic(anime model.LocalAnime, ep model.LocalEpisode) *P
 	}
 }
 
-func proxyPlaybackDiagnostic(detail string) *PlaybackDiagnostic {
+func proxyPlaybackDiagnostic(detail string, canUseDirectLink bool) *PlaybackDiagnostic {
 	return &PlaybackDiagnostic{
 		Code:             "jellyfin_proxy_failed",
 		Summary:          "Jellyfin 代理流播放失败",
-		Hint:             "可以先尝试右上角的直连播放；如果仍然失败，请检查 Jellyfin 地址、反向代理和媒体是否已入库。",
+		Hint:             "请检查 Jellyfin 地址、Tailscale 连接、反向代理和媒体是否已入库。",
 		Detail:           detail,
-		CanUseDirectLink: true,
+		CanUseDirectLink: canUseDirectLink,
 		PrimaryAction:    "检查本地番剧详情",
 		PrimaryTarget:    "/local-anime",
 	}
+}
+
+func normalizeJellyfinBaseURL(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", nil
+	}
+	parsed, err := url.Parse(value)
+	if err != nil || parsed.Hostname() == "" || (!strings.EqualFold(parsed.Scheme, "http") && !strings.EqualFold(parsed.Scheme, "https")) {
+		return "", errors.New("jellyfin 浏览器直连地址必须是完整的 http:// 或 https:// 地址")
+	}
+	if parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", errors.New("jellyfin 浏览器直连地址不能包含账号、查询参数或片段")
+	}
+	parsed.Scheme = strings.ToLower(parsed.Scheme)
+	parsed.Path = strings.TrimRight(parsed.Path, "/")
+	return strings.TrimRight(parsed.String(), "/"), nil
 }
 
 func missingMetadataDiagnostic(anime model.LocalAnime) *PlaybackDiagnostic {
@@ -306,9 +324,16 @@ func GetPlayInfoHandler(c *gin.Context) {
 	// 6. Generate Stream URL
 
 	// 6. Generate Stream URL (PROXIED via our backend to avoid CORS/Network issues)
-	proxyUrl := fmt.Sprintf("/api/jellyfin/stream/%d", ep.ID)
-	// Direct URL for fallback
-	directUrl := client.GetStreamURL(epId)
+	proxyUrl := fmt.Sprintf("/api/v1/jellyfin/stream/%d", ep.ID)
+	// Direct URL is advertised separately because the address reachable by the
+	// browser (for example a Tailscale MagicDNS name) can differ from the URL
+	// used by AnimateTool on the server.
+	directUrl := ""
+	if directBase, directErr := normalizeJellyfinBaseURL(configValue(model.ConfigKeyJellyfinDirectUrl)); directErr == nil && directBase != "" {
+		directUrl = jellyfin.NewClient(directBase, apiKey).GetStreamURL(epId)
+	} else if directErr != nil {
+		log.Printf("[WARN] ignoring invalid Jellyfin direct URL: %v", directErr)
+	}
 
 	if _, err := os.Stat(ep.Path); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -325,7 +350,7 @@ func GetPlayInfoHandler(c *gin.Context) {
 		PosterURL:       anime.Metadata.Image, // Use local image
 		Title:           anime.Metadata.Title,
 		EpisodeTitle:    fmt.Sprintf("S%dE%d - %s", ep.SeasonNum, ep.EpisodeNum, ep.Title),
-		Diagnostic:      proxyPlaybackDiagnostic("代理流若黑屏或加载失败，可直接打开 Jellyfin 直连链接继续播放。"),
+		Diagnostic:      proxyPlaybackDiagnostic("浏览器直连失败时播放器会自动切换到 AnimateTool 代理流。", directUrl != ""),
 	})
 }
 

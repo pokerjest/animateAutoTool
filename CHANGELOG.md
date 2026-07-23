@@ -8,6 +8,22 @@
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-07-23
+
+### Added
+- Jellyfin 新增独立的浏览器直连地址，可为手机和平板配置 Tailscale 或其他浏览器可达服务器；播放器优先直连，失败时自动回退 AnimateTool 代理。
+- Jellyfin 播放信息、流代理和进度上报纳入 OpenAPI 类型契约，播放器恢复 Jellyfin 断点并持续同步观看进度。
+
+### Changed
+- 重构本地番剧扫描器，采用递归媒体发现和作品级归并，支持散装剧集、年份/分类多层目录、Season、Specials、BDMV、符号链接及 NFO。
+- 同作品的不同字幕组、清晰度和季目录会合并到同一番剧；同名不同年份的重制版继续保持独立。
+- 扫描目录进行规范化并串行执行，重叠媒体根目录只认领一次物理文件，减少重复扫描和重复记录。
+
+### Fixed
+- 修复根目录视频被逐集识别成多部番剧、嵌套作品被错误合并、目录改名后留下重复项，以及文件恢复后受软删除唯一索引阻挡而漏扫的问题。
+- 修复扫描不完整时可能误清理旧记录的问题；子目录无权限或读取失败时保留已有媒体数据并提供诊断。
+- 修复 Jellyfin 直连失败后代理回退仍指向旧 `/api` 路径的问题。
+
 ## [0.7.4] - 2026-07-23
 
 ### Changed
@@ -175,7 +191,8 @@
 
 ---
 
-[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v0.7.4...HEAD
+[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/pokerjest/animateAutoTool/compare/v0.7.4...v0.8.0
 [0.7.4]: https://github.com/pokerjest/animateAutoTool/compare/v0.7.3...v0.7.4
 [0.7.3]: https://github.com/pokerjest/animateAutoTool/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/pokerjest/animateAutoTool/compare/v0.7.1...v0.7.2

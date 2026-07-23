@@ -768,7 +768,7 @@ func V1UpdateSettingsHandler(c *gin.Context) {
 		return
 	}
 	allowed := map[string]bool{}
-	for _, key := range []string{model.ConfigKeyQBMode, model.ConfigKeyQBUrl, model.ConfigKeyQBUsername, model.ConfigKeyQBPassword, model.ConfigKeyBaseDir, model.ConfigKeyBangumiAppID, model.ConfigKeyBangumiAppSecret, model.ConfigKeyBangumiAccessToken, model.ConfigKeyBangumiRefreshToken, model.ConfigKeyTMDBToken, model.ConfigKeyAniListToken, model.ConfigKeyProxyURL, model.ConfigKeyProxyBangumi, model.ConfigKeyProxyMikan, model.ConfigKeyProxyTMDB, model.ConfigKeyProxyAniList, model.ConfigKeyProxyJellyfin, model.ConfigKeyProxyAI, model.ConfigKeyProxyUpdater, model.ConfigKeyJellyfinUrl, model.ConfigKeyJellyfinUsername, model.ConfigKeyJellyfinPassword, model.ConfigKeyJellyfinApiKey, model.ConfigKeyAListUrl, model.ConfigKeyAListToken, model.ConfigKeyPikPakUsername, model.ConfigKeyPikPakPassword, model.ConfigKeyPikPakRefreshToken, model.ConfigKeyAIBaseURL, model.ConfigKeyAIModel, model.ConfigKeyAIApiKey, model.ConfigKeyR2Endpoint, model.ConfigKeyR2Bucket, model.ConfigKeyR2AccessKey, model.ConfigKeyR2SecretKey, model.ConfigKeyRepoUpdateEnabled, model.ConfigKeyRepoAutoPullEnabled, model.ConfigKeyRepoUpdateIntervalMinutes, model.ConfigKeyRepoUpdateOwner, model.ConfigKeyRepoUpdateName, model.ConfigKeyRepoRequireChecksum} {
+	for _, key := range []string{model.ConfigKeyQBMode, model.ConfigKeyQBUrl, model.ConfigKeyQBUsername, model.ConfigKeyQBPassword, model.ConfigKeyBaseDir, model.ConfigKeyBangumiAppID, model.ConfigKeyBangumiAppSecret, model.ConfigKeyBangumiAccessToken, model.ConfigKeyBangumiRefreshToken, model.ConfigKeyTMDBToken, model.ConfigKeyAniListToken, model.ConfigKeyProxyURL, model.ConfigKeyProxyBangumi, model.ConfigKeyProxyMikan, model.ConfigKeyProxyTMDB, model.ConfigKeyProxyAniList, model.ConfigKeyProxyJellyfin, model.ConfigKeyProxyAI, model.ConfigKeyProxyUpdater, model.ConfigKeyJellyfinUrl, model.ConfigKeyJellyfinDirectUrl, model.ConfigKeyJellyfinUsername, model.ConfigKeyJellyfinPassword, model.ConfigKeyJellyfinApiKey, model.ConfigKeyAListUrl, model.ConfigKeyAListToken, model.ConfigKeyPikPakUsername, model.ConfigKeyPikPakPassword, model.ConfigKeyPikPakRefreshToken, model.ConfigKeyAIBaseURL, model.ConfigKeyAIModel, model.ConfigKeyAIApiKey, model.ConfigKeyR2Endpoint, model.ConfigKeyR2Bucket, model.ConfigKeyR2AccessKey, model.ConfigKeyR2SecretKey, model.ConfigKeyRepoUpdateEnabled, model.ConfigKeyRepoAutoPullEnabled, model.ConfigKeyRepoUpdateIntervalMinutes, model.ConfigKeyRepoUpdateOwner, model.ConfigKeyRepoUpdateName, model.ConfigKeyRepoRequireChecksum} {
 		allowed[key] = true
 	}
 	updates := map[string]string{}
@@ -784,6 +784,14 @@ func V1UpdateSettingsHandler(c *gin.Context) {
 			normalized, err := httpx.NormalizeProxyURL(value)
 			if err != nil {
 				v1Error(c, http.StatusBadRequest, "invalid_proxy_url", err.Error())
+				return
+			}
+			value = normalized
+		}
+		if key == model.ConfigKeyJellyfinDirectUrl {
+			normalized, err := normalizeJellyfinBaseURL(value)
+			if err != nil {
+				v1Error(c, http.StatusBadRequest, "invalid_jellyfin_direct_url", err.Error())
 				return
 			}
 			value = normalized
