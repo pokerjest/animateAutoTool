@@ -4,7 +4,11 @@ import type { SessionState } from '../api/types'
 
 export const useSessionStore = defineStore('session', {
   state: () => ({ state: null as SessionState | null, loading: false }),
-  getters: { authenticated: s => Boolean(s.state?.authenticated), setupPending: s => Boolean(s.state?.setup_pending) },
+  getters: {
+    authenticated: s => Boolean(s.state?.authenticated),
+    setupPending: s => Boolean(s.state?.setup_pending),
+    localSetupAvailable: s => Boolean(s.state?.local_setup_available),
+  },
   actions: {
     async load(force = false) {
       if (this.state && !force) return this.state
@@ -13,6 +17,10 @@ export const useSessionStore = defineStore('session', {
     },
     async login(username: string, password: string, remember_me: boolean) {
       await api('/session/login', { method: 'POST', body: JSON.stringify({ username, password, remember_me }), headers: { 'Content-Type': 'application/json' } })
+      return this.load(true)
+    },
+    async beginLocalSetup() {
+      await api('/session/bootstrap', { method: 'POST' })
       return this.load(true)
     },
     async logout() { await api('/session/logout', { method: 'POST' }); this.state = null },

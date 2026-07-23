@@ -8,6 +8,14 @@
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-07-23
+
+### Changed
+- 首次在本机启动时可直接建立仅限 localhost 的初始化会话，由用户自行设置管理员密码，无需查找或输入随机密码。
+
+### Security
+- 初始化会话仅允许初始化未完成时通过 localhost 直连和同源请求建立；远程、代理转发及跨站请求继续被拒绝，完成初始化后入口自动关闭。
+
 ## [0.7.0] - 2026-07-23
 
 ### Added
@@ -142,7 +150,8 @@
 
 ---
 
-[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/pokerjest/animateAutoTool/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/pokerjest/animateAutoTool/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/pokerjest/animateAutoTool/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/pokerjest/animateAutoTool/compare/v0.5.4...v0.6.0

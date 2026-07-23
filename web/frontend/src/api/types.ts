@@ -1,6 +1,6 @@
 import type { components } from './schema'
 
-export interface SessionState { authenticated: boolean; setup_pending: boolean; username?: string; version: string; recovery_local_only: boolean }
+export interface SessionState { authenticated: boolean; setup_pending: boolean; local_setup_available: boolean; username?: string; version: string; recovery_local_only: boolean }
 export type TaskAccepted = components['schemas']['TaskAccepted']
 export type TaskUpdate = components['schemas']['TaskUpdate']
 export interface Metadata { ID: number; id?: number; title: string; title_cn?: string; title_jp?: string; image: string; summary: string; air_date: string; bangumi_id: number; tmdb_id: number; anilist_id: number; data_source: string }

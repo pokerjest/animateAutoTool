@@ -16,6 +16,12 @@ paths:
       operationId: login
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/LoginInput" } } } }
       responses: { "200": { $ref: "#/components/responses/Success" }, "401": { $ref: "#/components/responses/Error" }, "429": { $ref: "#/components/responses/Error" } }
+  /session/bootstrap:
+    post:
+      security: []
+      operationId: createLocalBootstrapSession
+      description: Creates a temporary authenticated setup session only for a direct localhost request while first-run setup is pending.
+      responses: { "200": { $ref: "#/components/responses/Success" }, "403": { $ref: "#/components/responses/Error" }, "409": { $ref: "#/components/responses/Error" } }
   /session/logout:
     post: { operationId: logout, responses: { "200": { $ref: "#/components/responses/Success" } } }
   /session/change-password:

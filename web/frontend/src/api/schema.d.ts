@@ -36,6 +36,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/session/bootstrap": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Creates a temporary authenticated setup session only for a direct localhost request while first-run setup is pending. */
+        post: operations["createLocalBootstrapSession"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/session/logout": {
         parameters: {
             query?: never;
@@ -1276,6 +1293,20 @@ export interface operations {
             200: components["responses"]["Success"];
             401: components["responses"]["Error"];
             429: components["responses"]["Error"];
+        };
+    };
+    createLocalBootstrapSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["Success"];
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
         };
     };
     logout: {

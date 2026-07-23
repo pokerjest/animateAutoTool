@@ -88,6 +88,7 @@ func initV1Routes(r *gin.Engine) {
 	{
 		v1.GET("/session", V1SessionHandler)
 		v1.POST("/session/login", SameOriginMiddleware(), V1LoginHandler)
+		v1.POST("/session/bootstrap", DirectLocalOnlyMiddleware(), SameOriginMiddleware(), V1BootstrapSessionHandler)
 	}
 
 	recovery := v1.Group("/recovery")
@@ -194,17 +195,51 @@ func V1TaskHandler(c *gin.Context) {
 }
 
 func V1SessionHandler(c *gin.Context) {
+	setupPending := bootstrap.BootstrapSetupPending()
 	data := gin.H{
-		"authenticated":       false,
-		"setup_pending":       bootstrap.BootstrapSetupPending(),
-		"version":             appversion.AppVersion,
-		"recovery_local_only": true,
+		"authenticated":         false,
+		"setup_pending":         setupPending,
+		"local_setup_available": setupPending && requestIsDirectLoopback(c),
+		"version":               appversion.AppVersion,
+		"recovery_local_only":   true,
 	}
 	if user, err := currentSessionUser(c); err == nil && user != nil {
 		data["authenticated"] = true
 		data["username"] = user.Username
 	}
 	v1Data(c, http.StatusOK, data)
+}
+
+func V1BootstrapSessionHandler(c *gin.Context) {
+	bootstrapInfo, pending := bootstrap.PendingAdminBootstrapInfo()
+	if !pending {
+		v1Error(c, http.StatusConflict, "setup_not_pending", "首次初始化已经完成")
+		return
+	}
+
+	user, err := store.NewUserStore(db.DB).GetByUsername(bootstrapInfo.Username)
+	if err != nil {
+		v1Error(c, http.StatusInternalServerError, "bootstrap_user_unavailable", "无法读取初始化管理员账户")
+		return
+	}
+
+	session := sessions.Default(c)
+	session.Set("user_id", user.ID)
+	session.Options(sessionCookieOptions(c, 0))
+	if err := session.Save(); err != nil {
+		v1Error(c, http.StatusInternalServerError, "session_save_failed", "无法保存初始化登录状态")
+		return
+	}
+
+	clearFailedLoginAttempts(requestClientIP(c))
+	auditCtx := auditContextForLogin(c, user.Username)
+	auditCtx.UserID = user.ID
+	service.RecordAudit(auditCtx, service.AuditEntry{
+		Action:  service.AuditActionLoginSuccess,
+		Outcome: service.AuditOutcomeSuccess,
+		Details: map[string]any{"method": "local_bootstrap"},
+	})
+	v1Message(c, http.StatusOK, "已建立本机初始化会话", gin.H{"setup_pending": true})
 }
 
 func V1LoginHandler(c *gin.Context) {

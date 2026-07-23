@@ -10,12 +10,15 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/pokerjest/animateAutoTool/internal/bootstrap"
 	"github.com/pokerjest/animateAutoTool/internal/config"
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/parser"
+	"github.com/pokerjest/animateAutoTool/internal/service"
 	"github.com/pokerjest/animateAutoTool/internal/taskstate"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -71,6 +74,121 @@ func TestV1SessionUsesDataEnvelope(t *testing.T) {
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &payload))
 	assert.False(t, payload.Data.Authenticated)
 	assert.NotEmpty(t, payload.Data.Version)
+}
+
+func TestV1SessionAdvertisesLocalSetupOnlyForDirectLoopback(t *testing.T) {
+	resetAuthFixtures(t)
+	require.NoError(t, bootstrap.SaveAdminBootstrapInfo(bootstrap.AdminBootstrapInfo{
+		Username:  "admin",
+		Password:  "admin",
+		CreatedAt: time.Now(),
+	}))
+	r := setupRouter()
+
+	readSession := func(mark func(*http.Request)) struct {
+		SetupPending        bool `json:"setup_pending"`
+		LocalSetupAvailable bool `json:"local_setup_available"`
+	} {
+		t.Helper()
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/session", nil)
+		mark(req)
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		var payload struct {
+			Data struct {
+				SetupPending        bool `json:"setup_pending"`
+				LocalSetupAvailable bool `json:"local_setup_available"`
+			} `json:"data"`
+		}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &payload))
+		return payload.Data
+	}
+
+	local := readSession(markLocalRequest)
+	assert.True(t, local.SetupPending)
+	assert.True(t, local.LocalSetupAvailable)
+
+	remote := httptest.NewRecorder()
+	remoteRequest := httptest.NewRequest(http.MethodGet, "/api/v1/session", nil)
+	markRemoteRequest(remoteRequest)
+	r.ServeHTTP(remote, remoteRequest)
+	require.Equal(t, http.StatusForbidden, remote.Code)
+	assert.Contains(t, remote.Body.String(), `"code":"bootstrap_local_only"`)
+}
+
+func TestV1LocalBootstrapSessionAuthenticatesPendingAdmin(t *testing.T) {
+	resetAuthFixtures(t)
+	require.NoError(t, bootstrap.SaveAdminBootstrapInfo(bootstrap.AdminBootstrapInfo{
+		Username:  "admin",
+		Password:  "admin",
+		CreatedAt: time.Now(),
+	}))
+	r := setupRouter()
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/session/bootstrap", nil)
+	markLocalRequest(req)
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	cookie := strings.SplitN(w.Header().Get("Set-Cookie"), ";", 2)[0]
+	require.NotEmpty(t, cookie)
+	sessionResponse := httptest.NewRecorder()
+	sessionRequest := httptest.NewRequest(http.MethodGet, "/api/v1/session", nil)
+	sessionRequest.Header.Set("Cookie", cookie)
+	markLocalRequest(sessionRequest)
+	r.ServeHTTP(sessionResponse, sessionRequest)
+	require.Equal(t, http.StatusOK, sessionResponse.Code, sessionResponse.Body.String())
+	assert.Contains(t, sessionResponse.Body.String(), `"authenticated":true`)
+	assert.Contains(t, sessionResponse.Body.String(), `"setup_pending":true`)
+
+	setupResponse := httptest.NewRecorder()
+	setupRequest := httptest.NewRequest(http.MethodPost, "/api/v1/setup/bootstrap", bytes.NewBufferString(`{"new_password":"local-first-run-123","confirm_password":"local-first-run-123","qb_mode":"managed","base_download_dir":""}`))
+	setupRequest.Header.Set("Content-Type", "application/json")
+	setupRequest.Header.Set("Cookie", cookie)
+	markLocalRequest(setupRequest)
+	r.ServeHTTP(setupResponse, setupRequest)
+	require.Equal(t, http.StatusOK, setupResponse.Code, setupResponse.Body.String())
+	assert.False(t, bootstrap.BootstrapSetupPending())
+	_, err := service.NewAuthService().Login("admin", "local-first-run-123")
+	require.NoError(t, err)
+}
+
+func TestV1LocalBootstrapSessionRejectsRemoteAndCrossOriginRequests(t *testing.T) {
+	resetAuthFixtures(t)
+	require.NoError(t, bootstrap.SaveAdminBootstrapInfo(bootstrap.AdminBootstrapInfo{
+		Username:  "admin",
+		Password:  "admin",
+		CreatedAt: time.Now(),
+	}))
+	r := setupRouter()
+
+	remote := httptest.NewRecorder()
+	remoteRequest := httptest.NewRequest(http.MethodPost, "/api/v1/session/bootstrap", nil)
+	markRemoteRequest(remoteRequest)
+	r.ServeHTTP(remote, remoteRequest)
+	require.Equal(t, http.StatusForbidden, remote.Code)
+	assert.Contains(t, remote.Body.String(), `"code":"bootstrap_local_only"`)
+
+	crossOrigin := httptest.NewRecorder()
+	crossOriginRequest := httptest.NewRequest(http.MethodPost, "/api/v1/session/bootstrap", nil)
+	crossOriginRequest.RemoteAddr = testLocalRemoteAddr
+	crossOriginRequest.Host = testLocalHost
+	crossOriginRequest.Header.Set("Origin", "https://evil.example.net")
+	r.ServeHTTP(crossOrigin, crossOriginRequest)
+	require.Equal(t, http.StatusForbidden, crossOrigin.Code)
+	assert.Contains(t, crossOrigin.Body.String(), `"code":"cross_origin_write"`)
+}
+
+func TestV1LocalBootstrapSessionClosesAfterInitialization(t *testing.T) {
+	resetAuthFixtures(t)
+	r := setupRouter()
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/session/bootstrap", nil)
+	markLocalRequest(req)
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusConflict, w.Code)
+	assert.Contains(t, w.Body.String(), `"code":"setup_not_pending"`)
 }
 
 func TestV1ProtectedEndpointsUseStructuredErrors(t *testing.T) {
