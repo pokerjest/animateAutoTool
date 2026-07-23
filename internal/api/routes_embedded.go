@@ -17,6 +17,15 @@ func InitRoutes(r *gin.Engine) {
 	r.Use(sessions.Sessions("animate_session", store))
 	r.Use(SecurityHeadersMiddleware())
 	r.Use(BootstrapLocalOnlyMiddleware())
+	r.Use(func(c *gin.Context) {
+		switch {
+		case strings.HasPrefix(c.Request.URL.Path, "/assets/"):
+			c.Header("Cache-Control", "public, max-age=31536000, immutable")
+		case strings.HasPrefix(c.Request.URL.Path, "/static/"):
+			c.Header("Cache-Control", "public, max-age=86400")
+		}
+		c.Next()
+	})
 
 	staticFS, err := webassets.StaticFS()
 	if err != nil {

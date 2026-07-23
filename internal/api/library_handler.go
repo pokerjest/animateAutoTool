@@ -400,15 +400,7 @@ func GetPosterHandler(c *gin.Context) {
 		return
 	}
 
-	// Basic content type detection (or we could store it in DB too)
-	contentType := "image/jpeg"
-	if len(data) > 4 && string(data[1:4]) == "PNG" {
-		contentType = "image/png"
-	} else if len(data) > 3 && string(data[:3]) == "GIF" {
-		contentType = "image/gif"
-	}
-
-	c.Data(http.StatusOK, contentType, data)
+	servePosterImage(c, data)
 }
 
 // ProxyTMDBImageHandler proxies TMDB images through the server

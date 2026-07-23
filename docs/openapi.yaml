@@ -142,6 +142,27 @@ paths:
     get: { operationId: getCalendar, responses: { "200": { $ref: "#/components/responses/Success" } } }
   /library:
     get: { operationId: getLibrary, parameters: [{ $ref: "#/components/parameters/Page" }, { $ref: "#/components/parameters/PageSize" }], responses: { "200": { $ref: "#/components/responses/Paginated" } } }
+  /posters/{id}:
+    get:
+      operationId: getPoster
+      description: Returns the cached poster. Set width for a JPEG thumbnail; versioned requests receive an immutable private cache policy.
+      parameters:
+        - { $ref: "#/components/parameters/Id" }
+        - { name: source, in: query, schema: { type: string, enum: [bangumi, tmdb, anilist] } }
+        - { name: width, in: query, schema: { type: integer, minimum: 64, maximum: 1280 } }
+        - { name: v, in: query, description: Metadata version used for cache busting, schema: { type: string } }
+      responses:
+        "200":
+          description: Poster image or resized JPEG thumbnail
+          headers:
+            Cache-Control: { schema: { type: string } }
+            ETag: { schema: { type: string } }
+          content:
+            image/jpeg: { schema: { type: string, format: binary } }
+            image/png: { schema: { type: string, format: binary } }
+            image/gif: { schema: { type: string, format: binary } }
+        "304": { description: Cached image is still current }
+        "404": { description: Poster not found }
   /library/refresh:
     post: { operationId: refreshLibrary, responses: { "202": { $ref: "#/components/responses/TaskAccepted" } } }
   /library/metadata/{id}/refresh:

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { api, ApiError, handlePosterError, normalizePosterURL, posterURL } from './client'
+import { api, ApiError, handlePosterError, normalizePosterURL, posterThumbnailURL, posterURL } from './client'
 
 describe('api client', () => {
   afterEach(() => vi.unstubAllGlobals())
@@ -31,5 +31,10 @@ describe('poster URLs', () => {
     image.src = '/api/v1/posters/9'
     handlePosterError({ currentTarget: image } as unknown as Event)
     expect(image.getAttribute('src')).toBe('/static/img/no_poster.svg')
+  })
+
+  it('adds thumbnail dimensions and a metadata cache version', () => {
+    expect(posterThumbnailURL('/api/v1/posters/9?source=tmdb', 320)).toBe('/api/v1/posters/9?source=tmdb&width=320')
+    expect(posterURL({ ID: 9, UpdatedAt: '2026-07-23T12:00:00Z' }, { width: 360 })).toBe('/api/v1/posters/9?width=360&v=2026-07-23T12%3A00%3A00Z')
   })
 })

@@ -8,6 +8,14 @@
 
 ## [Unreleased]
 
+## [0.7.3] - 2026-07-23
+
+### Changed
+- 海报列表改用按需生成的缩略图、浏览器条件缓存与分批渲染，降低手机访问时的传输量和图片解码内存；静态哈希资源启用长期缓存。
+
+### Fixed
+- 修复移动端同时加载多张原始高分辨率海报时加载缓慢、图片被浏览器回收或显示失败的问题。
+
 ## [0.7.2] - 2026-07-23
 
 ### Fixed
@@ -155,7 +163,8 @@
 
 ---
 
-[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v0.7.2...HEAD
+[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v0.7.3...HEAD
+[0.7.3]: https://github.com/pokerjest/animateAutoTool/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/pokerjest/animateAutoTool/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/pokerjest/animateAutoTool/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/pokerjest/animateAutoTool/compare/v0.6.1...v0.7.0
