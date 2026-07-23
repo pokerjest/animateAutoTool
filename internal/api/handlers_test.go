@@ -2339,6 +2339,18 @@ func TestPopulateSubscriptionActionHintsIncludesLibraryAndUpgradeState(t *testin
 	assert.Contains(t, sub.LibraryHint, "Jellyfin 已建立条目")
 	assert.True(t, sub.CanRetryUpgrade)
 	assert.Contains(t, sub.StrategyHint, "较低分辨率")
+	assert.False(t, sub.HasRepairActions, "optional quality upgrades must not be reported as subscription failures")
+}
+
+func TestCollectUpgradeableEpisodesIgnoresUnknownResolution(t *testing.T) {
+	episodes := []model.LocalEpisode{
+		{EpisodeNum: 1, Resolution: ""},
+		{EpisodeNum: 2, Resolution: "unknown"},
+		{EpisodeNum: 3, Resolution: "720p"},
+		{EpisodeNum: 4, Resolution: "1080p"},
+	}
+
+	assert.Equal(t, []int{3}, collectUpgradeableEpisodes(episodes))
 }
 
 func TestPopulateSubscriptionActionHintsMarksLibraryPendingSyncWhenJellyfinConfigured(t *testing.T) {
@@ -2401,6 +2413,7 @@ func TestPopulateSubscriptionActionHintsMarksLibraryPendingSyncWhenJellyfinConfi
 	assert.Equal(t, "warning", sub.LibraryTone)
 	assert.Contains(t, sub.LibraryHint, "建议触发一次库刷新")
 	assert.True(t, sub.CanRefreshLibrary)
+	assert.False(t, sub.HasRepairActions, "a media-server refresh recommendation must not create a permanent issue")
 }
 
 func TestRenderSubscriptionCardTemplateIncludesLifecycleAndRepairActions(t *testing.T) {

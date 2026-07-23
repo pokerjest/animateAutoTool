@@ -47,10 +47,11 @@ func InitDB(storagePath string) {
 	if err != nil {
 		log.Fatalf("failed to access sql database handle: %v", err)
 	}
-	if isInMemoryDB(storagePath) {
-		sqlDB.SetMaxOpenConns(1)
-		sqlDB.SetMaxIdleConns(1)
-	}
+	// SQLite has a single writer. Keeping one application connection prevents
+	// concurrent background metadata jobs from racing for the write lock while
+	// still allowing the driver-level busy timeout to cover external locks.
+	sqlDB.SetMaxOpenConns(1)
+	sqlDB.SetMaxIdleConns(1)
 
 	err = RunMigrations(DB)
 	if err != nil {
@@ -126,18 +127,18 @@ func isInMemoryDB(storagePath string) bool {
 }
 
 func sqliteDriverPath(storagePath string) string {
-	if currentDBGOOS() != "windows" {
-		return storagePath
-	}
-
 	separator := "?"
 	if strings.Contains(storagePath, "?") {
 		separator = "&"
+	}
+	driverPath := storagePath + separator + "_pragma=busy_timeout(5000)"
+	if currentDBGOOS() != "windows" {
+		return driverPath
 	}
 
 	// modernc/glebarez SQLite can fail to clean up rollback journals on Windows
 	// in some portable/self-contained layouts. WAL keeps crash recovery and
 	// durability characteristics closer to the default mode while avoiding the
 	// most fragile rollback-journal path.
-	return storagePath + separator + "_pragma=journal_mode(WAL)"
+	return driverPath + "&_pragma=journal_mode(WAL)"
 }

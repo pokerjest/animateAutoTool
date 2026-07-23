@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { api, ApiError, handlePosterError, normalizePosterURL, posterThumbnailURL, posterURL } from './client'
+import { api, ApiError, calendarPosterURL, handlePosterError, normalizePosterURL, posterThumbnailURL, posterURL } from './client'
 
 describe('api client', () => {
   afterEach(() => vi.unstubAllGlobals())
@@ -36,5 +36,10 @@ describe('poster URLs', () => {
   it('adds thumbnail dimensions and a metadata cache version', () => {
     expect(posterThumbnailURL('/api/v1/posters/9?source=tmdb', 320)).toBe('/api/v1/posters/9?source=tmdb&width=320')
     expect(posterURL({ ID: 9, UpdatedAt: '2026-07-23T12:00:00Z' }, { width: 360 })).toBe('/api/v1/posters/9?width=360&v=2026-07-23T12%3A00%3A00Z')
+  })
+
+  it('routes calendar images through the same-origin thumbnail proxy', () => {
+    expect(calendarPosterURL(99, 'https://lain.bgm.tv/pic/cover/l/test.jpg', 360)).toBe('/api/v1/calendar/posters/99?width=360')
+    expect(calendarPosterURL(0, 'https://lain.bgm.tv/pic/cover/l/test.jpg', 360)).toBe('https://lain.bgm.tv/pic/cover/l/test.jpg')
   })
 })

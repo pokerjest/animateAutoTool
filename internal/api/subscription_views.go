@@ -235,7 +235,10 @@ func populateSubscriptionStaleHints(sub *model.Subscription) {
 }
 
 func subscriptionHasRepairActions(sub *model.Subscription) bool {
-	return sub.CanUseBaseRSS || sub.CanClearFilter || sub.CanResetStaleLogs || sub.CanRetryMissing || sub.CanRetryStale || sub.CanRetryUpgrade || sub.CanRefreshLibrary
+	// Quality upgrades and media-server refreshes are optional recommendations.
+	// They can remain available when no better release exists or before Jellyfin
+	// has written its IDs back, so they must not create a permanent red issue.
+	return sub.CanUseBaseRSS || sub.CanClearFilter || sub.CanResetStaleLogs || sub.CanRetryMissing || sub.CanRetryStale
 }
 
 func populateSubscriptionLifecycle(sub *model.Subscription) {
@@ -379,6 +382,12 @@ func collectUpgradeableEpisodes(episodes []model.LocalEpisode) []int {
 
 	upgradeable := make([]int, 0)
 	for episodeNum, score := range bestByEpisode {
+		// An absent/unrecognised resolution is not evidence that the episode is
+		// low quality. Treating it as such creates an upgrade warning that can
+		// never be resolved by checking the feed again.
+		if score == 0 {
+			continue
+		}
 		if score >= resolutionScore(subscriptionResolution1080p) {
 			continue
 		}

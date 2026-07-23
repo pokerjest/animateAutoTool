@@ -63,6 +63,11 @@ export function posterURL(item: PosterRecord, options: PosterOptions = {}) {
   return normalizePosterURL(image)
 }
 
+export function calendarPosterURL(subjectID?: number, image?: string, width = 360) {
+  if (!subjectID || !image?.trim()) return normalizePosterURL(image)
+  return `/api/v1/calendar/posters/${subjectID}?width=${Math.max(64, Math.min(1280, Math.round(width)))}`
+}
+
 export function handlePosterError(event: Event, ...fallbacks: Array<string | undefined>) {
   const image = event.currentTarget
   if (!(image instanceof HTMLImageElement)) return

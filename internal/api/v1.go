@@ -133,6 +133,7 @@ func initV1Routes(r *gin.Engine) {
 		protected.GET("/subscriptions/:id/history", V1SubscriptionHistoryHandler)
 
 		protected.GET("/calendar", V1CalendarHandler)
+		protected.GET("/calendar/posters/:id", V1CalendarPosterHandler)
 		protected.GET("/library", V1LibraryHandler)
 		protected.POST("/library/refresh", V1RefreshLibraryHandler)
 		protected.POST("/library/metadata/:id/refresh", V1RefreshMetadataItemHandler)
@@ -199,11 +200,12 @@ func V1TaskHandler(c *gin.Context) {
 func V1SessionHandler(c *gin.Context) {
 	setupPending := bootstrap.BootstrapSetupPending()
 	data := gin.H{
-		"authenticated":         false,
-		"setup_pending":         setupPending,
-		"local_setup_available": setupPending && requestIsDirectLoopback(c),
-		"version":               appversion.AppVersion,
-		"recovery_local_only":   true,
+		"authenticated":            false,
+		"setup_pending":            setupPending,
+		"local_setup_available":    setupPending && requestIsDirectLoopback(c),
+		"local_recovery_available": requestIsDirectLoopback(c),
+		"version":                  appversion.AppVersion,
+		"recovery_local_only":      true,
 	}
 	if user, err := currentSessionUser(c); err == nil && user != nil {
 		data["authenticated"] = true
@@ -500,6 +502,7 @@ func V1CalendarHandler(c *gin.Context) {
 		v1Error(c, http.StatusBadGateway, "calendar_unavailable", "无法获取番剧日历："+humanizeOperationError(err.Error()))
 		return
 	}
+	rememberCalendarPosterSources(calendar)
 	v1Data(c, http.StatusOK, gin.H{"days": calendar, "today": calendarTodayTab(calendar, time.Now())})
 }
 

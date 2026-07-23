@@ -10,6 +10,7 @@ const baseState: SessionState = {
   authenticated: false,
   setup_pending: true,
   local_setup_available: true,
+  local_recovery_available: true,
   version: 'test',
   recovery_local_only: true,
 }

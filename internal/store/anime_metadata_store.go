@@ -75,14 +75,14 @@ func (s *AnimeMetadataStore) Create(m *model.AnimeMetadata) error {
 	if s == nil || s.db == nil {
 		return gorm.ErrInvalidDB
 	}
-	return s.db.Create(m).Error
+	return retrySQLiteBusy(func() error { return s.db.Create(m).Error })
 }
 
 func (s *AnimeMetadataStore) Save(m *model.AnimeMetadata) error {
 	if s == nil || s.db == nil {
 		return gorm.ErrInvalidDB
 	}
-	return s.db.Save(m).Error
+	return retrySQLiteBusy(func() error { return s.db.Save(m).Error })
 }
 
 func (s *AnimeMetadataStore) ListAll() ([]model.AnimeMetadata, error) {
@@ -122,7 +122,9 @@ func (s *AnimeMetadataStore) PropagateToSubscriptions(metadataID uint, updates m
 	if metadataID == 0 || len(updates) == 0 {
 		return nil
 	}
-	return s.db.Model(&model.Subscription{}).Where("metadata_id = ?", metadataID).Updates(updates).Error
+	return retrySQLiteBusy(func() error {
+		return s.db.Model(&model.Subscription{}).Where("metadata_id = ?", metadataID).Updates(updates).Error
+	})
 }
 
 // PropagateToLocalAnimes updates fields on all LocalAnime rows linked to the
@@ -134,5 +136,7 @@ func (s *AnimeMetadataStore) PropagateToLocalAnimes(metadataID uint, updates map
 	if metadataID == 0 || len(updates) == 0 {
 		return nil
 	}
-	return s.db.Model(&model.LocalAnime{}).Where("metadata_id = ?", metadataID).Updates(updates).Error
+	return retrySQLiteBusy(func() error {
+		return s.db.Model(&model.LocalAnime{}).Where("metadata_id = ?", metadataID).Updates(updates).Error
+	})
 }

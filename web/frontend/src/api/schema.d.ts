@@ -503,6 +503,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/calendar/posters/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getCalendarPoster"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/library": {
         parameters: {
             query?: never;
@@ -1132,6 +1148,16 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        SessionState: {
+            authenticated: boolean;
+            setup_pending: boolean;
+            local_setup_available: boolean;
+            /** @description True only when this request directly targets localhost from the loopback interface without forwarded headers. */
+            local_recovery_available: boolean;
+            username?: string;
+            version: string;
+            recovery_local_only: boolean;
+        };
         LoginInput: {
             username: string;
             /** Format: password */
@@ -1244,6 +1270,17 @@ export interface components {
                 "application/json": components["schemas"]["Envelope"];
             };
         };
+        /** @description Current browser session and local-only capability state */
+        Session: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Envelope"] & {
+                    data?: components["schemas"]["SessionState"];
+                };
+            };
+        };
         /** @description Paginated successful response */
         Paginated: {
             headers: {
@@ -1307,7 +1344,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            200: components["responses"]["Success"];
+            200: components["responses"]["Session"];
         };
     };
     login: {
@@ -1779,6 +1816,37 @@ export interface operations {
         requestBody?: never;
         responses: {
             200: components["responses"]["Success"];
+        };
+    };
+    getCalendarPoster: {
+        parameters: {
+            query?: {
+                width?: number;
+            };
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Cached same-origin Bangumi calendar poster */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/jpeg": string;
+                };
+            };
+            /** @description Poster unavailable */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
     getLibrary: {

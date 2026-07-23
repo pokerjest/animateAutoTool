@@ -55,6 +55,10 @@ var newV1MikanClient = func() v1MikanClient {
 	return newConfiguredMikanParser()
 }
 
+var enrichV1LocalAnime = func(anime *model.LocalAnime) error {
+	return service.NewMetadataService().EnrichAnime(anime)
+}
+
 func mikanDiscoveryItems(items []parser.SearchResult) []v1MikanDiscoveryItem {
 	result := make([]v1MikanDiscoveryItem, 0, len(items))
 	for _, item := range items {
@@ -413,18 +417,36 @@ func V1RefreshLocalMetadataHandler(c *gin.Context) {
 	taskID := "local-metadata-" + c.Param("id")
 	taskstate.Global.Start(taskID, "metadata", "刷新本地番剧元数据", "正在刷新 "+anime.Title)
 	go func(target *model.LocalAnime) {
-		if err := service.NewMetadataService().EnrichAnime(target); err != nil {
+		if err := enrichV1LocalAnime(target); err != nil {
 			log.Printf("local metadata refresh failed for %d: %v", target.ID, err)
+			updateLocalMetadataIssue(target, err)
 			taskstate.Global.Fail(taskID, err)
 			return
 		}
-		if err := db.DB.Save(target).Error; err != nil {
-			taskstate.Global.Fail(taskID, err)
-			return
-		}
+		updateLocalMetadataIssue(target, nil)
 		taskstate.Global.Complete(taskID, "本地番剧元数据刷新完成")
 	}(anime)
 	v1Message(c, http.StatusAccepted, "本地番剧元数据刷新已经启动", gin.H{"task_id": taskID, "status": "running"})
+}
+
+func updateLocalMetadataIssue(anime *model.LocalAnime, refreshErr error) {
+	if anime == nil || anime.ID == 0 {
+		return
+	}
+	issueKey := "scrape:" + strconv.FormatUint(uint64(anime.ID), 10)
+	if refreshErr == nil {
+		_ = service.ResolveLibraryIssue(issueKey)
+		return
+	}
+	_ = service.ReportLibraryIssue(service.LibraryIssueInput{
+		IssueKey:      issueKey,
+		IssueType:     service.LibraryIssueTypeScrape,
+		Title:         anime.Title,
+		DirectoryPath: anime.Path,
+		LocalAnimeID:  &anime.ID,
+		Message:       refreshErr.Error(),
+		Hint:          "元数据刷新会自动重试临时数据库锁；若仍失败，请等待扫描结束后再次刷新。",
+	})
 }
 
 func V1LocalAnimeSourceHandler(c *gin.Context) {
