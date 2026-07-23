@@ -32,8 +32,14 @@ const (
 )
 
 func NewSubscriptionManager(down downloader.Downloader) *SubscriptionManager {
+	rssParser := parser.NewMikanParser()
+	if proxyURL := configuredProxyURL(model.ConfigKeyProxyMikan); proxyURL != "" {
+		if err := rssParser.SetProxy(proxyURL); err != nil {
+			log.Printf("SubscriptionManager: failed to configure Mikan proxy: %v", err)
+		}
+	}
 	return &SubscriptionManager{
-		RSSParser:  parser.NewMikanParser(),
+		RSSParser:  rssParser,
 		Downloader: down,
 		DB:         db.DB,
 	}

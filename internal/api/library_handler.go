@@ -228,11 +228,6 @@ func SearchMetadataHandler(c *gin.Context) {
 		source = SourceBangumi
 	}
 
-	fetchProxy := func() (string, bool) {
-		value := configValue(model.ConfigKeyProxyURL)
-		return value, value != ""
-	}
-
 	switch source {
 	case SourceTMDB:
 		token := configValue(model.ConfigKeyTMDBToken)
@@ -241,15 +236,7 @@ func SearchMetadataHandler(c *gin.Context) {
 			return
 		}
 
-		// Check proxy for TMDB
-		var proxyURL string
-		if configValue(model.ConfigKeyProxyTMDB) == ValueTrue {
-			if purl, ok := fetchProxy(); ok {
-				proxyURL = purl
-			}
-		}
-
-		tmdbClient := tmdb.NewClient(token, proxyURL)
+		tmdbClient := tmdb.NewClient(token, configuredProxyURL(model.ConfigKeyProxyTMDB))
 
 		results, err := tmdbClient.SearchTVContext(c.Request.Context(), keyword)
 		if err != nil {
@@ -279,14 +266,7 @@ func SearchMetadataHandler(c *gin.Context) {
 			return
 		}
 
-		var proxyURL string
-		if configValue(model.ConfigKeyProxyAniList) == ValueTrue {
-			if purl, ok := fetchProxy(); ok {
-				proxyURL = purl
-			}
-		}
-
-		client := anilist.NewClient(token, proxyURL)
+		client := anilist.NewClient(token, configuredProxyURL(model.ConfigKeyProxyAniList))
 
 		result, err := client.SearchAnimeContext(c.Request.Context(), keyword)
 		if err != nil {
@@ -316,11 +296,7 @@ func SearchMetadataHandler(c *gin.Context) {
 
 	default: // Bangumi
 		client := bangumi.NewClient("", "", "")
-		if configValue(model.ConfigKeyProxyBangumi) == ValueTrue {
-			if purl, ok := fetchProxy(); ok {
-				client.SetProxy(purl)
-			}
-		}
+		applyProxyToBangumiClient(client)
 
 		// Bangumi search returns its own struct, but frontend expects generic?
 		// The original handler returned raw bangumi results or generic?
@@ -369,12 +345,7 @@ func GetBangumiSubjectHandler(c *gin.Context) {
 	id, _ := strconv.Atoi(idStr)
 
 	client := bangumi.NewClient("", "", "")
-
-	// Proxy
-	proxyURL := configValue(model.ConfigKeyProxyURL)
-	if configValue(model.ConfigKeyProxyBangumi) == ValueTrue && proxyURL != "" {
-		client.SetProxy(proxyURL)
-	}
+	applyProxyToBangumiClient(client)
 
 	subject, err := client.GetSubjectContext(c.Request.Context(), id)
 	if err != nil {
@@ -452,17 +423,7 @@ func ProxyTMDBImageHandler(c *gin.Context) {
 	var token model.GlobalConfig
 	db.DB.Where("key = ?", model.ConfigKeyTMDBToken).First(&token)
 
-	// Fetch proxy setting
-	var proxyEnabled model.GlobalConfig
-	var proxyURL string
-	db.DB.Where("key = ?", model.ConfigKeyProxyTMDB).First(&proxyEnabled)
-	if proxyEnabled.Value == ValueTrue {
-		var pUrl model.GlobalConfig
-		db.DB.Where("key = ?", model.ConfigKeyProxyURL).First(&pUrl)
-		proxyURL = pUrl.Value
-	}
-
-	tmdbClient := tmdb.NewClient(token.Value, proxyURL)
+	tmdbClient := tmdb.NewClient(token.Value, configuredProxyURL(model.ConfigKeyProxyTMDB))
 	resp, err := tmdbClient.ProxyImage(path)
 	if err != nil {
 		c.Status(http.StatusInternalServerError)

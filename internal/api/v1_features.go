@@ -52,14 +52,7 @@ type v1MikanSubgroup struct {
 }
 
 var newV1MikanClient = func() v1MikanClient {
-	client := parser.NewMikanParser()
-	if db.DB != nil {
-		var proxyConfig model.GlobalConfig
-		if err := db.DB.Where("key = ?", model.ConfigKeyProxyURL).First(&proxyConfig).Error; err == nil {
-			client.SetProxy(proxyConfig.Value)
-		}
-	}
-	return client
+	return newConfiguredMikanParser()
 }
 
 func mikanDiscoveryItems(items []parser.SearchResult) []v1MikanDiscoveryItem {
@@ -494,6 +487,13 @@ func V1ConnectionStatusHandler(c *gin.Context) {
 		connected, detail = CheckTMDBConnection()
 	case "anilist":
 		connected, account, detail = CheckAniListConnection()
+	case "mikan":
+		_, err := newConfiguredMikanParser().GetDashboardContext(c.Request.Context(), "", "")
+		if err != nil {
+			detail = humanizeOperationError(err.Error())
+		} else {
+			connected = true
+		}
 	case "jellyfin":
 		connected, detail = CheckJellyfinConnection()
 	case "bangumi":

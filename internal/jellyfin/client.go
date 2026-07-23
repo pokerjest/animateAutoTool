@@ -47,10 +47,14 @@ func HasStatus(err error, statuses ...int) bool {
 }
 
 func NewClient(url, apiKey string) *Client {
+	return NewClientWithProxy(url, apiKey, "")
+}
+
+func NewClientWithProxy(url, apiKey, proxyURL string) *Client {
 	return &Client{
 		BaseURL: strings.TrimRight(url, "/"),
 		APIKey:  apiKey,
-		Client:  httpx.NewHTTPClient(10 * time.Second),
+		Client:  httpx.NewHTTPClientWithProxy(10*time.Second, proxyURL),
 	}
 }
 

@@ -131,6 +131,25 @@ func TestProcessSubscriptionPersistsSuccessState(t *testing.T) {
 	}
 }
 
+func TestConfiguredProxyURLRequiresServiceToggle(t *testing.T) {
+	withServiceTestDB(t)
+	requireConfig := func(key, value string) {
+		t.Helper()
+		if err := db.DB.Create(&model.GlobalConfig{Key: key, Value: value}).Error; err != nil {
+			t.Fatalf("seed %s: %v", key, err)
+		}
+	}
+	requireConfig(model.ConfigKeyProxyURL, "127.0.0.1:7890")
+
+	if got := configuredProxyURL(model.ConfigKeyProxyMikan); got != "" {
+		t.Fatalf("expected disabled Mikan proxy to stay empty, got %q", got)
+	}
+	requireConfig(model.ConfigKeyProxyMikan, model.ConfigValueTrue)
+	if got := configuredProxyURL(model.ConfigKeyProxyMikan); got != "http://127.0.0.1:7890" {
+		t.Fatalf("unexpected configured proxy: %q", got)
+	}
+}
+
 func TestProcessSubscriptionPersistsIdleStateForDuplicates(t *testing.T) {
 	withServiceTestDB(t)
 

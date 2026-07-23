@@ -111,6 +111,7 @@ func DashboardBangumiDataHandler(c *gin.Context) {
 
 	if token := configValue(model.ConfigKeyBangumiAccessToken); token != "" {
 		client := bangumi.NewClient("", "", "")
+		applyProxyToBangumiClient(client)
 		user, err := client.GetCurrentUser(token)
 		if err == nil {
 			watching, err1 := client.GetUserCollection(token, user.Username, 3, 12, 0)

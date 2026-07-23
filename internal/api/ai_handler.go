@@ -109,7 +109,7 @@ func AIChatHandler(c *gin.Context) {
 		modelName = defaultAIModel // fallback
 	}
 
-	client := ai.NewClient(baseURL, apiKey, modelName)
+	client := ai.NewClientWithProxy(baseURL, apiKey, modelName, configuredProxyURL(model.ConfigKeyProxyAI))
 	tools := GlobalAIRegistry.GetToolDefinitions()
 	historyKey := aiChatHistoryKey(c)
 
@@ -300,7 +300,7 @@ func GetAIModelsHandler(c *gin.Context) {
 		return
 	}
 
-	client := ai.NewClient(baseURL, apiKey, "")
+	client := ai.NewClientWithProxy(baseURL, apiKey, "", configuredProxyURL(model.ConfigKeyProxyAI))
 	models, err := client.ListModels(context.Background())
 	if err != nil {
 		log.Printf("Failed to list models: %v", err)

@@ -687,6 +687,9 @@ func clampInt(v, min, max int) int {
 }
 
 func updaterHTTPClient(timeout time.Duration) *http.Client {
-	proxyURL := readGlobalConfig(model.ConfigKeyProxyURL)
+	proxyURL := ""
+	if readGlobalConfig(model.ConfigKeyProxyUpdater) == model.ConfigValueTrue {
+		proxyURL = readGlobalConfig(model.ConfigKeyProxyURL)
+	}
 	return httpx.NewHTTPClientWithProxy(timeout, proxyURL)
 }

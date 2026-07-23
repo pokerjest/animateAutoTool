@@ -60,10 +60,17 @@ func MikanIDFromRSSURL(raw string) (string, bool) {
 }
 
 // SetProxy sets the proxy for the Mikan parser client
-func (p *MikanParser) SetProxy(proxyURL string) {
-	if proxyURL != "" {
-		p.client.SetProxy(proxyURL)
+func (p *MikanParser) SetProxy(proxyURL string) error {
+	normalized, err := httpx.NormalizeProxyURL(proxyURL)
+	if err != nil {
+		return err
 	}
+	if normalized == "" {
+		p.client.RemoveProxy()
+		return nil
+	}
+	p.client.SetProxy(normalized)
+	return nil
 }
 
 func (p *MikanParser) Name() string {

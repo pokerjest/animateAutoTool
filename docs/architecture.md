@@ -103,7 +103,7 @@ resp, err := httpx.NewRequest(ctx, client).Get(url)
 约定：
 - 每个外部 client 都暴露**两套方法**：`Foo()` 和 `FooContext(ctx)`，前者只是 `FooContext(context.Background())` 的便捷包装。新代码请走 ctx 版本。
 - 超时由调用方传入，不要在 httpx 里写死默认值。
-- proxy / UA / headers 通过参数注入，不读全局配置。
+- proxy / UA / headers 通过参数注入；代理地址统一由 `httpx.NormalizeProxyURL` 校验和规范化，业务入口按服务开关注入，不读取系统环境代理。
 - `httpx.NewHTTPClient` / `NewHTTPClientWithProxy` 同样基于 `newHTTPTransport`，**显式禁用环境变量代理**并强制 30s connect / 30s keep-alive，避免被系统 `HTTP_PROXY` 影响。
 
 ## AI 能力：`internal/ai`
