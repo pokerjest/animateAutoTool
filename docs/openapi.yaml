@@ -202,6 +202,47 @@ paths:
     post: { operationId: refreshLocalMetadata, parameters: [{ $ref: "#/components/parameters/Id" }], responses: { "202": { $ref: "#/components/responses/TaskAccepted" } } }
   /local-anime/{id}/source:
     post: { operationId: switchLocalSource, parameters: [{ $ref: "#/components/parameters/Id" }], responses: { "200": { $ref: "#/components/responses/Success" } } }
+  /jellyfin/play/{id}:
+    get:
+      operationId: getJellyfinPlayInfo
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200":
+          description: Resolved proxy and optional browser-direct Jellyfin playback URLs
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JellyfinPlayInfo" }
+        "404": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /jellyfin/stream/{id}:
+    get:
+      operationId: streamJellyfinEpisode
+      description: Proxies a Jellyfin static stream while preserving Range requests.
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200":
+          description: Proxied video stream
+          content:
+            video/*:
+              schema: { type: string, format: binary }
+        "206":
+          description: Partial proxied video stream
+          content:
+            video/*:
+              schema: { type: string, format: binary }
+        "404": { description: Episode or Jellyfin item not found }
+  /jellyfin/progress:
+    post:
+      operationId: reportJellyfinProgress
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PlaybackProgressInput" }
+      responses:
+        "200": { description: Playback progress accepted }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
   /bangumi/subject/{id}/collection:
     post: { operationId: updateBangumiCollection, parameters: [{ $ref: "#/components/parameters/Id" }], requestBody: { $ref: "#/components/requestBodies/JsonObject" }, responses: { "200": { $ref: "#/components/responses/Success" } } }
   /bangumi/subject/{id}/progress:
@@ -355,6 +396,37 @@ components:
           type: array
           items: { $ref: "#/components/schemas/MikanEpisode" }
         total: { type: integer, minimum: 0 }
+    PlaybackDiagnostic:
+      type: object
+      required: [code, summary, hint, can_use_direct_link]
+      properties:
+        code: { type: string }
+        summary: { type: string }
+        hint: { type: string }
+        detail: { type: string }
+        can_use_direct_link: { type: boolean }
+        primary_action: { type: string }
+        primary_target: { type: string }
+    JellyfinPlayInfo:
+      type: object
+      required: [stream_url, direct_stream_url, resume_ticks, poster_url, title, episode_title]
+      properties:
+        stream_url: { type: string }
+        direct_stream_url:
+          type: string
+          description: Browser-reachable Jellyfin stream URL; empty when direct playback is not configured.
+        resume_ticks: { type: integer, format: int64, minimum: 0 }
+        poster_url: { type: string }
+        title: { type: string }
+        episode_title: { type: string }
+        diagnostic: { $ref: "#/components/schemas/PlaybackDiagnostic" }
+    PlaybackProgressInput:
+      type: object
+      required: [episode_id, event, ticks]
+      properties:
+        episode_id: { type: integer, minimum: 1 }
+        event: { type: string, enum: [timeupdate, pause, ended, destroy] }
+        ticks: { type: integer, format: int64, minimum: 0 }
     Envelope:
       type: object
       required: [data]

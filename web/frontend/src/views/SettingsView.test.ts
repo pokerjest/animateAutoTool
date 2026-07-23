@@ -59,6 +59,14 @@ describe('SettingsView proxy settings', () => {
     expect(proxyTestBody).toEqual({ proxy_url: '127.0.0.1:7890' })
     expect(wrapper.text()).toContain('代理连接成功')
 
+    const mediaTab = wrapper.findAll('button').find(button => button.text().includes('媒体服务'))
+    expect(mediaTab).toBeDefined()
+    await mediaTab!.trigger('click')
+    expect(wrapper.text()).toContain('Jellyfin 服务端连接地址')
+    expect(wrapper.text()).toContain('浏览器直连地址（Tailscale）')
+    expect(wrapper.find('input[placeholder*="example-tailnet.ts.net"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('留空时全部走 AnimateTool 代理')
+
     wrapper.unmount()
     queryClient.clear()
   })

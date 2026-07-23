@@ -371,6 +371,40 @@ func TestV1SettingsRejectInvalidProxyURL(t *testing.T) {
 	assert.Empty(t, store.NewConfigStore(db.DB).GetDefault(model.ConfigKeyProxyURL, ""))
 }
 
+func TestV1SettingsNormalizesJellyfinDirectURL(t *testing.T) {
+	resetAuthFixtures(t)
+	r := setupRouter()
+	cookie, _ := loginCookie(t, r, "admin")
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/settings", bytes.NewBufferString(`{"values":{"jellyfin_direct_url":" https://media.example-tailnet.ts.net/jellyfin/ "}}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Cookie", cookie)
+	markLocalRequest(req)
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	value := store.NewConfigStore(db.DB).GetDefault(model.ConfigKeyJellyfinDirectUrl, "")
+	assert.Equal(t, "https://media.example-tailnet.ts.net/jellyfin", value)
+	data, err := os.ReadFile(config.ConfigFilePath())
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "jellyfin_direct_url: https://media.example-tailnet.ts.net/jellyfin")
+}
+
+func TestV1SettingsRejectsInvalidJellyfinDirectURL(t *testing.T) {
+	resetAuthFixtures(t)
+	r := setupRouter()
+	cookie, _ := loginCookie(t, r, "admin")
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/settings", bytes.NewBufferString(`{"values":{"jellyfin_direct_url":"ftp://media.example-tailnet.ts.net"}}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Cookie", cookie)
+	markLocalRequest(req)
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), `"code":"invalid_jellyfin_direct_url"`)
+	assert.Empty(t, store.NewConfigStore(db.DB).GetDefault(model.ConfigKeyJellyfinDirectUrl, ""))
+}
+
 func TestV1ProxyTestUsesSubmittedProxy(t *testing.T) {
 	resetAuthFixtures(t)
 	var proxyHit atomic.Bool

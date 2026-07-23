@@ -10,6 +10,9 @@ export type MikanDashboard = components['schemas']['MikanDashboard']
 export type MikanSubgroup = components['schemas']['MikanSubgroup']
 export type MikanEpisode = components['schemas']['MikanEpisode']
 export type MikanEpisodePreview = components['schemas']['MikanEpisodePreview']
+export type JellyfinPlayInfo = components['schemas']['JellyfinPlayInfo']
+export type PlaybackDiagnostic = components['schemas']['PlaybackDiagnostic']
+export type PlaybackProgressInput = components['schemas']['PlaybackProgressInput']
 export interface MikanSubscriptionSelection {
   mikan_id: string
   title: string

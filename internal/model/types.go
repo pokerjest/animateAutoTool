@@ -196,6 +196,7 @@ const (
 	ConfigKeyRepoUpdateName            = "repo_update_name"
 	ConfigKeyRepoRequireChecksum       = "repo_update_require_checksum"
 	ConfigKeyJellyfinUrl               = "jellyfin_url"
+	ConfigKeyJellyfinDirectUrl         = "jellyfin_direct_url"
 	ConfigKeyJellyfinUsername          = "jellyfin_username"
 	ConfigKeyJellyfinPassword          = "jellyfin_password"
 	ConfigKeyJellyfinApiKey            = "jellyfin_api_key" //nolint:gosec
