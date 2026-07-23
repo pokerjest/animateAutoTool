@@ -162,7 +162,7 @@ var migrations = []migration{
 
 ## 配置与安全
 
-- 业务密码存 bcrypt，bootstrap admin 初始密码写 `data/bootstrap/admin.json`，首次改密后失效
+- 业务密码存 bcrypt，bootstrap admin 初始密码写 `data/bootstrap/admin.json`，但不会下发给浏览器；首次启动可通过仅限 localhost 的 `/api/v1/session/bootstrap` 建立初始化会话，首次改密后凭据与入口同时失效
 - `auth.secret_key` 留空会自动落到 `data/bootstrap/auth_secret`（不要提交到仓库）
 - `server.trusted_proxies` 只填明确控制的反向代理 IP / CIDR
 - `server.public_url` 用于生成回调地址 + 同源校验
