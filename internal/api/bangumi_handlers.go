@@ -26,16 +26,12 @@ func saveBangumiTokens(accessToken, refreshToken string) error {
 }
 
 func applyProxyToBangumiClient(client *bangumi.Client) {
-	proxyURL := configValue(model.ConfigKeyProxyURL)
-	if proxyURL == "" {
-		return
+	proxyURL := configuredProxyURL(model.ConfigKeyProxyBangumi)
+	if proxyURL != "" {
+		if err := client.SetProxy(proxyURL); err != nil {
+			log.Printf("Failed to configure Bangumi proxy: %v", err)
+		}
 	}
-
-	if configValue(model.ConfigKeyProxyBangumi) != model.ConfigValueTrue {
-		return
-	}
-
-	client.SetProxy(proxyURL)
 }
 
 func BangumiLoginHandler(c *gin.Context) {
@@ -63,6 +59,7 @@ func BangumiCallbackHandler(c *gin.Context) {
 	appID, appSecret := getBangumiConfig()
 	redirectURI := getBangumiRedirectURI(c)
 	client := bangumi.NewClient(appID, appSecret, redirectURI)
+	applyProxyToBangumiClient(client)
 
 	tokenResp, err := client.ExchangeToken(code)
 	if err != nil {

@@ -9,7 +9,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/pokerjest/animateAutoTool/internal/alist"
 	"github.com/pokerjest/animateAutoTool/internal/db"
-	"github.com/pokerjest/animateAutoTool/internal/jellyfin"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/qbutil"
 	"github.com/pokerjest/animateAutoTool/internal/store"
@@ -54,9 +53,12 @@ func resolveSettingsScopeSpec(scope string) settingsScopeSpec {
 			},
 			checkboxes: []string{
 				model.ConfigKeyProxyBangumi,
+				model.ConfigKeyProxyMikan,
 				model.ConfigKeyProxyTMDB,
 				model.ConfigKeyProxyAniList,
 				model.ConfigKeyProxyJellyfin,
+				model.ConfigKeyProxyAI,
+				model.ConfigKeyProxyUpdater,
 				model.ConfigKeyRepoUpdateEnabled,
 				model.ConfigKeyRepoAutoPullEnabled,
 				model.ConfigKeyRepoRequireChecksum,
@@ -93,8 +95,11 @@ func resolveSettingsScopeSpec(scope string) settingsScopeSpec {
 				model.ConfigKeyAniListToken,
 				model.ConfigKeyProxyURL,
 				model.ConfigKeyProxyBangumi,
+				model.ConfigKeyProxyMikan,
 				model.ConfigKeyProxyTMDB,
 				model.ConfigKeyProxyAniList,
+				model.ConfigKeyProxyAI,
+				model.ConfigKeyProxyUpdater,
 				model.ConfigKeyRepoUpdateEnabled,
 				model.ConfigKeyRepoAutoPullEnabled,
 				model.ConfigKeyRepoUpdateIntervalMinutes,
@@ -112,9 +117,12 @@ func resolveSettingsScopeSpec(scope string) settingsScopeSpec {
 			},
 			checkboxes: []string{
 				model.ConfigKeyProxyBangumi,
+				model.ConfigKeyProxyMikan,
 				model.ConfigKeyProxyTMDB,
 				model.ConfigKeyProxyAniList,
 				model.ConfigKeyProxyJellyfin,
+				model.ConfigKeyProxyAI,
+				model.ConfigKeyProxyUpdater,
 				model.ConfigKeyRepoUpdateEnabled,
 				model.ConfigKeyRepoAutoPullEnabled,
 				model.ConfigKeyRepoRequireChecksum,
@@ -169,7 +177,7 @@ func maybeAutoAuthJellyfin(c *gin.Context) []string {
 		return nil
 	}
 
-	client := jellyfin.NewClient(jfURL, "")
+	client := newConfiguredJellyfinClient(jfURL, "")
 	authResp, err := client.AuthenticateContext(c.Request.Context(), jfUser, jfPass)
 	if err == nil && authResp.AccessToken != "" {
 		log.Printf("Jellyfin Auto-Auth Successful for user: %s", jfUser)

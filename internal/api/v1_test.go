@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/parser"
 	"github.com/pokerjest/animateAutoTool/internal/service"
+	"github.com/pokerjest/animateAutoTool/internal/store"
 	"github.com/pokerjest/animateAutoTool/internal/taskstate"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -276,6 +278,73 @@ func TestV1SettingsSaveMirrorsValuesToConfigFile(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(data), "qb_url: http://local-qb:8080")
 	assert.Contains(t, string(data), "qb_password: mirror-secret")
+}
+
+func TestV1SettingsNormalizeAndPersistProxyOptions(t *testing.T) {
+	resetAuthFixtures(t)
+	r := setupRouter()
+	cookie, _ := loginCookie(t, r, "admin")
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/settings", bytes.NewBufferString(`{"values":{"proxy_url":"127.0.0.1:7890","proxy_bangumi_enabled":"true","proxy_mikan_enabled":"true","proxy_ai_enabled":"true","proxy_updater_enabled":"true"}}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Cookie", cookie)
+	markLocalRequest(req)
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	configs, err := store.NewConfigStore(db.DB).ListMap()
+	require.NoError(t, err)
+	assert.Equal(t, "http://127.0.0.1:7890", configs[model.ConfigKeyProxyURL])
+	assert.Equal(t, model.ConfigValueTrue, configs[model.ConfigKeyProxyMikan])
+	assert.Equal(t, model.ConfigValueTrue, configs[model.ConfigKeyProxyAI])
+	assert.Equal(t, model.ConfigValueTrue, configs[model.ConfigKeyProxyUpdater])
+
+	data, err := os.ReadFile(config.ConfigFilePath())
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "proxy_url: http://127.0.0.1:7890")
+}
+
+func TestV1SettingsRejectInvalidProxyURL(t *testing.T) {
+	resetAuthFixtures(t)
+	r := setupRouter()
+	cookie, _ := loginCookie(t, r, "admin")
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/settings", bytes.NewBufferString(`{"values":{"proxy_url":"ftp://127.0.0.1:21"}}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Cookie", cookie)
+	markLocalRequest(req)
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), `"code":"invalid_proxy_url"`)
+	assert.Empty(t, store.NewConfigStore(db.DB).GetDefault(model.ConfigKeyProxyURL, ""))
+}
+
+func TestV1ProxyTestUsesSubmittedProxy(t *testing.T) {
+	resetAuthFixtures(t)
+	var proxyHit atomic.Bool
+	proxyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		proxyHit.Store(true)
+		assert.Equal(t, "http://proxy-probe.test/health", r.URL.String())
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer proxyServer.Close()
+
+	previousProbeURL := proxyProbeURL
+	proxyProbeURL = "http://proxy-probe.test/health"
+	t.Cleanup(func() { proxyProbeURL = previousProbeURL })
+
+	r := setupRouter()
+	cookie, _ := loginCookie(t, r, "admin")
+	w := httptest.NewRecorder()
+	body := `{"proxy_url":` + strconv.Quote(proxyServer.URL) + `}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/settings/proxy/test", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Cookie", cookie)
+	markLocalRequest(req)
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.True(t, proxyHit.Load())
+	assert.Contains(t, w.Body.String(), `"connected":true`)
 }
 
 func TestV1WriteRejectsCrossOriginRequests(t *testing.T) {

@@ -15,7 +15,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/downloader"
-	"github.com/pokerjest/animateAutoTool/internal/jellyfin"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/parser"
 
@@ -471,7 +470,7 @@ func triggerJellyfinRefreshForSeries(ctx context.Context, seriesIDs map[string]s
 		return
 	}
 
-	client := jellyfin.NewClient(urlValue, apiKey)
+	client := newConfiguredJellyfinClient(urlValue, apiKey)
 	for seriesID := range seriesIDs {
 		if err := client.RefreshItemContext(ctx, seriesID); err != nil {
 			log.Printf("Jellyfin series refresh failed for %s: %v", seriesID, err)

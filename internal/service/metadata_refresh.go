@@ -33,15 +33,15 @@ func (s *MetadataService) StartMetadataMigration() {
 		for _, m := range list {
 			updated := false
 			if m.BangumiImage != "" && len(m.BangumiImageRaw) == 0 {
-				m.BangumiImageRaw = s.fetchAndCacheImage(m.BangumiImage)
+				m.BangumiImageRaw = s.fetchAndCacheImage(m.BangumiImage, model.ConfigKeyProxyBangumi)
 				updated = true
 			}
 			if m.TMDBImage != "" && len(m.TMDBImageRaw) == 0 {
-				m.TMDBImageRaw = s.fetchAndCacheImage(m.TMDBImage)
+				m.TMDBImageRaw = s.fetchAndCacheImage(m.TMDBImage, model.ConfigKeyProxyTMDB)
 				updated = true
 			}
 			if m.AniListImage != "" && len(m.AniListImageRaw) == 0 {
-				m.AniListImageRaw = s.fetchAndCacheImage(m.AniListImage)
+				m.AniListImageRaw = s.fetchAndCacheImage(m.AniListImage, model.ConfigKeyProxyAniList)
 				updated = true
 			}
 

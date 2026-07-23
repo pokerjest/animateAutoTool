@@ -8,6 +8,11 @@
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-07-23
+
+### Fixed
+- 修复代理地址未注入后台 Mikan 订阅、Bangumi 登录回调、部分观看进度、元数据图片、Jellyfin、AI 和更新请求的问题；新增按服务代理开关、地址校验与直接连通性测试。
+
 ## [0.7.1] - 2026-07-23
 
 ### Changed
@@ -150,7 +155,8 @@
 
 ---
 
-[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v0.7.2...HEAD
+[0.7.2]: https://github.com/pokerjest/animateAutoTool/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/pokerjest/animateAutoTool/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/pokerjest/animateAutoTool/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/pokerjest/animateAutoTool/compare/v0.6.0...v0.6.1

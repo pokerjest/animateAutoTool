@@ -999,6 +999,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/settings/proxy/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["testProxy"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/settings/connections/{provider}": {
         parameters: {
             query?: never;
@@ -2171,12 +2187,26 @@ export interface operations {
             200: components["responses"]["Success"];
         };
     };
+    testProxy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: components["requestBodies"]["JsonObject"];
+        responses: {
+            200: components["responses"]["Success"];
+            400: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+        };
+    };
     getConnectionStatus: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                provider: "qb" | "tmdb" | "anilist" | "jellyfin" | "bangumi";
+                provider: "qb" | "tmdb" | "anilist" | "jellyfin" | "bangumi" | "mikan";
             };
             cookie?: never;
         };

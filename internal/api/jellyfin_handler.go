@@ -14,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/pokerjest/animateAutoTool/internal/bangumi"
 	"github.com/pokerjest/animateAutoTool/internal/db"
+	"github.com/pokerjest/animateAutoTool/internal/httpx"
 	"github.com/pokerjest/animateAutoTool/internal/jellyfin"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 )
@@ -160,7 +161,7 @@ func resolveJellyfinPlaybackClient() (*jellyfin.Client, error) {
 		return nil, errors.New("missing jellyfin url or api key")
 	}
 
-	client := jellyfin.NewClient(urlValue, apiKey)
+	client := newConfiguredJellyfinClient(urlValue, apiKey)
 	users, err := client.GetUsers()
 	if err != nil {
 		return nil, err
@@ -365,7 +366,7 @@ func ReportProgressHandler(c *gin.Context) {
 		c.Status(http.StatusServiceUnavailable) // Not configured
 		return
 	}
-	client := jellyfin.NewClient(urlValue, apiKey)
+	client := newConfiguredJellyfinClient(urlValue, apiKey)
 
 	users, _ := client.GetUsers()
 	if len(users) > 0 {
@@ -424,13 +425,7 @@ func ReportProgressHandler(c *gin.Context) {
 				token := configValue(model.ConfigKeyBangumiAccessToken)
 				if token != "" {
 					bgmClient := bangumi.NewClient("", "", "")
-
-					proxyUrl := configValue(model.ConfigKeyProxyURL)
-					proxyEnabled := configValue(model.ConfigKeyProxyBangumi)
-
-					if proxyEnabled == ValueTrue && proxyUrl != "" {
-						bgmClient.SetProxy(proxyUrl)
-					}
+					applyProxyToBangumiClient(bgmClient)
 
 					if err := bgmClient.UpdateWatchedEpisodes(token, bgmID, epNum); err != nil {
 						log.Printf("Failed to sync progress to Bangumi: %v", err)
@@ -494,6 +489,7 @@ func ProxyVideoHandler(c *gin.Context) {
 	}
 
 	proxy := httputil.NewSingleHostReverseProxy(target)
+	proxy.Transport = httpx.NewHTTPClientWithProxy(0, configuredProxyURL(model.ConfigKeyProxyJellyfin)).Transport
 	proxy.FlushInterval = 100 * time.Millisecond // Optimize for streaming
 
 	// Define the director to rewrite the request

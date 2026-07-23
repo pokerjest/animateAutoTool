@@ -203,8 +203,10 @@ paths:
   /settings:
     get: { operationId: getSettings, responses: { "200": { $ref: "#/components/responses/Success" } } }
     put: { operationId: updateSettings, requestBody: { $ref: "#/components/requestBodies/JsonObject" }, responses: { "200": { $ref: "#/components/responses/Success" } } }
+  /settings/proxy/test:
+    post: { operationId: testProxy, requestBody: { $ref: "#/components/requestBodies/JsonObject" }, responses: { "200": { $ref: "#/components/responses/Success" }, "400": { $ref: "#/components/responses/Error" }, "502": { $ref: "#/components/responses/Error" } } }
   /settings/connections/{provider}:
-    get: { operationId: getConnectionStatus, parameters: [{ name: provider, in: path, required: true, schema: { type: string, enum: [qb, tmdb, anilist, jellyfin, bangumi] } }], responses: { "200": { $ref: "#/components/responses/Success" } } }
+    get: { operationId: getConnectionStatus, parameters: [{ name: provider, in: path, required: true, schema: { type: string, enum: [qb, tmdb, anilist, jellyfin, bangumi, mikan] } }], responses: { "200": { $ref: "#/components/responses/Success" } } }
   /settings/maintenance:
     get: { operationId: getMaintenance, responses: { "200": { $ref: "#/components/responses/Success" } } }
   /settings/updater/{action}:

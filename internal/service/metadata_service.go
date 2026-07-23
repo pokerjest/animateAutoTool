@@ -11,6 +11,7 @@ import (
 
 	"github.com/pokerjest/animateAutoTool/internal/anilist"
 	"github.com/pokerjest/animateAutoTool/internal/bangumi"
+	"github.com/pokerjest/animateAutoTool/internal/httpx"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/parser"
 	"github.com/pokerjest/animateAutoTool/internal/safeio"
@@ -161,32 +162,24 @@ func (s *MetadataService) EnrichMetadata(m *model.AnimeMetadata, query string) {
 }
 
 func (s *MetadataService) initClients() (*bangumi.Client, *tmdb.Client, *anilist.Client) {
-	proxyURL := configValue(model.ConfigKeyProxyURL)
-
 	// Bangumi
 	bgmClient := bangumi.NewClient("", "", "")
-	if configValue(model.ConfigKeyProxyBangumi) == model.ConfigValueTrue && proxyURL != "" {
-		bgmClient.SetProxy(proxyURL)
+	if proxyURL := configuredProxyURL(model.ConfigKeyProxyBangumi); proxyURL != "" {
+		if err := bgmClient.SetProxy(proxyURL); err != nil {
+			log.Printf("MetadataService: failed to configure Bangumi proxy: %v", err)
+		}
 	}
 
 	// TMDB
 	var tmdbClient *tmdb.Client
 	if token := configValue(model.ConfigKeyTMDBToken); token != "" {
-		clientProxy := ""
-		if configValue(model.ConfigKeyProxyTMDB) == model.ConfigValueTrue {
-			clientProxy = proxyURL
-		}
-		tmdbClient = tmdb.NewClient(token, clientProxy)
+		tmdbClient = tmdb.NewClient(token, configuredProxyURL(model.ConfigKeyProxyTMDB))
 	}
 
 	// AniList
 	var anilistClient *anilist.Client
 	if token := configValue(model.ConfigKeyAniListToken); token != "" {
-		clientProxy := ""
-		if configValue(model.ConfigKeyProxyAniList) == model.ConfigValueTrue {
-			clientProxy = proxyURL
-		}
-		anilistClient = anilist.NewClient(token, clientProxy)
+		anilistClient = anilist.NewClient(token, configuredProxyURL(model.ConfigKeyProxyAniList))
 	}
 
 	return bgmClient, tmdbClient, anilistClient
@@ -251,7 +244,7 @@ func (s *MetadataService) applyBangumiSubject(m *model.AnimeMetadata, bgmSubject
 	} else {
 		m.BangumiTitle = bgmSubject.Name
 	}
-	m.BangumiImageRaw = s.fetchAndCacheImage(m.BangumiImage)
+	m.BangumiImageRaw = s.fetchAndCacheImage(m.BangumiImage, model.ConfigKeyProxyBangumi)
 }
 
 func (s *MetadataService) processTMDB(m *model.AnimeMetadata, client *tmdb.Client, candidates []string, mu *sync.Mutex) {
@@ -283,7 +276,7 @@ func (s *MetadataService) processTMDB(m *model.AnimeMetadata, client *tmdb.Clien
 	}
 
 	if tmdbShow != nil {
-		imgRaw := s.fetchAndCacheImage(tmdbShow.PosterPath)
+		imgRaw := s.fetchAndCacheImage(tmdbShow.PosterPath, model.ConfigKeyProxyTMDB)
 		mu.Lock()
 		m.TMDBID = tmdbShow.ID
 		m.TMDBTitle = tmdbShow.Name
@@ -333,7 +326,7 @@ func (s *MetadataService) processAniList(m *model.AnimeMetadata, client *anilist
 	}
 
 	if alMedia != nil {
-		imgRaw := s.fetchAndCacheImage(alMedia.CoverImage.ExtraLarge)
+		imgRaw := s.fetchAndCacheImage(alMedia.CoverImage.ExtraLarge, model.ConfigKeyProxyAniList)
 		mu.Lock()
 		m.AniListID = alMedia.ID
 		m.AniListTitle = alMedia.Title.Romaji
@@ -417,7 +410,7 @@ func (s *MetadataService) setActiveFields(m *model.AnimeMetadata, rawQueryTitle 
 	}
 }
 
-func (s *MetadataService) fetchAndCacheImage(url string) []byte {
+func (s *MetadataService) fetchAndCacheImage(url, proxyFlagKey string) []byte {
 	if url == "" {
 		return nil
 	}
@@ -425,7 +418,7 @@ func (s *MetadataService) fetchAndCacheImage(url string) []byte {
 		// TMDB partial path, internal/tmdb might handle this, but being safe:
 		url = "https://image.tmdb.org/t/p/w500" + url
 	}
-	client := &http.Client{Timeout: 15 * time.Second}
+	client := httpx.NewHTTPClientWithProxy(15*time.Second, configuredProxyURL(proxyFlagKey))
 	resp, err := client.Get(url)
 	if err != nil || resp.StatusCode != http.StatusOK {
 		return nil

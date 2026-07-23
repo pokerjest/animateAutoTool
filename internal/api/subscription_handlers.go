@@ -326,7 +326,7 @@ func BatchPreviewHandler(c *gin.Context) {
 			if s.RSSUrl == "" {
 				res.Error = "缺少 RSS 链接"
 			} else {
-				p := parser.NewMikanParser()
+				p := newConfiguredMikanParser()
 				eps, err := p.Parse(s.RSSUrl)
 				if err != nil {
 					res.Error = err.Error()
@@ -518,6 +518,7 @@ func UpdateSubscriptionHandler(c *gin.Context) {
 		if sub.Metadata != nil {
 			sub.Metadata.BangumiID = 0
 			bgmClient := bangumi.NewClient("", "", "")
+			applyProxyToBangumiClient(bgmClient)
 			if res, err := bgmClient.SearchSubject(sub.Title); err == nil && res != nil {
 				sub.Metadata.BangumiID = res.ID
 			}
@@ -566,7 +567,7 @@ func ValidateSubscriptionRSSHandler(c *gin.Context) {
 		return
 	}
 
-	parserClient := parser.NewMikanParser()
+	parserClient := newConfiguredMikanParser()
 	primaryEpisodes, primaryErr := parserClient.ParseContext(context.Background(), sub.RSSUrl)
 	response := RSSValidationResponse{}
 	if primaryErr == nil {

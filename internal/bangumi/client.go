@@ -42,10 +42,17 @@ func NewClient(appID, appSecret, redirectURI string) *Client {
 	}
 }
 
-func (c *Client) SetProxy(proxyURL string) {
-	if proxyURL != "" {
-		c.client.SetProxy(proxyURL)
+func (c *Client) SetProxy(proxyURL string) error {
+	normalized, err := httpx.NormalizeProxyURL(proxyURL)
+	if err != nil {
+		return err
 	}
+	if normalized == "" {
+		c.client.RemoveProxy()
+		return nil
+	}
+	c.client.SetProxy(normalized)
+	return nil
 }
 
 func (c *Client) SetTimeout(timeout time.Duration) {

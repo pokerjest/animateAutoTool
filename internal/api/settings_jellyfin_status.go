@@ -9,7 +9,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/pokerjest/animateAutoTool/internal/httpx"
-	"github.com/pokerjest/animateAutoTool/internal/jellyfin"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/safeio"
 )
@@ -92,7 +91,7 @@ func JellyfinLoginHandler(c *gin.Context) {
 		return
 	}
 
-	client := jellyfin.NewClient(url, "")
+	client := newConfiguredJellyfinClient(url, "")
 	resp, err := client.AuthenticateContext(c.Request.Context(), username, password)
 	if err != nil {
 		c.String(http.StatusOK, fmt.Sprintf(`<div id="jellyfin-login-status" class="text-red-500 text-sm mt-2">❌ 登录失败: %s</div>`, err.Error()))

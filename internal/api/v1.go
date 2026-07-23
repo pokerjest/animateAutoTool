@@ -19,6 +19,7 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/bangumi"
 	"github.com/pokerjest/animateAutoTool/internal/bootstrap"
 	"github.com/pokerjest/animateAutoTool/internal/db"
+	"github.com/pokerjest/animateAutoTool/internal/httpx"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/safeio"
 	"github.com/pokerjest/animateAutoTool/internal/service"
@@ -171,6 +172,7 @@ func initV1Routes(r *gin.Engine) {
 		protected.GET("/audit-logs", V1AuditLogsHandler)
 		protected.GET("/settings", V1SettingsHandler)
 		protected.PUT("/settings", V1UpdateSettingsHandler)
+		protected.POST("/settings/proxy/test", V1ProxyTestHandler)
 		protected.GET("/settings/connections/:provider", V1ConnectionStatusHandler)
 		protected.GET("/settings/maintenance", V1MaintenanceHandler)
 		protected.POST("/settings/updater/:action", V1UpdaterActionHandler)
@@ -763,7 +765,7 @@ func V1UpdateSettingsHandler(c *gin.Context) {
 		return
 	}
 	allowed := map[string]bool{}
-	for _, key := range []string{model.ConfigKeyQBMode, model.ConfigKeyQBUrl, model.ConfigKeyQBUsername, model.ConfigKeyQBPassword, model.ConfigKeyBaseDir, model.ConfigKeyBangumiAppID, model.ConfigKeyBangumiAppSecret, model.ConfigKeyBangumiAccessToken, model.ConfigKeyBangumiRefreshToken, model.ConfigKeyTMDBToken, model.ConfigKeyAniListToken, model.ConfigKeyProxyURL, model.ConfigKeyProxyBangumi, model.ConfigKeyProxyTMDB, model.ConfigKeyProxyAniList, model.ConfigKeyProxyJellyfin, model.ConfigKeyJellyfinUrl, model.ConfigKeyJellyfinUsername, model.ConfigKeyJellyfinPassword, model.ConfigKeyJellyfinApiKey, model.ConfigKeyAListUrl, model.ConfigKeyAListToken, model.ConfigKeyPikPakUsername, model.ConfigKeyPikPakPassword, model.ConfigKeyPikPakRefreshToken, model.ConfigKeyAIBaseURL, model.ConfigKeyAIModel, model.ConfigKeyAIApiKey, model.ConfigKeyR2Endpoint, model.ConfigKeyR2Bucket, model.ConfigKeyR2AccessKey, model.ConfigKeyR2SecretKey, model.ConfigKeyRepoUpdateEnabled, model.ConfigKeyRepoAutoPullEnabled, model.ConfigKeyRepoUpdateIntervalMinutes, model.ConfigKeyRepoUpdateOwner, model.ConfigKeyRepoUpdateName, model.ConfigKeyRepoRequireChecksum} {
+	for _, key := range []string{model.ConfigKeyQBMode, model.ConfigKeyQBUrl, model.ConfigKeyQBUsername, model.ConfigKeyQBPassword, model.ConfigKeyBaseDir, model.ConfigKeyBangumiAppID, model.ConfigKeyBangumiAppSecret, model.ConfigKeyBangumiAccessToken, model.ConfigKeyBangumiRefreshToken, model.ConfigKeyTMDBToken, model.ConfigKeyAniListToken, model.ConfigKeyProxyURL, model.ConfigKeyProxyBangumi, model.ConfigKeyProxyMikan, model.ConfigKeyProxyTMDB, model.ConfigKeyProxyAniList, model.ConfigKeyProxyJellyfin, model.ConfigKeyProxyAI, model.ConfigKeyProxyUpdater, model.ConfigKeyJellyfinUrl, model.ConfigKeyJellyfinUsername, model.ConfigKeyJellyfinPassword, model.ConfigKeyJellyfinApiKey, model.ConfigKeyAListUrl, model.ConfigKeyAListToken, model.ConfigKeyPikPakUsername, model.ConfigKeyPikPakPassword, model.ConfigKeyPikPakRefreshToken, model.ConfigKeyAIBaseURL, model.ConfigKeyAIModel, model.ConfigKeyAIApiKey, model.ConfigKeyR2Endpoint, model.ConfigKeyR2Bucket, model.ConfigKeyR2AccessKey, model.ConfigKeyR2SecretKey, model.ConfigKeyRepoUpdateEnabled, model.ConfigKeyRepoAutoPullEnabled, model.ConfigKeyRepoUpdateIntervalMinutes, model.ConfigKeyRepoUpdateOwner, model.ConfigKeyRepoUpdateName, model.ConfigKeyRepoRequireChecksum} {
 		allowed[key] = true
 	}
 	updates := map[string]string{}
@@ -774,7 +776,16 @@ func V1UpdateSettingsHandler(c *gin.Context) {
 		if v1SecretConfigKeys[key] && strings.TrimSpace(value) == "" {
 			continue
 		}
-		updates[key] = strings.TrimSpace(value)
+		value = strings.TrimSpace(value)
+		if key == model.ConfigKeyProxyURL {
+			normalized, err := httpx.NormalizeProxyURL(value)
+			if err != nil {
+				v1Error(c, http.StatusBadRequest, "invalid_proxy_url", err.Error())
+				return
+			}
+			value = normalized
+		}
+		updates[key] = value
 	}
 	if err := store.NewConfigStore(db.DB).SetMany(updates); err != nil {
 		v1Error(c, http.StatusInternalServerError, "settings_save_failed", err.Error())
@@ -809,7 +820,7 @@ func V1AssistantMessageHandler(c *gin.Context) {
 		history = append(history, ai.ChatMessage{Role: "system", Content: aiSystemPrompt})
 	}
 	history = append(history, ai.ChatMessage{Role: "user", Content: strings.TrimSpace(req.Message)})
-	client := ai.NewClient(baseURL, apiKey, modelName)
+	client := ai.NewClientWithProxy(baseURL, apiKey, modelName, configuredProxyURL(model.ConfigKeyProxyAI))
 	answer := ""
 	for attempts := 0; attempts < 6; attempts++ {
 		resp, err := client.CreateChatCompletion(c.Request.Context(), ai.ChatCompletionRequest{Model: modelName, Messages: history, Tools: GlobalAIRegistry.GetToolDefinitions()})

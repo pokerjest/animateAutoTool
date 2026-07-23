@@ -12,8 +12,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/pokerjest/animateAutoTool/internal/alist"
-	"github.com/pokerjest/animateAutoTool/internal/db"
-	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/parser"
 )
 
@@ -37,13 +35,7 @@ func GetMikanEpisodesHandler(c *gin.Context) {
 		rssURL += fmt.Sprintf("&subgroupid=%s", subgroupID)
 	}
 
-	p := parser.NewMikanParser()
-
-	// Apply Proxy if configured
-	var proxyConfig model.GlobalConfig
-	if err := db.DB.Where("key = ?", model.ConfigKeyProxyURL).First(&proxyConfig).Error; err == nil {
-		p.SetProxy(proxyConfig.Value)
-	}
+	p := newConfiguredMikanParser()
 	episodes, err := p.ParseContext(c.Request.Context(), rssURL)
 	if err != nil {
 		jsonServerError(c, "获取 RSS 剧集列表", err)

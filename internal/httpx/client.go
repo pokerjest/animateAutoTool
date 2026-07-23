@@ -2,6 +2,7 @@ package httpx
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"net/http"
 	"net/url"
@@ -13,11 +14,43 @@ import (
 
 const DefaultUserAgent = "AnimateAutoTool/0.5.0 (+https://github.com/pokerjest/animateAutoTool)"
 
+// NormalizeProxyURL accepts the common host:port shorthand used by desktop
+// proxy applications and returns a URL that net/http can use consistently.
+// Only forward proxy schemes supported by Go's HTTP transport are accepted.
+func NormalizeProxyURL(raw string) (string, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return "", nil
+	}
+	if !strings.Contains(trimmed, "://") {
+		trimmed = "http://" + trimmed
+	}
+
+	parsed, err := url.Parse(trimmed)
+	if err != nil {
+		return "", fmt.Errorf("代理地址格式无效: %w", err)
+	}
+	switch strings.ToLower(parsed.Scheme) {
+	case "http", "https", "socks5", "socks5h":
+	default:
+		return "", fmt.Errorf("不支持的代理协议 %q，请使用 http、https 或 socks5", parsed.Scheme)
+	}
+	if parsed.Hostname() == "" {
+		return "", fmt.Errorf("代理地址缺少主机名")
+	}
+	if parsed.RawQuery != "" || parsed.Fragment != "" || (parsed.Path != "" && parsed.Path != "/") {
+		return "", fmt.Errorf("代理地址不能包含路径、查询参数或片段")
+	}
+	parsed.Scheme = strings.ToLower(parsed.Scheme)
+	parsed.Path = ""
+	return parsed.String(), nil
+}
+
 func NewRestyClient(timeout time.Duration, proxyURL string, headers map[string]string) *resty.Client {
 	client := resty.New().SetTimeout(timeout)
 	client.SetTransport(newHTTPTransport(proxyURL))
-	if strings.TrimSpace(proxyURL) != "" {
-		client.SetProxy(strings.TrimSpace(proxyURL))
+	if normalized, err := NormalizeProxyURL(proxyURL); err == nil && normalized != "" {
+		client.SetProxy(normalized)
 	}
 	client.SetHeader("User-Agent", DefaultUserAgent)
 	for key, value := range headers {
@@ -62,8 +95,8 @@ func newHTTPTransport(proxyURL string) *http.Transport {
 		KeepAlive: 30 * time.Second,
 	}).DialContext
 
-	if trimmed := strings.TrimSpace(proxyURL); trimmed != "" {
-		if parsed, err := url.Parse(trimmed); err == nil {
+	if normalized, err := NormalizeProxyURL(proxyURL); err == nil && normalized != "" {
+		if parsed, err := url.Parse(normalized); err == nil {
 			transport.Proxy = http.ProxyURL(parsed)
 		}
 	}

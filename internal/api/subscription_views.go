@@ -619,7 +619,7 @@ func SearchAnimeHandler(c *gin.Context) {
 		return
 	}
 
-	p := parser.NewMikanParser()
+	p := newConfiguredMikanParser()
 	results, err := p.Search(keyword)
 	if err != nil {
 		log.Printf("Search error: %v", err)
@@ -640,7 +640,7 @@ func GetSubgroupsHandler(c *gin.Context) {
 		return
 	}
 
-	p := parser.NewMikanParser()
+	p := newConfiguredMikanParser()
 	subgroups, err := p.GetSubgroups(bangumiID)
 	if err != nil {
 		log.Printf("GetSubgroups error: %v", err)
@@ -659,7 +659,7 @@ func PreviewRSSHandler(c *gin.Context) {
 		return
 	}
 
-	p := parser.NewMikanParser()
+	p := newConfiguredMikanParser()
 	episodes, err := p.Parse(url)
 	if err != nil {
 		log.Printf("Preview error: %v", err)
@@ -677,7 +677,7 @@ func GetMikanDashboardHandler(c *gin.Context) {
 	year := c.Query("year")
 	season := c.Query("season")
 
-	p := parser.NewMikanParser()
+	p := newConfiguredMikanParser()
 	dashboard, err := p.GetDashboard(year, season)
 	if err != nil {
 		log.Printf("GetMikanDashboard error: %v", err)

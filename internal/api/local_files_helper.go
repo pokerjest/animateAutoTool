@@ -12,7 +12,6 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/anilist"
 	"github.com/pokerjest/animateAutoTool/internal/bangumi"
 	"github.com/pokerjest/animateAutoTool/internal/db"
-	"github.com/pokerjest/animateAutoTool/internal/jellyfin"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 )
 
@@ -41,7 +40,7 @@ func fetchJellyfinProgress(anime *model.LocalAnime) (map[string]JfEpisodeData, s
 
 	jellyfinUrl = strings.TrimSuffix(jellyfinURLValue, "/")
 
-	client := jellyfin.NewClient(jellyfinURLValue, jellyfinAPIKey)
+	client := newConfiguredJellyfinClient(jellyfinURLValue, jellyfinAPIKey)
 	users, _ := client.GetUsers()
 	if len(users) > 0 {
 		client.UserID = users[0].Id
@@ -141,6 +140,7 @@ func fetchBangumiProgress(anime *model.LocalAnime, effectiveSource string) (int,
 
 		if bgmToken != "" {
 			bgmClient := bangumi.NewClient(appID, appSecret, "")
+			applyProxyToBangumiClient(bgmClient)
 			col, err := bgmClient.GetSubjectCollection(bgmToken, "me", anime.Metadata.BangumiID)
 			if err != nil {
 				log.Printf("DEBUG: ❌ Failed to fetch Bangumi collection for ID %d: %v", anime.Metadata.BangumiID, err)
@@ -182,7 +182,7 @@ func fetchAniListProgress(anime *model.LocalAnime, effectiveSource string) (int,
 		log.Printf("DEBUG: Attempting to fetch AniList progress for AniListID=%d", anime.Metadata.AniListID)
 		alToken := configValue(model.ConfigKeyAniListToken)
 		if alToken != "" {
-			alClient := anilist.NewClient(alToken, "")
+			alClient := anilist.NewClient(alToken, configuredProxyURL(model.ConfigKeyProxyAniList))
 			entry, err := alClient.GetMediaListEntry(anime.Metadata.AniListID)
 			if err != nil {
 				log.Printf("DEBUG: ❌ Failed to fetch AniList entry for ID %d: %v", anime.Metadata.AniListID, err)

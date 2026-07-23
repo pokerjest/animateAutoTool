@@ -22,6 +22,10 @@ type Client struct {
 }
 
 func NewClient(baseURL, apiKey, model string) *Client {
+	return NewClientWithProxy(baseURL, apiKey, model, "")
+}
+
+func NewClientWithProxy(baseURL, apiKey, model, proxyURL string) *Client {
 	// Ensure baseURL doesn't end with a slash, and default to openAI if empty but key is provided
 	baseURL = strings.TrimSuffix(baseURL, "/")
 	if baseURL == "" {
@@ -32,7 +36,7 @@ func NewClient(baseURL, apiKey, model string) *Client {
 		baseURL:    baseURL,
 		apiKey:     apiKey,
 		model:      model,
-		httpClient: httpx.NewHTTPClient(60 * time.Second), // Long timeout for LLM responses
+		httpClient: httpx.NewHTTPClientWithProxy(60*time.Second, proxyURL), // Long timeout for LLM responses
 	}
 }
 

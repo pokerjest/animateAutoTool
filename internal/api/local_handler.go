@@ -11,7 +11,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/pokerjest/animateAutoTool/internal/db"
-	"github.com/pokerjest/animateAutoTool/internal/jellyfin"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/service"
 )
@@ -92,7 +91,7 @@ func LocalAnimePageHandler(c *gin.Context) {
 		// NOTE: To avoid blocking page load if Jellyfin is down, we should probably fetch this async or use a cached value.
 		// However, for this specific "fix mismatch" user request, let's fetch it.
 		// Optimization: We could reuse the client from elsewhere?
-		client := jellyfin.NewClient(jellyfinURL, jellyfinAPIKey)
+		client := newConfiguredJellyfinClient(jellyfinURL, jellyfinAPIKey)
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 3*time.Second)
 		defer cancel()
 		info, err := client.GetPublicInfoContext(ctx)
@@ -219,7 +218,7 @@ func AddLocalDirectoryHandler(c *gin.Context) {
 		jellyfinAPIKey := configValue(model.ConfigKeyJellyfinApiKey)
 
 		if jellyfinURL != "" && jellyfinAPIKey != "" {
-			client := jellyfin.NewClient(jellyfinURL, jellyfinAPIKey)
+			client := newConfiguredJellyfinClient(jellyfinURL, jellyfinAPIKey)
 			libName := filepath.Base(path)
 			// Use "tvshows" as default for Anime
 			if err := client.CreateLibrary(libName, path, "tvshows"); err != nil {
@@ -299,7 +298,7 @@ func triggerJellyfinLibraryRefresh(ctx context.Context) {
 		return
 	}
 
-	client := jellyfin.NewClient(jellyfinURL, jellyfinAPIKey)
+	client := newConfiguredJellyfinClient(jellyfinURL, jellyfinAPIKey)
 	if err := client.RequestLibraryRefreshContext(ctx); err != nil {
 		log.Printf("Jellyfin library refresh failed: %v", err)
 	}
