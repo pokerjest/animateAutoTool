@@ -21,6 +21,7 @@ import (
 const (
 	defaultPosterCacheControl   = "private, max-age=86400, stale-while-revalidate=604800"
 	versionedPosterCacheControl = "private, max-age=31536000, immutable"
+	posterJPEGContentType       = "image/jpeg"
 	maxPosterThumbnailWidth     = 1280
 	maxPosterThumbnailEntries   = 384
 )
@@ -110,7 +111,7 @@ func servePosterImage(c *gin.Context, original []byte) {
 		cacheKey := etag
 		if cached, ok := posterThumbnails.get(cacheKey); ok {
 			data = cached
-			contentType = "image/jpeg"
+			contentType = posterJPEGContentType
 		} else {
 			value, err, _ := posterThumbnailGroup.Do(cacheKey, func() (any, error) {
 				posterThumbnailSlots <- struct{}{}
@@ -124,7 +125,7 @@ func servePosterImage(c *gin.Context, original []byte) {
 			})
 			if err == nil {
 				data = value.([]byte)
-				contentType = "image/jpeg"
+				contentType = posterJPEGContentType
 			}
 		}
 	}

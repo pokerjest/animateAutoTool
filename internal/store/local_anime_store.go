@@ -233,14 +233,14 @@ func (s *LocalAnimeStore) CreateAnime(anime *model.LocalAnime) error {
 	if s == nil || s.db == nil {
 		return gorm.ErrInvalidDB
 	}
-	return s.db.Create(anime).Error
+	return retrySQLiteBusy(func() error { return s.db.Create(anime).Error })
 }
 
 func (s *LocalAnimeStore) SaveAnime(anime *model.LocalAnime) error {
 	if s == nil || s.db == nil {
 		return gorm.ErrInvalidDB
 	}
-	return s.db.Save(anime).Error
+	return retrySQLiteBusy(func() error { return s.db.Save(anime).Error })
 }
 
 func (s *LocalAnimeStore) FindEpisodeByPath(path string) (*model.LocalEpisode, error) {
@@ -258,14 +258,14 @@ func (s *LocalAnimeStore) CreateEpisode(ep *model.LocalEpisode) error {
 	if s == nil || s.db == nil {
 		return gorm.ErrInvalidDB
 	}
-	return s.db.Create(ep).Error
+	return retrySQLiteBusy(func() error { return s.db.Create(ep).Error })
 }
 
 func (s *LocalAnimeStore) SaveEpisode(ep *model.LocalEpisode) error {
 	if s == nil || s.db == nil {
 		return gorm.ErrInvalidDB
 	}
-	return s.db.Save(ep).Error
+	return retrySQLiteBusy(func() error { return s.db.Save(ep).Error })
 }
 
 // DeleteEpisodesNotInPaths removes any episode rows under animeID whose path

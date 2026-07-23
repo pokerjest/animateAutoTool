@@ -7,7 +7,18 @@ import LibraryView from './LibraryView.vue'
 afterEach(() => vi.unstubAllGlobals())
 
 describe('poster loading', () => {
-  it('renders a small first batch and requests cached thumbnails', async () => {
+  it('renders a small first batch and automatically loads more near the end', async () => {
+    let onIntersect: IntersectionObserverCallback | undefined
+    vi.stubGlobal('IntersectionObserver', class {
+      constructor(callback: IntersectionObserverCallback) { onIntersect = callback }
+      observe() {}
+      disconnect() {}
+      unobserve() {}
+      takeRecords() { return [] }
+      root = null
+      rootMargin = '320px 0px'
+      thresholds = [0]
+    })
     const items = Array.from({ length: 30 }, (_, index) => ({
       ID: index + 1,
       UpdatedAt: '2026-07-23T12:00:00Z',
@@ -43,9 +54,12 @@ describe('poster loading', () => {
     expect(first.attributes('loading')).toBe('lazy')
     expect(first.attributes('decoding')).toBe('async')
 
-    const loadMore = wrapper.findAll('button').find(button => button.text().includes('继续加载'))
-    expect(loadMore).toBeDefined()
-    await loadMore!.trigger('click')
+    expect(wrapper.text()).not.toContain('继续加载')
+    expect(wrapper.find('[data-testid="auto-load-sentinel"]').exists()).toBe(true)
+    expect(onIntersect).toBeDefined()
+    onIntersect!([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver)
+    await wrapper.vm.$nextTick()
     expect(wrapper.findAll('img')).toHaveLength(30)
+    expect(wrapper.find('[data-testid="auto-load-sentinel"]').exists()).toBe(false)
   })
 })

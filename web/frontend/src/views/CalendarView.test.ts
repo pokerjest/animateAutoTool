@@ -58,7 +58,7 @@ describe('CalendarView', () => {
         today: 1,
         days: [{
           weekday: { id: 1, cn: '星期一', en: 'Mon' },
-          items: [{ id: 99, name: 'Test Anime', name_cn: '测试番剧', images: { large: 'poster.jpg' }, air_date: '2026-07-23', summary: '简介' }],
+          items: [{ id: 99, name: 'Test Anime', name_cn: '测试番剧', images: { large: 'https://lain.bgm.tv/pic/cover/l/poster.jpg' }, air_date: '2026-07-23', summary: '简介' }],
         }],
       })
       if (path.endsWith('/api/v1/subscriptions')) {
@@ -84,9 +84,11 @@ describe('CalendarView', () => {
 
     await vi.waitFor(() => expect(wrapper.text()).toContain('测试番剧'))
     expect(wrapper.text()).not.toContain('查看详情')
+    expect(wrapper.get('img').attributes('src')).toBe('/api/v1/calendar/posters/99?width=360')
 
     await wrapper.get('[data-testid="poster-open"]').trigger('click')
     expect(wrapper.text()).toContain('从 Mikan 添加订阅')
+    expect(wrapper.findAll('img').some(image => image.attributes('src') === '/api/v1/calendar/posters/99?width=720')).toBe(true)
     await buttonByText(wrapper, '从 Mikan 添加订阅').trigger('click')
     expect(wrapper.get('[data-testid="mikan-dialog"]').text()).toContain('测试番剧')
 

@@ -1,7 +1,0 @@
-import{c}from"./index-Cw6UbF1v.js";/**
- * @license @lucide/vue v1.25.0 - ISC
- *
- * This source code is licensed under the ISC license.
- * See the LICENSE file in the root directory of this source tree.
- */const a=[["path",{d:"M9 9.003a1 1 0 0 1 1.517-.859l4.997 2.997a1 1 0 0 1 0 1.718l-4.997 2.997A1 1 0 0 1 9 14.996z",key:"kmsa83"}],["circle",{cx:"12",cy:"12",r:"10",key:"1mglay"}]],l=c("circle-play",a);export{l as C};
-//# sourceMappingURL=circle-play-B5kTFjG8.js.map

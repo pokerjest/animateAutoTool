@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -69,13 +70,64 @@ func TestV1SessionUsesDataEnvelope(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 	var payload struct {
 		Data struct {
-			Authenticated bool   `json:"authenticated"`
-			Version       string `json:"version"`
+			Authenticated          bool   `json:"authenticated"`
+			LocalRecoveryAvailable bool   `json:"local_recovery_available"`
+			Version                string `json:"version"`
 		} `json:"data"`
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &payload))
 	assert.False(t, payload.Data.Authenticated)
+	assert.True(t, payload.Data.LocalRecoveryAvailable)
 	assert.NotEmpty(t, payload.Data.Version)
+}
+
+func TestV1SessionDisablesLocalRecoveryForRemoteRequests(t *testing.T) {
+	resetAuthFixtures(t)
+	r := setupRouter()
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/session", nil)
+	markRemoteRequest(req)
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	var payload struct {
+		Data struct {
+			LocalRecoveryAvailable bool `json:"local_recovery_available"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &payload))
+	assert.False(t, payload.Data.LocalRecoveryAvailable)
+}
+
+func TestV1LocalMetadataRefreshResolvesPreviousIssue(t *testing.T) {
+	taskstate.Global.Reset()
+	t.Cleanup(taskstate.Global.Reset)
+	if err := db.DB.Exec("DELETE FROM library_issues").Error; err != nil {
+		t.Fatalf("clear library issues: %v", err)
+	}
+	anime := model.LocalAnime{Title: "Locked Show", Path: "/library/Locked Show"}
+	if err := db.DB.Create(&anime).Error; err != nil {
+		t.Fatalf("create local anime: %v", err)
+	}
+	updateLocalMetadataIssue(&anime, errors.New("database is locked (5) (SQLITE_BUSY)"))
+
+	previousEnricher := enrichV1LocalAnime
+	enrichV1LocalAnime = func(*model.LocalAnime) error { return nil }
+	t.Cleanup(func() { enrichV1LocalAnime = previousEnricher })
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{{Key: "id", Value: strconv.FormatUint(uint64(anime.ID), 10)}}
+	V1RefreshLocalMetadataHandler(c)
+	require.Equal(t, http.StatusAccepted, w.Code)
+	require.Eventually(t, func() bool {
+		task, ok := taskstate.Global.Get("local-metadata-" + strconv.FormatUint(uint64(anime.ID), 10))
+		return ok && task.Status == taskstate.StatusCompleted
+	}, time.Second, 10*time.Millisecond)
+
+	issues, err := service.ListOpenLibraryIssues(10)
+	require.NoError(t, err)
+	assert.Empty(t, issues)
 }
 
 func TestV1SessionAdvertisesLocalSetupOnlyForDirectLoopback(t *testing.T) {

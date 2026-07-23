@@ -8,6 +8,18 @@
 
 ## [Unreleased]
 
+## [0.7.4] - 2026-07-23
+
+### Changed
+- 媒体库、番剧图鉴和本地番剧列表改为滚动到底部前自动加载下一批内容，不再要求手动点击“继续加载”。
+- 追番日历海报改由服务端同源代理、缩略和缓存，减少移动端直连图片源失败及大图解码压力。
+
+### Fixed
+- 修复 SQLite 并发写入时偶发 `SQLITE_BUSY / database is locked` 的问题，增加写入串行化、忙等待和有限退避重试。
+- 修复可选清晰度升级、Jellyfin 刷新建议及未知分辨率被错误计入“需要关注”的问题。
+- 修复本地元数据刷新成功后历史异常仍残留，以及刷新失败时缺少可恢复提示的问题。
+- 修复非 localhost 访问点击“本机恢复”后仍进入表单、直到提交才提示受限的问题；现在会在入口处立即说明本机操作方式。
+
 ## [0.7.3] - 2026-07-23
 
 ### Changed
@@ -163,7 +175,8 @@
 
 ---
 
-[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v0.7.3...HEAD
+[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v0.7.4...HEAD
+[0.7.4]: https://github.com/pokerjest/animateAutoTool/compare/v0.7.3...v0.7.4
 [0.7.3]: https://github.com/pokerjest/animateAutoTool/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/pokerjest/animateAutoTool/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/pokerjest/animateAutoTool/compare/v0.7.0...v0.7.1

@@ -9,7 +9,7 @@ security:
   - cookieSession: []
 paths:
   /session:
-    get: { security: [], operationId: getSession, responses: { "200": { $ref: "#/components/responses/Success" } } }
+    get: { security: [], operationId: getSession, responses: { "200": { $ref: "#/components/responses/Session" } } }
   /session/login:
     post:
       security: []
@@ -140,6 +140,17 @@ paths:
     get: { operationId: getSubscriptionHistory, parameters: [{ $ref: "#/components/parameters/Id" }], responses: { "200": { $ref: "#/components/responses/Success" } } }
   /calendar:
     get: { operationId: getCalendar, responses: { "200": { $ref: "#/components/responses/Success" } } }
+  /calendar/posters/{id}:
+    get:
+      operationId: getCalendarPoster
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer, minimum: 1 } }
+        - { name: width, in: query, schema: { type: integer, minimum: 64, maximum: 1280, default: 360 } }
+      responses:
+        "200":
+          description: Cached same-origin Bangumi calendar poster
+          content: { image/jpeg: { schema: { type: string, format: binary } } }
+        "404": { description: Poster unavailable }
   /library:
     get: { operationId: getLibrary, parameters: [{ $ref: "#/components/parameters/Page" }, { $ref: "#/components/parameters/PageSize" }], responses: { "200": { $ref: "#/components/responses/Paginated" } } }
   /posters/{id}:
@@ -251,10 +262,31 @@ components:
     JsonArray: { required: true, content: { application/json: { schema: { type: array, items: { type: object, additionalProperties: true } } } } }
   responses:
     Success: { description: Successful response, content: { application/json: { schema: { $ref: "#/components/schemas/Envelope" } } } }
+    Session:
+      description: Current browser session and local-only capability state
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/Envelope"
+              - type: object
+                properties:
+                  data: { $ref: "#/components/schemas/SessionState" }
     Paginated: { description: Paginated successful response, content: { application/json: { schema: { $ref: "#/components/schemas/PaginatedEnvelope" } } } }
     TaskAccepted: { description: Background task accepted, content: { application/json: { schema: { $ref: "#/components/schemas/TaskEnvelope" } } } }
     Error: { description: Error response, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
   schemas:
+    SessionState:
+      type: object
+      required: [authenticated, setup_pending, local_setup_available, local_recovery_available, version, recovery_local_only]
+      properties:
+        authenticated: { type: boolean }
+        setup_pending: { type: boolean }
+        local_setup_available: { type: boolean }
+        local_recovery_available: { type: boolean, description: True only when this request directly targets localhost from the loopback interface without forwarded headers. }
+        username: { type: string }
+        version: { type: string }
+        recovery_local_only: { type: boolean }
     LoginInput:
       type: object
       required: [username, password]

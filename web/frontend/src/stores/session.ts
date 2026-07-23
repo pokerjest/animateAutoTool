@@ -8,6 +8,7 @@ export const useSessionStore = defineStore('session', {
     authenticated: s => Boolean(s.state?.authenticated),
     setupPending: s => Boolean(s.state?.setup_pending),
     localSetupAvailable: s => Boolean(s.state?.local_setup_available),
+    localRecoveryAvailable: s => Boolean(s.state?.local_recovery_available),
   },
   actions: {
     async load(force = false) {
