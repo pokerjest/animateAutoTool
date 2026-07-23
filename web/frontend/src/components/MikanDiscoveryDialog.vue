@@ -159,7 +159,7 @@ function confirmSelection() {
         <StateBlock v-else-if="!dashboardItems.length" class="mt-5" state="empty" title="这一天暂时没有番组" description="可切换其他日期、OVA 或剧场版。" />
         <div v-else class="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4" data-testid="mikan-dashboard-results">
           <button v-for="item in dashboardItems" :key="item.mikan_id" class="panel-muted group overflow-hidden text-left" @click="chooseAnime(item, dashboard.data.value?.season || `${selectedYear} ${selectedSeason}季`)">
-            <img :src="normalizePosterURL(item.image)" :alt="`${item.title} 海报`" class="aspect-[3/4] w-full object-cover transition group-hover:scale-[1.02]" @error="handlePosterError($event)" />
+            <img :src="normalizePosterURL(item.image)" :alt="`${item.title} 海报`" loading="lazy" decoding="async" fetchpriority="low" class="aspect-[3/4] w-full object-cover transition group-hover:scale-[1.02]" @error="handlePosterError($event)" />
             <span class="block p-3 text-sm font-extrabold leading-5">{{ item.title }}</span>
           </button>
         </div>
@@ -177,7 +177,7 @@ function confirmSelection() {
         <StateBlock v-else-if="!searchResults.data.value?.items.length" class="mt-5" state="empty" title="没有找到匹配番剧" description="尝试缩短关键词或使用原名搜索。" />
         <div v-else class="mt-5 grid gap-3 sm:grid-cols-2" data-testid="mikan-search-results">
           <button v-for="item in searchResults.data.value?.items" :key="item.mikan_id" class="panel-muted flex min-h-28 items-center gap-4 p-3 text-left" @click="chooseAnime(item)">
-            <img :src="normalizePosterURL(item.image)" :alt="`${item.title} 海报`" class="h-24 w-16 rounded-xl object-cover" @error="handlePosterError($event)" />
+            <img :src="normalizePosterURL(item.image)" :alt="`${item.title} 海报`" loading="lazy" decoding="async" fetchpriority="low" class="h-24 w-16 rounded-xl object-cover" @error="handlePosterError($event)" />
             <span class="min-w-0"><strong class="line-clamp-2">{{ item.title }}</strong><small class="muted mt-2 block">Mikan #{{ item.mikan_id }}</small></span>
           </button>
         </div>
@@ -187,7 +187,7 @@ function confirmSelection() {
     <template v-else>
       <button class="btn btn-quiet mb-4 px-2" type="button" @click="backToBrowse"><ArrowLeft :size="17" />返回番剧列表</button>
       <div v-if="selectedAnime" class="panel-muted mb-5 flex items-center gap-4 p-4">
-        <img :src="normalizePosterURL(selectedAnime.image)" :alt="`${selectedAnime.title} 海报`" class="h-24 w-16 rounded-xl object-cover" @error="handlePosterError($event)" />
+        <img :src="normalizePosterURL(selectedAnime.image)" :alt="`${selectedAnime.title} 海报`" decoding="async" class="h-24 w-16 rounded-xl object-cover" @error="handlePosterError($event)" />
         <div class="min-w-0"><p class="eyebrow">MIKAN #{{ selectedAnime.mikan_id }}</p><h3 class="mt-1 text-lg font-black">{{ selectedAnime.title }}</h3><p class="muted mt-1 text-sm">{{ selectedAnime.season || '搜索结果' }}</p></div>
       </div>
 

@@ -3,7 +3,7 @@ import type { components } from './schema'
 export interface SessionState { authenticated: boolean; setup_pending: boolean; local_setup_available: boolean; username?: string; version: string; recovery_local_only: boolean }
 export type TaskAccepted = components['schemas']['TaskAccepted']
 export type TaskUpdate = components['schemas']['TaskUpdate']
-export interface Metadata { ID: number; id?: number; title: string; title_cn?: string; title_jp?: string; image: string; summary: string; air_date: string; bangumi_id: number; tmdb_id: number; anilist_id: number; data_source: string }
+export interface Metadata { ID: number; id?: number; UpdatedAt?: string; updated_at?: string; title: string; title_cn?: string; title_jp?: string; image: string; summary: string; air_date: string; bangumi_id: number; tmdb_id: number; anilist_id: number; data_source: string }
 export interface Subscription { ID: number; mikan_id?: string; title: string; rss_url: string; backup_rss_url?: string; image: string; subtitle_group: string; season: string; filter_rule: string; exclude_rule: string; expected_episodes: number; downloaded_count: number; is_active: boolean; allow_multi_subgroup?: boolean; auto_disable_on_done?: boolean; stale_after_hours?: number; last_run_status: string; last_run_summary: string; last_error_display: string; has_repair_actions?: boolean; can_use_base_rss?: boolean; can_clear_filter?: boolean; can_reset_stale_logs?: boolean; can_retry_missing?: boolean; can_retry_stale?: boolean; can_retry_upgrade?: boolean; can_refresh_library?: boolean; metadata?: Metadata }
 export type MikanDiscoveryItem = components['schemas']['MikanDiscoveryItem']
 export type MikanDashboard = components['schemas']['MikanDashboard']

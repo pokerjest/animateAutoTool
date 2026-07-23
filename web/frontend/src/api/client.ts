@@ -37,10 +37,29 @@ export function normalizePosterURL(image?: string) {
   return value
 }
 
-export function posterURL(item: { ID?: number; id?: number; image?: string; Image?: string }) {
+interface PosterRecord { ID?: number; id?: number; image?: string; Image?: string; UpdatedAt?: string; updated_at?: string }
+interface PosterOptions { width?: number; source?: string }
+
+export function posterThumbnailURL(image?: string, width = 360) {
+  const normalized = normalizePosterURL(image)
+  if (!normalized.startsWith('/api/v1/posters/')) return normalized
+  const url = new URL(normalized, window.location.origin)
+  if (!url.searchParams.has('width')) url.searchParams.set('width', String(width))
+  return `${url.pathname}${url.search}`
+}
+
+export function posterURL(item: PosterRecord, options: PosterOptions = {}) {
   const id = item.ID ?? item.id
   const image = item.image ?? item.Image
-  if (id) return `/api/v1/posters/${id}`
+  if (id) {
+    const params = new URLSearchParams()
+    if (options.source) params.set('source', options.source)
+    if (options.width) params.set('width', String(options.width))
+    const updatedAt = item.UpdatedAt ?? item.updated_at
+    if (updatedAt) params.set('v', updatedAt)
+    const query = params.toString()
+    return `/api/v1/posters/${id}${query ? `?${query}` : ''}`
+  }
   return normalizePosterURL(image)
 }
 

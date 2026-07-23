@@ -153,6 +153,8 @@ var migrations = []migration{
 
 入口在 `internal/api/routes_embedded.go`，资源用 `embed.FS` 嵌入二进制。
 
+海报原图保存在 SQLite，`GET /api/v1/posters/{id}?width=...&v=...` 按需生成缩略图并放入有界内存缓存；内容指纹作为 `ETag`，版本化 URL 使用浏览器私有 immutable 缓存。缩略图生成限制并发，避免移动端首次请求大量海报时把服务端内存推高。Vite 哈希资源使用一年 immutable 缓存。
+
 中间件分层（已在 routes_embedded 装配）：
 1. `SecurityHeadersMiddleware` — CSP / XFO / Permissions-Policy 等浏览器侧硬约束
 2. `BootstrapLocalOnlyMiddleware` — 首次初始化前**只允许 localhost 直连**

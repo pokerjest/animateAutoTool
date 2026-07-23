@@ -519,6 +519,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/posters/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Returns the cached poster. Set width for a JPEG thumbnail; versioned requests receive an immutable private cache policy. */
+        get: operations["getPoster"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/library/refresh": {
         parameters: {
             query?: never;
@@ -1777,6 +1794,51 @@ export interface operations {
         requestBody?: never;
         responses: {
             200: components["responses"]["Paginated"];
+        };
+    };
+    getPoster: {
+        parameters: {
+            query?: {
+                source?: "bangumi" | "tmdb" | "anilist";
+                width?: number;
+                /** @description Metadata version used for cache busting */
+                v?: string;
+            };
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Poster image or resized JPEG thumbnail */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/jpeg": string;
+                    "image/png": string;
+                    "image/gif": string;
+                };
+            };
+            /** @description Cached image is still current */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Poster not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
     refreshLibrary: {
