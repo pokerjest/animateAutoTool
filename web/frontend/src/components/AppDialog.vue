@@ -10,7 +10,7 @@ defineEmits<{ 'update:open': [value: boolean] }>()
   <DialogRoot :open="open" @update:open="$emit('update:open', $event)">
     <DialogPortal>
       <DialogOverlay class="fixed inset-0 z-[80] bg-black/45 backdrop-blur-sm" />
-      <DialogContent class="panel fixed left-1/2 top-1/2 z-[81] max-h-[90vh] w-[min(94vw,620px)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto p-5 sm:p-7" :class="wide ? 'lg:w-[min(92vw,920px)]' : ''">
+      <DialogContent class="panel fixed left-1/2 top-1/2 z-[81] max-h-[90vh] w-[94vw] -translate-x-1/2 -translate-y-1/2 overflow-y-auto p-5 sm:p-7" :class="wide ? 'max-w-[920px]' : 'max-w-[620px]'">
         <div class="mb-6 flex items-start justify-between gap-4">
           <div>
             <DialogTitle class="text-2xl font-black">{{ title }}</DialogTitle>

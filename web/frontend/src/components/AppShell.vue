@@ -5,9 +5,11 @@ import { Activity, ArchiveRestore, Bot, CalendarDays, ChevronRight, Clapperboard
 import { useUIStore } from '../stores/ui'
 import { useTaskStore } from '../stores/tasks'
 import { useSessionStore } from '../stores/session'
+import { useAsyncActions } from '../composables/useAsyncActions'
+import AsyncButton from './AsyncButton.vue'
 import TaskCenter from './TaskCenter.vue'
 
-const route = useRoute(); const router = useRouter(); const ui = useUIStore(); const tasks = useTaskStore(); const session = useSessionStore()
+const route = useRoute(); const router = useRouter(); const ui = useUIStore(); const tasks = useTaskStore(); const session = useSessionStore(); const actions = useAsyncActions()
 const groups = [
   { label: '概览', links: [{ to: '/', label: '今日概览', icon: Home }, { to: '/calendar', label: '追番日历', icon: CalendarDays }] },
   { label: '追番', links: [{ to: '/subscriptions', label: '订阅管理', icon: Tv }, { to: '/assistant', label: 'AI 助手', icon: Bot }] },
@@ -18,7 +20,7 @@ const bottom = groups.flatMap(g => g.links).filter(l => ['/', '/calendar', '/sub
 const isActive = (to: string) => to === '/' ? route.path === '/' : route.path.startsWith(to)
 const themeIcon = computed(() => ui.theme === 'dark' ? Sun : MoonStar)
 const toggleTheme = () => ui.setTheme(document.documentElement.classList.contains('dark') ? 'light' : 'dark')
-const logout = async () => { await session.logout(); router.push('/login') }
+const logout = async () => { try { await actions.run('logout', async () => { await session.logout(); await router.push('/login') }) } catch (error) { ui.toast(error instanceof Error ? error.message : '退出登录失败', 'error') } }
 </script>
 
 <template>
@@ -38,7 +40,7 @@ const logout = async () => { await session.logout(); router.push('/login') }
       </nav>
       <div class="panel-muted mt-2 flex items-center justify-between p-2">
         <button class="btn btn-quiet h-10 min-h-10 w-10 p-0" type="button" @click="toggleTheme" aria-label="切换明暗主题"><component :is="themeIcon" :size="18" /></button>
-        <button class="min-w-0 flex-1 truncate px-2 text-left text-xs font-bold" type="button" @click="logout"><span class="block truncate">{{ session.state?.username || '管理员' }}</span><span class="muted">退出登录</span></button>
+        <AsyncButton class="min-w-0 flex-1 truncate px-2 text-left text-xs font-bold" :loading="actions.isBusy('logout')" loading-label="退出中…" @click="logout"><span class="block truncate">{{ session.state?.username || '管理员' }}</span><span class="muted">退出登录</span></AsyncButton>
         <span class="badge">{{ session.state?.version }}</span>
       </div>
     </aside>
@@ -67,7 +69,7 @@ const logout = async () => { await session.logout(); router.push('/login') }
         <div v-for="group in groups" :key="group.label" class="mb-5"><h3 class="mb-2 px-2 text-xs font-extrabold muted">{{ group.label }}</h3><RouterLink v-for="link in group.links" :key="link.to" :to="link.to" class="mb-1 flex min-h-12 items-center gap-3 rounded-xl px-3 font-bold" :class="isActive(link.to) ? 'bg-[var(--brand-soft)] text-[var(--brand-strong)]' : ''" @click="ui.mobileMore=false"><component :is="link.icon" :size="19" />{{ link.label }}</RouterLink></div>
         <div class="panel-muted mt-6 grid gap-2 p-3">
           <button class="btn btn-secondary w-full justify-start" type="button" @click="toggleTheme" aria-label="切换明暗主题"><component :is="themeIcon" :size="18" />切换明暗主题</button>
-          <button class="btn btn-quiet w-full justify-start text-[var(--danger)]" type="button" @click="ui.mobileMore=false; logout()"><LogOut :size="18" />退出登录</button>
+          <AsyncButton class="btn btn-quiet w-full justify-start text-[var(--danger)]" :loading="actions.isBusy('logout')" loading-label="退出中…" @click="ui.mobileMore=false; logout()"><LogOut :size="18" />退出登录</AsyncButton>
         </div>
       </aside>
     </div>

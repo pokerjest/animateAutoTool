@@ -23,6 +23,7 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/safeio"
 	"github.com/pokerjest/animateAutoTool/internal/service"
 	"github.com/pokerjest/animateAutoTool/internal/store"
+	"github.com/pokerjest/animateAutoTool/internal/taskstate"
 	appversion "github.com/pokerjest/animateAutoTool/internal/version"
 	"gorm.io/gorm"
 )
@@ -101,6 +102,8 @@ func initV1Routes(r *gin.Engine) {
 		protected.POST("/session/logout", V1LogoutHandler)
 		protected.POST("/session/change-password", V1ChangePasswordHandler)
 		protected.GET("/events", SSEHandler)
+		protected.GET("/tasks", V1TasksHandler)
+		protected.GET("/tasks/:task_id", V1TaskHandler)
 
 		protected.GET("/setup/readiness", V1SetupReadinessHandler)
 		protected.POST("/setup/bootstrap", V1SetupBootstrapHandler)
@@ -175,6 +178,19 @@ func initV1Routes(r *gin.Engine) {
 		protected.POST("/assistant/messages", V1AssistantMessageHandler)
 		protected.DELETE("/assistant/messages", V1AssistantClearHandler)
 	}
+}
+
+func V1TasksHandler(c *gin.Context) {
+	v1Data(c, http.StatusOK, gin.H{"items": taskstate.Global.List()})
+}
+
+func V1TaskHandler(c *gin.Context) {
+	task, ok := taskstate.Global.Get(c.Param("task_id"))
+	if !ok {
+		v1Error(c, http.StatusNotFound, "task_not_found", "未找到对应任务")
+		return
+	}
+	v1Data(c, http.StatusOK, task)
 }
 
 func V1SessionHandler(c *gin.Context) {
@@ -317,12 +333,17 @@ func V1DashboardHandler(c *gin.Context) {
 }
 
 func V1SyncHandler(c *gin.Context) {
+	const taskID = "manual-sync"
+	taskstate.Global.Start(taskID, "sync", "立即同步", "正在同步订阅、本地媒体和下载状态")
 	go func() {
 		if err := runDashboardSyncNow(context.Background()); err != nil {
 			log.Printf("manual dashboard sync failed: %v", err)
+			taskstate.Global.Fail(taskID, err)
+			return
 		}
+		taskstate.Global.Complete(taskID, "同步完成")
 	}()
-	v1Message(c, http.StatusAccepted, "同步任务已经启动", gin.H{"task_id": "manual-sync", "status": "running"})
+	v1Message(c, http.StatusAccepted, "同步任务已经启动", gin.H{"task_id": taskID, "status": "running"})
 }
 
 func V1SubscriptionsHandler(c *gin.Context) {
@@ -379,12 +400,17 @@ func V1SubscriptionActionHandler(action string) gin.HandlerFunc {
 				return
 			}
 		case "run":
+			taskID := "subscription-" + c.Param("id")
+			taskstate.Global.Start(taskID, "subscription", "订阅检查", "正在检查 "+sub.Title)
 			go func(target *model.Subscription) {
 				if err := runSubscriptionCheck(target, "manual"); err != nil {
 					log.Printf("manual subscription run failed: %v", err)
+					taskstate.Global.Fail(taskID, err)
+					return
 				}
+				taskstate.Global.Complete(taskID, "订阅检查完成")
 			}(sub)
-			v1Message(c, http.StatusAccepted, "订阅检查已经启动", gin.H{"task_id": "subscription-" + c.Param("id"), "status": "running"})
+			v1Message(c, http.StatusAccepted, "订阅检查已经启动", gin.H{"task_id": taskID, "status": "running"})
 			return
 		}
 		updated, _ := loadSubscriptionCard(sub.ID)
@@ -486,7 +512,7 @@ func V1LibraryHandler(c *gin.Context) {
 func V1RefreshLibraryHandler(c *gin.Context) {
 	force := c.Query("force") == ValueTrue
 	if !service.NewMetadataService().StartRefreshAllMetadata(force) {
-		v1Message(c, http.StatusOK, "元数据已经在刷新中", gin.H{"task_id": "metadata-refresh", "status": "running"})
+		v1Message(c, http.StatusAccepted, "元数据已经在刷新中", gin.H{"task_id": "metadata-refresh", "status": "running"})
 		return
 	}
 	v1Message(c, http.StatusAccepted, "元数据刷新已经启动", gin.H{"task_id": "metadata-refresh", "status": "running"})
@@ -533,16 +559,20 @@ func V1LocalAnimeEpisodesHandler(c *gin.Context) {
 }
 
 func V1LocalScanHandler(c *gin.Context) {
+	const taskID = "local-scan"
+	taskstate.Global.Start(taskID, "scan", "本地扫描", "正在扫描本地媒体目录")
 	go func() {
 		scanner := service.NewScannerService()
 		if err := scanner.ScanAll(); err != nil {
 			log.Printf("local scan failed: %v", err)
+			taskstate.Global.Fail(taskID, err)
 			return
 		}
 		service.NewAgentService().RunAgentForLibrary()
 		triggerJellyfinLibraryRefresh(context.Background())
+		taskstate.Global.Complete(taskID, "本地扫描完成")
 	}()
-	v1Message(c, http.StatusAccepted, "本地扫描已经启动", gin.H{"task_id": "local-scan", "status": "running"})
+	v1Message(c, http.StatusAccepted, "本地扫描已经启动", gin.H{"task_id": taskID, "status": "running"})
 }
 
 func V1AddLocalDirectoryHandler(c *gin.Context) {
@@ -557,8 +587,18 @@ func V1AddLocalDirectoryHandler(c *gin.Context) {
 		v1Error(c, http.StatusBadRequest, "directory_add_failed", err.Error())
 		return
 	}
-	go func() { _ = service.NewScannerService().ScanAll() }()
-	v1Message(c, http.StatusCreated, "目录已添加", nil)
+	const taskID = "local-scan"
+	taskstate.Global.Start(taskID, "scan", "本地扫描", "目录已添加，正在扫描本地媒体")
+	go func() {
+		if err := service.NewScannerService().ScanAll(); err != nil {
+			taskstate.Global.Fail(taskID, err)
+			return
+		}
+		service.NewAgentService().RunAgentForLibrary()
+		triggerJellyfinLibraryRefresh(context.Background())
+		taskstate.Global.Complete(taskID, "目录已添加，本地扫描完成")
+	}()
+	v1Message(c, http.StatusAccepted, "目录已添加，扫描任务已经启动", gin.H{"task_id": taskID, "status": "running"})
 }
 
 func V1BackupHandler(c *gin.Context) {

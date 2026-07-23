@@ -7,7 +7,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/pokerjest/animateAutoTool/internal/bangumi"
-	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 )
 
@@ -19,24 +18,11 @@ func getBangumiTokens() (string, string) {
 	return configValue(model.ConfigKeyBangumiAccessToken), configValue(model.ConfigKeyBangumiRefreshToken)
 }
 
-func saveBangumiTokens(accessToken, refreshToken string) {
-	// Upsert Access Token
-	var at model.GlobalConfig
-	if err := db.DB.Where("key = ?", model.ConfigKeyBangumiAccessToken).First(&at).Error; err != nil {
-		db.DB.Create(&model.GlobalConfig{Key: model.ConfigKeyBangumiAccessToken, Value: accessToken})
-	} else {
-		at.Value = accessToken
-		db.DB.Save(&at)
-	}
-
-	// Upsert Refresh Token
-	var rt model.GlobalConfig
-	if err := db.DB.Where("key = ?", model.ConfigKeyBangumiRefreshToken).First(&rt).Error; err != nil {
-		db.DB.Create(&model.GlobalConfig{Key: model.ConfigKeyBangumiRefreshToken, Value: refreshToken})
-	} else {
-		rt.Value = refreshToken
-		db.DB.Save(&rt)
-	}
+func saveBangumiTokens(accessToken, refreshToken string) error {
+	return persistGlobalConfigs(map[string]string{
+		model.ConfigKeyBangumiAccessToken:  accessToken,
+		model.ConfigKeyBangumiRefreshToken: refreshToken,
+	})
 }
 
 func applyProxyToBangumiClient(client *bangumi.Client) {
@@ -85,7 +71,11 @@ func BangumiCallbackHandler(c *gin.Context) {
 		return
 	}
 
-	saveBangumiTokens(tokenResp.AccessToken, tokenResp.RefreshToken)
+	if err := saveBangumiTokens(tokenResp.AccessToken, tokenResp.RefreshToken); err != nil {
+		log.Printf("Bangumi token persistence error: %v", err)
+		htmlServerError(c, "保存 Bangumi 授权", err)
+		return
+	}
 
 	// Redirect back to settings page
 	c.Redirect(http.StatusTemporaryRedirect, "/settings")
@@ -112,8 +102,11 @@ func renderBangumiContent() string {
 				client := bangumi.NewClient(appID, appSecret, getBangumiRedirectURI(nil))
 				applyProxyToBangumiClient(client)
 				if tokenResp, errRefresh := client.RefreshToken(refreshToken); errRefresh == nil {
-					saveBangumiTokens(tokenResp.AccessToken, tokenResp.RefreshToken)
-					user, err = client.GetCurrentUser(tokenResp.AccessToken)
+					if saveErr := saveBangumiTokens(tokenResp.AccessToken, tokenResp.RefreshToken); saveErr != nil {
+						err = saveErr
+					} else {
+						user, err = client.GetCurrentUser(tokenResp.AccessToken)
+					}
 				}
 			}
 		}
@@ -162,8 +155,11 @@ func BangumiProfileHandler(c *gin.Context) {
 
 func BangumiLogoutHandler(c *gin.Context) {
 	// Clear tokens
-	db.DB.Model(&model.GlobalConfig{}).Where("key = ?", model.ConfigKeyBangumiAccessToken).Update("value", "")
-	db.DB.Model(&model.GlobalConfig{}).Where("key = ?", model.ConfigKeyBangumiRefreshToken).Update("value", "")
+	if err := saveBangumiTokens("", ""); err != nil {
+		log.Printf("Bangumi token clear error: %v", err)
+		c.String(http.StatusInternalServerError, "清除 Bangumi Token 失败")
+		return
+	}
 
 	// Check if configured to show "Connect" button state
 	c.String(http.StatusOK, `<div class="text-sm text-gray-500 flex items-center gap-2"><span>🔴 未连接</span><span class="text-xs text-gray-400">(请先输入 Access Token 并保存)</span></div>`)

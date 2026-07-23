@@ -13,11 +13,12 @@ import (
 )
 
 type Config struct {
-	Server   ServerConfig   `mapstructure:"server"`
-	Database DatabaseConfig `mapstructure:"database"`
-	Log      LogConfig      `mapstructure:"log"`
-	Auth     AuthConfig     `mapstructure:"auth"`
-	Managed  ManagedConfig  `mapstructure:"managed_services"`
+	Server         ServerConfig      `mapstructure:"server"`
+	Database       DatabaseConfig    `mapstructure:"database"`
+	Log            LogConfig         `mapstructure:"log"`
+	Auth           AuthConfig        `mapstructure:"auth"`
+	Managed        ManagedConfig     `mapstructure:"managed_services"`
+	SystemSettings map[string]string `mapstructure:"system_settings"`
 }
 
 type Paths struct {
@@ -390,6 +391,10 @@ auth:
 # Managed sidecars
 managed_services:
   download_missing: false
+
+# Web settings mirror. Values saved in the settings page are synchronized here.
+# This section can contain service passwords and API keys; keep this file private.
+system_settings: {}
 `) + "\n"
 
 	return os.WriteFile(AppPaths.ConfigFile, []byte(content), 0600)

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { api, ApiError } from './client'
+import { api, ApiError, handlePosterError, normalizePosterURL, posterURL } from './client'
 
 describe('api client', () => {
   afterEach(() => vi.unstubAllGlobals())
@@ -12,5 +12,24 @@ describe('api client', () => {
   it('turns structured errors into ApiError', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: { code: 'denied', message: '没有权限' } }), { status: 403, headers: { 'Content-Type': 'application/json' } })))
     await expect(api('/settings')).rejects.toMatchObject({ status: 403, message: '没有权限' } satisfies Partial<ApiError>)
+  })
+})
+
+describe('poster URLs', () => {
+  it('upgrades legacy poster paths to the v1 endpoint', () => {
+    expect(normalizePosterURL('/api/posters/42?source=tmdb')).toBe('/api/v1/posters/42?source=tmdb')
+  })
+
+  it('preserves external image URLs and provides a default for empty values', () => {
+    expect(normalizePosterURL('https://mikanani.me/images/poster.jpg')).toBe('https://mikanani.me/images/poster.jpg')
+    expect(normalizePosterURL()).toBe('/static/img/no_poster.svg')
+  })
+
+  it('prefers a metadata ID and falls back to the default after an image error', () => {
+    expect(posterURL({ ID: 9, image: '/api/posters/8' })).toBe('/api/v1/posters/9')
+    const image = document.createElement('img')
+    image.src = '/api/v1/posters/9'
+    handlePosterError({ currentTarget: image } as unknown as Event)
+    expect(image.getAttribute('src')).toBe('/static/img/no_poster.svg')
   })
 })

@@ -8,6 +8,22 @@
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-07-23
+
+### Added
+- 恢复 Mikan 季度番组、文本搜索、字幕组选择、最近资源预览与 RSS 自动配置，并支持新建和编辑订阅时重新关联。
+- 新增进程内任务注册表、任务快照 API 与类型化 `task_update` SSE，覆盖同步、扫描、订阅检查与修复、元数据、更新器和 R2 任务。
+- 系统设置保存后同步写入本地 `config.yaml`，保留敏感字段留空不覆盖的行为。
+
+### Changed
+- 路由主内容加入约 200ms 的淡入上移过渡；异步按钮统一提供转圈、进行中文案、禁用状态和 `aria-busy`。
+- 后台任务按钮持续显示到任务真正结束，断线或刷新后可通过任务快照恢复，并在完成后刷新对应数据。
+- 追番日历通过海报进入条目并使用完整 Mikan 源添加订阅；备份、设置、AI、播放与认证流程统一异步反馈。
+
+### Fixed
+- 修复海报加载失败、Mikan ID 与 Bangumi subject ID 混用，以及旧订阅缺失 Mikan ID 的兼容回填问题。
+- 修复列表操作共享忙碌状态、重复提交、后台请求已接收后按钮过早停止和减少动态效果时仍旋转的问题。
+
 ## [0.6.1] - 2026-07-23
 
 ### Fixed
@@ -126,7 +142,8 @@
 
 ---
 
-[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/pokerjest/animateAutoTool/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/pokerjest/animateAutoTool/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/pokerjest/animateAutoTool/compare/v0.5.4...v0.6.0
 [0.5.4]: https://github.com/pokerjest/animateAutoTool/compare/v0.5.3.2...v0.5.4

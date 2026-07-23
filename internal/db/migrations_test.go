@@ -111,3 +111,53 @@ func TestRunMigrationsUpgradesLegacySubscriptionSchema(t *testing.T) {
 		t.Fatal("expected library_issues table to be created for legacy databases")
 	}
 }
+
+func TestMikanIDMigrationBackfillsOnlyMissingOfficialRSSAssociations(t *testing.T) {
+	target, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "mikan-backfill.db")), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite db: %v", err)
+	}
+	t.Cleanup(func() { closeTestDB(t, target) })
+
+	if err := autoMigrateCoreSchema(target); err != nil {
+		t.Fatalf("migrate core schema: %v", err)
+	}
+	if err := target.AutoMigrate(&SchemaMigration{}); err != nil {
+		t.Fatalf("migrate schema history: %v", err)
+	}
+	for _, item := range migrations[:len(migrations)-1] {
+		if err := target.Create(&SchemaMigration{ID: item.ID, Description: item.Description}).Error; err != nil {
+			t.Fatalf("seed migration %s: %v", item.ID, err)
+		}
+	}
+
+	items := []model.Subscription{
+		{Title: "Missing", RSSUrl: "https://mikanani.me/RSS/Bangumi?bangumiId=3141&subgroupid=583"},
+		{Title: "Existing", RSSUrl: "https://mikanani.me/RSS/Bangumi?bangumiId=99", MikanID: "keep-me"},
+		{Title: "External", RSSUrl: "https://example.com/RSS/Bangumi?bangumiId=88"},
+	}
+	if err := target.Create(&items).Error; err != nil {
+		t.Fatalf("seed subscriptions: %v", err)
+	}
+
+	if err := RunMigrations(target); err != nil {
+		t.Fatalf("run Mikan backfill migration: %v", err)
+	}
+	if err := RunMigrations(target); err != nil {
+		t.Fatalf("rerun migrations: %v", err)
+	}
+
+	var got []model.Subscription
+	if err := target.Order("id").Find(&got).Error; err != nil {
+		t.Fatalf("load subscriptions: %v", err)
+	}
+	if got[0].MikanID != "3141" {
+		t.Fatalf("expected missing association to be backfilled, got %q", got[0].MikanID)
+	}
+	if got[1].MikanID != "keep-me" {
+		t.Fatalf("expected existing association to be preserved, got %q", got[1].MikanID)
+	}
+	if got[2].MikanID != "" {
+		t.Fatalf("expected external RSS to remain untouched, got %q", got[2].MikanID)
+	}
+}

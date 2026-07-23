@@ -30,6 +30,43 @@ paths:
     post: { operationId: pickDirectory, requestBody: { $ref: "#/components/requestBodies/JsonObject" }, responses: { "200": { $ref: "#/components/responses/Success" } } }
   /dashboard:
     get: { operationId: getDashboard, responses: { "200": { $ref: "#/components/responses/Success" } } }
+  /tasks:
+    get:
+      operationId: listTasks
+      responses:
+        "200":
+          description: Current in-process task snapshot
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [items]
+                        properties:
+                          items:
+                            type: array
+                            items: { $ref: "#/components/schemas/TaskUpdate" }
+  /tasks/{task_id}:
+    get:
+      operationId: getTask
+      parameters:
+        - { name: task_id, in: path, required: true, schema: { type: string, minLength: 1 } }
+      responses:
+        "200":
+          description: Current task state
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/TaskUpdate" }
+        "404": { $ref: "#/components/responses/Error" }
   /tasks/sync:
     post: { operationId: startSync, responses: { "202": { $ref: "#/components/responses/TaskAccepted" } } }
   /events:
@@ -57,11 +94,25 @@ paths:
   /subscriptions/rss-preview:
     get: { operationId: previewRss, parameters: [{ name: rss, in: query, required: true, schema: { type: string, format: uri } }], responses: { "200": { $ref: "#/components/responses/Success" } } }
   /subscriptions/mikan/dashboard:
-    get: { operationId: getMikanDashboard, responses: { "200": { $ref: "#/components/responses/Success" } } }
+    get:
+      operationId: getMikanDashboard
+      parameters:
+        - { name: year, in: query, schema: { type: string, pattern: "^[0-9]{4}$" } }
+        - { name: season, in: query, schema: { type: string, enum: [春, 夏, 秋, 冬] } }
+      responses: { "200": { $ref: "#/components/responses/Success" }, "400": { $ref: "#/components/responses/Error" } }
   /subscriptions/mikan/episodes:
-    get: { operationId: getMikanEpisodes, responses: { "200": { $ref: "#/components/responses/Success" } } }
+    get:
+      operationId: getMikanEpisodes
+      parameters:
+        - { name: mikan_id, in: query, required: true, schema: { type: string, pattern: "^[0-9]+$" } }
+        - { name: subgroup_id, in: query, schema: { type: string, pattern: "^[0-9]+$" } }
+      responses: { "200": { $ref: "#/components/responses/Success" }, "400": { $ref: "#/components/responses/Error" } }
   /subscriptions/mikan/subgroups:
-    get: { operationId: getMikanSubgroups, responses: { "200": { $ref: "#/components/responses/Success" } } }
+    get:
+      operationId: getMikanSubgroups
+      parameters:
+        - { name: mikan_id, in: query, required: true, schema: { type: string, pattern: "^[0-9]+$" } }
+      responses: { "200": { $ref: "#/components/responses/Success" }, "400": { $ref: "#/components/responses/Error" } }
   /subscriptions/{id}:
     parameters: [{ $ref: "#/components/parameters/Id" }]
     put: { operationId: updateSubscription, requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/SubscriptionInput" } } } }, responses: { "200": { $ref: "#/components/responses/Success" } } }
@@ -98,7 +149,7 @@ paths:
   /local-anime/scan:
     post: { operationId: scanLocalAnime, responses: { "202": { $ref: "#/components/responses/TaskAccepted" } } }
   /local-directories:
-    post: { operationId: addLocalDirectory, requestBody: { $ref: "#/components/requestBodies/JsonObject" }, responses: { "201": { $ref: "#/components/responses/Success" } } }
+    post: { operationId: addLocalDirectory, requestBody: { $ref: "#/components/requestBodies/JsonObject" }, responses: { "202": { $ref: "#/components/responses/TaskAccepted" } } }
   /local-directories/{id}:
     delete: { operationId: deleteLocalDirectory, parameters: [{ $ref: "#/components/parameters/Id" }], responses: { "200": { $ref: "#/components/responses/Success" } } }
   /local-directories/{id}/rename-preview:
@@ -185,6 +236,10 @@ components:
       properties:
         title: { type: string }
         rss_url: { type: string, format: uri }
+        mikan_id: { type: string }
+        image: { type: string, format: uri }
+        subtitle_group: { type: string }
+        season: { type: string }
         backup_rss_url: { type: string, format: uri }
         filter_rule: { type: string }
         exclude_rule: { type: string }
@@ -192,6 +247,53 @@ components:
         allow_multi_subgroup: { type: boolean }
         auto_disable_on_done: { type: boolean }
         stale_after_hours: { type: integer, minimum: 1 }
+    MikanDiscoveryItem:
+      type: object
+      required: [mikan_id, title, image]
+      properties:
+        mikan_id: { type: string }
+        title: { type: string }
+        image: { type: string }
+    MikanDashboard:
+      type: object
+      required: [season, days]
+      properties:
+        season: { type: string }
+        days:
+          type: object
+          additionalProperties:
+            type: array
+            items: { $ref: "#/components/schemas/MikanDiscoveryItem" }
+    MikanSubgroup:
+      type: object
+      required: [id, name, is_all]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        is_all: { type: boolean }
+    MikanEpisode:
+      type: object
+      required: [title, episode_num, sub_group, resolution, pub_date]
+      properties:
+        title: { type: string }
+        anime_identify: { type: string }
+        episode_num: { type: string }
+        season: { type: string }
+        magnet: { type: string }
+        torrent_url: { type: string }
+        size: { type: string }
+        pub_date: { type: string, format: date-time }
+        sub_group: { type: string }
+        resolution: { type: string }
+    MikanEpisodePreview:
+      type: object
+      required: [mikan_id, items, total]
+      properties:
+        mikan_id: { type: string }
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/MikanEpisode" }
+        total: { type: integer, minimum: 0 }
     Envelope:
       type: object
       required: [data]
@@ -211,10 +313,25 @@ components:
         - $ref: "#/components/schemas/Envelope"
         - type: object
           properties:
-            data:
-              type: object
-              required: [task_id, status]
-              properties: { task_id: { type: string }, status: { type: string, const: running } }
+            data: { $ref: "#/components/schemas/TaskAccepted" }
+    TaskAccepted:
+      type: object
+      required: [task_id, status]
+      properties:
+        task_id: { type: string, minLength: 1 }
+        status: { type: string, enum: [queued, running] }
+    TaskUpdate:
+      type: object
+      required: [task_id, kind, title, status, message, updated_at]
+      properties:
+        task_id: { type: string, minLength: 1 }
+        kind: { type: string }
+        title: { type: string }
+        status: { type: string, enum: [queued, running, completed, error] }
+        message: { type: string }
+        current: { type: integer, format: int64, minimum: 0 }
+        total: { type: integer, format: int64, minimum: 0 }
+        updated_at: { type: string, format: date-time }
     Error:
       type: object
       required: [error]

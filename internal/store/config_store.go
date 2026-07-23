@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/pokerjest/animateAutoTool/internal/config"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"gorm.io/gorm"
 )
@@ -64,23 +65,35 @@ func (s *ConfigStore) Set(key, value string) error {
 	if strings.TrimSpace(key) == "" {
 		return errors.New("config key is required")
 	}
-	var conf model.GlobalConfig
-	return s.db.Where(model.GlobalConfig{Key: key}).
-		Assign(model.GlobalConfig{Value: value}).
-		FirstOrCreate(&conf).Error
+	if err := setConfigValue(s.db, key, value); err != nil {
+		return err
+	}
+	return config.UpdateSystemSettings(map[string]string{key: value})
 }
 
 func (s *ConfigStore) SetMany(values map[string]string) error {
 	if s == nil || s.db == nil {
 		return gorm.ErrInvalidDB
 	}
-	return s.db.Transaction(func(tx *gorm.DB) error {
-		txStore := NewConfigStore(tx)
+	if err := s.db.Transaction(func(tx *gorm.DB) error {
 		for key, value := range values {
-			if err := txStore.Set(key, value); err != nil {
+			if strings.TrimSpace(key) == "" {
+				return errors.New("config key is required")
+			}
+			if err := setConfigValue(tx, key, value); err != nil {
 				return err
 			}
 		}
 		return nil
-	})
+	}); err != nil {
+		return err
+	}
+	return config.UpdateSystemSettings(values)
+}
+
+func setConfigValue(database *gorm.DB, key, value string) error {
+	var conf model.GlobalConfig
+	return database.Where(model.GlobalConfig{Key: key}).
+		Assign(model.GlobalConfig{Value: value}).
+		FirstOrCreate(&conf).Error
 }

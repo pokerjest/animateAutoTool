@@ -2,17 +2,57 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/pokerjest/animateAutoTool/internal/config"
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/model"
+	"github.com/pokerjest/animateAutoTool/internal/parser"
+	"github.com/pokerjest/animateAutoTool/internal/taskstate"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type fakeV1MikanClient struct {
+	searchItems    []parser.SearchResult
+	dashboard      *parser.MikanDashboard
+	subgroups      []parser.Subgroup
+	episodes       []parser.Episode
+	lastSearch     string
+	lastYear       string
+	lastSeason     string
+	lastSubgroupID string
+	lastRSSURL     string
+}
+
+func (f *fakeV1MikanClient) ParseContext(_ context.Context, rssURL string) ([]parser.Episode, error) {
+	f.lastRSSURL = rssURL
+	return f.episodes, nil
+}
+
+func (f *fakeV1MikanClient) SearchContext(_ context.Context, keyword string) ([]parser.SearchResult, error) {
+	f.lastSearch = keyword
+	return f.searchItems, nil
+}
+
+func (f *fakeV1MikanClient) GetSubgroupsContext(_ context.Context, mikanID string) ([]parser.Subgroup, error) {
+	f.lastSubgroupID = mikanID
+	return f.subgroups, nil
+}
+
+func (f *fakeV1MikanClient) GetDashboardContext(_ context.Context, year, season string) (*parser.MikanDashboard, error) {
+	f.lastYear = year
+	f.lastSeason = season
+	return f.dashboard, nil
+}
 
 func TestV1SessionUsesDataEnvelope(t *testing.T) {
 	resetAuthFixtures(t)
@@ -46,6 +86,47 @@ func TestV1ProtectedEndpointsUseStructuredErrors(t *testing.T) {
 	assert.Equal(t, "unauthorized", payload.Error.Code)
 }
 
+func TestV1TaskSnapshotEndpointsRequireAuthAndReturnTypedState(t *testing.T) {
+	resetAuthFixtures(t)
+	taskstate.Global.Reset()
+	t.Cleanup(taskstate.Global.Reset)
+	taskstate.Global.Start("test-scan", "scan", "本地扫描", "正在扫描")
+	taskstate.Global.Progress("test-scan", "正在读取剧集", 2, 5)
+
+	r := setupRouter()
+	unauthorized := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/tasks", nil)
+	markLocalRequest(request)
+	r.ServeHTTP(unauthorized, request)
+	require.Equal(t, http.StatusUnauthorized, unauthorized.Code)
+
+	cookie, _ := loginCookie(t, r, "admin")
+	get := func(path string) *httptest.ResponseRecorder {
+		t.Helper()
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Header.Set("Cookie", cookie)
+		markLocalRequest(req)
+		r.ServeHTTP(w, req)
+		return w
+	}
+
+	list := get("/api/v1/tasks")
+	require.Equal(t, http.StatusOK, list.Code, list.Body.String())
+	assert.Contains(t, list.Body.String(), `"task_id":"test-scan"`)
+	assert.Contains(t, list.Body.String(), `"status":"running"`)
+	assert.Contains(t, list.Body.String(), `"current":2`)
+
+	detail := get("/api/v1/tasks/test-scan")
+	require.Equal(t, http.StatusOK, detail.Code, detail.Body.String())
+	assert.Contains(t, detail.Body.String(), `"kind":"scan"`)
+	assert.Contains(t, detail.Body.String(), `"total":5`)
+
+	missing := get("/api/v1/tasks/missing")
+	require.Equal(t, http.StatusNotFound, missing.Code)
+	assert.Contains(t, missing.Body.String(), `"code":"task_not_found"`)
+}
+
 func TestV1SettingsNeverReturnSecretValues(t *testing.T) {
 	resetAuthFixtures(t)
 	require.NoError(t, db.DB.Create(&model.GlobalConfig{Key: model.ConfigKeyAIApiKey, Value: "top-secret"}).Error)
@@ -59,6 +140,24 @@ func TestV1SettingsNeverReturnSecretValues(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 	assert.NotContains(t, w.Body.String(), "top-secret")
 	assert.Contains(t, w.Body.String(), `"ai_api_key":true`)
+}
+
+func TestV1SettingsSaveMirrorsValuesToConfigFile(t *testing.T) {
+	resetAuthFixtures(t)
+	r := setupRouter()
+	cookie, _ := loginCookie(t, r, "admin")
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/settings", bytes.NewBufferString(`{"values":{"qb_url":"http://local-qb:8080","qb_password":"mirror-secret"}}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Cookie", cookie)
+	markLocalRequest(req)
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	data, err := os.ReadFile(config.ConfigFilePath())
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "qb_url: http://local-qb:8080")
+	assert.Contains(t, string(data), "qb_password: mirror-secret")
 }
 
 func TestV1WriteRejectsCrossOriginRequests(t *testing.T) {
@@ -133,4 +232,163 @@ func TestProductionRouterDoesNotExposeLegacyAPI(t *testing.T) {
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusNotFound, w.Code)
 	assert.Contains(t, w.Body.String(), "not_found")
+}
+
+func TestV1MikanDiscoveryEndpointsUseTypedContracts(t *testing.T) {
+	resetAuthFixtures(t)
+	episodes := make([]parser.Episode, 21)
+	for i := range episodes {
+		episodes[i] = parser.Episode{Title: "Episode", EpisodeNum: "1", SubGroup: "ANi", Resolution: "1080p"}
+	}
+	fake := &fakeV1MikanClient{
+		searchItems: []parser.SearchResult{{MikanID: "3141", Title: "测试番剧", Image: "https://mikanani.me/poster.jpg"}},
+		dashboard: &parser.MikanDashboard{Season: "2026 夏季番组", Days: map[string][]parser.SearchResult{
+			"1": {{MikanID: "3141", Title: "测试番剧", Image: "https://mikanani.me/poster.jpg"}},
+		}},
+		subgroups: []parser.Subgroup{{ID: "", Name: "全部 (All)"}, {ID: "583", Name: "ANi"}},
+		episodes:  episodes,
+	}
+	previousFactory := newV1MikanClient
+	newV1MikanClient = func() v1MikanClient { return fake }
+	t.Cleanup(func() { newV1MikanClient = previousFactory })
+
+	r := setupRouter()
+	cookie, _ := loginCookie(t, r, "admin")
+	request := func(path string) *httptest.ResponseRecorder {
+		t.Helper()
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Header.Set("Cookie", cookie)
+		markLocalRequest(req)
+		r.ServeHTTP(w, req)
+		return w
+	}
+
+	search := request("/api/v1/subscriptions/search?q=%E6%B5%8B%E8%AF%95")
+	require.Equal(t, http.StatusOK, search.Code, search.Body.String())
+	assert.Contains(t, search.Body.String(), `"mikan_id":"3141"`)
+	assert.NotContains(t, search.Body.String(), `"MikanID"`)
+	assert.Equal(t, "测试", fake.lastSearch)
+
+	dashboard := request("/api/v1/subscriptions/mikan/dashboard?year=2026&season=%E5%A4%8F")
+	require.Equal(t, http.StatusOK, dashboard.Code, dashboard.Body.String())
+	assert.Contains(t, dashboard.Body.String(), `"season":"2026 夏季番组"`)
+	assert.Contains(t, dashboard.Body.String(), `"days"`)
+	assert.Equal(t, "2026", fake.lastYear)
+	assert.Equal(t, "夏", fake.lastSeason)
+
+	groups := request("/api/v1/subscriptions/mikan/subgroups?mikan_id=3141")
+	require.Equal(t, http.StatusOK, groups.Code, groups.Body.String())
+	assert.Contains(t, groups.Body.String(), `"name":"全部字幕组"`)
+	assert.Contains(t, groups.Body.String(), `"is_all":true`)
+	assert.Equal(t, "3141", fake.lastSubgroupID)
+
+	preview := request("/api/v1/subscriptions/mikan/episodes?mikan_id=3141&subgroup_id=583")
+	require.Equal(t, http.StatusOK, preview.Code, preview.Body.String())
+	var previewPayload struct {
+		Data struct {
+			MikanID string           `json:"mikan_id"`
+			Items   []parser.Episode `json:"items"`
+			Total   int              `json:"total"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(preview.Body.Bytes(), &previewPayload))
+	assert.Equal(t, "3141", previewPayload.Data.MikanID)
+	assert.Len(t, previewPayload.Data.Items, 20)
+	assert.Equal(t, 21, previewPayload.Data.Total)
+	assert.True(t, strings.Contains(fake.lastRSSURL, "bangumiId=3141"))
+	assert.True(t, strings.Contains(fake.lastRSSURL, "subgroupid=583"))
+
+	invalid := request("/api/v1/subscriptions/mikan/subgroups?mikan_id=not-a-number")
+	require.Equal(t, http.StatusBadRequest, invalid.Code)
+	assert.Contains(t, invalid.Body.String(), `"code":"invalid_mikan_id"`)
+}
+
+func TestV1SubscriptionPersistsMikanAssociationWithoutUsingBangumiSubjectID(t *testing.T) {
+	resetAuthFixtures(t)
+	require.NoError(t, db.DB.Exec("DELETE FROM subscriptions").Error)
+	require.NoError(t, db.DB.Exec("DELETE FROM anime_metadata").Error)
+	previousEnrich := enrichSubscriptionMetadata
+	enrichSubscriptionMetadata = func(_ *model.AnimeMetadata, _ string) {}
+	previousRun := runSubscriptionCheck
+	runComplete := make(chan struct{}, 1)
+	runSubscriptionCheck = func(_ *model.Subscription, _ string) error {
+		runComplete <- struct{}{}
+		return nil
+	}
+	t.Cleanup(func() {
+		enrichSubscriptionMetadata = previousEnrich
+		runSubscriptionCheck = previousRun
+	})
+
+	r := setupRouter()
+	cookie, _ := loginCookie(t, r, "admin")
+	body := `{"title":"测试番剧","rss_url":"https://mikanani.me/RSS/Bangumi?bangumiId=3141&subgroupid=583","backup_rss_url":"https://mikanani.me/RSS/Bangumi?bangumiId=3141","mikan_id":"3141","image":"https://mikanani.me/poster.jpg","subtitle_group":"ANi","season":"2026 夏季番组","filter_rule":"ANi","stale_after_hours":168}`
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/subscriptions", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Cookie", cookie)
+	markLocalRequest(req)
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
+	<-runComplete
+
+	var created model.Subscription
+	require.NoError(t, db.DB.Preload("Metadata").Where("rss_url LIKE ?", "%bangumiId=3141%").First(&created).Error)
+	assert.Equal(t, "3141", created.MikanID)
+	assert.Equal(t, "ANi", created.SubtitleGroup)
+	assert.Equal(t, "2026 夏季番组", created.Season)
+	assert.Equal(t, "https://mikanani.me/poster.jpg", created.Image)
+	var incorrectMetadataCount int64
+	require.NoError(t, db.DB.Model(&model.AnimeMetadata{}).Where("bangumi_id = ?", 3141).Count(&incorrectMetadataCount).Error)
+	assert.Zero(t, incorrectMetadataCount, "Mikan identifiers must never be stored as bgm.tv subject IDs")
+
+	updateBody := `{"title":"测试番剧","rss_url":"https://mikanani.me/RSS/Bangumi?bangumiId=3141","mikan_id":"3141","image":"https://mikanani.me/new.jpg","subtitle_group":"","season":"2026 夏季番组","filter_rule":"","allow_multi_subgroup":true,"stale_after_hours":168}`
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPut, "/api/v1/subscriptions/"+strconv.FormatUint(uint64(created.ID), 10), bytes.NewBufferString(updateBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Cookie", cookie)
+	markLocalRequest(req)
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.NoError(t, db.DB.First(&created, created.ID).Error)
+	assert.Equal(t, "3141", created.MikanID)
+	assert.Empty(t, created.SubtitleGroup)
+	assert.Empty(t, created.FilterRule)
+	assert.True(t, created.AllowMultiSubgroup)
+	assert.Equal(t, "https://mikanani.me/new.jpg", created.Image)
+}
+
+func TestRestoringSubscriptionRefreshesMikanAssociationFields(t *testing.T) {
+	resetAuthFixtures(t)
+	require.NoError(t, db.DB.Exec("DELETE FROM subscriptions").Error)
+	require.NoError(t, db.DB.Exec("DELETE FROM anime_metadata").Error)
+	previousEnrich := enrichSubscriptionMetadata
+	enrichSubscriptionMetadata = func(_ *model.AnimeMetadata, _ string) {}
+	previousRun := runSubscriptionCheck
+	runs := make(chan struct{}, 2)
+	runSubscriptionCheck = func(_ *model.Subscription, _ string) error { runs <- struct{}{}; return nil }
+	t.Cleanup(func() {
+		enrichSubscriptionMetadata = previousEnrich
+		runSubscriptionCheck = previousRun
+	})
+
+	feedURL := "https://mikanani.me/RSS/Bangumi?bangumiId=3141&subgroupid=583"
+	original := &model.Subscription{Title: "旧标题", RSSUrl: feedURL, MikanID: "3141", SubtitleGroup: "旧字幕组", Image: "old.jpg", Season: "旧季度"}
+	require.NoError(t, createSubscriptionInternal(original))
+	<-runs
+	require.NoError(t, db.DB.Delete(original).Error)
+
+	restored := &model.Subscription{Title: "新标题", RSSUrl: feedURL, MikanID: "3141", SubtitleGroup: "ANi", Image: "new.jpg", Season: "2026 夏季番组", FilterRule: "ANi"}
+	require.NoError(t, createSubscriptionInternal(restored))
+	<-runs
+
+	var got model.Subscription
+	require.NoError(t, db.DB.Unscoped().First(&got, original.ID).Error)
+	assert.False(t, got.DeletedAt.Valid)
+	assert.Equal(t, "3141", got.MikanID)
+	assert.Equal(t, "ANi", got.SubtitleGroup)
+	assert.Equal(t, "new.jpg", got.Image)
+	assert.Equal(t, "2026 夏季番组", got.Season)
+	assert.Equal(t, "ANi", got.FilterRule)
 }

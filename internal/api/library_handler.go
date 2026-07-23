@@ -508,6 +508,6 @@ func GetRandomBackgroundHandler(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"url":     fmt.Sprintf("/api/posters/%d?source=%s", m.ID, source),
+		"url":     fmt.Sprintf("/api/v1/posters/%d?source=%s", m.ID, source),
 	})
 }

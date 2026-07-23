@@ -124,7 +124,7 @@ resp, err := client.CreateChatCompletion(ctx, ai.ChatCompletionRequest{
 - 请求体走 OpenAI 兼容 schema（`ChatMessage`/`Tool`/`ToolCall`），换其他模型供应商时**只改 baseURL/apiKey/model**，不改类型。
 - 工具调用用 `Registry`：`Register(name, description, params, handler)` → 模型回 `tool_calls` 时调 `ExecuteTool(ctx, name, args)` 执行。
 - `JSONSchemaObject` / `JSONSchemaProperty` 是参数 schema 的便捷构造，避免每个工具自己拼 map。
-- **凭据存哪**：API Key 走 `global_configs`（参考 bangumi/tmdb token 的存储位置），用 `configValue(key)` 读取；不要写进配置文件或环境变量。
+- **凭据存哪**：运行时查询走 `global_configs`（参考 bangumi/tmdb token 的存储位置），用 `configValue(key)` 读取；保存时同步镜像到本机 `config.yaml` 的 `system_settings`，Unix 文件权限必须保持为 `0600`，Windows 依赖安装目录 ACL。
 
 何时引入 AI 调用：
 - ✅ 番剧标题归一化（中英日多语对齐）、元数据冲突仲裁、订阅疑似缺集的自然语言总结
@@ -166,7 +166,7 @@ var migrations = []migration{
 - `auth.secret_key` 留空会自动落到 `data/bootstrap/auth_secret`（不要提交到仓库）
 - `server.trusted_proxies` 只填明确控制的反向代理 IP / CIDR
 - `server.public_url` 用于生成回调地址 + 同源校验
-- 所有外部凭据（qB / Jellyfin / R2 / TMDB / AniList / Bangumi）保存在 `global_configs` 表，通过 `configValue` 读
+- 所有外部凭据（qB / Jellyfin / R2 / TMDB / AniList / Bangumi）运行时保存在 `global_configs` 表并通过 `configValue` 读取，同时镜像到本机 `config.yaml` 的 `system_settings`；应用登录密码不进入 YAML
 
 ## 日志
 

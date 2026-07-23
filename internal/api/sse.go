@@ -54,6 +54,7 @@ func SSEHandler(c *gin.Context) {
 		event.EventScanRun,
 		event.EventSubscriptionRun,
 		event.EventSchedulerRun,
+		event.EventTaskUpdate,
 	}
 
 	var subIDs = make(map[event.EventType]string)

@@ -24,6 +24,7 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/safeio"
 	"github.com/pokerjest/animateAutoTool/internal/service"
+	"github.com/pokerjest/animateAutoTool/internal/taskstate"
 )
 
 // Progress Management
@@ -43,6 +44,7 @@ const (
 	r2ProgressCleanupInterval = 15 * time.Minute
 	r2ProgressTerminalTTL     = 2 * time.Hour
 	r2ProgressActiveTTL       = 24 * time.Hour
+	r2ProgressStatusCompleted = "completed"
 	r2RequestTimeout          = 15 * time.Second
 	r2StageDownloadTimeout    = 30 * time.Minute
 	r2UploadTimeout           = 30 * time.Minute
@@ -269,6 +271,7 @@ func startR2UploadTask(ctx context.Context) (string, error) {
 	taskID := uuid.New().String()
 	ensureR2ProgressJanitor()
 	progressMap.Store(taskID, &DownloadProgress{TaskID: taskID, Status: "pending", UpdatedAt: time.Now()})
+	taskstate.Global.Start(taskID, "backup", "R2 云备份", "正在准备完整备份")
 
 	go func(tID, b string, cli *s3.Client) {
 		defer func() {
@@ -323,7 +326,7 @@ func startR2UploadTask(ctx context.Context) (string, error) {
 		r2BackupCache = nil
 		r2BackupCacheTime = time.Time{}
 		r2BackupCacheLock.Unlock()
-		updateProgress(tID, "completed", "", total, total, gin.H{"key": key})
+		updateProgress(tID, r2ProgressStatusCompleted, "", total, total, gin.H{"key": key})
 	}(taskID, bucket, client)
 
 	return taskID, nil
@@ -497,6 +500,7 @@ func StageR2BackupHandler(c *gin.Context) {
 		UpdatedAt:  time.Now(),
 	}
 	progressMap.Store(taskID, progress)
+	taskstate.Global.Start(taskID, "backup", "云备份恢复", "正在准备下载云备份")
 
 	// Launch Background Task
 	go func(tID, k, b string, cli *s3.Client) {
@@ -570,7 +574,7 @@ func StageR2BackupHandler(c *gin.Context) {
 
 		// 5. Register the staged file and return structured restore data.
 		restoreToken := registerRestoreArtifact(tempFile.Name())
-		updateProgress(tID, "completed", "", total, total, gin.H{"stats": stats, "restore_token": restoreToken})
+		updateProgress(tID, r2ProgressStatusCompleted, "", total, total, gin.H{"stats": stats, "restore_token": restoreToken})
 
 	}(taskID, key, bucket, client)
 
@@ -602,6 +606,24 @@ func updateProgress(taskID, status, errStr string, total, downloaded int64, resu
 	}
 
 	progressMap.Store(taskID, p)
+	switch status {
+	case r2ProgressStatusCompleted:
+		taskstate.Global.Complete(taskID, "云备份任务完成")
+	case "error":
+		taskstate.Global.Fail(taskID, fmt.Errorf("%s", errStr))
+	default:
+		message := map[string]string{
+			"pending":     "正在等待任务开始",
+			"preparing":   "正在创建完整备份",
+			"uploading":   "正在上传到 R2",
+			"downloading": "正在下载云备份",
+			"analyzing":   "正在校验备份",
+		}[status]
+		if message == "" {
+			message = "云备份任务进行中"
+		}
+		taskstate.Global.Progress(taskID, message, downloaded, total)
+	}
 }
 
 func ensureR2ProgressJanitor() {
@@ -625,7 +647,7 @@ func cleanupStaleR2Progress(now time.Time) {
 		}
 
 		ttl := r2ProgressActiveTTL
-		if progress.Status == "completed" || progress.Status == "error" {
+		if progress.Status == r2ProgressStatusCompleted || progress.Status == "error" {
 			ttl = r2ProgressTerminalTTL
 		}
 		if progress.UpdatedAt.IsZero() || now.Sub(progress.UpdatedAt) > ttl {

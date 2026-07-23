@@ -21,6 +21,7 @@ const (
 	EventScanRun          EventType = "scan_run"
 	EventSubscriptionRun  EventType = "subscription_run"
 	EventSchedulerRun     EventType = "scheduler_run"
+	EventTaskUpdate       EventType = "task_update"
 )
 
 // Event 代表一个系统事件

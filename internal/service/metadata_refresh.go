@@ -10,6 +10,7 @@ import (
 
 	"github.com/pokerjest/animateAutoTool/internal/event"
 	"github.com/pokerjest/animateAutoTool/internal/model"
+	"github.com/pokerjest/animateAutoTool/internal/taskstate"
 )
 
 // StartMetadataMigration background task to cache images for existing records
@@ -45,7 +46,7 @@ func (s *MetadataService) StartMetadataMigration() {
 			}
 
 			if updated {
-				m.Image = fmt.Sprintf("/api/posters/%d", m.ID)
+				m.Image = fmt.Sprintf("/api/v1/posters/%d", m.ID)
 				if err := mStore.Save(&m); err == nil {
 					s.SyncMetadataToModels(&m)
 				}
@@ -140,6 +141,7 @@ func (s *MetadataService) StartRefreshAllMetadata(force bool) bool {
 		return false
 	}
 
+	taskstate.Global.Start("metadata-refresh", "metadata", "刷新全部元数据", "正在刷新番剧元数据")
 	go s.RefreshAllMetadata(force)
 	return true
 }
@@ -150,12 +152,14 @@ func (s *MetadataService) RefreshAllMetadata(force bool) int {
 	mStore := metadataStore()
 	if mStore == nil {
 		GlobalRefreshStatus.Finish("数据库未就绪")
+		taskstate.Global.Fail("metadata-refresh", fmt.Errorf("数据库未就绪"))
 		return 0
 	}
 	allList, err := listAllMetadata()
 	if err != nil {
 		log.Printf("Refresh: failed to list metadata: %v", err)
 		GlobalRefreshStatus.Finish("加载元数据失败")
+		taskstate.Global.Fail("metadata-refresh", err)
 		return 0
 	}
 
@@ -176,6 +180,7 @@ func (s *MetadataService) RefreshAllMetadata(force bool) int {
 
 	if total == 0 {
 		GlobalRefreshStatus.Finish("已是最新")
+		taskstate.Global.Complete("metadata-refresh", "元数据已是最新")
 		return 0
 	}
 
@@ -193,6 +198,7 @@ func (s *MetadataService) RefreshAllMetadata(force bool) int {
 			defer func() { <-guard }()
 
 			GlobalRefreshStatus.UpdateProgress(idx+1, meta.Title)
+			taskstate.Global.Progress("metadata-refresh", "正在刷新 "+meta.Title, int64(idx+1), int64(total))
 
 			event.GlobalBus.Publish(event.EventMetadataUpdated, map[string]interface{}{
 				"type":    "progress",
@@ -222,6 +228,7 @@ func (s *MetadataService) RefreshAllMetadata(force bool) int {
 		"type":    "complete",
 		"message": finalStatus.LastResult,
 	})
+	taskstate.Global.Complete("metadata-refresh", finalStatus.LastResult)
 
 	return updatedCount
 }

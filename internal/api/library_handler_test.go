@@ -52,7 +52,7 @@ func TestGetRandomBackgroundHandlerUsesAniListImageColumn(t *testing.T) {
 	if !payload.Success {
 		t.Fatalf("expected success response, got body %s", w.Body.String())
 	}
-	expected := "/api/posters/" + strconv.FormatUint(uint64(meta.ID), 10) + "?source=anilist"
+	expected := "/api/v1/posters/" + strconv.FormatUint(uint64(meta.ID), 10) + "?source=anilist"
 	if payload.URL != expected {
 		t.Fatalf("expected poster url %q, got %q", expected, payload.URL)
 	}

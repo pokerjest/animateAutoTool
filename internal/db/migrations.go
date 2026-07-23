@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/pokerjest/animateAutoTool/internal/model"
+	"github.com/pokerjest/animateAutoTool/internal/parser"
 	"gorm.io/gorm"
 )
 
@@ -52,6 +53,31 @@ var migrations = []migration{
 			return tx.AutoMigrate(&model.AuditLog{})
 		},
 	},
+	{
+		ID:          "005_subscription_mikan_ids",
+		Description: "Backfill missing Mikan identifiers from official RSS URLs",
+		Apply:       backfillSubscriptionMikanIDs,
+	},
+}
+
+func backfillSubscriptionMikanIDs(tx *gorm.DB) error {
+	var subscriptions []model.Subscription
+	if err := tx.Where("mikan_id IS NULL OR mikan_id = ?", "").Find(&subscriptions).Error; err != nil {
+		return err
+	}
+
+	for i := range subscriptions {
+		mikanID, ok := parser.MikanIDFromRSSURL(subscriptions[i].RSSUrl)
+		if !ok {
+			continue
+		}
+		if err := tx.Model(&model.Subscription{}).
+			Where("id = ? AND (mikan_id IS NULL OR mikan_id = ?)", subscriptions[i].ID, "").
+			Update("mikan_id", mikanID).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func autoMigrateCoreSchema(tx *gorm.DB) error {

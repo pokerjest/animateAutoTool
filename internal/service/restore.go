@@ -65,13 +65,21 @@ func (s *RestoreService) PerformRestore(sourcePath string, options RestoreOption
 	log.Printf("RestoreService: Read phase complete.")
 
 	// 3. Transaction Write Phase
-	return db.DB.Transaction(func(tx *gorm.DB) error {
+	if err := db.DB.Transaction(func(tx *gorm.DB) error {
 		if err := s.writeRestoreData(tx, data, options, descriptor); err != nil {
 			return err
 		}
 		log.Printf("RestoreService: Transaction committed successfully in %v", time.Since(start))
 		return nil
-	})
+	}); err != nil {
+		return err
+	}
+	if options.Configs {
+		if err := db.ExportGlobalConfigsToConfigFile(); err != nil {
+			return fmt.Errorf("sync restored settings to config.yaml: %w", err)
+		}
+	}
+	return nil
 }
 
 type restoreData struct {
