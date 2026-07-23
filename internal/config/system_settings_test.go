@@ -21,7 +21,7 @@ func TestSystemSettingsMirrorPreservesConfigAndSecuresFile(t *testing.T) {
 	})
 
 	initial := []byte("# keep this comment\nserver:\n  port: 8306\nsystem_settings:\n  old_key: old-value\n")
-	if err := os.WriteFile(ConfigFilePath(), initial, 0o644); err != nil {
+	if err := os.WriteFile(ConfigFilePath(), initial, 0o600); err != nil {
 		t.Fatalf("write fixture: %v", err)
 	}
 
@@ -55,7 +55,7 @@ func TestSystemSettingsMirrorPreservesConfigAndSecuresFile(t *testing.T) {
 		t.Fatalf("in-memory settings were not refreshed: %#v", AppConfig.SystemSettings)
 	}
 
-	if runtime.GOOS != "windows" {
+	if runtime.GOOS != goosWindows {
 		info, err := os.Stat(ConfigFilePath())
 		if err != nil {
 			t.Fatalf("stat mirror: %v", err)

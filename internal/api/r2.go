@@ -44,6 +44,7 @@ const (
 	r2ProgressCleanupInterval = 15 * time.Minute
 	r2ProgressTerminalTTL     = 2 * time.Hour
 	r2ProgressActiveTTL       = 24 * time.Hour
+	r2ProgressStatusCompleted = "completed"
 	r2RequestTimeout          = 15 * time.Second
 	r2StageDownloadTimeout    = 30 * time.Minute
 	r2UploadTimeout           = 30 * time.Minute
@@ -325,7 +326,7 @@ func startR2UploadTask(ctx context.Context) (string, error) {
 		r2BackupCache = nil
 		r2BackupCacheTime = time.Time{}
 		r2BackupCacheLock.Unlock()
-		updateProgress(tID, "completed", "", total, total, gin.H{"key": key})
+		updateProgress(tID, r2ProgressStatusCompleted, "", total, total, gin.H{"key": key})
 	}(taskID, bucket, client)
 
 	return taskID, nil
@@ -573,7 +574,7 @@ func StageR2BackupHandler(c *gin.Context) {
 
 		// 5. Register the staged file and return structured restore data.
 		restoreToken := registerRestoreArtifact(tempFile.Name())
-		updateProgress(tID, "completed", "", total, total, gin.H{"stats": stats, "restore_token": restoreToken})
+		updateProgress(tID, r2ProgressStatusCompleted, "", total, total, gin.H{"stats": stats, "restore_token": restoreToken})
 
 	}(taskID, key, bucket, client)
 
@@ -606,7 +607,7 @@ func updateProgress(taskID, status, errStr string, total, downloaded int64, resu
 
 	progressMap.Store(taskID, p)
 	switch status {
-	case "completed":
+	case r2ProgressStatusCompleted:
 		taskstate.Global.Complete(taskID, "云备份任务完成")
 	case "error":
 		taskstate.Global.Fail(taskID, fmt.Errorf("%s", errStr))
@@ -646,7 +647,7 @@ func cleanupStaleR2Progress(now time.Time) {
 		}
 
 		ttl := r2ProgressActiveTTL
-		if progress.Status == "completed" || progress.Status == "error" {
+		if progress.Status == r2ProgressStatusCompleted || progress.Status == "error" {
 			ttl = r2ProgressTerminalTTL
 		}
 		if progress.UpdatedAt.IsZero() || now.Sub(progress.UpdatedAt) > ttl {

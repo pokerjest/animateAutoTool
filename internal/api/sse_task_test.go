@@ -28,7 +28,9 @@ func TestSSEStreamsTypedTaskUpdate(t *testing.T) {
 	require.NoError(t, err)
 	response, err := http.DefaultClient.Do(request)
 	require.NoError(t, err)
-	defer response.Body.Close()
+	t.Cleanup(func() {
+		assert.NoError(t, response.Body.Close())
+	})
 	require.Equal(t, http.StatusOK, response.StatusCode)
 	require.Contains(t, response.Header.Get("Content-Type"), "text/event-stream")
 
