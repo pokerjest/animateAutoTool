@@ -18,6 +18,8 @@ bin/
 # Dependency directories
 vendor/
 web/frontend/node_modules/
+web/frontend/playwright-report/
+web/frontend/test-results/
 
 # Go workspace file
 go.work

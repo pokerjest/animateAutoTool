@@ -181,7 +181,29 @@ paths:
   /library/fix-match:
     post: { operationId: fixMetadataMatch, requestBody: { $ref: "#/components/requestBodies/JsonObject" }, responses: { "200": { $ref: "#/components/responses/Success" } } }
   /metadata/search:
-    get: { operationId: searchMetadata, responses: { "200": { $ref: "#/components/responses/Success" } } }
+    get:
+      operationId: searchMetadata
+      parameters:
+        - { name: q, in: query, required: true, schema: { type: string, minLength: 1 } }
+        - { name: source, in: query, schema: { type: string, enum: [bangumi, tmdb, anilist], default: bangumi } }
+      responses:
+        "200": { $ref: "#/components/responses/MetadataSearch" }
+        "400": { $ref: "#/components/responses/Error" }
+  /ui/background/random:
+    get:
+      operationId: getRandomBackground
+      responses:
+        "200":
+          description: Same-origin poster selected for the application background
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/RandomBackground" }
+        "404": { $ref: "#/components/responses/Error" }
   /local-anime:
     get: { operationId: getLocalAnime, parameters: [{ $ref: "#/components/parameters/Page" }, { $ref: "#/components/parameters/PageSize" }], responses: { "200": { $ref: "#/components/responses/Paginated" } } }
   /local-anime/scan:
@@ -315,6 +337,18 @@ components:
                   data: { $ref: "#/components/schemas/SessionState" }
     Paginated: { description: Paginated successful response, content: { application/json: { schema: { $ref: "#/components/schemas/PaginatedEnvelope" } } } }
     TaskAccepted: { description: Background task accepted, content: { application/json: { schema: { $ref: "#/components/schemas/TaskEnvelope" } } } }
+    MetadataSearch:
+      description: Metadata search results from the selected provider
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/Envelope"
+              - type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/MetadataSearchResult" }
     Error: { description: Error response, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
   schemas:
     SessionState:
@@ -326,6 +360,7 @@ components:
         local_setup_available: { type: boolean }
         local_recovery_available: { type: boolean, description: True only when this request directly targets localhost from the loopback interface without forwarded headers. }
         username: { type: string }
+        auth_mode: { type: string, enum: [none, session, ip_allowlist], description: Authentication source for the current request. }
         version: { type: string }
         recovery_local_only: { type: boolean }
     LoginInput:
@@ -396,6 +431,29 @@ components:
           type: array
           items: { $ref: "#/components/schemas/MikanEpisode" }
         total: { type: integer, minimum: 0 }
+    MetadataSearchResult:
+      type: object
+      required: [id, name, name_cn, images, summary, air_date]
+      properties:
+        id: { type: integer, minimum: 1 }
+        name: { type: string }
+        name_cn: { type: string }
+        images:
+          type: object
+          required: [large, common, medium, small, grid]
+          properties:
+            large: { type: string }
+            common: { type: string }
+            medium: { type: string }
+            small: { type: string }
+            grid: { type: string }
+        summary: { type: string }
+        air_date: { type: string }
+    RandomBackground:
+      type: object
+      required: [url]
+      properties:
+        url: { type: string, pattern: "^/api/v1/posters/" }
     PlaybackDiagnostic:
       type: object
       required: [code, summary, hint, can_use_direct_link]

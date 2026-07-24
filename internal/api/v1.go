@@ -18,6 +18,7 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/ai"
 	"github.com/pokerjest/animateAutoTool/internal/bangumi"
 	"github.com/pokerjest/animateAutoTool/internal/bootstrap"
+	"github.com/pokerjest/animateAutoTool/internal/config"
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/httpx"
 	"github.com/pokerjest/animateAutoTool/internal/model"
@@ -139,6 +140,7 @@ func initV1Routes(r *gin.Engine) {
 		protected.POST("/library/metadata/:id/refresh", V1RefreshMetadataItemHandler)
 		protected.POST("/library/fix-match", V1FixMatchHandler)
 		protected.GET("/metadata/search", V1MetadataSearchHandler)
+		protected.GET("/ui/background/random", V1RandomBackgroundHandler)
 		protected.GET("/posters/:id", GetPosterHandler)
 
 		protected.GET("/local-anime", V1LocalAnimeHandler)
@@ -206,10 +208,16 @@ func V1SessionHandler(c *gin.Context) {
 		"local_recovery_available": requestIsDirectLoopback(c),
 		"version":                  appversion.AppVersion,
 		"recovery_local_only":      true,
+		"auth_mode":                "none",
 	}
 	if user, err := currentSessionUser(c); err == nil && user != nil {
 		data["authenticated"] = true
 		data["username"] = user.Username
+		data["auth_mode"] = "session"
+	} else if user, passwordless := passwordlessAdminForRequest(c); passwordless {
+		data["authenticated"] = true
+		data["username"] = user.Username
+		data["auth_mode"] = "ip_allowlist"
 	}
 	v1Data(c, http.StatusOK, data)
 }
@@ -756,7 +764,12 @@ func V1SettingsHandler(c *gin.Context) {
 		configured[key] = strings.TrimSpace(values[key]) != ""
 		values[key] = ""
 	}
-	v1Data(c, http.StatusOK, gin.H{"values": values, "configured": configured, "stats": stats})
+	v1Data(c, http.StatusOK, gin.H{
+		"values":     values,
+		"configured": configured,
+		"stats":      stats,
+		"request_ip": requestClientIP(c),
+	})
 }
 
 func V1UpdateSettingsHandler(c *gin.Context) {
@@ -768,7 +781,7 @@ func V1UpdateSettingsHandler(c *gin.Context) {
 		return
 	}
 	allowed := map[string]bool{}
-	for _, key := range []string{model.ConfigKeyQBMode, model.ConfigKeyQBUrl, model.ConfigKeyQBUsername, model.ConfigKeyQBPassword, model.ConfigKeyBaseDir, model.ConfigKeyBangumiAppID, model.ConfigKeyBangumiAppSecret, model.ConfigKeyBangumiAccessToken, model.ConfigKeyBangumiRefreshToken, model.ConfigKeyTMDBToken, model.ConfigKeyAniListToken, model.ConfigKeyProxyURL, model.ConfigKeyProxyBangumi, model.ConfigKeyProxyMikan, model.ConfigKeyProxyTMDB, model.ConfigKeyProxyAniList, model.ConfigKeyProxyJellyfin, model.ConfigKeyProxyAI, model.ConfigKeyProxyUpdater, model.ConfigKeyJellyfinUrl, model.ConfigKeyJellyfinDirectUrl, model.ConfigKeyJellyfinUsername, model.ConfigKeyJellyfinPassword, model.ConfigKeyJellyfinApiKey, model.ConfigKeyAListUrl, model.ConfigKeyAListToken, model.ConfigKeyPikPakUsername, model.ConfigKeyPikPakPassword, model.ConfigKeyPikPakRefreshToken, model.ConfigKeyAIBaseURL, model.ConfigKeyAIModel, model.ConfigKeyAIApiKey, model.ConfigKeyR2Endpoint, model.ConfigKeyR2Bucket, model.ConfigKeyR2AccessKey, model.ConfigKeyR2SecretKey, model.ConfigKeyRepoUpdateEnabled, model.ConfigKeyRepoAutoPullEnabled, model.ConfigKeyRepoUpdateIntervalMinutes, model.ConfigKeyRepoUpdateOwner, model.ConfigKeyRepoUpdateName, model.ConfigKeyRepoRequireChecksum} {
+	for _, key := range []string{model.ConfigKeyQBMode, model.ConfigKeyQBUrl, model.ConfigKeyQBUsername, model.ConfigKeyQBPassword, model.ConfigKeyBaseDir, model.ConfigKeyBangumiAppID, model.ConfigKeyBangumiAppSecret, model.ConfigKeyBangumiAccessToken, model.ConfigKeyBangumiRefreshToken, model.ConfigKeyTMDBToken, model.ConfigKeyAniListToken, model.ConfigKeyProxyURL, model.ConfigKeyProxyBangumi, model.ConfigKeyProxyMikan, model.ConfigKeyProxyTMDB, model.ConfigKeyProxyAniList, model.ConfigKeyProxyJellyfin, model.ConfigKeyProxyAI, model.ConfigKeyProxyUpdater, model.ConfigKeyAuthIPAllowlistEnabled, model.ConfigKeyAuthIPAllowlist, model.ConfigKeyJellyfinUrl, model.ConfigKeyJellyfinDirectUrl, model.ConfigKeyJellyfinUsername, model.ConfigKeyJellyfinPassword, model.ConfigKeyJellyfinApiKey, model.ConfigKeyAListUrl, model.ConfigKeyAListToken, model.ConfigKeyPikPakUsername, model.ConfigKeyPikPakPassword, model.ConfigKeyPikPakRefreshToken, model.ConfigKeyAIBaseURL, model.ConfigKeyAIModel, model.ConfigKeyAIApiKey, model.ConfigKeyR2Endpoint, model.ConfigKeyR2Bucket, model.ConfigKeyR2AccessKey, model.ConfigKeyR2SecretKey, model.ConfigKeyRepoUpdateEnabled, model.ConfigKeyRepoAutoPullEnabled, model.ConfigKeyRepoUpdateIntervalMinutes, model.ConfigKeyRepoUpdateOwner, model.ConfigKeyRepoUpdateName, model.ConfigKeyRepoRequireChecksum} {
 		allowed[key] = true
 	}
 	updates := map[string]string{}
@@ -796,7 +809,34 @@ func V1UpdateSettingsHandler(c *gin.Context) {
 			}
 			value = normalized
 		}
+		if key == model.ConfigKeyAuthIPAllowlistEnabled {
+			value = strings.ToLower(value)
+			if value != ValueTrue && value != "false" {
+				v1Error(c, http.StatusBadRequest, "invalid_auth_ip_allowlist", "IP 白名单开关必须为 true 或 false")
+				return
+			}
+		}
+		if key == model.ConfigKeyAuthIPAllowlist {
+			normalized, err := normalizeAuthIPAllowlist(value)
+			if err != nil {
+				v1Error(c, http.StatusBadRequest, "invalid_auth_ip_allowlist", err.Error())
+				return
+			}
+			value = normalized
+		}
 		updates[key] = value
+	}
+	enabled := authIPAllowlistEnabled()
+	if value, ok := updates[model.ConfigKeyAuthIPAllowlistEnabled]; ok {
+		enabled = value == ValueTrue
+	}
+	allowlist := config.SystemSetting(model.ConfigKeyAuthIPAllowlist)
+	if value, ok := updates[model.ConfigKeyAuthIPAllowlist]; ok {
+		allowlist = value
+	}
+	if enabled && strings.TrimSpace(allowlist) == "" {
+		v1Error(c, http.StatusBadRequest, "invalid_auth_ip_allowlist", "启用免密登录前请至少填写一个 IP 或 CIDR 网段")
+		return
 	}
 	if err := store.NewConfigStore(db.DB).SetMany(updates); err != nil {
 		v1Error(c, http.StatusInternalServerError, "settings_save_failed", err.Error())

@@ -13,6 +13,12 @@ import (
 var errNoActiveSession = errors.New("no active session")
 
 func currentSessionUserID(c *gin.Context) (uint, error) {
+	if value, exists := c.Get(passwordlessUserIDContextKey); exists {
+		if userID, ok := value.(uint); ok && userID != 0 {
+			return userID, nil
+		}
+	}
+
 	session := sessions.Default(c)
 	userID := session.Get("user_id")
 	if userID == nil {

@@ -31,19 +31,70 @@ func getCandidateTitles(m *model.AnimeMetadata, query string) []string {
 	return candidates
 }
 
+func bangumiMatchReferences(m *model.AnimeMetadata, queryTitle string) []string {
+	seen := make(map[string]bool)
+	references := make([]string, 0, 4)
+	add := func(title string) {
+		title = strings.TrimSpace(title)
+		if title == "" || seen[title] {
+			return
+		}
+		seen[title] = true
+		references = append(references, title)
+	}
+
+	// Once another provider has identified the work, its provider-specific
+	// title is safer than the shared display fields, which may contain a stale
+	// Bangumi match from an older scan.
+	if m != nil {
+		if m.TMDBID != 0 {
+			add(m.TMDBTitle)
+		}
+		if m.AniListID != 0 {
+			add(m.AniListTitle)
+		}
+	}
+	if len(references) > 0 {
+		return references
+	}
+
+	add(queryTitle)
+	if m != nil {
+		add(m.TitleCN)
+		add(m.TitleJP)
+		add(m.TitleEN)
+		add(m.Title)
+	}
+	return references
+}
+
+func bestBangumiSearchResult(results []bangumi.SearchResult, references []string) (*bangumi.SearchResult, int) {
+	bestIndex := -1
+	bestScore := 0
+	for i := range results {
+		for _, candidateTitle := range []string{results[i].NameCN, results[i].Name} {
+			for _, reference := range references {
+				score := titleMatchScore(candidateTitle, reference)
+				if score > bestScore {
+					bestIndex = i
+					bestScore = score
+				}
+			}
+		}
+	}
+	if bestIndex < 0 || bestScore < 45 {
+		return nil, bestScore
+	}
+	result := results[bestIndex]
+	return &result, bestScore
+}
+
 func shouldApplyBangumiSubject(m *model.AnimeMetadata, subject *bangumi.Subject, queryTitle string) bool {
 	if subject == nil {
 		return false
 	}
-	if m == nil {
-		return true
-	}
-	if m.TMDBID == 0 && m.AniListID == 0 {
-		return true
-	}
-
 	bangumiTitles := []string{subject.NameCN, subject.Name}
-	referenceTitles := []string{queryTitle, m.TMDBTitle, m.AniListTitle, m.TitleCN, m.TitleJP, m.TitleEN, m.Title}
+	referenceTitles := bangumiMatchReferences(m, queryTitle)
 	for _, bgmTitle := range bangumiTitles {
 		for _, ref := range referenceTitles {
 			if titlesLookRelated(bgmTitle, ref) {
@@ -52,6 +103,46 @@ func shouldApplyBangumiSubject(m *model.AnimeMetadata, subject *bangumi.Subject,
 		}
 	}
 	return false
+}
+
+func metadataSourcesConflict(m *model.AnimeMetadata) bool {
+	if m == nil || m.BangumiID == 0 || strings.TrimSpace(m.BangumiTitle) == "" {
+		return false
+	}
+	independentTitles := make([]string, 0, 2)
+	if m.TMDBID != 0 && strings.TrimSpace(m.TMDBTitle) != "" {
+		independentTitles = append(independentTitles, m.TMDBTitle)
+	}
+	if m.AniListID != 0 && strings.TrimSpace(m.AniListTitle) != "" {
+		independentTitles = append(independentTitles, m.AniListTitle)
+	}
+	if len(independentTitles) == 0 {
+		return false
+	}
+	for _, title := range independentTitles {
+		if titlesLookRelated(m.BangumiTitle, title) {
+			return false
+		}
+	}
+	return true
+}
+
+func metadataRefreshQuery(m *model.AnimeMetadata) string {
+	if m == nil {
+		return ""
+	}
+	if metadataSourcesConflict(m) {
+		if strings.TrimSpace(m.TMDBTitle) != "" {
+			return m.TMDBTitle
+		}
+		if strings.TrimSpace(m.AniListTitle) != "" {
+			return m.AniListTitle
+		}
+	}
+	if strings.TrimSpace(m.TitleCN) != "" {
+		return m.TitleCN
+	}
+	return m.Title
 }
 
 func sourceMatchScore(rawQueryTitle string, m *model.AnimeMetadata, candidateTitle string) int {

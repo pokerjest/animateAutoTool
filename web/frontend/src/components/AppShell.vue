@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Activity, ArchiveRestore, Bot, CalendarDays, ChevronRight, Clapperboard, Download, HeartPulse, Home, Library, LogOut, Menu, MoonStar, Settings, Sparkles, Sun, Tv, X } from '@lucide/vue'
+import { Activity, ArchiveRestore, Bot, CalendarDays, ChevronRight, Clapperboard, Download, HeartPulse, Home, Library, LogOut, Menu, MoonStar, Settings, ShieldCheck, Sparkles, Sun, Tv, X } from '@lucide/vue'
 import { useUIStore } from '../stores/ui'
 import { useTaskStore } from '../stores/tasks'
 import { useSessionStore } from '../stores/session'
 import { useAsyncActions } from '../composables/useAsyncActions'
 import AsyncButton from './AsyncButton.vue'
+import AppBackground from './AppBackground.vue'
 import TaskCenter from './TaskCenter.vue'
 
 const route = useRoute(); const router = useRouter(); const ui = useUIStore(); const tasks = useTaskStore(); const session = useSessionStore(); const actions = useAsyncActions()
@@ -25,6 +26,7 @@ const logout = async () => { try { await actions.run('logout', async () => { awa
 
 <template>
   <div class="app-backdrop min-h-screen">
+    <AppBackground />
     <aside class="glass fixed inset-y-4 left-4 z-40 hidden w-[248px] flex-col rounded-[1.7rem] p-4 lg:flex">
       <RouterLink to="/" class="mb-6 flex items-center gap-3 rounded-2xl p-2">
         <span class="grid h-11 w-11 place-items-center rounded-2xl bg-gradient-to-br from-pink-400 to-rose-600 text-white shadow-lg"><Sparkles :size="22" /></span>
@@ -40,7 +42,8 @@ const logout = async () => { try { await actions.run('logout', async () => { awa
       </nav>
       <div class="panel-muted mt-2 flex items-center justify-between p-2">
         <button class="btn btn-quiet h-10 min-h-10 w-10 p-0" type="button" @click="toggleTheme" aria-label="切换明暗主题"><component :is="themeIcon" :size="18" /></button>
-        <AsyncButton class="min-w-0 flex-1 truncate px-2 text-left text-xs font-bold" :loading="actions.isBusy('logout')" loading-label="退出中…" @click="logout"><span class="block truncate">{{ session.state?.username || '管理员' }}</span><span class="muted">退出登录</span></AsyncButton>
+        <div v-if="session.passwordless" class="min-w-0 flex-1 truncate px-2 text-left text-xs font-bold"><span class="block truncate">{{ session.state?.username || '管理员' }}</span><span class="muted">IP 白名单免密</span></div>
+        <AsyncButton v-else class="min-w-0 flex-1 truncate px-2 text-left text-xs font-bold" :loading="actions.isBusy('logout')" loading-label="退出中…" @click="logout"><span class="block truncate">{{ session.state?.username || '管理员' }}</span><span class="muted">退出登录</span></AsyncButton>
         <span class="badge">{{ session.state?.version }}</span>
       </div>
     </aside>
@@ -69,7 +72,8 @@ const logout = async () => { try { await actions.run('logout', async () => { awa
         <div v-for="group in groups" :key="group.label" class="mb-5"><h3 class="mb-2 px-2 text-xs font-extrabold muted">{{ group.label }}</h3><RouterLink v-for="link in group.links" :key="link.to" :to="link.to" class="mb-1 flex min-h-12 items-center gap-3 rounded-xl px-3 font-bold" :class="isActive(link.to) ? 'bg-[var(--brand-soft)] text-[var(--brand-strong)]' : ''" @click="ui.mobileMore=false"><component :is="link.icon" :size="19" />{{ link.label }}</RouterLink></div>
         <div class="panel-muted mt-6 grid gap-2 p-3">
           <button class="btn btn-secondary w-full justify-start" type="button" @click="toggleTheme" aria-label="切换明暗主题"><component :is="themeIcon" :size="18" />切换明暗主题</button>
-          <AsyncButton class="btn btn-quiet w-full justify-start text-[var(--danger)]" :loading="actions.isBusy('logout')" loading-label="退出中…" @click="ui.mobileMore=false; logout()"><LogOut :size="18" />退出登录</AsyncButton>
+          <div v-if="session.passwordless" class="flex min-h-11 items-center gap-2 px-3 text-sm font-bold text-[var(--success)]"><ShieldCheck :size="18" />当前 IP 白名单免密</div>
+          <AsyncButton v-else class="btn btn-quiet w-full justify-start text-[var(--danger)]" :loading="actions.isBusy('logout')" loading-label="退出中…" @click="ui.mobileMore=false; logout()"><LogOut :size="18" />退出登录</AsyncButton>
         </div>
       </aside>
     </div>

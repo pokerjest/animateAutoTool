@@ -12,6 +12,16 @@ describe('ui store', () => {
     expect(localStorage.getItem('animate-theme')).toBe('dark')
   })
 
+  it('persists the anime poster background preference', () => {
+    const ui = useUIStore()
+    expect(ui.backgroundMode).toBe('default')
+
+    ui.setBackgroundMode('anime')
+
+    expect(ui.backgroundMode).toBe('anime')
+    expect(localStorage.getItem('animate-background-mode')).toBe('anime')
+  })
+
   it('queues a globally visible toast', () => {
     vi.useFakeTimers()
     const ui = useUIStore()

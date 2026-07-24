@@ -6,16 +6,17 @@
 2. Run `go test ./internal/db -count=1`.
 3. Run `go test ./internal/api -count=1`.
 4. Run `go test ./... -race`.
-5. Run `./scripts/package.sh` and verify new artifacts exist in `dist/`.
-6. Run `bash ./scripts/check_release_assets.sh` to validate updater-required assets and `SHA256SUMS.txt`.
-7. Smoke-check core flows on a live server:
+5. Run `make package-e2e` to validate the extracted release archive with headless Chromium.
+6. Run `./scripts/package.sh` and verify new artifacts exist in `dist/`.
+7. Run `bash ./scripts/check_release_assets.sh` to validate updater-required assets and `SHA256SUMS.txt`.
+8. Smoke-check core flows on a live server:
    - `/login`
    - `/calendar`
    - `/subscriptions`
    - `/local-anime`
    - `/backup`
-8. Verify the latest schema migration was applied and startup logs show the expected schema version.
-9. Review `git status` and confirm no accidental local files are about to ship.
+9. Verify the latest schema migration was applied and startup logs show the expected schema version.
+10. Review `git status` and confirm no accidental local files are about to ship.
 
 ## After pushing the release tag
 

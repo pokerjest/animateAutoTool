@@ -393,7 +393,7 @@ var r2FetchLock sync.Mutex
 // ...
 
 func ListR2BackupsHandler(c *gin.Context) {
-	forceRefresh := c.Query("force") == "true"
+	forceRefresh := c.Query("force") == ValueTrue
 
 	// 1. Fast Path: Check cache
 	r2BackupCacheLock.RLock()

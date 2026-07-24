@@ -146,18 +146,20 @@ func AuthMiddleware() gin.HandlerFunc {
 		path := c.Request.URL.Path
 
 		if userID == nil {
-			if isAPIRequestPath(path) {
-				if isV1APIRequestPath(path) {
-					v1Error(c, http.StatusUnauthorized, "unauthorized", "请先登录")
+			if _, passwordless := passwordlessAdminForRequest(c); !passwordless {
+				if isAPIRequestPath(path) {
+					if isV1APIRequestPath(path) {
+						v1Error(c, http.StatusUnauthorized, "unauthorized", "请先登录")
+						return
+					}
+					c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "请先登录"})
 					return
 				}
-				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "请先登录"})
+
+				c.Redirect(http.StatusFound, "/login")
+				c.Abort()
 				return
 			}
-
-			c.Redirect(http.StatusFound, "/login")
-			c.Abort()
-			return
 		}
 
 		if bootstrap.BootstrapSetupPending() && !setupEnforcementExempt(path) {

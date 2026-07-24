@@ -55,11 +55,32 @@ button { cursor: pointer; }
 ::selection { background: var(--brand-soft); color: var(--ink); }
 
 .app-backdrop {
+  position: relative;
+  isolation: isolate;
   background:
     radial-gradient(circle at 6% 0%, color-mix(in srgb, var(--brand-soft) 72%, transparent) 0 24rem, transparent 44rem),
     radial-gradient(circle at 92% 8%, color-mix(in srgb, var(--sky-soft) 68%, transparent) 0 22rem, transparent 42rem),
     var(--canvas);
 }
+.anime-background {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-position: center 24%;
+  background-repeat: no-repeat;
+  background-size: cover;
+  animation: background-reveal .28s ease-out both;
+}
+.anime-background::after {
+  position: absolute;
+  inset: 0;
+  content: "";
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--canvas) 72%, transparent), color-mix(in srgb, var(--canvas) 88%, transparent) 68%, var(--canvas)),
+    linear-gradient(90deg, color-mix(in srgb, var(--canvas) 35%, transparent), color-mix(in srgb, var(--canvas) 68%, transparent));
+}
+.app-backdrop > main { position: relative; z-index: 1; }
 .glass { background: color-mix(in srgb, var(--surface) 90%, transparent); border: 1px solid color-mix(in srgb, var(--line) 70%, white); backdrop-filter: blur(22px); box-shadow: 0 18px 60px rgba(76, 53, 62, .08); }
 .panel { background: var(--surface-solid); border: 1px solid var(--line); border-radius: 1.25rem; box-shadow: 0 10px 35px rgba(54, 42, 48, .055); }
 .panel-muted { background: var(--surface-muted); border: 1px solid var(--line); border-radius: 1rem; }
@@ -77,6 +98,9 @@ button { cursor: pointer; }
 .btn-danger { color: var(--danger); background: color-mix(in srgb, var(--danger) 8%, var(--surface-solid)); border-color: color-mix(in srgb, var(--danger) 25%, var(--line)); }
 .field { width: 100%; min-height: 2.8rem; border: 1px solid var(--line); border-radius: .85rem; background: var(--surface-solid); color: var(--ink); padding: .68rem .85rem; transition: border-color .18s, box-shadow .18s; }
 .field:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 4px color-mix(in srgb, var(--brand-soft) 75%, transparent); }
+.search-field { position: relative; display: block; }
+.search-field > svg { position: absolute; z-index: 1; top: 50%; left: .85rem; pointer-events: none; transform: translateY(-50%); color: var(--ink-muted); }
+.field.field-leading-icon { padding-left: 2.75rem; }
 .label { display: grid; gap: .45rem; color: var(--ink-muted); font-size: .84rem; font-weight: 700; }
 .badge { display: inline-flex; min-height: 1.7rem; align-items: center; gap: .3rem; border-radius: 999px; padding: .24rem .62rem; font-size: .72rem; font-weight: 800; background: var(--surface-muted); color: var(--ink-muted); }
 .badge-success { background: color-mix(in srgb, var(--success) 13%, var(--surface-solid)); color: var(--success); }
@@ -87,6 +111,7 @@ button { cursor: pointer; }
 .skip-link { position: fixed; left: .75rem; top: .75rem; z-index: 200; transform: translateY(-150%); border-radius: .75rem; background: var(--ink); color: var(--canvas); padding: .75rem 1rem; }
 .skip-link:focus { transform: none; }
 @keyframes shimmer { to { background-position: -200% 0; } }
+@keyframes background-reveal { from { opacity: 0; } to { opacity: 1; } }
 .page-enter-active { transition: opacity .2s ease-out, transform .2s ease-out; }
 .page-leave-active { transition: opacity .12s ease-in, transform .12s ease-in; }
 .page-enter-from { opacity: 0; transform: translateY(8px); }

@@ -168,7 +168,7 @@ func (s *MetadataService) RefreshAllMetadata(force bool) int {
 		list = allList
 	} else {
 		for _, m := range allList {
-			if m.Summary != "" && (m.BangumiID != 0 || m.TMDBID != 0 || m.AniListID != 0) {
+			if !metadataSourcesConflict(&m) && m.Summary != "" && (m.BangumiID != 0 || m.TMDBID != 0 || m.AniListID != 0) {
 				continue
 			}
 			list = append(list, m)
@@ -208,11 +208,7 @@ func (s *MetadataService) RefreshAllMetadata(force bool) int {
 			})
 
 			if freshM, err := mStore.GetByID(meta.ID); err == nil {
-				queryTitle := freshM.Title
-				if freshM.TitleCN != "" {
-					queryTitle = freshM.TitleCN
-				}
-				s.EnrichMetadata(freshM, queryTitle)
+				s.EnrichMetadata(freshM, metadataRefreshQuery(freshM))
 				updateMu.Lock()
 				updatedCount++
 				updateMu.Unlock()
@@ -243,11 +239,7 @@ func (s *MetadataService) RefreshSingleMetadata(id uint) error {
 	if err != nil {
 		return err
 	}
-	queryTitle := m.Title
-	if m.TitleCN != "" {
-		queryTitle = m.TitleCN
-	}
-	s.EnrichMetadata(m, queryTitle)
+	s.EnrichMetadata(m, metadataRefreshQuery(m))
 	return nil
 }
 

@@ -216,6 +216,23 @@ type SearchResult struct {
 	AirDate string `json:"air_date"`
 }
 
+func bangumiMetadataSearchResults(results []bangumi.SearchResult) []SearchResult {
+	items := make([]SearchResult, 0, len(results))
+	for _, result := range results {
+		var item SearchResult
+		item.ID = result.ID
+		item.Name = result.Name
+		item.NameCN = result.NameCN
+		item.Images.Large = result.Images.Large
+		item.Images.Common = result.Images.Common
+		item.Images.Medium = result.Images.Medium
+		item.Images.Small = result.Images.Small
+		item.Images.Grid = result.Images.Grid
+		items = append(items, item)
+	}
+	return items
+}
+
 func SearchMetadataHandler(c *gin.Context) {
 	keyword := c.Query("q")
 	source := c.Query("source")
@@ -244,7 +261,7 @@ func SearchMetadataHandler(c *gin.Context) {
 			return
 		}
 
-		var genericResults []SearchResult
+		genericResults := make([]SearchResult, 0, len(results))
 		for _, show := range results {
 			var r SearchResult
 			r.ID = show.ID
@@ -274,7 +291,7 @@ func SearchMetadataHandler(c *gin.Context) {
 			return
 		}
 
-		var genericResults []SearchResult
+		genericResults := make([]SearchResult, 0, 1)
 		if result != nil {
 			var r SearchResult
 			r.ID = result.ID
@@ -298,45 +315,12 @@ func SearchMetadataHandler(c *gin.Context) {
 		client := bangumi.NewClient("", "", "")
 		applyProxyToBangumiClient(client)
 
-		// Bangumi search returns its own struct, but frontend expects generic?
-		// The original handler returned raw bangumi results or generic?
-		// "if results != nil { c.JSON(http.StatusOK, results) }"
-		// It seems the frontend (Alpine) handles different structures or we should unify.
-		// Let's implement unification for consistency if possible, or stick to what frontend expects.
-		// The original code returned whatever Bangumi client returned for "Bangumi".
-		// But for TMDB/AniList it mapped to "genericResults".
-		// Note checks:
-		// "Bangumi" results have "id", "name", "name_cn", "images" object.
-		// Our SearchResult struct mirrors Bangumi structure close enough?
-		// Bangumi has: id, name, name_cn, summary, air_date, images { large, ... }
-		// So passing genericResults for others is trying to match Bangumi's format!
-		// So we can just return Bangumi raw results.
-
-		results, err := client.SearchSubject(keyword)
+		results, err := client.SearchSubjectsContext(c.Request.Context(), keyword)
 		if err != nil {
 			jsonServerError(c, "搜索 Bangumi 元数据", err)
 			return
 		}
-		if results != nil {
-			// SearchSubject returns a SINGLE result? No, current client.SearchSubject return *BangumiSubject (single)?
-			// Wait, the client method is named `SearchSubject` but does it return a list?
-			// Let's check `bangumi` package usage or definition.
-			// If it returns single, that explains why logic loop wasn't there.
-			// But usually search returns list.
-			// Code snippet 1347: `client.SearchSubject(keyword)` returns `res, err`.
-			// If res is single struct, we return array?
-			// `c.JSON(http.StatusOK, []interface{}{res})`?
-			// Original code:
-			// `if results != nil { c.JSON(http.StatusOK, results) }`
-			// If results is a slice, fine. If struct, fine.
-			// Let's enable returning list if possible.
-			// Checking `client.SearchSubject`: It likely calls `/search/subject/{keywords}` which returns list.
-			// BUT `bangumi/client.go` implementation might be simple.
-			// Assuming it returns `[]bangumi.Subject` or similar.
-			c.JSON(http.StatusOK, results)
-		} else {
-			c.JSON(http.StatusOK, []interface{}{})
-		}
+		c.JSON(http.StatusOK, bangumiMetadataSearchResults(results))
 	}
 }
 
@@ -430,8 +414,7 @@ func ProxyTMDBImageHandler(c *gin.Context) {
 	c.Data(http.StatusOK, resp.Header().Get("Content-Type"), resp.Body())
 }
 
-// GetRandomBackgroundHandler returns a URL to a random anime cover image
-func GetRandomBackgroundHandler(c *gin.Context) {
+func randomBackgroundURL() (string, error) {
 	// Query for a random metadata record that has some image data
 	// Note: RANDOM() is SQLite specific, usually ORDER BY RANDOM()
 	// GORM raw sql is easiest here or Find with Random order
@@ -445,8 +428,7 @@ func GetRandomBackgroundHandler(c *gin.Context) {
 		First(&m)
 
 	if result.Error != nil {
-		c.JSON(http.StatusOK, gin.H{"success": false, "message": "暂时没有找到可用封面"})
-		return
+		return "", result.Error
 	}
 
 	// Determine best source
@@ -459,8 +441,29 @@ func GetRandomBackgroundHandler(c *gin.Context) {
 		source = SourceAniList
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"url":     fmt.Sprintf("/api/v1/posters/%d?source=%s", m.ID, source),
-	})
+	return fmt.Sprintf("/api/v1/posters/%d?source=%s", m.ID, source), nil
+}
+
+// GetRandomBackgroundHandler returns a URL to a random anime cover image for
+// the legacy HTML UI. New clients use V1RandomBackgroundHandler.
+func GetRandomBackgroundHandler(c *gin.Context) {
+	backgroundURL, err := randomBackgroundURL()
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "暂时没有找到可用封面"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true, "url": backgroundURL})
+}
+
+// V1RandomBackgroundHandler returns a same-origin poster URL that clients can
+// resize with the poster endpoint's width query parameter.
+func V1RandomBackgroundHandler(c *gin.Context) {
+	backgroundURL, err := randomBackgroundURL()
+	if err != nil {
+		v1Error(c, http.StatusNotFound, "background_not_found", "暂时没有找到可用封面")
+		return
+	}
+
+	v1Data(c, http.StatusOK, gin.H{"url": backgroundURL})
 }

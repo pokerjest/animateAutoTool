@@ -15,11 +15,17 @@ afterEach(() => {
 
 describe('SettingsView proxy settings', () => {
   it('shows per-service switches and tests the current unsaved proxy address', async () => {
+    localStorage.clear()
     let proxyTestBody: Record<string, string> | undefined
+    let settingsSaveBody: { values: Record<string, string> } | undefined
     const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input)
+      if (path.endsWith('/api/v1/settings') && init?.method === 'PUT') {
+        settingsSaveBody = JSON.parse(String(init.body)) as { values: Record<string, string> }
+        return response(null)
+      }
       if (path.endsWith('/api/v1/settings') && (!init?.method || init.method === 'GET')) {
-        return response({ values: { proxy_url: '', proxy_bangumi_enabled: 'false', proxy_mikan_enabled: 'false' }, configured: {}, stats: {} })
+        return response({ values: { proxy_url: '', proxy_bangumi_enabled: 'false', proxy_mikan_enabled: 'false', auth_ip_allowlist_enabled: 'false', auth_ip_allowlist: '' }, configured: {}, stats: {}, request_ip: '100.64.1.20' })
       }
       if (path.includes('/api/v1/audit-logs')) return response({ items: [] })
       if (path.endsWith('/api/v1/settings/maintenance')) return response({ deployment: { items: [] }, updater: {} })
@@ -62,10 +68,45 @@ describe('SettingsView proxy settings', () => {
     const mediaTab = wrapper.findAll('button').find(button => button.text().includes('媒体服务'))
     expect(mediaTab).toBeDefined()
     await mediaTab!.trigger('click')
-    expect(wrapper.text()).toContain('Jellyfin 服务端连接地址')
+    const jellyfinPanel = wrapper.get('[data-testid="media-app-jellyfin"]')
+    const alistPanel = wrapper.get('[data-testid="media-app-alist"]')
+    expect(jellyfinPanel.text()).toContain('Jellyfin')
+    expect(jellyfinPanel.text()).toContain('服务端连接地址')
+    expect(jellyfinPanel.text()).not.toContain('AList')
+    expect(alistPanel.text()).toContain('AList')
+    expect(alistPanel.text()).toContain('服务地址')
+    expect(alistPanel.text()).not.toContain('Jellyfin')
     expect(wrapper.text()).toContain('浏览器直连地址（Tailscale）')
     expect(wrapper.find('input[placeholder*="example-tailnet.ts.net"]').exists()).toBe(true)
     expect(wrapper.text()).toContain('留空时全部走 AnimateTool 代理')
+
+    const appearanceTab = wrapper.findAll('button').find(button => button.text() === '外观')
+    expect(appearanceTab).toBeDefined()
+    await appearanceTab!.trigger('click')
+    expect(wrapper.text()).toContain('主题模式')
+    expect(wrapper.text()).not.toContain('修改管理员密码')
+    const backgroundMode = wrapper.get('[data-testid="background-mode"]')
+    await backgroundMode.setValue('anime')
+    expect(localStorage.getItem('animate-background-mode')).toBe('anime')
+    expect(wrapper.text()).toContain('手机、平板和电脑加载 640、960、1280px')
+
+    const securityTab = wrapper.findAll('button').find(button => button.text() === '安全')
+    expect(securityTab).toBeDefined()
+    await securityTab!.trigger('click')
+    expect(wrapper.text()).toContain('修改管理员密码')
+    expect(wrapper.text()).toContain('最近安全审计')
+    expect(wrapper.text()).toContain('IP 白名单免密访问')
+    expect(wrapper.text()).not.toContain('主题模式')
+    const allowlistPanel = wrapper.get('[data-testid="auth-ip-allowlist"]')
+    expect(allowlistPanel.text()).toContain('100.64.1.20')
+    await allowlistPanel.findAll('button').find(button => button.text().includes('填入当前 IP'))!.trigger('click')
+    expect((allowlistPanel.get('textarea').element as HTMLTextAreaElement).value).toBe('100.64.1.20')
+    await allowlistPanel.get('input[type="checkbox"]').setValue(true)
+    await allowlistPanel.get('textarea').setValue('192.168.1.20\n100.64.0.0/10')
+    await allowlistPanel.findAll('button').find(button => button.text().includes('保存免密设置'))!.trigger('click')
+    await flushPromises()
+    expect(settingsSaveBody?.values.auth_ip_allowlist_enabled).toBe('true')
+    expect(settingsSaveBody?.values.auth_ip_allowlist).toBe('192.168.1.20\n100.64.0.0/10')
 
     wrapper.unmount()
     queryClient.clear()

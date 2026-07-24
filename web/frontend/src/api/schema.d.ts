@@ -616,6 +616,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/ui/background/random": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getRandomBackground"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/local-anime": {
         parameters: {
             query?: never;
@@ -1204,6 +1220,11 @@ export interface components {
             /** @description True only when this request directly targets localhost from the loopback interface without forwarded headers. */
             local_recovery_available: boolean;
             username?: string;
+            /**
+             * @description Authentication source for the current request.
+             * @enum {string}
+             */
+            auth_mode?: "none" | "session" | "ip_allowlist";
             version: string;
             recovery_local_only: boolean;
         };
@@ -1265,6 +1286,23 @@ export interface components {
             mikan_id: string;
             items: components["schemas"]["MikanEpisode"][];
             total: number;
+        };
+        MetadataSearchResult: {
+            id: number;
+            name: string;
+            name_cn: string;
+            images: {
+                large: string;
+                common: string;
+                medium: string;
+                small: string;
+                grid: string;
+            };
+            summary: string;
+            air_date: string;
+        };
+        RandomBackground: {
+            url: string;
         };
         PlaybackDiagnostic: {
             code: string;
@@ -1373,6 +1411,17 @@ export interface components {
             };
             content: {
                 "application/json": components["schemas"]["TaskEnvelope"];
+            };
+        };
+        /** @description Metadata search results from the selected provider */
+        MetadataSearch: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Envelope"] & {
+                    data?: components["schemas"]["MetadataSearchResult"][];
+                };
             };
         };
         /** @description Error response */
@@ -2025,6 +2074,22 @@ export interface operations {
     };
     searchMetadata: {
         parameters: {
+            query: {
+                q: string;
+                source?: "bangumi" | "tmdb" | "anilist";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["MetadataSearch"];
+            400: components["responses"]["Error"];
+        };
+    };
+    getRandomBackground: {
+        parameters: {
             query?: never;
             header?: never;
             path?: never;
@@ -2032,7 +2097,18 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            200: components["responses"]["Success"];
+            /** @description Same-origin poster selected for the application background */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["RandomBackground"];
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
         };
     };
     getLocalAnime: {

@@ -189,6 +189,8 @@ const (
 	ConfigKeyProxyAniList              = "proxy_anilist_enabled"
 	ConfigKeyProxyAI                   = "proxy_ai_enabled"
 	ConfigKeyProxyUpdater              = "proxy_updater_enabled"
+	ConfigKeyAuthIPAllowlistEnabled    = "auth_ip_allowlist_enabled"
+	ConfigKeyAuthIPAllowlist           = "auth_ip_allowlist"
 	ConfigKeyRepoUpdateEnabled         = "repo_update_enabled"
 	ConfigKeyRepoAutoPullEnabled       = "repo_auto_pull_enabled"
 	ConfigKeyRepoUpdateIntervalMinutes = "repo_update_interval_minutes"

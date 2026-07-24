@@ -3,7 +3,7 @@
 <div align="center">
 
 ![Go Version](https://img.shields.io/badge/Go-1.25-00ADD8?style=for-the-badge&logo=go)
-![Version](https://img.shields.io/badge/Version-v0.8.0-blue?style=for-the-badge)
+![Version](https://img.shields.io/badge/Version-v0.8.1-blue?style=for-the-badge)
 ![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)
 ![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/pokerjest/animateAutoTool/go.yml?style=for-the-badge)
 
@@ -87,7 +87,7 @@ Animate Auto Tool 是一个基于 Go 1.25 开发的自动化动漫下载工具�
    - 如需前台调试，请双击 `run.bat`。
 
 > [!NOTE]
-> GitHub Actions 会同时产出带版本号的目录包、单文件 Windows `exe`，以及 macOS `dmg`，例如 `animate-server_v0.8.0_linux_amd64.tar.gz`、`animate-server_v0.8.0_windows_amd64.exe`、`animate-server_v0.8.0_darwin_arm64.dmg`。同时会产出 `SHA256SUMS.txt` 供应用内自动更新校验完整性使用。
+> GitHub Actions 会同时产出带版本号的目录包、单文件 Windows `exe`，以及 macOS `dmg`，例如 `animate-server_v0.8.1_linux_amd64.tar.gz`、`animate-server_v0.8.1_windows_amd64.exe`、`animate-server_v0.8.1_darwin_arm64.dmg`。同时会产出 `SHA256SUMS.txt` 供应用内自动更新校验完整性使用。
 
 #### macOS / Linux 用户
 1. 解压下载的 `.tar.gz` 压缩包。
@@ -201,6 +201,15 @@ system_settings: {}
 - 设置页保存后，业务配置会同时保存在数据库和 `config.yaml` 的 `system_settings` 段；重启时 YAML 中已有的值会回填数据库，便于迁移和手工维护。
 - `system_settings` 可能包含外部服务密码、Token 和 API Key。Unix 下程序会把 `config.yaml` 权限收紧为 `0600`，Windows 下依赖所在目录的用户 ACL；请勿上传、分享或提交真实配置文件。应用登录密码不会写入 YAML。
 
+#### IP 白名单免密访问
+
+在“系统设置 → 安全”中可启用 IP 白名单。支持单个 IPv4、IPv6 或 CIDR 网段，例如 `192.168.1.20`、`192.168.1.0/24` 和 Tailscale 网段 `100.64.0.0/10`。命中后请求会以现有 `admin` 管理员身份访问，不需要密码，但写操作仍需通过同源校验。
+
+- 首次初始化期间不会启用白名单免密，仍必须在 localhost 完成设置。
+- 系统拒绝 `0.0.0.0/0`、`::/0`、组播地址和无效条目，最多保存 64 项。
+- 反向代理场景下，只有来自 `server.trusted_proxies` 的请求才会采信 `X-Forwarded-For`；直连请求无法通过伪造该请求头命中白名单。
+- 设置会同步到 `config.yaml` 的 `system_settings.auth_ip_allowlist_enabled` 和 `system_settings.auth_ip_allowlist`。
+
 ### 4. 反向代理建议
 
 推荐让公网用户只访问反向代理，由反向代理转发到本机服务：
@@ -275,6 +284,7 @@ system_settings: {}
 | `./scripts/run.sh` | 前台运行服务 | `scripts/manage.sh run` |
 | `./scripts/setup.sh` | 环境初始化 | - |
 | `./scripts/package.sh $(cat VERSION)` | 生成当前版本打包包 | 读取 `VERSION` |
+| `make package-e2e` | 打包当前平台并用无头浏览器验证真实发行二进制 | `scripts/test-package-e2e.sh` |
 | `./scripts/manage.sh status` | 查看运行状态 | - |
 | `./scripts/manage.sh log` | 实时查看日志 | - |
 | `http://localhost:8306/recover` | 本机重置管理员密码 | 仅 localhost 可访问 |
@@ -333,6 +343,14 @@ animateAutoTool/
 - [docs/api.md](./docs/api.md):HTTP 路由参考(所有 API 与页面路由分组列表)
 - [docs/release-checklist.md](./docs/release-checklist.md):发版前测试、打包、核心流程和 Release 检查项
 - [docs/mobile-qa-checklist.md](./docs/mobile-qa-checklist.md):手机端重点页面和弹窗的真机验收项
+
+发行包可在本地执行自动化冒烟测试：
+
+```bash
+make package-e2e
+```
+
+该命令会构建并解压当前平台的发行包，启动包内真实单二进制，再由无头 Chromium 验证首次初始化、登录态、仪表盘、前端静态资源和 SPA 深链接刷新。测试数据位于临时目录，结束后会自动清理，不会使用项目现有的 `config.yaml` 或数据库。
 
 ### 技术栈
 

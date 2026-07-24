@@ -15,6 +15,19 @@ const systemSettingsYAMLKey = "system_settings"
 
 var configFileMu sync.Mutex
 
+// SystemSetting returns a value from the in-memory config.yaml mirror. Reads
+// share the same lock as updates so request middleware can safely consume
+// settings that are changed while the server is running.
+func SystemSetting(key string) string {
+	configFileMu.Lock()
+	defer configFileMu.Unlock()
+
+	if AppConfig == nil || AppConfig.SystemSettings == nil {
+		return ""
+	}
+	return AppConfig.SystemSettings[key]
+}
+
 // UpdateSystemSettings merges settings into the local config.yaml mirror.
 // It is a no-op for callers (mostly tests and offline helpers) that have not
 // initialized the application config paths.

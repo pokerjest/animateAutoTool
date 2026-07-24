@@ -9,6 +9,7 @@ export const useSessionStore = defineStore('session', {
     setupPending: s => Boolean(s.state?.setup_pending),
     localSetupAvailable: s => Boolean(s.state?.local_setup_available),
     localRecoveryAvailable: s => Boolean(s.state?.local_recovery_available),
+    passwordless: s => s.state?.auth_mode === 'ip_allowlist',
   },
   actions: {
     async load(force = false) {

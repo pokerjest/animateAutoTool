@@ -7,8 +7,8 @@ APP_DISPLAY_NAME="Animate Auto Tool"
 APP_BUNDLE_NAME="${APP_DISPLAY_NAME}.app"
 APP_IDENTIFIER="com.pokerjest.animateautotool"
 VERSION_FILE="./VERSION"
-DEFAULT_VERSION="v0.8.0"
-DIST_DIR="./dist"
+DEFAULT_VERSION="v0.8.1"
+DIST_DIR="${DIST_DIR:-./dist}"
 SRC_PATH="cmd/server/main.go"
 
 GREEN='\033[0;32m'
@@ -230,6 +230,13 @@ generate_checksums() {
 
     echo -e "${YELLOW}No checksum tool found (shasum/sha256sum). Skipping SHA256SUMS generation.${NC}"
 }
+
+case "$DIST_DIR" in
+    ""|"/"|"."|"./")
+        echo "Refusing to use unsafe package output directory: $DIST_DIR" >&2
+        exit 1
+        ;;
+esac
 
 rm -rf "$DIST_DIR"
 mkdir -p "$DIST_DIR"

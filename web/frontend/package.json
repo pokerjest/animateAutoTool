@@ -1,7 +1,7 @@
 {
   "name": "animate-auto-tool-web",
   "private": true,
-  "version": "0.8.0",
+  "version": "0.8.1",
   "type": "module",
   "engines": {
     "node": ">=22"
@@ -22,6 +22,7 @@
     "vue-router": "^4.5.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "@tailwindcss/vite": "^4.0.0",
     "@types/node": "^22.10.5",
     "@vitejs/plugin-vue": "^5.2.1",

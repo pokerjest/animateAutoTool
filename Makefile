@@ -1,4 +1,4 @@
-.PHONY: all frontend-build frontend-test build run start stop restart status log help clean doctor repair
+.PHONY: all frontend-build frontend-test build run start stop restart status log help clean doctor repair package package-e2e
 
 # 默认目标：显示帮助信息
 all: help
@@ -48,6 +48,10 @@ log:
 package:
 	@./scripts/package.sh $(v)
 
+# 构建当前平台发行包，并对解压后的真实二进制执行无头端到端测试
+package-e2e:
+	@bash ./scripts/test-package-e2e.sh
+
 # 运行健康诊断
 doctor:
 	@go run ./cmd/doctor
@@ -76,6 +80,7 @@ help:
 	@echo "  make status   - 查看服务运行状态 (PID)"
 	@echo "  make log      - 实时查看日志 (logs/server.log)"
 	@echo "  make package  - 打包发布 (用法: make package v=1.0.0)"
+	@echo "  make package-e2e - 打包当前平台并运行无头端到端验证"
 	@echo "  make doctor   - 输出当前系统健康摘要"
 	@echo "  make repair   - 执行一次下载日志与订阅修复"
 	@echo "  make clean    - 清理本地构建、日志与调试残留"

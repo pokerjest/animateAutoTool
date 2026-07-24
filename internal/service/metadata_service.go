@@ -134,17 +134,10 @@ func (s *MetadataService) EnrichMetadata(m *model.AnimeMetadata, query string) {
 
 	wg.Wait()
 
-	// 4. Cross-Reference: AniList -> Bangumi
-	if m.BangumiID == 0 && m.AniListID != 0 {
-		retryTitle := ""
-		if m.TitleJP != "" {
-			retryTitle = m.TitleJP
-		} else if m.TitleEN != "" {
-			retryTitle = m.TitleEN
-		}
-		if retryTitle != "" && retryTitle != queryTitle {
-			s.enrichBangumi(m, bgmClient, retryTitle)
-		}
+	// 4. Cross-reference the now-populated TMDB/AniList titles. The first
+	// Bangumi request runs in parallel and only knows the original query.
+	if m.BangumiID == 0 && (m.TMDBID != 0 || m.AniListID != 0) {
+		s.enrichBangumi(m, bgmClient, queryTitle)
 	}
 
 	// 5. Save and Consolidate
@@ -187,6 +180,7 @@ func (s *MetadataService) initClients() (*bangumi.Client, *tmdb.Client, *anilist
 
 func (s *MetadataService) enrichBangumi(m *model.AnimeMetadata, bgmClient *bangumi.Client, queryTitle string) {
 	var bgmSubject *bangumi.Subject
+	references := bangumiMatchReferences(m, queryTitle)
 
 	if m.BangumiID != 0 {
 		bgmSubject, _ = performWithRetry(func() (*bangumi.Subject, error) {
@@ -195,33 +189,77 @@ func (s *MetadataService) enrichBangumi(m *model.AnimeMetadata, bgmClient *bangu
 	}
 
 	if bgmSubject == nil {
-		initialCandidates := getCandidateTitles(m, queryTitle)
-		for _, t := range initialCandidates {
+		var bestResult *bangumi.SearchResult
+		bestScore := 0
+		for _, t := range references {
 			if t == "" {
 				continue
 			}
-			res, err := performWithRetry(func() (*bangumi.SearchResult, error) {
-				return bgmClient.SearchSubject(t)
+			results, err := performWithRetry(func() ([]bangumi.SearchResult, error) {
+				return bgmClient.SearchSubjects(t)
 			})
-			if err == nil && res != nil {
-				m.BangumiID = res.ID
-				bgmSubject, _ = performWithRetry(func() (*bangumi.Subject, error) {
-					return bgmClient.GetSubject(res.ID)
-				})
+			if err != nil {
+				continue
+			}
+			result, score := bestBangumiSearchResult(results, references)
+			if result != nil && score > bestScore {
+				bestResult = result
+				bestScore = score
+			}
+			if bestScore == 100 {
 				break
 			}
+		}
+		if bestResult != nil {
+			m.BangumiID = bestResult.ID
+			bgmSubject, _ = performWithRetry(func() (*bangumi.Subject, error) {
+				return bgmClient.GetSubject(bestResult.ID)
+			})
 		}
 	}
 
 	if bgmSubject != nil {
 		if !shouldApplyBangumiSubject(m, bgmSubject, queryTitle) {
 			log.Printf("MetadataService: skipping mismatched Bangumi subject %d for query=%q (subject=%q/%q)", bgmSubject.ID, queryTitle, bgmSubject.NameCN, bgmSubject.Name)
-			if m.ID == 0 {
-				m.BangumiID = 0
-			}
+			s.clearMismatchedBangumiSubject(m, bgmSubject)
 			return
 		}
 		s.applyBangumiSubject(m, bgmSubject)
+	}
+}
+
+func (s *MetadataService) clearMismatchedBangumiSubject(m *model.AnimeMetadata, subject *bangumi.Subject) {
+	if m == nil || subject == nil {
+		return
+	}
+	staleTitles := map[string]bool{
+		strings.TrimSpace(subject.Name):   true,
+		strings.TrimSpace(subject.NameCN): true,
+		strings.TrimSpace(m.BangumiTitle): true,
+	}
+	if staleTitles[strings.TrimSpace(m.Title)] {
+		m.Title = ""
+	}
+	if staleTitles[strings.TrimSpace(m.TitleCN)] {
+		m.TitleCN = ""
+	}
+	if staleTitles[strings.TrimSpace(m.TitleJP)] {
+		m.TitleJP = ""
+	}
+	if strings.TrimSpace(m.AirDate) == strings.TrimSpace(subject.Date) {
+		m.AirDate = ""
+	}
+	if m.Summary == m.BangumiSummary || m.Summary == subject.Summary {
+		m.Summary = ""
+	}
+	m.BangumiID = 0
+	m.BangumiTitle = ""
+	m.BangumiImage = ""
+	m.BangumiSummary = ""
+	m.BangumiRating = 0
+	m.BangumiImageRaw = nil
+	if m.DataSource == metadataSourceBangumi {
+		m.DataSource = ""
 	}
 }
 
