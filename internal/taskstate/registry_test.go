@@ -2,6 +2,7 @@ package taskstate
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -51,4 +52,23 @@ func TestRegistryPreservesTaskIdentityOnFailure(t *testing.T) {
 	assert.Equal(t, "sync", failed.Kind)
 	assert.Equal(t, "立即同步", failed.Title)
 	assert.Equal(t, "网络不可用", failed.Message)
+}
+
+func TestRegistryEvictionPreservesRunningTasks(t *testing.T) {
+	registry := NewRegistry()
+	registry.Start("long-running", "backup", "长时间备份", "正在备份")
+
+	for i := 0; i < maxTrackedTasks; i++ {
+		taskID := fmt.Sprintf("completed-%03d", i)
+		registry.Start(taskID, "short", "短任务", "正在执行")
+		registry.Complete(taskID, "已完成")
+	}
+
+	if _, ok := registry.Get("long-running"); !ok {
+		t.Fatal("running task was evicted")
+	}
+	updated := registry.Progress("long-running", "仍在备份", 1, 2)
+	assert.Equal(t, "backup", updated.Kind)
+	assert.Equal(t, "长时间备份", updated.Title)
+	assert.LessOrEqual(t, len(registry.tasks), maxTrackedTasks)
 }

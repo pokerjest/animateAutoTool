@@ -1,6 +1,8 @@
 package startup
 
 import (
+	"context"
+
 	"github.com/pokerjest/animateAutoTool/internal/service"
 	"github.com/pokerjest/animateAutoTool/internal/updater"
 	"github.com/pokerjest/animateAutoTool/internal/worker"
@@ -8,7 +10,7 @@ import (
 
 // Run performs runtime-only initialization that should not happen as a side
 // effect of constructing HTTP routes.
-func Run() {
+func Run(ctx context.Context) {
 	scannerSvc := service.NewScannerService()
 	scannerSvc.CleanupGarbage()
 
@@ -16,7 +18,7 @@ func Run() {
 	metaSvc.StartMetadataMigration()
 
 	worker.StartMetadataWorker()
-	worker.StartDownloadLogSyncWorker()
+	worker.StartDownloadLogSyncWorker(ctx)
 
 	authSvc := service.NewAuthService()
 	authSvc.EnsureDefaultUser()

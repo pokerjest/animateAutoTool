@@ -150,6 +150,13 @@ func persistSettingsScope(c *gin.Context, scope string) error {
 			continue
 		}
 		if val, exists := c.GetPostForm(key); exists {
+			if key == model.ConfigKeyJellyfinUrl || key == model.ConfigKeyJellyfinDirectUrl {
+				normalized, err := normalizeJellyfinBaseURL(val)
+				if err != nil {
+					return err
+				}
+				val = normalized
+			}
 			if err := persistGlobalConfig(key, val); err != nil {
 				return err
 			}

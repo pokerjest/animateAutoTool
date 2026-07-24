@@ -13,7 +13,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/pokerjest/animateAutoTool/internal/bangumi"
 	"github.com/pokerjest/animateAutoTool/internal/config"
-	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/downloader"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/parser"
@@ -193,10 +192,17 @@ func createSubscriptionInternal(sub *model.Subscription) error {
 
 	sub.IsActive = true
 
+	s := subscriptionStore()
+	if s == nil {
+		return gorm.ErrInvalidDB
+	}
+
 	// Check if already exists (including soft-deleted)
-	var existing model.Subscription
-	if err := db.DB.Unscoped().Where("rss_url = ?", sub.RSSUrl).First(&existing).Error; err == nil {
-		// Found existing
+	existing, found, err := s.FindByRSSURLUnscoped(sub.RSSUrl)
+	if err != nil {
+		return fmt.Errorf("failed to query existing: %v", err)
+	}
+	if found {
 		if existing.DeletedAt.Valid {
 			// Restore it
 			existing.DeletedAt = gorm.DeletedAt{} // Restore
@@ -213,16 +219,16 @@ func createSubscriptionInternal(sub *model.Subscription) error {
 			existing.AllowMultiSubgroup = sub.AllowMultiSubgroup
 			existing.StaleAfterHours = sub.StaleAfterHours
 			existing.IsActive = true
-			if err := db.DB.Save(&existing).Error; err != nil {
+			if err := s.Save(existing); err != nil {
 				return fmt.Errorf("failed to restore: %v", err)
 			}
-			*sub = existing // Update caller's pointer
+			*sub = *existing // Update caller's pointer
 		} else {
 			return fmt.Errorf("exists")
 		}
 	} else {
 		// New creation
-		if err := db.DB.Create(sub).Error; err != nil {
+		if err := s.Create(sub); err != nil {
 			return fmt.Errorf("failed to create: %v", err)
 		}
 	}
@@ -380,34 +386,19 @@ func DeleteSubscriptionHandler(c *gin.Context) {
 	log.Printf("DEBUG: Deleting subscription ID: %d", id)
 
 	auditCtx := buildAuditContext(c)
+	s := subscriptionStore()
+	if s == nil {
+		subscriptionSaveError(c, "删除订阅", gorm.ErrInvalidDB)
+		return
+	}
 	var subTitle string
-	var existing model.Subscription
-	if err := db.DB.Unscoped().First(&existing, id).Error; err == nil {
+	if existing, err := s.GetByID(uint(id)); err == nil && existing != nil {
 		subTitle = existing.Title
 	}
 
-	// Start transaction for cascading delete
-	tx := db.DB.Begin()
-
-	// 1. Delete associated logs (Hard Delete)
-	if err := tx.Unscoped().Where("subscription_id = ?", id).Delete(&model.DownloadLog{}).Error; err != nil {
-		tx.Rollback()
-		log.Printf("ERROR: Delete logs failed for subID %d: %v", id, err)
-		subscriptionSaveError(c, "删除关联日志", err)
-		return
-	}
-
-	// 2. Delete subscription (Hard Delete)
-	if err := tx.Unscoped().Delete(&model.Subscription{}, id).Error; err != nil {
-		tx.Rollback()
-		log.Printf("ERROR: Delete sub failed for ID %d: %v", id, err)
+	if err := s.DeleteCascade(uint(id)); err != nil {
+		log.Printf("ERROR: cascade delete failed for subID %d: %v", id, err)
 		subscriptionSaveError(c, "删除订阅", err)
-		return
-	}
-
-	if err := tx.Commit().Error; err != nil {
-		log.Printf("ERROR: Commit failed: %v", err)
-		subscriptionSaveError(c, "提交删除操作", err)
 		return
 	}
 	service.RecordAudit(auditCtx, service.AuditEntry{
@@ -840,7 +831,12 @@ func SwitchSubscriptionSourceHandler(c *gin.Context) {
 		}
 	}
 
-	if err := db.DB.Save(m).Error; err != nil {
+	ms := animeMetadataStore()
+	if ms == nil {
+		subscriptionSaveError(c, "切换数据源", gorm.ErrInvalidDB)
+		return
+	}
+	if err := ms.Save(m); err != nil {
 		subscriptionSaveError(c, "切换数据源", err)
 		return
 	}

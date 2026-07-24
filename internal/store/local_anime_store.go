@@ -297,6 +297,17 @@ func (s *LocalAnimeStore) SaveEpisodeIncludingDeleted(ep *model.LocalEpisode) er
 	return retrySQLiteBusy(func() error { return s.db.Unscoped().Save(ep).Error })
 }
 
+// UpdateEpisodeJellyfinItemID updates only the cached Jellyfin item id column
+// for a single episode.
+func (s *LocalAnimeStore) UpdateEpisodeJellyfinItemID(id uint, itemID string) error {
+	if s == nil || s.db == nil {
+		return gorm.ErrInvalidDB
+	}
+	return retrySQLiteBusy(func() error {
+		return s.db.Model(&model.LocalEpisode{}).Where("id = ?", id).Update("jellyfin_item_id", itemID).Error
+	})
+}
+
 // DeleteEpisodesNotInPaths removes any episode rows under animeID whose path
 // is not present in the keep set. When keep is empty, all episodes for the
 // anime are removed.

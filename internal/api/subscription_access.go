@@ -59,3 +59,10 @@ func localAnimeStore() *store.LocalAnimeStore {
 	}
 	return store.NewLocalAnimeStore(db.DB)
 }
+
+func animeMetadataStore() *store.AnimeMetadataStore {
+	if db.DB == nil {
+		return nil
+	}
+	return store.NewAnimeMetadataStore(db.DB)
+}

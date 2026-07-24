@@ -43,6 +43,9 @@ func (m *Manager) Start() {
 			select {
 			case <-m.ticker.C:
 				m.CheckUpdatesContext(m.ctx)
+			case <-m.ctx.Done():
+				m.ticker.Stop()
+				return
 			case <-m.quit:
 				m.ticker.Stop()
 				return

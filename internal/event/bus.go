@@ -38,6 +38,8 @@ type Bus interface {
 	Subscribe(topic EventType, handler Handler) string // 返回 Subscription ID
 	Unsubscribe(topic EventType, subID string)
 	Publish(topic EventType, payload interface{})
+	// Wait 停止接收新事件并阻塞到已派发的异步 Handler 执行完毕。
+	Wait()
 }
 
 // HandlerWrapper 包装 Handler 以便识别
@@ -50,6 +52,8 @@ type HandlerWrapper struct {
 type InMemoryBus struct {
 	mu       sync.RWMutex
 	handlers map[EventType][]HandlerWrapper
+	wg       sync.WaitGroup
+	closed   bool
 }
 
 // GlobalBus 全局单例
@@ -86,9 +90,16 @@ func (b *InMemoryBus) Unsubscribe(topic EventType, subID string) {
 }
 
 func (b *InMemoryBus) Publish(topic EventType, payload interface{}) {
-	b.mu.RLock()
+	b.mu.Lock()
+	if b.closed {
+		b.mu.Unlock()
+		return
+	}
 	wrappers := append([]HandlerWrapper(nil), b.handlers[topic]...)
-	b.mu.RUnlock()
+	// Add while holding the same lock used by Wait. This guarantees that Wait
+	// either observes this publication or closes the bus before it begins.
+	b.wg.Add(len(wrappers))
+	b.mu.Unlock()
 
 	// 异步执行所有 Handler，避免阻塞发布者
 	evt := Event{Type: topic, Payload: payload}
@@ -96,6 +107,7 @@ func (b *InMemoryBus) Publish(topic EventType, payload interface{}) {
 		handler := w.Handler
 		subID := w.ID
 		go func() {
+			defer b.wg.Done()
 			defer func() {
 				if r := recover(); r != nil {
 					log.Printf("event bus handler panic topic=%s sub_id=%s err=%v", topic, subID, r)
@@ -104,4 +116,13 @@ func (b *InMemoryBus) Publish(topic EventType, payload interface{}) {
 			handler(evt)
 		}()
 	}
+}
+
+// Wait stops accepting new publications and blocks until every handler that
+// was already dispatched has completed. A bus is not reusable after Wait.
+func (b *InMemoryBus) Wait() {
+	b.mu.Lock()
+	b.closed = true
+	b.mu.Unlock()
+	b.wg.Wait()
 }

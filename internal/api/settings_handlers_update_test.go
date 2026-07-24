@@ -43,6 +43,41 @@ func TestUpdateSettingsMediaScopeSavesJellyfinAPIKey(t *testing.T) {
 	assert.Equal(t, "test-api-key-123", apiKeyCfg.Value)
 }
 
+func TestUpdateSettingsMediaScopeNormalizesJellyfinURLs(t *testing.T) {
+	resetAuthFixtures(t)
+
+	r := setupRouter()
+	cookie, _ := loginCookie(t, r, "admin")
+	form := url.Values{
+		"settings_scope":                 {"media"},
+		model.ConfigKeyJellyfinUrl:       {" https://jellyfin.example.com/base/ "},
+		model.ConfigKeyJellyfinDirectUrl: {" https://media.example.com/jellyfin/ "},
+		model.ConfigKeyJellyfinUsername:  {""},
+		model.ConfigKeyJellyfinPassword:  {""},
+	}
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodPost, "/api/settings", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Cookie", cookie)
+	markLocalRequest(req)
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var serverURL model.GlobalConfig
+	if err := db.DB.First(&serverURL, "key = ?", model.ConfigKeyJellyfinUrl).Error; err != nil {
+		t.Fatalf("expected Jellyfin server URL to be persisted: %v", err)
+	}
+	assert.Equal(t, "https://jellyfin.example.com/base", serverURL.Value)
+
+	var directURL model.GlobalConfig
+	if err := db.DB.First(&directURL, "key = ?", model.ConfigKeyJellyfinDirectUrl).Error; err != nil {
+		t.Fatalf("expected Jellyfin direct URL to be persisted: %v", err)
+	}
+	assert.Equal(t, "https://media.example.com/jellyfin", directURL.Value)
+}
+
 func TestRenderSettingsTemplateIncludesJellyfinAPIKeyInputID(t *testing.T) {
 	html, err := renderTemplateToString("settings.html", map[string]interface{}{
 		"SkipLayout":       true,

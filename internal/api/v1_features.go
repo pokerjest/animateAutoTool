@@ -20,6 +20,7 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/store"
 	"github.com/pokerjest/animateAutoTool/internal/taskstate"
 	"github.com/pokerjest/animateAutoTool/internal/updater"
+	"gorm.io/gorm"
 )
 
 func V1BatchPreviewHandler(c *gin.Context)    { v1RunJSONHandler(c, BatchPreviewHandler) }
@@ -348,7 +349,11 @@ func applyV1MetadataSource(metadata *model.AnimeMetadata, source string) error {
 		return fmt.Errorf("不支持的数据源")
 	}
 	metadata.DataSource = source
-	if err := db.DB.Save(metadata).Error; err != nil {
+	ms := animeMetadataStore()
+	if ms == nil {
+		return gorm.ErrInvalidDB
+	}
+	if err := ms.Save(metadata); err != nil {
 		return err
 	}
 	service.NewMetadataService().SyncMetadataToModels(metadata)

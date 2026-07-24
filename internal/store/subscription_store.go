@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"time"
 
 	"github.com/pokerjest/animateAutoTool/internal/model"
@@ -74,7 +75,47 @@ func (s *SubscriptionStore) Save(sub *model.Subscription) error {
 	if s == nil || s.db == nil {
 		return gorm.ErrInvalidDB
 	}
-	return s.db.Save(sub).Error
+	return retrySQLiteBusy(func() error { return s.db.Save(sub).Error })
+}
+
+func (s *SubscriptionStore) Create(sub *model.Subscription) error {
+	if s == nil || s.db == nil {
+		return gorm.ErrInvalidDB
+	}
+	return retrySQLiteBusy(func() error { return s.db.Create(sub).Error })
+}
+
+// FindByRSSURLUnscoped looks up a subscription by RSS URL including
+// soft-deleted rows. The bool reports whether a matching row exists.
+func (s *SubscriptionStore) FindByRSSURLUnscoped(rssURL string) (*model.Subscription, bool, error) {
+	if s == nil || s.db == nil {
+		return nil, false, gorm.ErrInvalidDB
+	}
+	var sub model.Subscription
+	err := s.db.Unscoped().Where("rss_url = ?", rssURL).First(&sub).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	return &sub, true, nil
+}
+
+// DeleteCascade hard-deletes a subscription together with its download logs in
+// a single transaction.
+func (s *SubscriptionStore) DeleteCascade(id uint) error {
+	if s == nil || s.db == nil {
+		return gorm.ErrInvalidDB
+	}
+	return retrySQLiteBusy(func() error {
+		return s.db.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Unscoped().Where("subscription_id = ?", id).Delete(&model.DownloadLog{}).Error; err != nil {
+				return err
+			}
+			return tx.Unscoped().Delete(&model.Subscription{}, id).Error
+		})
+	})
 }
 
 func (s *SubscriptionStore) Count() (int64, error) {

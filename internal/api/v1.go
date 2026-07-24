@@ -471,19 +471,20 @@ func V1DeleteSubscriptionHandler(c *gin.Context) {
 		v1Error(c, http.StatusBadRequest, "invalid_id", "订阅 ID 无效")
 		return
 	}
-	var existing model.Subscription
-	_ = db.DB.Unscoped().First(&existing, uint(id)).Error
-	err = db.DB.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Unscoped().Where("subscription_id = ?", uint(id)).Delete(&model.DownloadLog{}).Error; err != nil {
-			return err
-		}
-		return tx.Unscoped().Delete(&model.Subscription{}, uint(id)).Error
-	})
-	if err != nil {
+	s := subscriptionStore()
+	if s == nil {
+		v1Error(c, http.StatusInternalServerError, "subscription_delete_failed", gorm.ErrInvalidDB.Error())
+		return
+	}
+	subTitle := ""
+	if existing, err := s.GetByID(uint(id)); err == nil && existing != nil {
+		subTitle = existing.Title
+	}
+	if err := s.DeleteCascade(uint(id)); err != nil {
 		v1Error(c, http.StatusInternalServerError, "subscription_delete_failed", err.Error())
 		return
 	}
-	service.RecordAudit(buildAuditContext(c), service.AuditEntry{Action: service.AuditActionSubscriptionDelete, Outcome: service.AuditOutcomeSuccess, TargetType: "subscription", TargetID: c.Param("id"), Details: map[string]string{"title": existing.Title}})
+	service.RecordAudit(buildAuditContext(c), service.AuditEntry{Action: service.AuditActionSubscriptionDelete, Outcome: service.AuditOutcomeSuccess, TargetType: "subscription", TargetID: c.Param("id"), Details: map[string]string{"title": subTitle}})
 	v1Message(c, http.StatusOK, "订阅已删除", nil)
 }
 

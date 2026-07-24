@@ -215,7 +215,9 @@ func buildEpisodeList(episodes []model.LocalEpisode, anime *model.LocalAnime, jf
 		// Update cached ID if missing
 		if ep.JellyfinItemID == "" && jfData.Id != "" {
 			ep.JellyfinItemID = jfData.Id
-			db.DB.Model(&ep).Update("jellyfin_item_id", ep.JellyfinItemID)
+			if err := localAnimeStore().UpdateEpisodeJellyfinItemID(ep.ID, ep.JellyfinItemID); err != nil {
+				log.Printf("WARN: cache Jellyfin item id for episode %d failed: %v", ep.ID, err)
+			}
 		}
 
 		thumb := ""

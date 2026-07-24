@@ -17,8 +17,11 @@ type Manager struct {
 	wg      sync.WaitGroup
 }
 
-func NewManager() *Manager {
-	ctx, cancel := context.WithCancel(context.Background())
+func NewManager(parent context.Context) *Manager {
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithCancel(parent)
 	binDir := config.BinDir()
 	dataDir := config.DataDir()
 	return &Manager{

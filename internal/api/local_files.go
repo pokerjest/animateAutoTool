@@ -229,7 +229,7 @@ func RefreshLocalAnimeMetadataHandler(c *gin.Context) {
 		"message": "刷新完成",
 	})
 
-	if err := db.DB.Save(&anime).Error; err != nil {
+	if err := localAnimeStore().SaveAnime(&anime); err != nil {
 		htmlServerError(c, "保存本地番剧信息", err)
 		return
 	}
@@ -292,7 +292,7 @@ func SwitchLocalAnimeSourceHandler(c *gin.Context) {
 		}
 	}
 
-	if err := db.DB.Save(m).Error; err != nil {
+	if err := animeMetadataStore().Save(m); err != nil {
 		htmlServerError(c, "切换数据源", err)
 		return
 	}

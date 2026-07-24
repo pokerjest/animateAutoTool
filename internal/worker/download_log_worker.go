@@ -21,20 +21,28 @@ import (
 
 const downloadLogSyncInterval = 90 * time.Second
 
-func StartDownloadLogSyncWorker() {
+func StartDownloadLogSyncWorker(ctx context.Context) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	go func() {
-		syncDownloadLogStatuses()
+		syncDownloadLogStatuses(ctx)
 
 		ticker := time.NewTicker(downloadLogSyncInterval)
 		defer ticker.Stop()
 
-		for range ticker.C {
-			syncDownloadLogStatuses()
+		for {
+			select {
+			case <-ticker.C:
+				syncDownloadLogStatuses(ctx)
+			case <-ctx.Done():
+				return
+			}
 		}
 	}()
 }
 
-func syncDownloadLogStatuses() {
+func syncDownloadLogStatuses(ctx context.Context) {
 	qbCfg := qbutil.LoadConfig()
 	if qbutil.ManagedBinaryMissing(qbCfg, config.BinDir()) || qbutil.MissingExternalURL(qbCfg) {
 		return
@@ -63,12 +71,12 @@ func syncDownloadLogStatuses() {
 		log.Printf("Worker: archived %d stale download logs (scanned=%d protected=%d)",
 			archiveResult.Archived, archiveResult.Scanned, archiveResult.Protected)
 		if len(archiveResult.AffectedSubscriptionIDs) > 0 {
-			if err := service.RetrySubscriptionsByID(context.Background(), client, archiveResult.AffectedSubscriptionIDs, "manual"); err != nil {
+			if err := service.RetrySubscriptionsByID(ctx, client, archiveResult.AffectedSubscriptionIDs, "manual"); err != nil {
 				log.Printf("Worker: auto retry after archive failed: %v", err)
 			}
 		}
 	}
-	if retried, err := service.RetryStaleSubscriptions(context.Background(), client, 6*time.Hour, "auto_recovery"); err != nil {
+	if retried, err := service.RetryStaleSubscriptions(ctx, client, 6*time.Hour, "auto_recovery"); err != nil {
 		log.Printf("Worker: stale subscription retry failed: %v", err)
 	} else if retried > 0 {
 		log.Printf("Worker: retried %d stale subscriptions", retried)

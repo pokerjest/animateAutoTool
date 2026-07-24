@@ -222,7 +222,9 @@ func resolveSeriesIDForPlayback(client *jellyfin.Client, anime *model.LocalAnime
 
 	if seriesID != "" {
 		anime.JellyfinSeriesID = seriesID
-		db.DB.Save(anime)
+		if err := localAnimeStore().SaveAnime(anime); err != nil {
+			log.Printf("WARN: cache Jellyfin series id for anime %d failed: %v", anime.ID, err)
+		}
 	}
 
 	return seriesID
@@ -318,7 +320,9 @@ func GetPlayInfoHandler(c *gin.Context) {
 		// Cache it
 		log.Printf("[DEBUG] PlayInfo: Resolved and Cached ItemID %s", epId)
 		ep.JellyfinItemID = epId
-		db.DB.Save(&ep)
+		if err := localAnimeStore().SaveEpisode(&ep); err != nil {
+			log.Printf("WARN: cache Jellyfin item id for episode %d failed: %v", ep.ID, err)
+		}
 	}
 
 	// 6. Generate Stream URL
@@ -416,7 +420,9 @@ func ReportProgressHandler(c *gin.Context) {
 
 		if seriesId != "" {
 			anime.JellyfinSeriesID = seriesId
-			db.DB.Save(&anime)
+			if err := localAnimeStore().SaveAnime(&anime); err != nil {
+				log.Printf("WARN: cache Jellyfin series id for anime %d failed: %v", anime.ID, err)
+			}
 		}
 	}
 
@@ -434,7 +440,9 @@ func ReportProgressHandler(c *gin.Context) {
 		}
 		itemId = id
 		ep.JellyfinItemID = itemId
-		db.DB.Save(&ep)
+		if err := localAnimeStore().SaveEpisode(&ep); err != nil {
+			log.Printf("WARN: cache Jellyfin item id for episode %d failed: %v", ep.ID, err)
+		}
 	}
 
 	// 4. Act on Event

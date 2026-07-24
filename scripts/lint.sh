@@ -11,7 +11,10 @@ if [ ! -x "$LINTER" ]; then
     exit 1
 fi
 
-export GOTOOLCHAIN=local
+# Default to "auto" so the Go toolchain required by go.mod (>= 1.25) can be
+# fetched when the locally resolved `go` is older. Override by exporting
+# GOTOOLCHAIN before invoking this script (CI pins the exact toolchain).
+export GOTOOLCHAIN="${GOTOOLCHAIN:-auto}"
 export GOTELEMETRY=off
 export GOMODCACHE="$ROOT_DIR/.gomodcache"
 export GOCACHE="$ROOT_DIR/.gocache"

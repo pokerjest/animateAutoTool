@@ -1,4 +1,4 @@
-.PHONY: all frontend-build frontend-test build run start stop restart status log help clean doctor repair package package-e2e
+.PHONY: all frontend-build frontend-test build run start stop restart status log help clean doctor repair package package-e2e lint vulncheck
 
 # 默认目标：显示帮助信息
 all: help
@@ -52,6 +52,14 @@ package:
 package-e2e:
 	@bash ./scripts/test-package-e2e.sh
 
+# 运行 golangci-lint (使用项目固定的 .tools/bin/golangci-lint)
+lint:
+	@sh scripts/lint.sh
+
+# 依赖漏洞扫描
+vulncheck:
+	@go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
 # 运行健康诊断
 doctor:
 	@go run ./cmd/doctor
@@ -73,6 +81,8 @@ help:
 	@echo "  make build    - 编译项目 (bin/animate-server)"
 	@echo "  make frontend-build - 构建嵌入式 Vue 前端"
 	@echo "  make frontend-test  - 运行前端组件测试"
+	@echo "  make lint     - 运行 golangci-lint 静态检查"
+	@echo "  make vulncheck - 扫描依赖已知漏洞 (govulncheck)"
 	@echo "  make run      - 以前台模式运行服务 (适合调试)"
 	@echo "  make start    - 以后台模式启动服务"
 	@echo "  make stop     - 停止后台服务"

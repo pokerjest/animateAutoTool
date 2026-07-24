@@ -29,6 +29,11 @@ type Task struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// maxTrackedTasks caps retained task history. Active tasks are never evicted,
+// so the registry may temporarily exceed this limit while more than this many
+// tasks are queued or running.
+const maxTrackedTasks = 200
+
 type Registry struct {
 	mu    sync.RWMutex
 	tasks map[string]Task
@@ -112,7 +117,33 @@ func (r *Registry) update(task Task) Task {
 	task.UpdatedAt = time.Now().UTC()
 	r.mu.Lock()
 	r.tasks[task.TaskID] = task
+	if len(r.tasks) > maxTrackedTasks {
+		r.evictOldestLocked(maxTrackedTasks)
+	}
 	r.mu.Unlock()
 	event.GlobalBus.Publish(event.EventTaskUpdate, task)
 	return task
+}
+
+// evictOldestLocked removes the oldest terminal tasks until the registry is at
+// the requested size. Queued and running tasks must remain addressable by ID.
+// Callers must hold r.mu.
+func (r *Registry) evictOldestLocked(keep int) {
+	if len(r.tasks) <= keep {
+		return
+	}
+	items := make([]Task, 0, len(r.tasks))
+	for _, task := range r.tasks {
+		if task.Status == StatusCompleted || task.Status == StatusError {
+			items = append(items, task)
+		}
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].UpdatedAt.Before(items[j].UpdatedAt) })
+	remove := len(r.tasks) - keep
+	if remove > len(items) {
+		remove = len(items)
+	}
+	for _, task := range items[:remove] {
+		delete(r.tasks, task.TaskID)
+	}
 }

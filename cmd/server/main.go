@@ -18,6 +18,7 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/api"
 	"github.com/pokerjest/animateAutoTool/internal/config"
 	"github.com/pokerjest/animateAutoTool/internal/db"
+	"github.com/pokerjest/animateAutoTool/internal/event"
 	"github.com/pokerjest/animateAutoTool/internal/launcher"
 	"github.com/pokerjest/animateAutoTool/internal/scheduler"
 	"github.com/pokerjest/animateAutoTool/internal/startup"
@@ -49,7 +50,13 @@ func main() {
 func runServer() {
 	log.Printf("AnimateAutoTool version: %s", appversion.AppVersion)
 
-	mgr := launcher.NewManager()
+	rootCtx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopSignals()
+
+	// Managed services must remain available while the HTTP server drains
+	// in-flight requests. StopAll cancels this independent context after the
+	// shutdown sequence completes.
+	mgr := launcher.NewManager(context.Background())
 
 	log.Println("Initializing environment (Checking Alist & qBittorrent)...")
 	if err := mgr.EnsureBinaries(); err != nil {
@@ -71,7 +78,7 @@ func runServer() {
 	if err := db.SyncGlobalConfigsWithConfigFile(); err != nil {
 		log.Printf("Failed to synchronize system settings with %s: %v", config.ConfigFilePath(), err)
 	}
-	startup.Run()
+	startup.Run(rootCtx)
 
 	r := gin.Default()
 	if err := r.SetTrustedProxies(config.AppConfig.Server.TrustedProxies); err != nil {
@@ -79,9 +86,6 @@ func runServer() {
 	}
 	api.InitRoutes(r)
 	api.InitR2Cache()
-
-	rootCtx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stopSignals()
 
 	sch := scheduler.NewManagerWithContext(rootCtx)
 	sch.Start()
@@ -108,6 +112,8 @@ func runServer() {
 		if err := srv.Shutdown(shutdownCtx); err != nil {
 			log.Printf("Graceful shutdown failed: %v", err)
 		}
+		// Drain in-flight async event handlers before the process exits.
+		event.GlobalBus.Wait()
 	case err := <-errCh:
 		if err == nil || err == http.ErrServerClosed {
 			return
