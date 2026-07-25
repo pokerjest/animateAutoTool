@@ -37,6 +37,7 @@ jobs:
       - name: Build and test frontend
         run: |
           npm --prefix web/frontend ci
+          npm audit --prefix web/frontend --audit-level=moderate
           npm --prefix web/frontend run generate:types
           npm --prefix web/frontend run test:run
           npm --prefix web/frontend run build
@@ -65,7 +66,7 @@ jobs:
           args: --timeout=5m
 
       - name: Install govulncheck
-        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.6.0
 
       - name: Run govulncheck
         run: govulncheck ./...
