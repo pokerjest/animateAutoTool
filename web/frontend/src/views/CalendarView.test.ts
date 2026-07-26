@@ -22,6 +22,8 @@ const selection: MikanSubscriptionSelection = {
   rss_url: 'https://mikanani.me/RSS/Bangumi?bangumiId=3141&subgroupid=583',
   backup_rss_url: 'https://mikanani.me/RSS/Bangumi?bangumiId=3141',
   filter_rule: 'ANi',
+  resolution_filter: '1080p',
+  subtitle_language: 'chs',
   allow_multi_subgroup: false,
 }
 

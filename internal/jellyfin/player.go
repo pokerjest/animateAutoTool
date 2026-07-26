@@ -7,6 +7,40 @@ import (
 	"strings"
 )
 
+type ItemUserData struct {
+	PlaybackPositionTicks int64   `json:"PlaybackPositionTicks"`
+	Played                bool    `json:"Played"`
+	IsFavorite            bool    `json:"IsFavorite"`
+	PlayedPercentage      float64 `json:"PlayedPercentage"`
+}
+
+type MediaStream struct {
+	Type         string `json:"Type"`
+	Codec        string `json:"Codec"`
+	Width        int    `json:"Width"`
+	Height       int    `json:"Height"`
+	BitRate      int64  `json:"BitRate"`
+	Channels     int    `json:"Channels"`
+	Language     string `json:"Language"`
+	DisplayTitle string `json:"DisplayTitle"`
+}
+
+type MediaSource struct {
+	Container    string        `json:"Container"`
+	Size         int64         `json:"Size"`
+	Bitrate      int64         `json:"Bitrate"`
+	MediaStreams []MediaStream `json:"MediaStreams"`
+}
+
+type ItemDetails struct {
+	ID           string        `json:"Id"`
+	Name         string        `json:"Name"`
+	Overview     string        `json:"Overview"`
+	RunTimeTicks int64         `json:"RunTimeTicks"`
+	UserData     ItemUserData  `json:"UserData"`
+	MediaSources []MediaSource `json:"MediaSources"`
+}
+
 // GetItemInfo fetches details for an item (resume position, media sources)
 func (c *Client) GetItemInfo(itemId string) (map[string]interface{}, error) {
 	endpoint := fmt.Sprintf("/Users/%s/Items/%s", c.UserID, itemId)
@@ -19,6 +53,22 @@ func (c *Client) GetItemInfo(itemId string) (map[string]interface{}, error) {
 		return nil, err
 	}
 	return result, nil
+}
+
+// GetItemDetails fetches user state and media source details for a Jellyfin item.
+func (c *Client) GetItemDetails(itemID string) (*ItemDetails, error) {
+	params := url.Values{}
+	params.Set("Fields", "Overview,RunTimeTicks,MediaSources,MediaStreams")
+	endpoint := fmt.Sprintf("/Users/%s/Items/%s?%s", c.UserID, itemID, params.Encode())
+	resp, err := c.do("GET", endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	var result ItemDetails
+	if err := json.Unmarshal(resp, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
 }
 
 // GetStreamURL generates a direct stream URL for the item
@@ -140,6 +190,17 @@ func (c *Client) UnmarkPlayed(itemId string) error {
 	// DELETE /Users/{UserId}/PlayedItems/{ItemId}
 	endpoint := fmt.Sprintf("/Users/%s/PlayedItems/%s", c.UserID, itemId)
 	_, err := c.do("DELETE", endpoint, nil)
+	return err
+}
+
+// SetFavorite updates the active user's favorite state for an item.
+func (c *Client) SetFavorite(itemID string, favorite bool) error {
+	method := "POST"
+	if !favorite {
+		method = "DELETE"
+	}
+	endpoint := fmt.Sprintf("/Users/%s/FavoriteItems/%s", c.UserID, itemID)
+	_, err := c.do(method, endpoint, nil)
 	return err
 }
 

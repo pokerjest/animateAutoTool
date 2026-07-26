@@ -841,6 +841,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/jellyfin/episodes/{id}/user-state": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["updateJellyfinEpisodeUserState"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/jellyfin/series/{id}/user-state": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["updateJellyfinSeriesUserState"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/bangumi/subject/{id}/collection": {
         parameters: {
             query?: never;
@@ -867,6 +899,23 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["updateBangumiProgress"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/diagnostics/logs/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Downloads a ZIP containing up to the newest three hourly server log files. */
+        get: operations["exportDiagnosticLogs"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1248,6 +1297,16 @@ export interface components {
             backup_rss_url?: string;
             filter_rule?: string;
             exclude_rule?: string;
+            /**
+             * @description Optional release resolution filter.
+             * @enum {string}
+             */
+            resolution_filter?: "" | "2160p" | "1080p" | "720p";
+            /**
+             * @description Optional subtitle language filter; chs and cht also match bilingual releases.
+             * @enum {string}
+             */
+            subtitle_language?: "" | "chs" | "cht" | "chs_cht";
             expected_episodes?: number;
             allow_multi_subgroup?: boolean;
             auto_disable_on_done?: boolean;
@@ -1319,10 +1378,33 @@ export interface components {
             direct_stream_url: string;
             /** Format: int64 */
             resume_ticks: number;
+            /** Format: int64 */
+            runtime_ticks: number;
+            played: boolean;
+            episode_favorite: boolean;
+            series_favorite: boolean;
+            media: components["schemas"]["JellyfinMediaInfo"];
             poster_url: string;
             title: string;
             episode_title: string;
             diagnostic?: components["schemas"]["PlaybackDiagnostic"];
+        };
+        JellyfinMediaInfo: {
+            container: string;
+            /** Format: int64 */
+            size: number;
+            /** Format: int64 */
+            bitrate: number;
+            width: number;
+            height: number;
+            video_codec: string;
+            audio_codec: string;
+            audio_channels: number;
+            subtitle_count: number;
+        };
+        JellyfinUserStateInput: {
+            played?: boolean;
+            favorite?: boolean;
         };
         PlaybackProgressInput: {
             episode_id: number;
@@ -2336,6 +2418,46 @@ export interface operations {
             404: components["responses"]["Error"];
         };
     };
+    updateJellyfinEpisodeUserState: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["JellyfinUserStateInput"];
+            };
+        };
+        responses: {
+            200: components["responses"]["Success"];
+            404: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+        };
+    };
+    updateJellyfinSeriesUserState: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["JellyfinUserStateInput"];
+            };
+        };
+        responses: {
+            200: components["responses"]["Success"];
+            404: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+        };
+    };
     updateBangumiCollection: {
         parameters: {
             query?: never;
@@ -2362,6 +2484,30 @@ export interface operations {
         requestBody: components["requestBodies"]["JsonObject"];
         responses: {
             200: components["responses"]["Success"];
+        };
+    };
+    exportDiagnosticLogs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Diagnostic log archive */
+            200: {
+                headers: {
+                    "Content-Disposition"?: string;
+                    "X-Log-File-Count"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/zip": string;
+                };
+            };
+            404: components["responses"]["Error"];
+            500: components["responses"]["Error"];
         };
     };
     getBackupStatus: {

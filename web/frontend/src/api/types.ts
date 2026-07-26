@@ -4,7 +4,9 @@ export type SessionState = components['schemas']['SessionState']
 export type TaskAccepted = components['schemas']['TaskAccepted']
 export type TaskUpdate = components['schemas']['TaskUpdate']
 export interface Metadata { ID: number; id?: number; UpdatedAt?: string; updated_at?: string; title: string; title_cn?: string; title_jp?: string; image: string; summary: string; air_date: string; bangumi_id: number; tmdb_id: number; anilist_id: number; data_source: string }
-export interface Subscription { ID: number; mikan_id?: string; title: string; rss_url: string; backup_rss_url?: string; image: string; subtitle_group: string; season: string; filter_rule: string; exclude_rule: string; expected_episodes: number; downloaded_count: number; is_active: boolean; allow_multi_subgroup?: boolean; auto_disable_on_done?: boolean; stale_after_hours?: number; last_run_status: string; last_run_summary: string; last_error_display: string; has_repair_actions?: boolean; can_use_base_rss?: boolean; can_clear_filter?: boolean; can_reset_stale_logs?: boolean; can_retry_missing?: boolean; can_retry_stale?: boolean; can_retry_upgrade?: boolean; can_refresh_library?: boolean; metadata?: Metadata }
+export type ResolutionFilter = '' | '2160p' | '1080p' | '720p'
+export type SubtitleLanguage = '' | 'chs' | 'cht' | 'chs_cht'
+export interface Subscription { ID: number; mikan_id?: string; title: string; rss_url: string; backup_rss_url?: string; image: string; subtitle_group: string; season: string; filter_rule: string; exclude_rule: string; resolution_filter?: ResolutionFilter; subtitle_language?: SubtitleLanguage; expected_episodes: number; downloaded_count: number; is_active: boolean; allow_multi_subgroup?: boolean; auto_disable_on_done?: boolean; stale_after_hours?: number; last_run_status: string; last_run_summary: string; last_error_display: string; has_repair_actions?: boolean; can_use_base_rss?: boolean; can_clear_filter?: boolean; can_reset_stale_logs?: boolean; can_retry_missing?: boolean; can_retry_stale?: boolean; can_retry_upgrade?: boolean; can_refresh_library?: boolean; metadata?: Metadata }
 export type MikanDiscoveryItem = components['schemas']['MikanDiscoveryItem']
 export type MikanDashboard = components['schemas']['MikanDashboard']
 export type MikanSubgroup = components['schemas']['MikanSubgroup']
@@ -25,6 +27,8 @@ export interface MikanSubscriptionSelection {
   rss_url: string
   backup_rss_url: string
   filter_rule: string
+  resolution_filter: ResolutionFilter
+  subtitle_language: SubtitleLanguage
   allow_multi_subgroup: boolean
 }
 export interface LocalAnime { ID: number; title: string; image: string; path: string; file_count: number; total_size: number; season: number; summary: string; metadata?: Metadata; has_repair_actions: boolean }

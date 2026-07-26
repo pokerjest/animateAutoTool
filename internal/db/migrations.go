@@ -58,6 +58,13 @@ var migrations = []migration{
 		Description: "Backfill missing Mikan identifiers from official RSS URLs",
 		Apply:       backfillSubscriptionMikanIDs,
 	},
+	{
+		ID:          "006_subscription_release_filters",
+		Description: "Add resolution and subtitle language filters to subscriptions",
+		Apply: func(tx *gorm.DB) error {
+			return tx.AutoMigrate(&model.Subscription{})
+		},
+	},
 }
 
 func backfillSubscriptionMikanIDs(tx *gorm.DB) error {

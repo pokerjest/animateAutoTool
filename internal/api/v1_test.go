@@ -596,7 +596,7 @@ func TestV1SubscriptionPersistsMikanAssociationWithoutUsingBangumiSubjectID(t *t
 
 	r := setupRouter()
 	cookie, _ := loginCookie(t, r, "admin")
-	body := `{"title":"测试番剧","rss_url":"https://mikanani.me/RSS/Bangumi?bangumiId=3141&subgroupid=583","backup_rss_url":"https://mikanani.me/RSS/Bangumi?bangumiId=3141","mikan_id":"3141","image":"https://mikanani.me/poster.jpg","subtitle_group":"ANi","season":"2026 夏季番组","filter_rule":"ANi","stale_after_hours":168}`
+	body := `{"title":"测试番剧","rss_url":"https://mikanani.me/RSS/Bangumi?bangumiId=3141&subgroupid=583","backup_rss_url":"https://mikanani.me/RSS/Bangumi?bangumiId=3141","mikan_id":"3141","image":"https://mikanani.me/poster.jpg","subtitle_group":"ANi","season":"2026 夏季番组","filter_rule":"ANi","resolution_filter":"1080p","subtitle_language":"chs","stale_after_hours":168}`
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/subscriptions", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -612,11 +612,13 @@ func TestV1SubscriptionPersistsMikanAssociationWithoutUsingBangumiSubjectID(t *t
 	assert.Equal(t, "ANi", created.SubtitleGroup)
 	assert.Equal(t, "2026 夏季番组", created.Season)
 	assert.Equal(t, "https://mikanani.me/poster.jpg", created.Image)
+	assert.Equal(t, "1080p", created.ResolutionFilter)
+	assert.Equal(t, "chs", created.SubtitleLanguage)
 	var incorrectMetadataCount int64
 	require.NoError(t, db.DB.Model(&model.AnimeMetadata{}).Where("bangumi_id = ?", 3141).Count(&incorrectMetadataCount).Error)
 	assert.Zero(t, incorrectMetadataCount, "Mikan identifiers must never be stored as bgm.tv subject IDs")
 
-	updateBody := `{"title":"测试番剧","rss_url":"https://mikanani.me/RSS/Bangumi?bangumiId=3141","mikan_id":"3141","image":"https://mikanani.me/new.jpg","subtitle_group":"","season":"2026 夏季番组","filter_rule":"","allow_multi_subgroup":true,"stale_after_hours":168}`
+	updateBody := `{"title":"测试番剧","rss_url":"https://mikanani.me/RSS/Bangumi?bangumiId=3141","mikan_id":"3141","image":"https://mikanani.me/new.jpg","subtitle_group":"","season":"2026 夏季番组","filter_rule":"","resolution_filter":"2160p","subtitle_language":"chs_cht","allow_multi_subgroup":true,"stale_after_hours":168}`
 	w = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodPut, "/api/v1/subscriptions/"+strconv.FormatUint(uint64(created.ID), 10), bytes.NewBufferString(updateBody))
 	req.Header.Set("Content-Type", "application/json")
@@ -630,6 +632,18 @@ func TestV1SubscriptionPersistsMikanAssociationWithoutUsingBangumiSubjectID(t *t
 	assert.Empty(t, created.FilterRule)
 	assert.True(t, created.AllowMultiSubgroup)
 	assert.Equal(t, "https://mikanani.me/new.jpg", created.Image)
+	assert.Equal(t, "2160p", created.ResolutionFilter)
+	assert.Equal(t, "chs_cht", created.SubtitleLanguage)
+
+	invalidBody := strings.Replace(updateBody, `"resolution_filter":"2160p"`, `"resolution_filter":"1440p"`, 1)
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPut, "/api/v1/subscriptions/"+strconv.FormatUint(uint64(created.ID), 10), bytes.NewBufferString(invalidBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Cookie", cookie)
+	markLocalRequest(req)
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), `"code":"invalid_subscription_filter"`)
 }
 
 func TestRestoringSubscriptionRefreshesMikanAssociationFields(t *testing.T) {
@@ -652,7 +666,7 @@ func TestRestoringSubscriptionRefreshesMikanAssociationFields(t *testing.T) {
 	<-runs
 	require.NoError(t, db.DB.Delete(original).Error)
 
-	restored := &model.Subscription{Title: "新标题", RSSUrl: feedURL, MikanID: "3141", SubtitleGroup: "ANi", Image: "new.jpg", Season: "2026 夏季番组", FilterRule: "ANi"}
+	restored := &model.Subscription{Title: "新标题", RSSUrl: feedURL, MikanID: "3141", SubtitleGroup: "ANi", Image: "new.jpg", Season: "2026 夏季番组", FilterRule: "ANi", ResolutionFilter: "1080p", SubtitleLanguage: "cht"}
 	require.NoError(t, createSubscriptionInternal(restored))
 	<-runs
 
@@ -664,4 +678,6 @@ func TestRestoringSubscriptionRefreshesMikanAssociationFields(t *testing.T) {
 	assert.Equal(t, "new.jpg", got.Image)
 	assert.Equal(t, "2026 夏季番组", got.Season)
 	assert.Equal(t, "ANi", got.FilterRule)
+	assert.Equal(t, "1080p", got.ResolutionFilter)
+	assert.Equal(t, "cht", got.SubtitleLanguage)
 }

@@ -36,6 +36,15 @@ const downloadProgressLabel = computed(() => {
     : `已加入下载 ${props.item.downloaded_count} 集`
 })
 
+const releaseFilterLabel = computed(() => {
+  const parts: string[] = []
+  if (props.item.resolution_filter) parts.push(props.item.resolution_filter.toUpperCase())
+  if (props.item.subtitle_language === 'chs') parts.push('简中')
+  if (props.item.subtitle_language === 'cht') parts.push('繁中')
+  if (props.item.subtitle_language === 'chs_cht') parts.push('简繁')
+  return parts.join(' · ')
+})
+
 const repairActions = computed<RepairAction[]>(() => [
   { name: 'use-base-rss', label: '改用主 RSS', visible: Boolean(props.item.can_use_base_rss) },
   { name: 'clear-filter', label: '清空过滤', visible: Boolean(props.item.can_clear_filter) },
@@ -78,7 +87,7 @@ function isRepairBusy(name: string) {
         </span>
       </div>
       <p class="muted mt-1 truncate text-sm">
-        {{ item.subtitle_group || '未指定字幕组' }} · {{ downloadProgressLabel }}
+        {{ item.subtitle_group || '未指定字幕组' }}<template v-if="releaseFilterLabel"> · {{ releaseFilterLabel }}</template> · {{ downloadProgressLabel }}
       </p>
       <p class="mt-2 text-xs" :class="item.last_error_display ? 'text-[var(--danger)]' : 'muted'">
         {{ item.last_error_display || item.last_run_summary || '等待首次检查' }}

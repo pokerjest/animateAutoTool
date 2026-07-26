@@ -175,6 +175,9 @@ func CreateSubscriptionHandler(c *gin.Context) {
 
 func createSubscriptionInternal(sub *model.Subscription) error {
 	normalizeMikanAssociation(sub)
+	if err := normalizeSubscriptionReleaseFilters(sub); err != nil {
+		return err
+	}
 	normalizeSubscriptionStrategy(sub)
 
 	if sub.Metadata == nil {
@@ -215,6 +218,8 @@ func createSubscriptionInternal(sub *model.Subscription) error {
 			existing.Season = sub.Season
 			existing.FilterRule = sub.FilterRule
 			existing.ExcludeRule = sub.ExcludeRule
+			existing.ResolutionFilter = sub.ResolutionFilter
+			existing.SubtitleLanguage = sub.SubtitleLanguage
 			existing.BackupRSSUrl = sub.BackupRSSUrl
 			existing.ExpectedEpisodes = sub.ExpectedEpisodes
 			existing.AutoDisableOnDone = sub.AutoDisableOnDone
@@ -280,6 +285,23 @@ func normalizeSubscriptionStrategy(sub *model.Subscription) {
 	if sub.StaleAfterHours == 0 {
 		sub.StaleAfterHours = 168
 	}
+}
+
+func normalizeSubscriptionReleaseFilters(sub *model.Subscription) error {
+	if sub == nil {
+		return nil
+	}
+	resolution, ok := service.NormalizeResolutionFilter(sub.ResolutionFilter)
+	if !ok {
+		return fmt.Errorf("不支持的清晰度筛选: %s", strings.TrimSpace(sub.ResolutionFilter))
+	}
+	language, ok := service.NormalizeSubtitleLanguage(sub.SubtitleLanguage)
+	if !ok {
+		return fmt.Errorf("不支持的字幕语言筛选: %s", strings.TrimSpace(sub.SubtitleLanguage))
+	}
+	sub.ResolutionFilter = resolution
+	sub.SubtitleLanguage = language
+	return nil
 }
 
 func CreateBatchSubscriptionHandler(c *gin.Context) {
@@ -491,6 +513,8 @@ func UpdateSubscriptionHandler(c *gin.Context) {
 		RSSUrl             string `form:"RSSUrl" binding:"required"`
 		FilterRule         string `form:"FilterRule"`
 		ExcludeRule        string `form:"ExcludeRule"`
+		ResolutionFilter   string `form:"ResolutionFilter"`
+		SubtitleLanguage   string `form:"SubtitleLanguage"`
 		BackupRSSUrl       string `form:"BackupRSSUrl"`
 		ExpectedEpisodes   int    `form:"ExpectedEpisodes"`
 		AllowMultiSubgroup bool   `form:"AllowMultiSubgroup"`
@@ -521,11 +545,17 @@ func UpdateSubscriptionHandler(c *gin.Context) {
 	sub.RSSUrl = input.RSSUrl
 	sub.FilterRule = input.FilterRule
 	sub.ExcludeRule = input.ExcludeRule
+	sub.ResolutionFilter = input.ResolutionFilter
+	sub.SubtitleLanguage = input.SubtitleLanguage
 	sub.BackupRSSUrl = input.BackupRSSUrl
 	sub.ExpectedEpisodes = input.ExpectedEpisodes
 	sub.AllowMultiSubgroup = input.AllowMultiSubgroup
 	sub.AutoDisableOnDone = input.AutoDisableOnDone
 	sub.StaleAfterHours = input.StaleAfterHours
+	if err := normalizeSubscriptionReleaseFilters(sub); err != nil {
+		subscriptionBadRequest(c, err.Error())
+		return
+	}
 	normalizeSubscriptionStrategy(sub)
 
 	if err := saveSubscription(sub); err != nil {
@@ -551,12 +581,18 @@ func ValidateSubscriptionRSSHandler(c *gin.Context) {
 		BackupRSSUrl:       strings.TrimSpace(c.Query("backup_rss")),
 		FilterRule:         strings.TrimSpace(c.Query("filter")),
 		ExcludeRule:        strings.TrimSpace(c.Query("exclude")),
+		ResolutionFilter:   strings.TrimSpace(c.Query("resolution_filter")),
+		SubtitleLanguage:   strings.TrimSpace(c.Query("subtitle_language")),
 		SubtitleGroup:      strings.TrimSpace(c.Query("subtitle_group")),
 		AllowMultiSubgroup: c.Query("allow_multi_subgroup") == ValueTrue,
 	}
 
 	if sub.RSSUrl == "" {
 		subscriptionJSONBadRequest(c, "请先输入 RSS 链接")
+		return
+	}
+	if err := normalizeSubscriptionReleaseFilters(&sub); err != nil {
+		subscriptionJSONBadRequest(c, err.Error())
 		return
 	}
 
@@ -583,7 +619,7 @@ func ValidateSubscriptionRSSHandler(c *gin.Context) {
 	if primaryErr == nil && len(primaryEpisodes) == 0 {
 		response.Warnings = append(response.Warnings, "主 RSS 当前为空，可能是该字幕组暂时还没有可用资源。")
 	}
-	if primaryErr == nil && len(primaryEpisodes) > 0 && response.MatchingCount == 0 && (sub.FilterRule != "" || sub.ExcludeRule != "") {
+	if primaryErr == nil && len(primaryEpisodes) > 0 && response.MatchingCount == 0 && (sub.FilterRule != "" || sub.ExcludeRule != "" || sub.ResolutionFilter != "" || sub.SubtitleLanguage != "") {
 		response.Warnings = append(response.Warnings, "当前过滤/排除规则会把本次 RSS 结果全部筛空。")
 	}
 

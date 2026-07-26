@@ -8,6 +8,21 @@
 
 ## [Unreleased]
 
+## [0.8.5] - 2026-07-26
+
+### Added
+- RSS 订阅新增清晰度与字幕语言筛选，可在字幕组之后继续选择 2160p、1080p、720p、简中、繁中或简繁双语，并完整保存到订阅配置。
+- 本地文件扫描新增目录预估和实时进度，任务中心会持续展示已扫描目录、候选番剧与已发现文件数量。
+- Jellyfin 播放器新增已看/未看、单集收藏、整部收藏、上一集、下一集及播完自动连播，并展示分辨率、编码、声道、码率、大小、字幕数量与续播百分比。
+- 系统健康页新增诊断日志导出，可将最新三个小时日志打包为 ZIP 后直接下载，便于提交故障信息。
+
+### Changed
+- Jellyfin 用户状态与媒体信息纳入 OpenAPI 类型契约，剧集列表同步展示 Jellyfin 已看状态和播放进度。
+- 订阅筛选与扫描进度接入统一任务状态和前端反馈，生产版前端资源已重新生成。
+
+### Fixed
+- 修复播放器更新已看状态时写入 Vue Query 只读数据导致的控制台警告，并确保自动下一集会在媒体准备完成后继续播放。
+
 ## [0.8.0] - 2026-07-23
 
 ### Added
@@ -191,7 +206,8 @@
 
 ---
 
-[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v0.8.5...HEAD
+[0.8.5]: https://github.com/pokerjest/animateAutoTool/compare/v0.8.4...v0.8.5
 [0.8.0]: https://github.com/pokerjest/animateAutoTool/compare/v0.7.4...v0.8.0
 [0.7.4]: https://github.com/pokerjest/animateAutoTool/compare/v0.7.3...v0.7.4
 [0.7.3]: https://github.com/pokerjest/animateAutoTool/compare/v0.7.2...v0.7.3

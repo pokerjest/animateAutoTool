@@ -3,7 +3,13 @@ import { computed, reactive, ref } from 'vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { Plus, Sparkles, Upload } from '@lucide/vue'
 import { api } from '../api/client'
-import type { MikanSubscriptionSelection, Subscription, TaskAccepted } from '../api/types'
+import type {
+  MikanSubscriptionSelection,
+  ResolutionFilter,
+  Subscription,
+  SubtitleLanguage,
+  TaskAccepted,
+} from '../api/types'
 import AppDialog from '../components/AppDialog.vue'
 import AsyncButton from '../components/AsyncButton.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
@@ -62,6 +68,8 @@ function createEmptyForm() {
     season: '',
     filter_rule: '',
     exclude_rule: '',
+    resolution_filter: '' as ResolutionFilter,
+    subtitle_language: '' as SubtitleLanguage,
     expected_episodes: 0,
     allow_multi_subgroup: false,
     auto_disable_on_done: false,
@@ -160,6 +168,8 @@ function openEdit(item: Subscription) {
     season: item.season || '',
     filter_rule: item.filter_rule || '',
     exclude_rule: item.exclude_rule || '',
+    resolution_filter: item.resolution_filter || '',
+    subtitle_language: item.subtitle_language || '',
     expected_episodes: item.expected_episodes || 0,
     allow_multi_subgroup: Boolean(item.allow_multi_subgroup),
     auto_disable_on_done: Boolean(item.auto_disable_on_done),
@@ -194,6 +204,8 @@ function applyMikanSelection(selection: MikanSubscriptionSelection) {
     rss_url: selection.rss_url,
     backup_rss_url: selection.backup_rss_url,
     filter_rule: selection.filter_rule,
+    resolution_filter: selection.resolution_filter,
+    subtitle_language: selection.subtitle_language,
     allow_multi_subgroup: selection.allow_multi_subgroup,
   })
   validation.value = null
@@ -254,6 +266,8 @@ async function validate() {
         backup_rss: form.backup_rss_url,
         filter: form.filter_rule,
         exclude: form.exclude_rule,
+        resolution_filter: form.resolution_filter,
+        subtitle_language: form.subtitle_language,
         subtitle_group: form.subtitle_group,
         allow_multi_subgroup: String(form.allow_multi_subgroup),
       })
@@ -442,6 +456,26 @@ async function importBatch() {
           <div class="grid gap-4 sm:grid-cols-2">
             <label class="label">包含规则<input v-model="form.filter_rule" class="field" /></label>
             <label class="label">排除规则<input v-model="form.exclude_rule" class="field" /></label>
+          </div>
+          <div class="grid gap-4 sm:grid-cols-2">
+            <label class="label">
+              清晰度
+              <select v-model="form.resolution_filter" class="field">
+                <option value="">不限清晰度</option>
+                <option value="2160p">2160P / 4K</option>
+                <option value="1080p">1080P</option>
+                <option value="720p">720P</option>
+              </select>
+            </label>
+            <label class="label">
+              字幕语言
+              <select v-model="form.subtitle_language" class="field">
+                <option value="">不限字幕</option>
+                <option value="chs">简体中文（含简繁）</option>
+                <option value="cht">繁体中文（含简繁）</option>
+                <option value="chs_cht">简繁双语</option>
+              </select>
+            </label>
           </div>
           <div class="grid gap-4 sm:grid-cols-2">
             <label class="label">预期集数<input v-model.number="form.expected_episodes" class="field" type="number" min="0" /></label>

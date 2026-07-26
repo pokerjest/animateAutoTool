@@ -209,7 +209,7 @@ func populateSubscriptionActionHints(sub *model.Subscription) {
 			sub.BaseRSSURL = baseRSS
 		}
 	}
-	if (strings.Contains(sub.LastRunSummary, filteredAllHint) || strings.Contains(sub.LastRunSummary, legacyFilteredAllHint)) && strings.TrimSpace(sub.FilterRule) != "" {
+	if (strings.Contains(sub.LastRunSummary, filteredAllHint) || strings.Contains(sub.LastRunSummary, legacyFilteredAllHint)) && subscriptionHasReleaseFilters(sub) {
 		sub.CanClearFilter = true
 	}
 	if (strings.Contains(sub.LastRunSummary, duplicateOnlyHint) || strings.Contains(sub.LastRunSummary, legacyDuplicateOnlyHint)) && hasResettableSubscriptionLogs(sub.ID, staleLogResetAge) {
@@ -217,6 +217,16 @@ func populateSubscriptionActionHints(sub *model.Subscription) {
 	}
 	sub.HasRepairActions = subscriptionHasRepairActions(sub)
 	populateSubscriptionLifecycle(sub)
+}
+
+func subscriptionHasReleaseFilters(sub *model.Subscription) bool {
+	if sub == nil {
+		return false
+	}
+	return strings.TrimSpace(sub.FilterRule) != "" ||
+		strings.TrimSpace(sub.ExcludeRule) != "" ||
+		strings.TrimSpace(sub.ResolutionFilter) != "" ||
+		strings.TrimSpace(sub.SubtitleLanguage) != ""
 }
 
 func resetSubscriptionActionHints(sub *model.Subscription) {
@@ -504,6 +514,9 @@ func clearFilterAndRecheck(sub *model.Subscription) error {
 	}
 
 	sub.FilterRule = ""
+	sub.ExcludeRule = ""
+	sub.ResolutionFilter = ""
+	sub.SubtitleLanguage = ""
 	sub.LastRunSummary = repairPendingSummary(repairActionClearFilter)
 	sub.LastError = ""
 	return persistRepairAndRecheck(sub, repairActionClearFilter)

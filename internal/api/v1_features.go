@@ -220,6 +220,8 @@ func V1UpdateSubscriptionHandler(c *gin.Context) {
 		Season             string `json:"season"`
 		FilterRule         string `json:"filter_rule"`
 		ExcludeRule        string `json:"exclude_rule"`
+		ResolutionFilter   string `json:"resolution_filter"`
+		SubtitleLanguage   string `json:"subtitle_language"`
 		BackupRSSURL       string `json:"backup_rss_url"`
 		ExpectedEpisodes   int    `json:"expected_episodes"`
 		AllowMultiSubgroup bool   `json:"allow_multi_subgroup"`
@@ -238,11 +240,17 @@ func V1UpdateSubscriptionHandler(c *gin.Context) {
 	sub.Season = strings.TrimSpace(input.Season)
 	sub.FilterRule = strings.TrimSpace(input.FilterRule)
 	sub.ExcludeRule = strings.TrimSpace(input.ExcludeRule)
+	sub.ResolutionFilter = strings.TrimSpace(input.ResolutionFilter)
+	sub.SubtitleLanguage = strings.TrimSpace(input.SubtitleLanguage)
 	sub.BackupRSSUrl = strings.TrimSpace(input.BackupRSSURL)
 	sub.ExpectedEpisodes = input.ExpectedEpisodes
 	sub.AllowMultiSubgroup = input.AllowMultiSubgroup
 	sub.AutoDisableOnDone = input.AutoDisableOnDone
 	sub.StaleAfterHours = input.StaleAfterHours
+	if err := normalizeSubscriptionReleaseFilters(sub); err != nil {
+		v1Error(c, http.StatusBadRequest, "invalid_subscription_filter", err.Error())
+		return
+	}
 	normalizeMikanAssociation(sub)
 	normalizeSubscriptionStrategy(sub)
 	if err := saveSubscription(sub); err != nil {

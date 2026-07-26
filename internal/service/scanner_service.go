@@ -69,6 +69,19 @@ type ScanResult struct {
 	Deleted         int
 }
 
+// ScanProgress describes the current phase of a full local-library scan.
+// Current and Total are monotonic work units: readable folders plus one
+// finalization unit for each configured library root.
+type ScanProgress struct {
+	Phase        string
+	Message      string
+	Current      int64
+	Total        int64
+	FoldersFound int64
+}
+
+type ScanProgressFunc func(ScanProgress)
+
 type scannedMediaFile struct {
 	Path         string
 	Size         int64
@@ -98,6 +111,12 @@ type scanCandidate struct {
 // first and claim their physical files so overlapping library roots do not
 // create duplicate series.
 func (s *ScannerService) ScanAll() error {
+	return s.ScanAllWithProgress(nil)
+}
+
+// ScanAllWithProgress first estimates the number of readable folders, then
+// reports monotonic progress while the real scan processes those folders.
+func (s *ScannerService) ScanAllWithProgress(report ScanProgressFunc) error {
 	scanRunMu.Lock()
 	defer scanRunMu.Unlock()
 
@@ -112,22 +131,79 @@ func (s *ScannerService) ScanAll() error {
 
 	if len(dirs) == 0 {
 		event.GlobalBus.Publish(event.EventScanRun, GlobalScanStatus.Skip("当前没有已配置目录可扫描"))
+		emitScanProgress(report, ScanProgress{Phase: "complete", Message: "当前没有已配置目录可扫描"})
 		return nil
 	}
 
 	sort.SliceStable(dirs, func(i, j int) bool {
 		return len(canonicalComparisonPath(dirs[i].Path)) > len(canonicalComparisonPath(dirs[j].Path))
 	})
+
+	var folderEstimate int64
+	for i := range dirs {
+		baseCount := folderEstimate
+		count, countErr := countScanDirectories(dirs[i].Path, func(current int64, _ string) {
+			emitScanProgress(report, ScanProgress{
+				Phase:        "planning",
+				Message:      fmt.Sprintf("正在统计扫描范围，已发现约 %d 个文件夹", baseCount+current),
+				FoldersFound: baseCount + current,
+			})
+		})
+		folderEstimate += count
+		if countErr != nil {
+			log.Printf("ScannerService: Failed to estimate directory %s: %v", dirs[i].Path, countErr)
+		}
+	}
+	totalWork := folderEstimate + int64(len(dirs))
+	emitScanProgress(report, ScanProgress{
+		Phase:        "scanning",
+		Message:      fmt.Sprintf("扫描范围统计完成：约 %d 个文件夹，开始读取媒体文件", folderEstimate),
+		Total:        totalWork,
+		FoldersFound: folderEstimate,
+	})
+
 	claimedFiles := make(map[string]struct{})
 	event.GlobalBus.Publish(event.EventScanRun, GlobalScanStatus.Begin(len(dirs)))
+	var scannedFolders int64
+	var lastReportedFolders int64
+	reportStride := max(int64(1), folderEstimate/100)
 
 	for i := range dirs {
 		d := &dirs[i]
-		res, scanErr := s.scanDirectory(d, claimedFiles)
+		root := filepath.Clean(d.Path)
+		res, scanErr := s.scanDirectory(d, claimedFiles, func(path string) {
+			scannedFolders++
+			if scannedFolders != 1 && scannedFolders != folderEstimate && scannedFolders-lastReportedFolders < reportStride {
+				return
+			}
+			lastReportedFolders = scannedFolders
+			if scannedFolders > folderEstimate {
+				folderEstimate = scannedFolders
+				totalWork = folderEstimate + int64(len(dirs))
+			}
+			emitScanProgress(report, ScanProgress{
+				Phase:        "scanning",
+				Message:      fmt.Sprintf("正在扫描文件夹 %d/%d：%s", scannedFolders, folderEstimate, relativeScanPath(root, path)),
+				Current:      scannedFolders + int64(i),
+				Total:        totalWork,
+				FoldersFound: folderEstimate,
+			})
+		})
 		event.GlobalBus.Publish(event.EventScanRun, GlobalScanStatus.Advance(d.Path, res, scanErr))
 		if scanErr != nil {
 			log.Printf("ScannerService: Failed to completely scan directory %s: %v", d.Path, scanErr)
 		}
+		message := fmt.Sprintf("已完成 %d/%d 个扫描根目录", i+1, len(dirs))
+		if res != nil {
+			message = fmt.Sprintf("已完成 %d/%d 个扫描根目录，发现 %d 个媒体文件、%d 部番剧", i+1, len(dirs), res.DiscoveredFiles, res.CandidateSeries)
+		}
+		emitScanProgress(report, ScanProgress{
+			Phase:        "finalizing",
+			Message:      message,
+			Current:      scannedFolders + int64(i+1),
+			Total:        totalWork,
+			FoldersFound: folderEstimate,
+		})
 	}
 	event.GlobalBus.Publish(event.EventScanRun, GlobalScanStatus.Finish())
 	event.GlobalBus.Publish(event.EventScanComplete, map[string]interface{}{
@@ -142,10 +218,10 @@ func (s *ScannerService) ScanAll() error {
 func (s *ScannerService) ScanDirectory(dir *model.LocalAnimeDirectory) (*ScanResult, error) {
 	scanRunMu.Lock()
 	defer scanRunMu.Unlock()
-	return s.scanDirectory(dir, nil)
+	return s.scanDirectory(dir, nil, nil)
 }
 
-func (s *ScannerService) scanDirectory(dir *model.LocalAnimeDirectory, claimedFiles map[string]struct{}) (*ScanResult, error) {
+func (s *ScannerService) scanDirectory(dir *model.LocalAnimeDirectory, claimedFiles map[string]struct{}, onDirectory func(string)) (*ScanResult, error) {
 	if dir == nil || strings.TrimSpace(dir.Path) == "" {
 		return nil, errors.New("scan directory path is empty")
 	}
@@ -155,7 +231,7 @@ func (s *ScannerService) scanDirectory(dir *model.LocalAnimeDirectory, claimedFi
 	log.Printf("ScannerService: Starting scan for %s", root)
 	event.GlobalBus.Publish(event.EventScanProgress, map[string]interface{}{"type": "start", "dir": root})
 
-	mediaFiles, walkErrors, fatalErr := discoverMediaFiles(root, claimedFiles)
+	mediaFiles, walkErrors, fatalErr := discoverMediaFiles(root, claimedFiles, onDirectory)
 	if fatalErr != nil {
 		_ = reportScanIssue(issueKey, root, fatalErr)
 		return nil, fatalErr
@@ -278,7 +354,7 @@ func reportScanIssue(issueKey, root string, scanErr error) error {
 	})
 }
 
-func discoverMediaFiles(root string, claimed map[string]struct{}) ([]scannedMediaFile, []error, error) {
+func discoverMediaFiles(root string, claimed map[string]struct{}, onDirectory func(string)) ([]scannedMediaFile, []error, error) {
 	rootInfo, err := os.Stat(root)
 	if err != nil {
 		return nil, nil, err
@@ -310,6 +386,9 @@ func discoverMediaFiles(root string, claimed map[string]struct{}) ([]scannedMedi
 				walkErrors = append(walkErrors, fmt.Errorf("read directory %s: %w", path, readErr))
 				return
 			}
+			if onDirectory != nil {
+				onDirectory(path)
+			}
 			for _, entry := range entries {
 				if shouldSkipScanEntry(entry.Name(), entry.IsDir()) {
 					continue
@@ -334,6 +413,76 @@ func discoverMediaFiles(root string, claimed map[string]struct{}) ([]scannedMedi
 	walk(root)
 	sort.Slice(media, func(i, j int) bool { return media[i].Path < media[j].Path })
 	return media, walkErrors, nil
+}
+
+func emitScanProgress(report ScanProgressFunc, progress ScanProgress) {
+	if report != nil {
+		report(progress)
+	}
+}
+
+// countScanDirectories mirrors the real walk without parsing media files. It
+// deliberately returns an estimate: directories may change between the two
+// passes, and the real scan adjusts its total upward if it discovers more.
+func countScanDirectories(root string, onCount func(int64, string)) (int64, error) {
+	root = filepath.Clean(root)
+	rootInfo, err := os.Stat(root)
+	if err != nil {
+		return 0, err
+	}
+	if !rootInfo.IsDir() {
+		return 0, nil
+	}
+	if _, err := os.ReadDir(root); err != nil {
+		return 0, err
+	}
+
+	visited := make(map[string]struct{})
+	var count int64
+	var walk func(string)
+	walk = func(path string) {
+		info, statErr := os.Stat(path)
+		if statErr != nil || !info.IsDir() {
+			return
+		}
+		realDir := canonicalComparisonPath(path)
+		if _, ok := visited[realDir]; ok {
+			return
+		}
+		visited[realDir] = struct{}{}
+		entries, readErr := os.ReadDir(path)
+		if readErr != nil {
+			return
+		}
+		count++
+		if onCount != nil && (count == 1 || count%25 == 0) {
+			onCount(count, path)
+		}
+		for _, entry := range entries {
+			isDirectory := entry.IsDir()
+			if !isDirectory && entry.Type()&os.ModeSymlink != 0 {
+				targetInfo, statErr := os.Stat(filepath.Join(path, entry.Name()))
+				isDirectory = statErr == nil && targetInfo.IsDir()
+			}
+			if !isDirectory || shouldSkipScanEntry(entry.Name(), true) {
+				continue
+			}
+			walk(filepath.Join(path, entry.Name()))
+		}
+	}
+	walk(root)
+	if onCount != nil && count > 1 && count%25 != 0 {
+		onCount(count, root)
+	}
+	return count, nil
+}
+
+func relativeScanPath(root, path string) string {
+	relative, err := filepath.Rel(root, path)
+	if err != nil || relative == "." || strings.HasPrefix(relative, "..") {
+		return filepath.Base(path)
+	}
+	return filepath.Join(filepath.Base(root), relative)
 }
 
 func shouldSkipScanEntry(name string, isDir bool) bool {

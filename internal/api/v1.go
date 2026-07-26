@@ -155,6 +155,8 @@ func initV1Routes(r *gin.Engine) {
 		protected.POST("/local-directories/:id/rename", V1RenameApplyHandler)
 		protected.GET("/jellyfin/stream/:id", ProxyVideoHandler)
 		protected.GET("/jellyfin/play/:id", GetPlayInfoHandler)
+		protected.PUT("/jellyfin/episodes/:id/user-state", UpdateJellyfinEpisodeStateHandler)
+		protected.PUT("/jellyfin/series/:id/user-state", UpdateJellyfinSeriesStateHandler)
 		protected.POST("/jellyfin/progress", ReportProgressHandler)
 		protected.POST("/bangumi/subject/:id/collection", V1BangumiCollectionHandler)
 		protected.POST("/bangumi/subject/:id/progress", V1BangumiProgressHandler)
@@ -172,6 +174,7 @@ func initV1Routes(r *gin.Engine) {
 
 		protected.GET("/health", V1HealthHandler)
 		protected.GET("/runtime", V1RuntimeHandler)
+		protected.GET("/diagnostics/logs/export", V1ExportDiagnosticLogsHandler)
 		protected.GET("/audit-logs", V1AuditLogsHandler)
 		protected.GET("/settings", V1SettingsHandler)
 		protected.PUT("/settings", V1UpdateSettingsHandler)
@@ -421,6 +424,10 @@ func V1CreateSubscriptionHandler(c *gin.Context) {
 		v1Error(c, http.StatusBadRequest, "invalid_subscription", "番剧名称和 RSS 地址不能为空")
 		return
 	}
+	if err := normalizeSubscriptionReleaseFilters(&sub); err != nil {
+		v1Error(c, http.StatusBadRequest, "invalid_subscription_filter", err.Error())
+		return
+	}
 	if err := createSubscriptionInternal(&sub); err != nil {
 		status := http.StatusInternalServerError
 		if err.Error() == "exists" {
@@ -625,11 +632,15 @@ func V1LocalScanHandler(c *gin.Context) {
 	taskstate.Global.Start(taskID, "scan", "本地扫描", "正在扫描本地媒体目录")
 	go func() {
 		scanner := service.NewScannerService()
-		if err := scanner.ScanAll(); err != nil {
+		if err := scanner.ScanAllWithProgress(func(progress service.ScanProgress) {
+			taskstate.Global.Progress(taskID, progress.Message, progress.Current, progress.Total)
+		}); err != nil {
 			log.Printf("local scan failed: %v", err)
 			taskstate.Global.Fail(taskID, err)
 			return
 		}
+		current, _ := taskstate.Global.Get(taskID)
+		taskstate.Global.Progress(taskID, "文件扫描完成，正在整理元数据并通知 Jellyfin", current.Current, current.Total)
 		service.NewAgentService().RunAgentForLibrary()
 		triggerJellyfinLibraryRefresh(context.Background())
 		summary := service.GlobalScanStatus.Snapshot().LastSummary
@@ -656,10 +667,14 @@ func V1AddLocalDirectoryHandler(c *gin.Context) {
 	const taskID = "local-scan"
 	taskstate.Global.Start(taskID, "scan", "本地扫描", "目录已添加，正在扫描本地媒体")
 	go func() {
-		if err := service.NewScannerService().ScanAll(); err != nil {
+		if err := service.NewScannerService().ScanAllWithProgress(func(progress service.ScanProgress) {
+			taskstate.Global.Progress(taskID, progress.Message, progress.Current, progress.Total)
+		}); err != nil {
 			taskstate.Global.Fail(taskID, err)
 			return
 		}
+		current, _ := taskstate.Global.Get(taskID)
+		taskstate.Global.Progress(taskID, "文件扫描完成，正在整理元数据并通知 Jellyfin", current.Current, current.Total)
 		service.NewAgentService().RunAgentForLibrary()
 		triggerJellyfinLibraryRefresh(context.Background())
 		taskstate.Global.Complete(taskID, "目录已添加，本地扫描完成")

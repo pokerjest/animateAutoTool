@@ -62,6 +62,19 @@ func TestPopulateSubscriptionActionHintsForFilteredFeed(t *testing.T) {
 	assert.True(t, sub.CanClearFilter)
 }
 
+func TestPopulateSubscriptionActionHintsForReleaseFilters(t *testing.T) {
+	sub := &model.Subscription{
+		ResolutionFilter: "1080p",
+		SubtitleLanguage: "chs",
+		LastRunStatus:    service.SubscriptionRunStatusIdle,
+		LastRunSummary:   "本次 RSS 返回 4 条资源，均被过滤规则跳过",
+	}
+
+	populateSubscriptionActionHints(sub)
+
+	assert.True(t, sub.CanClearFilter)
+}
+
 func TestUseBaseRSSHandlerTriggersAutoRecheck(t *testing.T) {
 	if err := db.DB.Exec("DELETE FROM subscriptions").Error; err != nil {
 		t.Fatalf("failed to clear subscriptions: %v", err)
@@ -106,7 +119,10 @@ func TestUseBaseRSSHandlerTriggersAutoRecheck(t *testing.T) {
 
 	assert.Equal(t, "https://mikanani.me/RSS/Bangumi?bangumiId=3941", updated.RSSUrl)
 	assert.Equal(t, "", updated.SubtitleGroup)
-	assert.Equal(t, "", updated.FilterRule)
+	assert.Empty(t, updated.FilterRule)
+	assert.Empty(t, updated.ExcludeRule)
+	assert.Empty(t, updated.ResolutionFilter)
+	assert.Empty(t, updated.SubtitleLanguage)
 }
 
 func TestUseBaseRSSAndRecheckRecordsConsistentFailureSummary(t *testing.T) {
@@ -154,12 +170,15 @@ func TestClearFilterAndRecheckClearsFilterAndTriggersRun(t *testing.T) {
 	}
 
 	sub := model.Subscription{
-		Title:          "Filter Show",
-		RSSUrl:         "https://example.test/filter-show",
-		FilterRule:     "ANi",
-		LastRunStatus:  service.SubscriptionRunStatusIdle,
-		LastRunSummary: "检查到 4 集，但都被过滤规则跳过",
-		IsActive:       true,
+		Title:            "Filter Show",
+		RSSUrl:           "https://example.test/filter-show",
+		FilterRule:       "ANi",
+		ExcludeRule:      "WEB-DL",
+		ResolutionFilter: "1080p",
+		SubtitleLanguage: "chs",
+		LastRunStatus:    service.SubscriptionRunStatusIdle,
+		LastRunSummary:   "检查到 4 集，但都被过滤规则跳过",
+		IsActive:         true,
 	}
 	if err := db.DB.Create(&sub).Error; err != nil {
 		t.Fatalf("failed to create subscription: %v", err)
@@ -195,12 +214,15 @@ func TestClearFilterAndRecheckRecordsConsistentFailureSummary(t *testing.T) {
 	}
 
 	sub := model.Subscription{
-		Title:          "Filter Show",
-		RSSUrl:         "https://example.test/filter-show",
-		FilterRule:     "ANi",
-		LastRunStatus:  service.SubscriptionRunStatusIdle,
-		LastRunSummary: "检查到 4 集，但都被过滤规则跳过",
-		IsActive:       true,
+		Title:            "Filter Show",
+		RSSUrl:           "https://example.test/filter-show",
+		FilterRule:       "ANi",
+		ExcludeRule:      "WEB-DL",
+		ResolutionFilter: "1080p",
+		SubtitleLanguage: "chs",
+		LastRunStatus:    service.SubscriptionRunStatusIdle,
+		LastRunSummary:   "检查到 4 集，但都被过滤规则跳过",
+		IsActive:         true,
 	}
 	if err := db.DB.Create(&sub).Error; err != nil {
 		t.Fatalf("failed to create subscription: %v", err)
@@ -225,6 +247,10 @@ func TestClearFilterAndRecheckRecordsConsistentFailureSummary(t *testing.T) {
 	assert.Equal(t, service.SubscriptionRunStatusIdle, updated.LastRunStatus)
 	assert.Equal(t, "已清空过滤规则，但自动重检未执行", updated.LastRunSummary)
 	assert.Equal(t, "qb offline", updated.LastError)
+	assert.Empty(t, updated.FilterRule)
+	assert.Empty(t, updated.ExcludeRule)
+	assert.Empty(t, updated.ResolutionFilter)
+	assert.Empty(t, updated.SubtitleLanguage)
 }
 
 func TestPopulateSubscriptionActionHintsForStaleDuplicateLogs(t *testing.T) {

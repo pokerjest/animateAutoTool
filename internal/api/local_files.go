@@ -48,19 +48,22 @@ type RenameRequest struct {
 
 // EpisodeDisplay 展示用的集数信息
 type EpisodeDisplay struct {
-	ID        uint    `json:"id"` // 0 if not in DB
-	Name      string  `json:"name"`
-	Path      string  `json:"path"`
-	Size      int64   `json:"size"`
-	Episode   int     `json:"episode"`
-	Season    int     `json:"season"`
-	Playable  bool    `json:"playable"`
-	Watched   bool    `json:"watched"`
-	Thumbnail string  `json:"thumbnail"`
-	Overview  string  `json:"overview"`
-	Rating    float64 `json:"rating"`
-	AirDate   string  `json:"air_date"`
-	Duration  string  `json:"duration"`
+	ID              uint    `json:"id"` // 0 if not in DB
+	Name            string  `json:"name"`
+	Path            string  `json:"path"`
+	Size            int64   `json:"size"`
+	Episode         int     `json:"episode"`
+	Season          int     `json:"season"`
+	Playable        bool    `json:"playable"`
+	Watched         bool    `json:"watched"`
+	Thumbnail       string  `json:"thumbnail"`
+	Overview        string  `json:"overview"`
+	Rating          float64 `json:"rating"`
+	AirDate         string  `json:"air_date"`
+	Duration        string  `json:"duration"`
+	ResumeTicks     int64   `json:"resume_ticks"`
+	RuntimeTicks    int64   `json:"runtime_ticks"`
+	ProgressPercent float64 `json:"progress_percent"`
 }
 
 // CollectionStatus 收藏状态信息

@@ -181,7 +181,22 @@ func ParseTitle(title string) Episode {
 		ep.SubGroup = match[1]
 	}
 
-	// 2. 尝试提取集数
+	// 2. 提取清晰度。Mikan RSS 没有独立的清晰度字段，只能从发布标题中识别。
+	resolutionRegex := regexp.MustCompile(`(?i)(^|[^a-z0-9])(2160p|4k|uhd|3840x2160|1080p|fhd|1920x1080|720p|1280x720)([^a-z0-9]|$)`)
+	if match := resolutionRegex.FindStringSubmatch(title); len(match) > 2 {
+		switch strings.ToLower(match[2]) {
+		case "4k", "uhd", "3840x2160":
+			ep.Resolution = "2160p"
+		case "fhd", "1920x1080":
+			ep.Resolution = "1080p"
+		case "1280x720":
+			ep.Resolution = "720p"
+		default:
+			ep.Resolution = strings.ToLower(match[2])
+		}
+	}
+
+	// 3. 尝试提取集数
 	// 策略 A: 匹配 " - 28 " 或 " - 28" (结尾)
 	epRegex1 := regexp.MustCompile(`\s-\s(\d+(\.\d+)?)(\s|$)`)
 	// 策略 B: 匹配 " [28] " 或 "[28]" 且后面不是分辨率等

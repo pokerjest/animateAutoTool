@@ -107,6 +107,12 @@ func TestRunMigrationsUpgradesLegacySubscriptionSchema(t *testing.T) {
 	if !target.Migrator().HasColumn(&model.Subscription{}, "expected_episodes") {
 		t.Fatal("expected expected_episodes column to be added to subscriptions")
 	}
+	if !target.Migrator().HasColumn(&model.Subscription{}, "resolution_filter") {
+		t.Fatal("expected resolution_filter column to be added to subscriptions")
+	}
+	if !target.Migrator().HasColumn(&model.Subscription{}, "subtitle_language") {
+		t.Fatal("expected subtitle_language column to be added to subscriptions")
+	}
 	if !target.Migrator().HasTable(&model.LibraryIssue{}) {
 		t.Fatal("expected library_issues table to be created for legacy databases")
 	}
@@ -125,7 +131,10 @@ func TestMikanIDMigrationBackfillsOnlyMissingOfficialRSSAssociations(t *testing.
 	if err := target.AutoMigrate(&SchemaMigration{}); err != nil {
 		t.Fatalf("migrate schema history: %v", err)
 	}
-	for _, item := range migrations[:len(migrations)-1] {
+	for _, item := range migrations {
+		if item.ID == "005_subscription_mikan_ids" {
+			break
+		}
 		if err := target.Create(&SchemaMigration{ID: item.ID, Description: item.Description}).Error; err != nil {
 			t.Fatalf("seed migration %s: %v", item.ID, err)
 		}

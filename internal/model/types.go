@@ -17,6 +17,8 @@ type Subscription struct {
 	Season              string     `json:"season" form:"season"`                      // 季度
 	FilterRule          string     `json:"filter_rule" form:"FilterRule"`             // 过滤规则
 	ExcludeRule         string     `json:"exclude_rule" form:"ExcludeRule"`           // 排除规则
+	ResolutionFilter    string     `json:"resolution_filter" form:"ResolutionFilter"` // 清晰度过滤 (2160p/1080p/720p)
+	SubtitleLanguage    string     `json:"subtitle_language" form:"SubtitleLanguage"` // 字幕语言过滤 (chs/cht/chs_cht)
 	BackupRSSUrl        string     `json:"backup_rss_url" form:"BackupRSSUrl"`        // 备用 RSS
 	ExpectedEpisodes    int        `json:"expected_episodes" form:"ExpectedEpisodes"` // 预期总集数
 	AutoDisableOnDone   bool       `json:"auto_disable_on_done" form:"AutoDisableOnDone"`

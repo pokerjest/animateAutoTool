@@ -16,12 +16,15 @@ import (
 )
 
 type JfEpisodeData struct {
-	Id       string
-	Watched  bool
-	Overview string
-	Rating   float64
-	AirDate  string
-	Duration string // Pre-formatted
+	Id              string
+	Watched         bool
+	Overview        string
+	Rating          float64
+	AirDate         string
+	Duration        string // Pre-formatted
+	ResumeTicks     int64
+	RuntimeTicks    int64
+	ProgressPercent float64
 }
 
 func fetchJellyfinProgress(anime *model.LocalAnime) (map[string]JfEpisodeData, string) {
@@ -114,13 +117,20 @@ func fetchJellyfinProgress(anime *model.LocalAnime) (map[string]JfEpisodeData, s
 					dateStr = t.Format("2006-01-02")
 				}
 
+				progressPercent := 0.0
+				if item.Duration > 0 {
+					progressPercent = min(100, float64(item.UserData.PlaybackPositionTicks)/float64(item.Duration)*100)
+				}
 				jfMap[key] = JfEpisodeData{
-					Id:       item.Id,
-					Watched:  item.UserData.Played,
-					Overview: item.Overview,
-					Rating:   item.Rating,
-					AirDate:  dateStr,
-					Duration: durStr,
+					Id:              item.Id,
+					Watched:         item.UserData.Played,
+					Overview:        item.Overview,
+					Rating:          item.Rating,
+					AirDate:         dateStr,
+					Duration:        durStr,
+					ResumeTicks:     item.UserData.PlaybackPositionTicks,
+					RuntimeTicks:    item.Duration,
+					ProgressPercent: progressPercent,
 				}
 			}
 		}
@@ -267,19 +277,22 @@ func buildEpisodeList(episodes []model.LocalEpisode, anime *model.LocalAnime, jf
 		}
 
 		display = append(display, EpisodeDisplay{
-			ID:        ep.ID,
-			Name:      filepath.Base(ep.Path),
-			Path:      ep.Path,
-			Size:      ep.FileSize,
-			Episode:   ep.EpisodeNum,
-			Season:    ep.SeasonNum,
-			Playable:  true,
-			Watched:   isWatched,
-			Thumbnail: thumb,
-			Overview:  overview,
-			Rating:    jfData.Rating,
-			AirDate:   jfData.AirDate,
-			Duration:  jfData.Duration,
+			ID:              ep.ID,
+			Name:            filepath.Base(ep.Path),
+			Path:            ep.Path,
+			Size:            ep.FileSize,
+			Episode:         ep.EpisodeNum,
+			Season:          ep.SeasonNum,
+			Playable:        true,
+			Watched:         isWatched,
+			Thumbnail:       thumb,
+			Overview:        overview,
+			Rating:          jfData.Rating,
+			AirDate:         jfData.AirDate,
+			Duration:        jfData.Duration,
+			ResumeTicks:     jfData.ResumeTicks,
+			RuntimeTicks:    jfData.RuntimeTicks,
+			ProgressPercent: jfData.ProgressPercent,
 		})
 	}
 	return display

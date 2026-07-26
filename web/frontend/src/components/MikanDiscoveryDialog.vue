@@ -9,11 +9,13 @@ import type {
   MikanEpisodePreview,
   MikanSubgroup,
   MikanSubscriptionSelection,
+  ResolutionFilter,
+  SubtitleLanguage,
 } from '../api/types'
 import AppDialog from './AppDialog.vue'
 import AsyncButton from './AsyncButton.vue'
 import StateBlock from './StateBlock.vue'
-import { buildMikanSelection } from '../utils/mikanSubscription'
+import { buildMikanSelection, mikanEpisodeMatchesFilters } from '../utils/mikanSubscription'
 
 const props = withDefaults(defineProps<{ open: boolean; initialSearch?: string; saving?: boolean }>(), { initialSearch: '', saving: false })
 const emit = defineEmits<{
@@ -49,6 +51,8 @@ const searchText = ref('')
 const submittedSearch = ref('')
 const selectedAnime = ref<SelectedAnime | null>(null)
 const selectedSubgroup = ref<MikanSubgroup | null>(null)
+const resolutionFilter = ref<ResolutionFilter>('')
+const subtitleLanguage = ref<SubtitleLanguage>('')
 
 const dashboard = useQuery({
   queryKey: computed(() => ['mikan-dashboard', selectedYear.value, selectedSeason.value]),
@@ -80,6 +84,9 @@ const episodes = useQuery({
 
 const dashboardItems = computed(() => dashboard.data.value?.days?.[activeDay.value] || [])
 const groupItems = computed(() => subgroups.data.value?.items || [])
+const filteredEpisodes = computed(() => (episodes.data.value?.items || []).filter(episode => (
+  mikanEpisodeMatchesFilters(episode, resolutionFilter.value, subtitleLanguage.value)
+)))
 const dialogTitle = computed(() => step.value === 'subgroups' ? '选择字幕组' : '从 Mikan 发现番剧')
 const dialogDescription = computed(() => step.value === 'subgroups'
   ? '先检查字幕组最近发布的资源，再确认订阅策略。'
@@ -104,6 +111,8 @@ watch(() => props.open, open => {
   step.value = 'browse'
   selectedAnime.value = null
   selectedSubgroup.value = null
+  resolutionFilter.value = ''
+  subtitleLanguage.value = ''
   submittedSearch.value = initialSearch
   searchText.value = initialSearch
 }, { immediate: true })
@@ -119,6 +128,8 @@ function submitSearch() {
 function chooseAnime(item: MikanDiscoveryItem, season = '') {
   selectedAnime.value = { ...item, season }
   selectedSubgroup.value = null
+  resolutionFilter.value = ''
+  subtitleLanguage.value = ''
   step.value = 'subgroups'
 }
 
@@ -130,7 +141,10 @@ function backToBrowse() {
 
 function confirmSelection() {
   if (!selectedAnime.value || !selectedSubgroup.value) return
-  emit('select', buildMikanSelection(selectedAnime.value, selectedSubgroup.value))
+  emit('select', buildMikanSelection(selectedAnime.value, selectedSubgroup.value, {
+    resolution_filter: resolutionFilter.value,
+    subtitle_language: subtitleLanguage.value,
+  }))
 }
 </script>
 
@@ -203,15 +217,39 @@ function confirmSelection() {
               <Check v-if="selectedSubgroup?.id === group.id" class="shrink-0 text-[var(--brand)]" :size="19" />
             </button>
           </div>
+
+          <div class="panel-muted mt-4 grid gap-3 p-4">
+            <h3 class="font-black">资源筛选</h3>
+            <label class="label" for="mikan-resolution-filter">
+              清晰度
+              <select id="mikan-resolution-filter" v-model="resolutionFilter" class="field">
+                <option value="">不限清晰度</option>
+                <option value="2160p">2160P / 4K</option>
+                <option value="1080p">1080P</option>
+                <option value="720p">720P</option>
+              </select>
+            </label>
+            <label class="label" for="mikan-subtitle-language">
+              字幕语言
+              <select id="mikan-subtitle-language" v-model="subtitleLanguage" class="field">
+                <option value="">不限字幕</option>
+                <option value="chs">简体中文（含简繁）</option>
+                <option value="cht">繁体中文（含简繁）</option>
+                <option value="chs_cht">简繁双语</option>
+              </select>
+            </label>
+            <p class="muted text-xs">清晰度、字幕语言会与字幕组及高级规则同时生效。</p>
+          </div>
         </section>
 
         <section aria-live="polite">
-          <div class="flex items-center justify-between gap-3"><h3 class="flex items-center gap-2 font-black"><Film :size="18" />最近资源</h3><span v-if="episodes.data.value" class="badge">共 {{ episodes.data.value.total }} 项</span></div>
+          <div class="flex items-center justify-between gap-3"><h3 class="flex items-center gap-2 font-black"><Film :size="18" />最近资源</h3><span v-if="episodes.data.value" class="badge">预览命中 {{ filteredEpisodes.length }} / {{ episodes.data.value.items.length }}</span></div>
           <StateBlock v-if="episodes.isLoading.value" class="mt-3" state="loading" title="正在预览字幕组资源" />
           <StateBlock v-else-if="episodes.isError.value" class="mt-3" state="error" title="资源预览失败" description="可以重试；预览失败不会修改现有订阅。" :retrying="episodes.isFetching.value" @retry="episodes.refetch()" />
           <StateBlock v-else-if="!episodes.data.value?.items.length" class="mt-3" state="empty" title="该字幕组暂时没有资源" description="可以选择其他字幕组或稍后再试。" />
+          <StateBlock v-else-if="!filteredEpisodes.length" class="mt-3" state="empty" title="最近资源没有命中筛选" description="可以放宽清晰度或字幕语言；保存后，新发布资源仍会继续按当前条件检查。" />
           <div v-else class="mt-3 max-h-80 space-y-2 overflow-y-auto pr-1" data-testid="mikan-episode-preview">
-            <article v-for="episode in episodes.data.value?.items" :key="`${episode.title}-${episode.pub_date}`" class="panel-muted p-3 text-sm">
+            <article v-for="episode in filteredEpisodes" :key="`${episode.title}-${episode.pub_date}`" class="panel-muted p-3 text-sm">
               <strong class="line-clamp-2">{{ episode.title }}</strong>
               <div class="muted mt-2 flex flex-wrap gap-2 text-xs"><span v-if="episode.sub_group" class="badge">{{ episode.sub_group }}</span><span v-if="episode.episode_num">第 {{ episode.episode_num }} 集</span><span v-if="episode.resolution">{{ episode.resolution }}</span><span v-if="episode.size">{{ episode.size }}</span></div>
             </article>

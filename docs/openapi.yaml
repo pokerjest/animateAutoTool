@@ -271,10 +271,47 @@ paths:
         "200": { description: Playback progress accepted }
         "400": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /jellyfin/episodes/{id}/user-state:
+    put:
+      operationId: updateJellyfinEpisodeUserState
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/JellyfinUserStateInput" } } }
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+        "404": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+  /jellyfin/series/{id}/user-state:
+    put:
+      operationId: updateJellyfinSeriesUserState
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/JellyfinUserStateInput" } } }
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+        "404": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
   /bangumi/subject/{id}/collection:
     post: { operationId: updateBangumiCollection, parameters: [{ $ref: "#/components/parameters/Id" }], requestBody: { $ref: "#/components/requestBodies/JsonObject" }, responses: { "200": { $ref: "#/components/responses/Success" } } }
   /bangumi/subject/{id}/progress:
     post: { operationId: updateBangumiProgress, parameters: [{ $ref: "#/components/parameters/Id" }], requestBody: { $ref: "#/components/requestBodies/JsonObject" }, responses: { "200": { $ref: "#/components/responses/Success" } } }
+  /diagnostics/logs/export:
+    get:
+      operationId: exportDiagnosticLogs
+      description: Downloads a ZIP containing up to the newest three hourly server log files.
+      responses:
+        "200":
+          description: Diagnostic log archive
+          headers:
+            Content-Disposition: { schema: { type: string } }
+            X-Log-File-Count: { schema: { type: integer, minimum: 1, maximum: 3 } }
+          content:
+            application/zip:
+              schema: { type: string, format: binary }
+        "404": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
   /backup:
     get: { operationId: getBackupStatus, responses: { "200": { $ref: "#/components/responses/Success" } } }
   /backup/export:
@@ -386,6 +423,8 @@ components:
         backup_rss_url: { type: string, format: uri }
         filter_rule: { type: string }
         exclude_rule: { type: string }
+        resolution_filter: { type: string, enum: ["", 2160p, 1080p, 720p], description: Optional release resolution filter. }
+        subtitle_language: { type: string, enum: ["", chs, cht, chs_cht], description: Optional subtitle language filter; chs and cht also match bilingual releases. }
         expected_episodes: { type: integer, minimum: 0 }
         allow_multi_subgroup: { type: boolean }
         auto_disable_on_done: { type: boolean }
@@ -473,17 +512,40 @@ components:
         primary_target: { type: string }
     JellyfinPlayInfo:
       type: object
-      required: [stream_url, direct_stream_url, resume_ticks, poster_url, title, episode_title]
+      required: [stream_url, direct_stream_url, resume_ticks, runtime_ticks, played, episode_favorite, series_favorite, media, poster_url, title, episode_title]
       properties:
         stream_url: { type: string }
         direct_stream_url:
           type: string
           description: Browser-reachable Jellyfin stream URL; empty when direct playback is not configured.
         resume_ticks: { type: integer, format: int64, minimum: 0 }
+        runtime_ticks: { type: integer, format: int64, minimum: 0 }
+        played: { type: boolean }
+        episode_favorite: { type: boolean }
+        series_favorite: { type: boolean }
+        media: { $ref: "#/components/schemas/JellyfinMediaInfo" }
         poster_url: { type: string }
         title: { type: string }
         episode_title: { type: string }
         diagnostic: { $ref: "#/components/schemas/PlaybackDiagnostic" }
+    JellyfinMediaInfo:
+      type: object
+      required: [container, size, bitrate, width, height, video_codec, audio_codec, audio_channels, subtitle_count]
+      properties:
+        container: { type: string }
+        size: { type: integer, format: int64, minimum: 0 }
+        bitrate: { type: integer, format: int64, minimum: 0 }
+        width: { type: integer, minimum: 0 }
+        height: { type: integer, minimum: 0 }
+        video_codec: { type: string }
+        audio_codec: { type: string }
+        audio_channels: { type: integer, minimum: 0 }
+        subtitle_count: { type: integer, minimum: 0 }
+    JellyfinUserStateInput:
+      type: object
+      properties:
+        played: { type: boolean }
+        favorite: { type: boolean }
     PlaybackProgressInput:
       type: object
       required: [episode_id, event, ticks]

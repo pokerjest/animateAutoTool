@@ -24,6 +24,40 @@ func createScannerDirectory(t *testing.T, root string) model.LocalAnimeDirectory
 	return directory
 }
 
+func TestScanAllReportsEstimatedFolderProgress(t *testing.T) {
+	withServiceTestDB(t)
+	root := t.TempDir()
+	writeScannerFixture(t, filepath.Join(root, "Progress Show", "Season 01", "Progress Show - 01.mkv"))
+	createScannerDirectory(t, root)
+
+	updates := make([]ScanProgress, 0)
+	err := NewScannerService().ScanAllWithProgress(func(progress ScanProgress) {
+		updates = append(updates, progress)
+	})
+	require.NoError(t, err)
+	require.NotEmpty(t, updates)
+
+	var sawPlanning bool
+	var lastCurrent int64
+	for _, update := range updates {
+		if update.Phase == "planning" && update.FoldersFound >= 3 {
+			sawPlanning = true
+		}
+		if update.Total == 0 {
+			continue
+		}
+		require.GreaterOrEqual(t, update.Current, lastCurrent)
+		require.LessOrEqual(t, update.Current, update.Total)
+		lastCurrent = update.Current
+	}
+	require.True(t, sawPlanning)
+	last := updates[len(updates)-1]
+	require.Equal(t, "finalizing", last.Phase)
+	require.EqualValues(t, 4, last.Total)
+	require.Equal(t, last.Total, last.Current)
+	require.Contains(t, last.Message, "1/1 个扫描根目录")
+}
+
 func TestScannerGroupsLooseFilesAndNestedSeasonDirectories(t *testing.T) {
 	withServiceTestDB(t)
 	root := t.TempDir()

@@ -63,7 +63,14 @@ describe('MikanDiscoveryDialog', () => {
       if (path.includes('/mikan/dashboard')) return response({ season: '2026 夏季番组', days: { '1': [] } })
       if (path.includes('/subscriptions/search')) return response({ items: [{ mikan_id: '3141', title: '测试番剧', image: 'poster.jpg' }] })
       if (path.includes('/mikan/subgroups')) return response({ items: [{ id: '', name: '全部字幕组', is_all: true }, { id: '583', name: 'ANi', is_all: false }] })
-      if (path.includes('/mikan/episodes')) return response({ mikan_id: '3141', total: 1, items: [{ title: '[ANi] 测试番剧 01', episode_num: '01', sub_group: 'ANi', resolution: '1080p', pub_date: '2026-07-23T00:00:00Z' }] })
+      if (path.includes('/mikan/episodes')) return response({
+        mikan_id: '3141',
+        total: 2,
+        items: [
+          { title: '[ANi] 测试番剧 01 [1080P][CHS]', episode_num: '01', sub_group: 'ANi', resolution: '1080p', pub_date: '2026-07-23T00:00:00Z' },
+          { title: '[ANi] 测试番剧 01 [720P][CHT]', episode_num: '01', sub_group: 'ANi', resolution: '720p', pub_date: '2026-07-23T00:00:00Z' },
+        ],
+      })
       throw new Error(`unexpected request: ${path}`)
     }))
 
@@ -75,7 +82,11 @@ describe('MikanDiscoveryDialog', () => {
     await buttonByText(wrapper, '测试番剧').trigger('click')
     await waitForText(wrapper, 'ANi')
     await buttonByText(wrapper, 'ANi').trigger('click')
-    await waitForText(wrapper, '[ANi] 测试番剧 01')
+    await waitForText(wrapper, '[ANi] 测试番剧 01 [1080P][CHS]')
+    await wrapper.get('#mikan-resolution-filter').setValue('1080p')
+    await wrapper.get('#mikan-subtitle-language').setValue('chs')
+    expect(wrapper.text()).toContain('预览命中 1 / 2')
+    expect(wrapper.text()).not.toContain('[720P][CHT]')
     await wrapper.get('[data-testid="confirm-mikan-selection"]').trigger('click')
 
     expect(wrapper.emitted('select')?.[0]?.[0]).toMatchObject({
@@ -85,6 +96,8 @@ describe('MikanDiscoveryDialog', () => {
       rss_url: 'https://mikanani.me/RSS/Bangumi?bangumiId=3141&subgroupid=583',
       backup_rss_url: 'https://mikanani.me/RSS/Bangumi?bangumiId=3141',
       filter_rule: 'ANi',
+      resolution_filter: '1080p',
+      subtitle_language: 'chs',
       allow_multi_subgroup: false,
     })
   })

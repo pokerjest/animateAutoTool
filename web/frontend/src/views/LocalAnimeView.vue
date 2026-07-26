@@ -12,6 +12,7 @@ import PageHeader from '../components/PageHeader.vue'
 import PosterCard from '../components/PosterCard.vue'
 import StateBlock from '../components/StateBlock.vue'
 import { useAsyncActions } from '../composables/useAsyncActions'
+import { useTaskStore } from '../stores/tasks'
 import { useUIStore } from '../stores/ui'
 
 interface Directory { ID:number; path:string; description:string }
@@ -19,7 +20,7 @@ interface Issue { ID:number; Title?:string; title?:string; Message?:string; mess
 interface Payload { directories:Directory[]; items:LocalAnime[]; scan_status:Record<string,unknown>; diagnostics:Issue[] }
 interface RenameItem { anime_name:string; original:string; new:string; path:string }
 
-const ui=useUIStore(),qc=useQueryClient(),actions=useAsyncActions(),search=ref(''),adding=ref(false),dirPath=ref(''),deleteDir=ref<Directory|null>(null),renameDir=ref<Directory|null>(null),renamePattern=ref('{Title} S{Season}E{Ep}'),renamePreview=ref<RenameItem[]>([]),selected=ref<LocalAnime|null>(null),matchQuery=ref(''),matchSource=ref('bangumi'),matchResults=ref<MetadataSearchResult[]>([])
+const ui=useUIStore(),tasks=useTaskStore(),qc=useQueryClient(),actions=useAsyncActions(),search=ref(''),adding=ref(false),dirPath=ref(''),deleteDir=ref<Directory|null>(null),renameDir=ref<Directory|null>(null),renamePattern=ref('{Title} S{Season}E{Ep}'),renamePreview=ref<RenameItem[]>([]),selected=ref<LocalAnime|null>(null),matchQuery=ref(''),matchSource=ref('bangumi'),matchResults=ref<MetadataSearchResult[]>([])
 const debouncedSearch=ref('')
 let searchTimer:ReturnType<typeof setTimeout>|undefined
 watch(search,value=>{
@@ -43,6 +44,8 @@ const firstPage=computed(()=>pages.value[0]?.data)
 const items=computed(()=>pages.value.flatMap(page=>page.data.items))
 const totalItems=computed(()=>pages.value[0]?.meta?.total??items.value.length)
 const remainingItems=computed(()=>Math.max(0,totalItems.value-items.value.length))
+const scanTask=computed(()=>tasks.taskByID('local-scan'))
+const scanPercent=computed(()=>scanTask.value?.total?Math.min(100,Math.round((scanTask.value.current||0)/scanTask.value.total*100)):0)
 async function loadMore(){if(query.hasNextPage.value&&!query.isFetchingNextPage.value)await query.fetchNextPage()}
 async function scan(){try{await actions.runTask('scan',()=>api<TaskAccepted>('/local-anime/scan',{method:'POST'}),'本地扫描','scan','正在扫描本地媒体目录');ui.toast('本地扫描已经启动')}catch(e){ui.toast(e instanceof Error?e.message:'扫描失败','error')}}
 async function chooseDir(){try{await actions.run('choose-dir',async()=>{const result=await api<{path:string}>('/system/pick-directory',{method:'POST',body:JSON.stringify({title:'选择媒体目录',default_path:dirPath.value}),headers:{'Content-Type':'application/json'}});if(result.path)dirPath.value=result.path})}catch(e){ui.toast(e instanceof Error?e.message:'目录选择不可用','error')}}
@@ -60,6 +63,11 @@ const resultName=(item:MetadataSearchResult)=>item.name_cn||item.name||'未命�
 <template>
   <div class="page-grid">
     <PageHeader eyebrow="ON DEVICE" title="本地番剧" description="扫描本地媒体，检查元数据，并从同一工作区进入播放。"><button class="btn btn-secondary" @click="adding=true"><FolderPlus :size="17"/>添加目录</button><AsyncButton class="btn btn-primary" :loading="actions.isBusy('scan','local-scan')" loading-label="扫描中…" @click="scan"><RefreshCw :size="17"/>重新扫描</AsyncButton></PageHeader>
+    <section v-if="scanTask?.tone==='running'" class="panel p-4" role="status" aria-live="polite" aria-busy="true">
+      <div class="flex flex-wrap items-center justify-between gap-3"><div><p class="eyebrow">LOCAL SCAN</p><strong class="mt-1 block">{{ scanTask.detail }}</strong></div><span class="badge">{{ scanTask.total ? `${scanPercent}%` : '正在统计' }}</span></div>
+      <div class="mt-3 h-2 overflow-hidden rounded-full bg-[var(--surface-muted)]"><div v-if="scanTask.total" class="h-full rounded-full bg-[var(--brand)] transition-[width]" :style="{width:`${scanPercent}%`}"></div><div v-else class="h-full w-1/3 animate-pulse rounded-full bg-[var(--brand)]"></div></div>
+      <p v-if="scanTask.total" class="muted mt-2 text-xs">{{ scanTask.current||0 }} / {{ scanTask.total }} 个扫描步骤</p>
+    </section>
     <section v-if="firstPage?.diagnostics.length" class="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200"><div class="flex items-start gap-3"><CircleAlert class="shrink-0"/><div><strong>媒体库有 {{ firstPage.diagnostics.length }} 项需要关注</strong><p class="mt-1 text-sm">{{ firstPage.diagnostics[0].Title||firstPage.diagnostics[0].title }}：{{ firstPage.diagnostics[0].Message||firstPage.diagnostics[0].message }}</p></div></div></section>
     <section class="panel p-4"><div class="grid gap-3 lg:grid-cols-[1fr_auto]"><label class="search-field"><Search :size="18" aria-hidden="true"/><input v-model="search" class="field field-leading-icon" placeholder="搜索本地番剧" aria-label="搜索本地番剧"/></label><span class="badge self-center">{{ totalItems }} 部本地番剧</span></div><div v-if="firstPage?.directories.length" class="mt-4 grid gap-2 lg:grid-cols-2"><article v-for="dir in firstPage.directories" :key="dir.ID" class="panel-muted flex min-w-0 items-center gap-3 p-3"><FolderCog class="shrink-0 text-[var(--sky)]" :size="19"/><div class="min-w-0 flex-1"><p class="truncate text-sm font-bold">{{ dir.path }}</p><p class="muted text-xs">扫描根目录</p></div><button class="btn btn-quiet h-11 w-11 p-0" aria-label="批量重命名" @click="renameDir=dir;renamePreview=[]"><WandSparkles :size="16"/></button><button class="btn btn-danger h-11 w-11 p-0" aria-label="移除目录" @click="deleteDir=dir"><Trash2 :size="16"/></button></article></div></section>
     <StateBlock v-if="query.isLoading.value" state="loading"/><StateBlock v-else-if="query.isError.value" state="error" title="本地媒体加载失败" :retrying="query.isFetching.value" @retry="query.refetch()"/><StateBlock v-else-if="!items.length" state="empty" title="还没有扫描到本地番剧" description="先添加包含番剧文件夹的根目录，然后运行一次扫描。"/>

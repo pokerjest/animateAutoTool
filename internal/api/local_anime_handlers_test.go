@@ -374,6 +374,12 @@ func TestGetPlayInfoUsesConfiguredDirectJellyfinURL(t *testing.T) {
 		case req.Method == http.MethodGet && req.URL.Path == testJellyfinItemsPath:
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"Items":[{"Id":"series-1","ProviderIds":{"bangumi":"4444"}}]}`))
+		case req.Method == http.MethodGet && req.URL.Path == "/Users/user-1/Items/episode-1":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"Id":"episode-1","RunTimeTicks":14400000000,"UserData":{"PlaybackPositionTicks":900000000,"Played":false,"IsFavorite":false}}`))
+		case req.Method == http.MethodGet && req.URL.Path == "/Users/user-1/Items/series-1":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"Id":"series-1","UserData":{"IsFavorite":false}}`))
 		case req.Method == http.MethodGet && strings.HasPrefix(req.URL.Path, "/Users/user-1/Items"):
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"Items":[{"Id":"episode-1","UserData":{"PlaybackPositionTicks":900000000,"Played":false}}]}`))
@@ -413,4 +419,86 @@ func TestGetPlayInfoUsesConfiguredDirectJellyfinURL(t *testing.T) {
 	assert.Equal(t, fmt.Sprintf("/api/v1/jellyfin/stream/%d", ep.ID), payload.StreamURL)
 	assert.Equal(t, "https://media.example-tailnet.ts.net/jellyfin/Videos/episode-1/stream?api_key=test-key&static=true", payload.DirectStreamURL)
 	assert.Equal(t, int64(900000000), payload.ResumeTicks)
+}
+
+func TestUpdateJellyfinEpisodeState(t *testing.T) {
+	resetAuthFixtures(t)
+	requests := make([]string, 0)
+	jf := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		requests = append(requests, req.Method+" "+req.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case req.Method == http.MethodGet && req.URL.Path == testJellyfinUsersPath:
+			_, _ = w.Write([]byte(`[{"Id":"user-1","Name":"admin"}]`))
+		case req.Method == http.MethodGet && req.URL.Path == "/Users/user-1/Items/episode-state-1":
+			_, _ = w.Write([]byte(`{"Id":"episode-state-1","UserData":{"Played":true,"IsFavorite":true}}`))
+		default:
+			w.WriteHeader(http.StatusNoContent)
+		}
+	}))
+	t.Cleanup(jf.Close)
+
+	for _, cfg := range []model.GlobalConfig{
+		{Key: model.ConfigKeyJellyfinUrl, Value: jf.URL},
+		{Key: model.ConfigKeyJellyfinApiKey, Value: "test-key"},
+	} {
+		require.NoError(t, db.DB.Save(&cfg).Error)
+	}
+	metadata := model.AnimeMetadata{Title: "Episode State", BangumiID: 910001}
+	require.NoError(t, db.DB.Create(&metadata).Error)
+	anime := model.LocalAnime{Title: metadata.Title, Path: t.TempDir(), MetadataID: &metadata.ID, JellyfinSeriesID: "series-state-1"}
+	require.NoError(t, db.DB.Create(&anime).Error)
+	episode := model.LocalEpisode{LocalAnimeID: anime.ID, Title: "Episode 1", EpisodeNum: 1, SeasonNum: 1, Path: filepath.Join(anime.Path, "01.mkv"), JellyfinItemID: "episode-state-1"}
+	require.NoError(t, db.DB.Create(&episode).Error)
+
+	r := setupRouter()
+	cookie, _ := loginCookie(t, r, "admin")
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/v1/jellyfin/episodes/%d/user-state", episode.ID), strings.NewReader(`{"played":true,"favorite":true}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Cookie", cookie)
+	markLocalRequest(req)
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.JSONEq(t, `{"data":{"favorite":true,"played":true}}`, w.Body.String())
+	assert.Contains(t, requests, "POST /Users/user-1/PlayedItems/episode-state-1")
+	assert.Contains(t, requests, "POST /Users/user-1/FavoriteItems/episode-state-1")
+}
+
+func TestUpdateJellyfinSeriesFavorite(t *testing.T) {
+	resetAuthFixtures(t)
+	requests := make([]string, 0)
+	jf := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		requests = append(requests, req.Method+" "+req.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		if req.Method == http.MethodGet && req.URL.Path == testJellyfinUsersPath {
+			_, _ = w.Write([]byte(`[{"Id":"user-1","Name":"admin"}]`))
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(jf.Close)
+
+	for _, cfg := range []model.GlobalConfig{
+		{Key: model.ConfigKeyJellyfinUrl, Value: jf.URL},
+		{Key: model.ConfigKeyJellyfinApiKey, Value: "test-key"},
+	} {
+		require.NoError(t, db.DB.Save(&cfg).Error)
+	}
+	metadata := model.AnimeMetadata{Title: "Series State", BangumiID: 910002}
+	require.NoError(t, db.DB.Create(&metadata).Error)
+	anime := model.LocalAnime{Title: metadata.Title, Path: t.TempDir(), MetadataID: &metadata.ID, JellyfinSeriesID: "series-state-2"}
+	require.NoError(t, db.DB.Create(&anime).Error)
+
+	r := setupRouter()
+	cookie, _ := loginCookie(t, r, "admin")
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/v1/jellyfin/series/%d/user-state", anime.ID), strings.NewReader(`{"favorite":false}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Cookie", cookie)
+	markLocalRequest(req)
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.JSONEq(t, `{"data":{"favorite":false}}`, w.Body.String())
+	assert.Contains(t, requests, "DELETE /Users/user-1/FavoriteItems/series-state-2")
 }

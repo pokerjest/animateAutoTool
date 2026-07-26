@@ -24,10 +24,32 @@ type PlayInfoResponse struct {
 	StreamURL       string              `json:"stream_url"`
 	DirectStreamURL string              `json:"direct_stream_url"`
 	ResumeTicks     int64               `json:"resume_ticks"`
+	RuntimeTicks    int64               `json:"runtime_ticks"`
+	Played          bool                `json:"played"`
+	EpisodeFavorite bool                `json:"episode_favorite"`
+	SeriesFavorite  bool                `json:"series_favorite"`
+	Media           JellyfinMediaInfo   `json:"media"`
 	PosterURL       string              `json:"poster_url"`
 	Title           string              `json:"title"`
 	EpisodeTitle    string              `json:"episode_title"`
 	Diagnostic      *PlaybackDiagnostic `json:"diagnostic,omitempty"`
+}
+
+type JellyfinMediaInfo struct {
+	Container     string `json:"container"`
+	Size          int64  `json:"size"`
+	Bitrate       int64  `json:"bitrate"`
+	Width         int    `json:"width"`
+	Height        int    `json:"height"`
+	VideoCodec    string `json:"video_codec"`
+	AudioCodec    string `json:"audio_codec"`
+	AudioChannels int    `json:"audio_channels"`
+	SubtitleCount int    `json:"subtitle_count"`
+}
+
+type jellyfinUserStateInput struct {
+	Played   *bool `json:"played"`
+	Favorite *bool `json:"favorite"`
 }
 
 type PlaybackDiagnostic struct {
@@ -230,6 +252,57 @@ func resolveSeriesIDForPlayback(client *jellyfin.Client, anime *model.LocalAnime
 	return seriesID
 }
 
+func ensureJellyfinEpisodeID(client *jellyfin.Client, anime *model.LocalAnime, ep *model.LocalEpisode) (string, error) {
+	if client == nil || anime == nil || ep == nil {
+		return "", errors.New("missing jellyfin episode context")
+	}
+	if strings.TrimSpace(ep.JellyfinItemID) != "" {
+		return ep.JellyfinItemID, nil
+	}
+	seriesID := resolveSeriesIDForPlayback(client, anime)
+	if seriesID == "" {
+		return "", errors.New("jellyfin series not found")
+	}
+	itemID, _, err := client.GetEpisodeFromSeries(seriesID, ep.SeasonNum, ep.EpisodeNum)
+	if err != nil {
+		return "", err
+	}
+	ep.JellyfinItemID = itemID
+	if err := localAnimeStore().SaveEpisode(ep); err != nil {
+		log.Printf("WARN: cache Jellyfin item id for episode %d failed: %v", ep.ID, err)
+	}
+	return itemID, nil
+}
+
+func jellyfinMediaInfo(details *jellyfin.ItemDetails) JellyfinMediaInfo {
+	if details == nil || len(details.MediaSources) == 0 {
+		return JellyfinMediaInfo{}
+	}
+	source := details.MediaSources[0]
+	result := JellyfinMediaInfo{Container: source.Container, Size: source.Size, Bitrate: source.Bitrate}
+	for _, stream := range source.MediaStreams {
+		switch strings.ToLower(stream.Type) {
+		case "video":
+			if result.VideoCodec == "" {
+				result.VideoCodec = stream.Codec
+				result.Width = stream.Width
+				result.Height = stream.Height
+				if result.Bitrate == 0 {
+					result.Bitrate = stream.BitRate
+				}
+			}
+		case "audio":
+			if result.AudioCodec == "" {
+				result.AudioCodec = stream.Codec
+				result.AudioChannels = stream.Channels
+			}
+		case "subtitle":
+			result.SubtitleCount++
+		}
+	}
+	return result
+}
+
 // GetPlayInfoHandler resolves a local episode to a Jellyfin stream URL
 func GetPlayInfoHandler(c *gin.Context) {
 	idStr := c.Param("id")
@@ -285,6 +358,11 @@ func GetPlayInfoHandler(c *gin.Context) {
 	// 5. Resolve Episode ID
 	epId := ep.JellyfinItemID
 	var resume int64 = 0
+	var details *jellyfin.ItemDetails
+	seriesFavorite := false
+	if seriesDetails, detailsErr := client.GetItemDetails(seriesId); detailsErr == nil {
+		seriesFavorite = seriesDetails.UserData.IsFavorite
+	}
 
 	// Always fetch from Jellyfin to get latest resume ticks, even if we have ID
 	// But if we have ID, we can get UserData directly?
@@ -292,13 +370,10 @@ func GetPlayInfoHandler(c *gin.Context) {
 	// ... (logic to fetch UserData and resume ticks)
 	if epId != "" {
 		log.Printf("[DEBUG] PlayInfo: Found cached ItemID %s", epId)
-		info, err := client.GetItemInfo(epId)
+		info, err := client.GetItemDetails(epId)
 		if err == nil {
-			if userData, ok := info["UserData"].(map[string]interface{}); ok {
-				if ticks, ok := userData["PlaybackPositionTicks"].(float64); ok {
-					resume = int64(ticks)
-				}
-			}
+			details = info
+			resume = info.UserData.PlaybackPositionTicks
 		} else {
 			// Cache might be invalid?
 			log.Printf("[DEBUG] PlayInfo: Cache invalid for %s, refetching...", epId)
@@ -323,6 +398,10 @@ func GetPlayInfoHandler(c *gin.Context) {
 		if err := localAnimeStore().SaveEpisode(&ep); err != nil {
 			log.Printf("WARN: cache Jellyfin item id for episode %d failed: %v", ep.ID, err)
 		}
+		if info, detailsErr := client.GetItemDetails(epId); detailsErr == nil {
+			details = info
+			resume = info.UserData.PlaybackPositionTicks
+		}
 	}
 
 	// 6. Generate Stream URL
@@ -346,16 +425,114 @@ func GetPlayInfoHandler(c *gin.Context) {
 		}
 		log.Printf("[WARN] unable to stat episode file %s: %v", ep.Path, err)
 	}
+	runtimeTicks := int64(0)
+	played := false
+	episodeFavorite := false
+	if details != nil {
+		runtimeTicks = details.RunTimeTicks
+		played = details.UserData.Played
+		episodeFavorite = details.UserData.IsFavorite
+	}
 
 	c.JSON(http.StatusOK, PlayInfoResponse{
 		StreamURL:       proxyUrl,
 		DirectStreamURL: directUrl,
 		ResumeTicks:     resume,
+		RuntimeTicks:    runtimeTicks,
+		Played:          played,
+		EpisodeFavorite: episodeFavorite,
+		SeriesFavorite:  seriesFavorite,
+		Media:           jellyfinMediaInfo(details),
 		PosterURL:       anime.Metadata.Image, // Use local image
 		Title:           anime.Metadata.Title,
 		EpisodeTitle:    fmt.Sprintf("S%dE%d - %s", ep.SeasonNum, ep.EpisodeNum, ep.Title),
 		Diagnostic:      proxyPlaybackDiagnostic("浏览器直连失败时播放器会自动切换到 AnimateTool 代理流。", directUrl != ""),
 	})
+}
+
+// UpdateJellyfinEpisodeStateHandler updates watched/favorite state for a local
+// episode without exposing Jellyfin item identifiers to the browser.
+func UpdateJellyfinEpisodeStateHandler(c *gin.Context) {
+	var input jellyfinUserStateInput
+	if err := c.ShouldBindJSON(&input); err != nil || (input.Played == nil && input.Favorite == nil) {
+		v1Error(c, http.StatusBadRequest, "invalid_jellyfin_state", "至少需要提交已观看或收藏状态")
+		return
+	}
+	var ep model.LocalEpisode
+	if err := db.DB.First(&ep, c.Param("id")).Error; err != nil {
+		v1Error(c, http.StatusNotFound, "episode_not_found", "未找到对应的剧集")
+		return
+	}
+	var anime model.LocalAnime
+	if err := db.DB.Preload("Metadata").First(&anime, ep.LocalAnimeID).Error; err != nil {
+		v1Error(c, http.StatusNotFound, "anime_not_found", "未找到对应的番剧")
+		return
+	}
+	client, err := resolveJellyfinPlaybackClient()
+	if err != nil || client == nil {
+		v1Error(c, http.StatusServiceUnavailable, "jellyfin_unavailable", "Jellyfin 暂时不可用")
+		return
+	}
+	itemID, err := ensureJellyfinEpisodeID(client, &anime, &ep)
+	if err != nil {
+		v1Error(c, http.StatusNotFound, "jellyfin_episode_not_found", "Jellyfin 中未找到对应剧集")
+		return
+	}
+	if input.Played != nil {
+		if *input.Played {
+			err = client.MarkPlayed(itemID)
+		} else {
+			err = client.UnmarkPlayed(itemID)
+		}
+		if err != nil {
+			v1Error(c, http.StatusBadGateway, "jellyfin_state_failed", "更新 Jellyfin 观看状态失败")
+			return
+		}
+	}
+	if input.Favorite != nil {
+		if err := client.SetFavorite(itemID, *input.Favorite); err != nil {
+			v1Error(c, http.StatusBadGateway, "jellyfin_favorite_failed", "更新 Jellyfin 收藏状态失败")
+			return
+		}
+	}
+	details, _ := client.GetItemDetails(itemID)
+	played := input.Played != nil && *input.Played
+	favorite := input.Favorite != nil && *input.Favorite
+	if details != nil {
+		played = details.UserData.Played
+		favorite = details.UserData.IsFavorite
+	}
+	v1Data(c, http.StatusOK, gin.H{"played": played, "favorite": favorite})
+}
+
+// UpdateJellyfinSeriesStateHandler updates the favorite state for a local
+// anime's Jellyfin series.
+func UpdateJellyfinSeriesStateHandler(c *gin.Context) {
+	var input jellyfinUserStateInput
+	if err := c.ShouldBindJSON(&input); err != nil || input.Favorite == nil {
+		v1Error(c, http.StatusBadRequest, "invalid_jellyfin_state", "需要提交收藏状态")
+		return
+	}
+	anime, err := localAnimeStore().GetWithMetadata(c.Param("id"))
+	if err != nil {
+		v1Error(c, http.StatusNotFound, "anime_not_found", "未找到对应的本地番剧")
+		return
+	}
+	client, err := resolveJellyfinPlaybackClient()
+	if err != nil || client == nil {
+		v1Error(c, http.StatusServiceUnavailable, "jellyfin_unavailable", "Jellyfin 暂时不可用")
+		return
+	}
+	seriesID := resolveSeriesIDForPlayback(client, anime)
+	if seriesID == "" {
+		v1Error(c, http.StatusNotFound, "jellyfin_series_not_found", "Jellyfin 中未找到对应番剧")
+		return
+	}
+	if err := client.SetFavorite(seriesID, *input.Favorite); err != nil {
+		v1Error(c, http.StatusBadGateway, "jellyfin_favorite_failed", "更新 Jellyfin 收藏状态失败")
+		return
+	}
+	v1Data(c, http.StatusOK, gin.H{"favorite": *input.Favorite})
 }
 
 // ReportProgressHandler receives progress updates from frontend and forwards to Jellyfin
