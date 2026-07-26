@@ -394,7 +394,11 @@ managed_services:
 
 # Web settings mirror. Values saved in the settings page are synchronized here.
 # This section can contain service passwords and API keys; keep this file private.
-system_settings: {}
+system_settings:
+  # Jellyfin/Plex-compatible default: Series/Season 01/Series - S01E01.ext
+  auto_rename_enabled: "true"
+  auto_rename_series_template: "{title}"
+  auto_rename_episode_template: "{title} - S{season}E{episode}{ext}"
 `) + "\n"
 
 	return os.WriteFile(AppPaths.ConfigFile, []byte(content), 0600)

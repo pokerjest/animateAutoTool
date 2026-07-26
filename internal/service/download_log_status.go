@@ -117,6 +117,7 @@ type DownloadLogArchiveResult struct {
 const (
 	downloadLogStatusDownloading = "downloading"
 	downloadLogStatusCompleted   = "completed"
+	downloadLogStatusRenamed     = "renamed"
 	downloadLogStatusFailed      = "failed"
 	downloadLogStatusArchived    = "archived"
 )

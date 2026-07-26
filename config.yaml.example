@@ -27,4 +27,8 @@ managed_services:
 # Web settings mirror
 # Values saved from the settings page are synchronized here. This section can
 # contain service passwords and API keys, so do not share or commit config.yaml.
-system_settings: {}
+system_settings:
+  # Jellyfin/Plex-compatible default: Series/Season 01/Series - S01E01.ext
+  auto_rename_enabled: "true"
+  auto_rename_series_template: "{title}"
+  auto_rename_episode_template: "{title} - S{season}E{episode}{ext}"

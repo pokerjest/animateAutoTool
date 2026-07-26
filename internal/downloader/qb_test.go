@@ -15,6 +15,7 @@ const (
 	qbVersionPath = "/api/v2/app/version"
 	qbAddPath     = "/api/v2/torrents/add"
 	qbTestCookie  = "cookie-value"
+	qbTestHash    = "abc"
 )
 
 func TestQBittorrentClientLoginAddListAndRename(t *testing.T) {
@@ -63,7 +64,7 @@ func TestQBittorrentClientLoginAddListAndRename(t *testing.T) {
 			if err := r.ParseForm(); err != nil {
 				t.Fatalf("parse rename form: %v", err)
 			}
-			if got := r.Form.Get("hash"); got != "abc" {
+			if got := r.Form.Get("hash"); got != qbTestHash {
 				t.Fatalf("unexpected hash: %q", got)
 			}
 			if got := r.Form.Get("oldPath"); got != "old/file.mkv" {
@@ -100,12 +101,38 @@ func TestQBittorrentClientLoginAddListAndRename(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list torrents failed: %v", err)
 	}
-	if len(torrents) != 1 || torrents[0].Hash != "abc" {
+	if len(torrents) != 1 || torrents[0].Hash != qbTestHash {
 		t.Fatalf("unexpected torrents payload: %+v", torrents)
 	}
 
-	if err := client.RenameFile("abc", "old/file.mkv", "new/file.mkv"); err != nil {
+	if err := client.RenameFile(qbTestHash, "old/file.mkv", "new/file.mkv"); err != nil {
 		t.Fatalf("rename file failed: %v", err)
+	}
+}
+
+func TestQBittorrentClientSetLocation(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v2/torrents/setLocation" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("parse set location form: %v", err)
+		}
+		if got := r.Form.Get("hashes"); got != qbTestHash {
+			t.Fatalf("unexpected set location hash: %q", got)
+		}
+		if got := r.Form.Get("location"); got != "/media/Show/Season 01" {
+			t.Fatalf("unexpected set location: %q", got)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	client := NewQBittorrentClient(server.URL)
+	if err := client.SetLocation(qbTestHash, "/media/Show/Season 01"); err != nil {
+		t.Fatalf("set location failed: %v", err)
 	}
 }
 

@@ -22,6 +22,7 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/httpx"
 	"github.com/pokerjest/animateAutoTool/internal/model"
+	"github.com/pokerjest/animateAutoTool/internal/renamer"
 	"github.com/pokerjest/animateAutoTool/internal/safeio"
 	"github.com/pokerjest/animateAutoTool/internal/service"
 	"github.com/pokerjest/animateAutoTool/internal/store"
@@ -818,7 +819,7 @@ func V1UpdateSettingsHandler(c *gin.Context) {
 		return
 	}
 	allowed := map[string]bool{}
-	for _, key := range []string{model.ConfigKeyQBMode, model.ConfigKeyQBUrl, model.ConfigKeyQBUsername, model.ConfigKeyQBPassword, model.ConfigKeyBaseDir, model.ConfigKeyBangumiAppID, model.ConfigKeyBangumiAppSecret, model.ConfigKeyBangumiAccessToken, model.ConfigKeyBangumiRefreshToken, model.ConfigKeyTMDBToken, model.ConfigKeyAniListToken, model.ConfigKeyProxyURL, model.ConfigKeyProxyBangumi, model.ConfigKeyProxyMikan, model.ConfigKeyProxyTMDB, model.ConfigKeyProxyAniList, model.ConfigKeyProxyJellyfin, model.ConfigKeyProxyAI, model.ConfigKeyProxyUpdater, model.ConfigKeyAuthIPAllowlistEnabled, model.ConfigKeyAuthIPAllowlist, model.ConfigKeyJellyfinUrl, model.ConfigKeyJellyfinDirectUrl, model.ConfigKeyJellyfinUsername, model.ConfigKeyJellyfinPassword, model.ConfigKeyJellyfinApiKey, model.ConfigKeyAListUrl, model.ConfigKeyAListToken, model.ConfigKeyPikPakUsername, model.ConfigKeyPikPakPassword, model.ConfigKeyPikPakRefreshToken, model.ConfigKeyAIBaseURL, model.ConfigKeyAIModel, model.ConfigKeyAIApiKey, model.ConfigKeyR2Endpoint, model.ConfigKeyR2Bucket, model.ConfigKeyR2AccessKey, model.ConfigKeyR2SecretKey, model.ConfigKeyRepoUpdateEnabled, model.ConfigKeyRepoAutoPullEnabled, model.ConfigKeyRepoUpdateIntervalMinutes, model.ConfigKeyRepoUpdateOwner, model.ConfigKeyRepoUpdateName, model.ConfigKeyRepoRequireChecksum} {
+	for _, key := range []string{model.ConfigKeyQBMode, model.ConfigKeyQBUrl, model.ConfigKeyQBUsername, model.ConfigKeyQBPassword, model.ConfigKeyBaseDir, model.ConfigKeyAutoRenameEnabled, model.ConfigKeyAutoRenameSeriesTemplate, model.ConfigKeyAutoRenameEpisodeTemplate, model.ConfigKeyBangumiAppID, model.ConfigKeyBangumiAppSecret, model.ConfigKeyBangumiAccessToken, model.ConfigKeyBangumiRefreshToken, model.ConfigKeyTMDBToken, model.ConfigKeyAniListToken, model.ConfigKeyProxyURL, model.ConfigKeyProxyBangumi, model.ConfigKeyProxyMikan, model.ConfigKeyProxyTMDB, model.ConfigKeyProxyAniList, model.ConfigKeyProxyJellyfin, model.ConfigKeyProxyAI, model.ConfigKeyProxyUpdater, model.ConfigKeyAuthIPAllowlistEnabled, model.ConfigKeyAuthIPAllowlist, model.ConfigKeyJellyfinUrl, model.ConfigKeyJellyfinDirectUrl, model.ConfigKeyJellyfinUsername, model.ConfigKeyJellyfinPassword, model.ConfigKeyJellyfinApiKey, model.ConfigKeyAListUrl, model.ConfigKeyAListToken, model.ConfigKeyPikPakUsername, model.ConfigKeyPikPakPassword, model.ConfigKeyPikPakRefreshToken, model.ConfigKeyAIBaseURL, model.ConfigKeyAIModel, model.ConfigKeyAIApiKey, model.ConfigKeyR2Endpoint, model.ConfigKeyR2Bucket, model.ConfigKeyR2AccessKey, model.ConfigKeyR2SecretKey, model.ConfigKeyRepoUpdateEnabled, model.ConfigKeyRepoAutoPullEnabled, model.ConfigKeyRepoUpdateIntervalMinutes, model.ConfigKeyRepoUpdateOwner, model.ConfigKeyRepoUpdateName, model.ConfigKeyRepoRequireChecksum} {
 		allowed[key] = true
 	}
 	updates := map[string]string{}
@@ -860,6 +861,31 @@ func V1UpdateSettingsHandler(c *gin.Context) {
 				return
 			}
 			value = normalized
+		}
+		if key == model.ConfigKeyAutoRenameEnabled {
+			value = strings.ToLower(value)
+			if value != model.ConfigValueTrue && value != "false" {
+				v1Error(c, http.StatusBadRequest, "invalid_auto_rename", "自动重命名开关必须为 true 或 false")
+				return
+			}
+		}
+		if key == model.ConfigKeyAutoRenameSeriesTemplate {
+			if value == "" {
+				value = renamer.DefaultSeriesTemplate
+			}
+			if err := renamer.ValidateSeriesTemplate(value); err != nil {
+				v1Error(c, http.StatusBadRequest, "invalid_auto_rename_template", err.Error())
+				return
+			}
+		}
+		if key == model.ConfigKeyAutoRenameEpisodeTemplate {
+			if value == "" {
+				value = renamer.DefaultEpisodeTemplate
+			}
+			if err := renamer.ValidateEpisodeTemplate(value); err != nil {
+				v1Error(c, http.StatusBadRequest, "invalid_auto_rename_template", err.Error())
+				return
+			}
 		}
 		updates[key] = value
 	}

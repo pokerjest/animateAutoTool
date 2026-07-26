@@ -16,8 +16,9 @@ func CleanTitle(raw string) string {
 	s = regexp.MustCompile(`\(.*?\)`).ReplaceAllString(s, "")
 
 	// 3. Remove Season info (Series/Season X, Sxx, 第x季, Part x)
-	reSeason := regexp.MustCompile(`(?i)(season\s*\d+|s\d{1,2}|第\s*\d+\s*季|part\s*\d+)`)
+	reSeason := regexp.MustCompile(`(?i)(season\s*\d+|s\d{1,2}|第\s*[0-9一二三四五六七八九十百]+\s*[季期]|part\s*\d+|\d+(?:st|nd|rd|th)\s*season)`)
 	s = reSeason.ReplaceAllString(s, "")
+	s = regexp.MustCompile(`(?i)\s+(?:II|III|IV|V|VI)$`).ReplaceAllString(s, "")
 
 	// 4. Cleanup: Remove extra spaces and leading/trailing dashes/spaces
 	s = strings.TrimSpace(regexp.MustCompile(`\s+`).ReplaceAllString(s, " "))

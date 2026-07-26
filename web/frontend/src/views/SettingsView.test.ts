@@ -47,6 +47,14 @@ describe('SettingsView proxy settings', () => {
     })
 
     await vi.waitFor(() => expect(wrapper.text()).toContain('网络代理'))
+    const downloaderTab = wrapper.findAll('button').find(button => button.text().includes('下载器'))
+    expect(downloaderTab).toBeDefined()
+    await downloaderTab!.trigger('click')
+    expect(wrapper.text()).toContain('下载完成后自动整理')
+    expect(wrapper.text()).toContain('系列文件夹模板')
+    expect(wrapper.text()).toContain('剧集文件模板')
+    expect(wrapper.get('[data-testid="auto-rename-help"]').text()).toContain('系列名/Season 01/系列名 - S01E01.mkv')
+
     const networkTab = wrapper.findAll('button').find(button => button.text().includes('网络代理'))
     expect(networkTab).toBeDefined()
     await networkTab!.trigger('click')

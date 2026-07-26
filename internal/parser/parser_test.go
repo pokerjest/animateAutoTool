@@ -65,6 +65,8 @@ func TestCleanTitle(t *testing.T) {
 		{"Show Season 2", "Show"},
 		{"Show S02", "Show"},
 		{"Show 第2季", "Show"},
+		{"示例番剧 第二季", "示例番剧"},
+		{"Show 2nd Season", "Show"},
 		{"   ", "   "}, // 全空格触发 fallback 返回 raw
 	}
 

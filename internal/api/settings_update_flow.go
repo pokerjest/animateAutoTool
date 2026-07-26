@@ -11,6 +11,7 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/qbutil"
+	"github.com/pokerjest/animateAutoTool/internal/renamer"
 	"github.com/pokerjest/animateAutoTool/internal/store"
 	"github.com/pokerjest/animateAutoTool/internal/updater"
 )
@@ -30,6 +31,9 @@ func resolveSettingsScopeSpec(scope string) settingsScopeSpec {
 				model.ConfigKeyQBUsername,
 				model.ConfigKeyQBPassword,
 				model.ConfigKeyBaseDir,
+				model.ConfigKeyAutoRenameEnabled,
+				model.ConfigKeyAutoRenameSeriesTemplate,
+				model.ConfigKeyAutoRenameEpisodeTemplate,
 			},
 		}
 	case "data-sources":
@@ -90,6 +94,9 @@ func resolveSettingsScopeSpec(scope string) settingsScopeSpec {
 				model.ConfigKeyQBUsername,
 				model.ConfigKeyQBPassword,
 				model.ConfigKeyBaseDir,
+				model.ConfigKeyAutoRenameEnabled,
+				model.ConfigKeyAutoRenameSeriesTemplate,
+				model.ConfigKeyAutoRenameEpisodeTemplate,
 				model.ConfigKeyBangumiRefreshToken,
 				model.ConfigKeyBangumiAccessToken,
 				model.ConfigKeyTMDBToken,
@@ -312,6 +319,15 @@ func loadSettingsViewData() (map[string]string, string, any) {
 		configMap[model.ConfigKeyQBUrl] = ""
 		configMap[model.ConfigKeyQBUsername] = ""
 		configMap[model.ConfigKeyQBPassword] = ""
+	}
+	if strings.TrimSpace(configMap[model.ConfigKeyAutoRenameEnabled]) == "" {
+		configMap[model.ConfigKeyAutoRenameEnabled] = model.ConfigValueTrue
+	}
+	if strings.TrimSpace(configMap[model.ConfigKeyAutoRenameSeriesTemplate]) == "" {
+		configMap[model.ConfigKeyAutoRenameSeriesTemplate] = renamer.DefaultSeriesTemplate
+	}
+	if strings.TrimSpace(configMap[model.ConfigKeyAutoRenameEpisodeTemplate]) == "" {
+		configMap[model.ConfigKeyAutoRenameEpisodeTemplate] = renamer.DefaultEpisodeTemplate
 	}
 
 	return configMap, "", getDBStats(db.DB, db.CurrentDBPath)

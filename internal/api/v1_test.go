@@ -323,6 +323,35 @@ func TestV1SettingsNeverReturnSecretValues(t *testing.T) {
 	assert.Contains(t, w.Body.String(), `"ai_api_key":true`)
 }
 
+func TestV1SettingsExposeAutomaticRenameDefaults(t *testing.T) {
+	resetAuthFixtures(t)
+	r := setupRouter()
+	cookie, _ := loginCookie(t, r, "admin")
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/settings", nil)
+	req.Header.Set("Cookie", cookie)
+	markLocalRequest(req)
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), `"auto_rename_enabled":"true"`)
+	assert.Contains(t, w.Body.String(), `"auto_rename_series_template":"{title}"`)
+	assert.Contains(t, w.Body.String(), `"auto_rename_episode_template":"{title} - S{season}E{episode}{ext}"`)
+}
+
+func TestV1SettingsRejectUnsafeAutomaticRenameTemplate(t *testing.T) {
+	resetAuthFixtures(t)
+	r := setupRouter()
+	cookie, _ := loginCookie(t, r, "admin")
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/settings", bytes.NewBufferString(`{"values":{"auto_rename_series_template":"../{title}"}}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Cookie", cookie)
+	markLocalRequest(req)
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), `"code":"invalid_auto_rename_template"`)
+}
+
 func TestV1SettingsSaveMirrorsValuesToConfigFile(t *testing.T) {
 	resetAuthFixtures(t)
 	r := setupRouter()

@@ -8,6 +8,14 @@
 
 ## [Unreleased]
 
+## [0.8.8] - 2026-07-27
+
+### Added
+- 新增默认开启的下载后自动整理配置，支持自定义系列文件夹和剧集文件模板。
+
+### Changed
+- 新下载和已有单集通过 qBittorrent 整理为 Jellyfin/Plex 兼容的 `系列/Season 01/系列 - S01E01.ext` 结构，同一番剧各季度归入统一系列目录且不中断做种。
+
 ## [0.8.7] - 2026-07-27
 
 ### Added
@@ -236,7 +244,8 @@
 
 ---
 
-[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v0.8.7...HEAD
+[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v0.8.8...HEAD
+[0.8.8]: https://github.com/pokerjest/animateAutoTool/compare/v0.8.7...v0.8.8
 [0.8.7]: https://github.com/pokerjest/animateAutoTool/compare/v0.8.6...v0.8.7
 [0.8.6]: https://github.com/pokerjest/animateAutoTool/compare/v0.8.5...v0.8.6
 [0.8.5]: https://github.com/pokerjest/animateAutoTool/compare/v0.8.4...v0.8.5

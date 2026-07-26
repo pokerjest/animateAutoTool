@@ -197,6 +197,9 @@ const (
 	ConfigKeyQBPassword                = "qb_password"
 	ConfigKeyQBMode                    = "qb_mode"
 	ConfigKeyBaseDir                   = "base_download_dir"
+	ConfigKeyAutoRenameEnabled         = "auto_rename_enabled"
+	ConfigKeyAutoRenameSeriesTemplate  = "auto_rename_series_template"
+	ConfigKeyAutoRenameEpisodeTemplate = "auto_rename_episode_template"
 	ConfigKeyBangumiAppID              = "bangumi_app_id"
 	ConfigKeyBangumiAppSecret          = "bangumi_app_secret" //nolint:gosec
 	ConfigKeyBangumiAccessToken        = "bangumi_access_token"

@@ -632,8 +632,39 @@ func TestProcessSubscriptionUsesGlobalBaseDirWhenSavePathEmpty(t *testing.T) {
 	if len(down.savePaths) != 1 {
 		t.Fatalf("expected one save path, got %d", len(down.savePaths))
 	}
-	if down.savePaths[0] != `E:\bangumi\Path Show` {
+	if down.savePaths[0] != `E:\bangumi\Path Show\Season 01` {
 		t.Fatalf("unexpected save path, got %q", down.savePaths[0])
+	}
+}
+
+func TestProcessSubscriptionFallsBackToFilenameEpisodeForAutomaticRename(t *testing.T) {
+	withServiceTestDB(t)
+
+	sub := model.Subscription{Title: "Fallback Episode Season 2", RSSUrl: "https://example.test/fallback-episode", IsActive: true}
+	if err := db.DB.Create(&sub).Error; err != nil {
+		t.Fatalf("create subscription: %v", err)
+	}
+	down := &fakeDownloader{}
+	mgr := &SubscriptionManager{
+		RSSParser: fakeRSSParser{episodes: []parser.Episode{{
+			Title:      "[Odd Group] Fallback Episode S02E07 [1080p]",
+			TorrentURL: "magnet:?xt=urn:btih:fallback-episode",
+		}}},
+		Downloader: down,
+		DB:         db.DB,
+	}
+
+	mgr.ProcessSubscription(&sub)
+
+	var entry model.DownloadLog
+	if err := db.DB.Where("subscription_id = ?", sub.ID).First(&entry).Error; err != nil {
+		t.Fatalf("load download log: %v", err)
+	}
+	if entry.Episode != "7" || entry.SeasonVal != "S02" {
+		t.Fatalf("unexpected parsed identity episode=%q season=%q", entry.Episode, entry.SeasonVal)
+	}
+	if len(down.savePaths) != 1 || down.savePaths[0] != "downloads/Fallback Episode/Season 02" {
+		t.Fatalf("unexpected structured save path %#v", down.savePaths)
 	}
 }
 
@@ -670,7 +701,7 @@ func TestProcessSubscriptionPrefersSubscriptionSavePath(t *testing.T) {
 	if len(down.savePaths) != 1 {
 		t.Fatalf("expected one save path, got %d", len(down.savePaths))
 	}
-	if down.savePaths[0] != `D:\manual` {
+	if down.savePaths[0] != `D:\manual\Season 01` {
 		t.Fatalf("expected subscription save path to be preferred, got %q", down.savePaths[0])
 	}
 }

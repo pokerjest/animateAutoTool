@@ -257,6 +257,33 @@ func (q *QBittorrentClient) RenameFile(hash, oldPath, newPath string) error {
 	return q.RenameFileContext(context.Background(), hash, oldPath, newPath)
 }
 
+// SetLocation moves a torrent through qBittorrent so its resume data and
+// seeding state remain valid after automatic media organization.
+func (q *QBittorrentClient) SetLocation(hash, location string) error {
+	if strings.TrimSpace(hash) == "" {
+		return errors.New("set location failed: missing torrent hash")
+	}
+	if strings.TrimSpace(location) == "" {
+		return errors.New("set location failed: missing destination")
+	}
+	req := httpx.NewRequest(context.Background(), q.client).
+		SetFormData(map[string]string{
+			"hashes":   strings.TrimSpace(hash),
+			"location": strings.TrimSpace(location),
+		})
+	if len(q.cookies) > 0 {
+		req.SetCookies(q.cookies)
+	}
+	resp, err := req.Post("/api/v2/torrents/setLocation")
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode() != http.StatusOK {
+		return fmt.Errorf("set location failed: %s, body: %s", resp.Status(), resp.String())
+	}
+	return nil
+}
+
 func (q *QBittorrentClient) RenameFileContext(ctx context.Context, hash, oldPath, newPath string) error {
 	if strings.TrimSpace(hash) == "" {
 		return errors.New("rename file failed: missing torrent hash")

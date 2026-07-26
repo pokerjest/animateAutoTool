@@ -184,8 +184,16 @@ func (m *SubscriptionManager) ProcessSubscriptionWithSourceContext(ctx context.C
 			continue // 已存在
 		}
 
+		episodeNum := strings.TrimSpace(ep.EpisodeNum)
+		if episodeNum == "" {
+			if parsed := parser.ParseFilename(ep.Title); parsed.Episode > 0 {
+				episodeNum = strconv.Itoa(parsed.Episode)
+			}
+		}
+
 		// 3. 添加下载
-		savePath := m.resolveSavePath(sub)
+		seasonVal := fmt.Sprintf("S%s", mediaSeasonValue(sub, ep.Season))
+		savePath := m.resolveSavePath(sub, seasonVal)
 
 		log.Printf("DEBUG: Adding torrent to QB: %s -> %s", ep.Title, savePath)
 		err := m.addTorrent(ctx, ep.TorrentURL, savePath, "Anime", false)
@@ -207,8 +215,8 @@ func (m *SubscriptionManager) ProcessSubscriptionWithSourceContext(ctx context.C
 			SubscriptionID: sub.ID,
 			Title:          ep.Title,
 			Magnet:         ep.TorrentURL,
-			Episode:        ep.EpisodeNum,
-			SeasonVal:      ep.Season,
+			Episode:        episodeNum,
+			SeasonVal:      seasonVal,
 			// InfoHash:       ep.InfoHash, // Undefined in parser.Episode
 			Status: "downloading",
 		}
@@ -216,14 +224,14 @@ func (m *SubscriptionManager) ProcessSubscriptionWithSourceContext(ctx context.C
 			log.Printf("Failed to create log for %s: %v", ep.Title, err)
 		} else {
 			// Update LastEp
-			if val, err := strconv.Atoi(ep.EpisodeNum); err == nil {
+			if val, err := strconv.Atoi(episodeNum); err == nil {
 				if val > sub.LastEp {
 					sub.LastEp = val
 					m.DB.Model(sub).Update("last_ep", val)
 				}
 			} else {
 				// Try float roughly
-				if f, err := strconv.ParseFloat(ep.EpisodeNum, 64); err == nil {
+				if f, err := strconv.ParseFloat(episodeNum, 64); err == nil {
 					val = int(f)
 					if val > sub.LastEp {
 						sub.LastEp = val
@@ -486,20 +494,33 @@ func (m *SubscriptionManager) diagnoseEmptySubscriptionFeedContext(ctx context.C
 	return fmt.Sprintf("当前字幕组 RSS 为空（%s），但该番剧主 RSS 还有 %d 集可用", subtitleGroup, len(episodes))
 }
 
-func (m *SubscriptionManager) resolveSavePath(sub *model.Subscription) string {
+func (m *SubscriptionManager) resolveSavePath(sub *model.Subscription, season string) string {
 	if sub == nil {
 		return "downloads"
 	}
 
 	if savePath := strings.TrimSpace(sub.SavePath); savePath != "" {
+		if autoRenameEnabled() {
+			return joinDownloadPath(savePath, mediaSeasonDirectory(sub, season))
+		}
 		return savePath
 	}
 
 	baseDir := strings.TrimSpace(m.loadGlobalConfigValue(model.ConfigKeyBaseDir))
 	if baseDir != "" {
+		if autoRenameEnabled() {
+			if target, err := mediaTargetDirectory(sub, season, baseDir); err == nil {
+				return target
+			}
+		}
 		return joinDownloadPath(baseDir, strings.TrimSpace(sub.Title))
 	}
 
+	if autoRenameEnabled() {
+		if target, err := mediaTargetDirectory(sub, season, "downloads"); err == nil {
+			return target
+		}
+	}
 	return joinDownloadPath("downloads", strings.TrimSpace(sub.Title))
 }
 

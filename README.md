@@ -3,7 +3,7 @@
 <div align="center">
 
 ![Go Version](https://img.shields.io/badge/Go-1.25-00ADD8?style=for-the-badge&logo=go)
-![Version](https://img.shields.io/badge/Version-v0.8.7-blue?style=for-the-badge)
+![Version](https://img.shields.io/badge/Version-v0.8.8-blue?style=for-the-badge)
 ![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)
 ![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/pokerjest/animateAutoTool/go.yml?style=for-the-badge)
 
@@ -87,7 +87,7 @@ Animate Auto Tool 是一个基于 Go 1.25 开发的自动化动漫下载工具�
    - 如需前台调试，请双击 `run.bat`。
 
 > [!NOTE]
-> GitHub Actions 会同时产出带版本号的目录包、单文件 Windows `exe`，以及 macOS `dmg`，例如 `animate-server_v0.8.7_linux_amd64.tar.gz`、`animate-server_v0.8.7_windows_amd64.exe`、`animate-server_v0.8.7_darwin_arm64.dmg`。同时会产出 `SHA256SUMS.txt` 供应用内自动更新校验完整性使用。
+> GitHub Actions 会同时产出带版本号的目录包、单文件 Windows `exe`，以及 macOS `dmg`，例如 `animate-server_v0.8.8_linux_amd64.tar.gz`、`animate-server_v0.8.8_windows_amd64.exe`、`animate-server_v0.8.8_darwin_arm64.dmg`。同时会产出 `SHA256SUMS.txt` 供应用内自动更新校验完整性使用。
 
 #### macOS / Linux 用户
 1. 解压下载的 `.tar.gz` 压缩包。
@@ -189,7 +189,10 @@ auth:
   secret_key: "replace-with-a-stable-random-secret"
 
 # 设置页保存的系统配置会自动同步到这里
-system_settings: {}
+system_settings:
+  auto_rename_enabled: "true"
+  auto_rename_series_template: "{title}"
+  auto_rename_episode_template: "{title} - S{season}E{episode}{ext}"
 ```
 
 说明：
@@ -200,6 +203,12 @@ system_settings: {}
 - qB、Jellyfin、AList、R2 等业务配置仍然建议在 Web 设置页中填写和测试。
 - 设置页保存后，业务配置会同时保存在数据库和 `config.yaml` 的 `system_settings` 段；重启时 YAML 中已有的值会回填数据库，便于迁移和手工维护。
 - `system_settings` 可能包含外部服务密码、Token 和 API Key。Unix 下程序会把 `config.yaml` 权限收紧为 `0600`，Windows 下依赖所在目录的用户 ACL；请勿上传、分享或提交真实配置文件。应用登录密码不会写入 YAML。
+
+#### 下载后自动整理
+
+自动整理默认开启，并通过 qBittorrent 自身的移动和重命名接口保持做种。默认目录结构兼容 Jellyfin 与 Plex：`媒体根目录/系列名/Season 01/系列名 - S01E01.ext`。系列名优先采用已经匹配的规范元数据，并会移除“第二季”“Season 2”等季度后缀，使同一系列的不同季度落入同一个系列目录。
+
+可在“系统设置 → 下载器”中关闭或修改系列、剧集模板。支持 `{title}`、`{season}`、`{episode}`、`{year}`、`{original}` 和 `{ext}`；需要区分同名重制版时，可把系列模板改成 `{title} ({year})`。多文件合集默认不会自动猜测和改名，以防误整理。
 
 #### IP 白名单免密访问
 
@@ -241,6 +250,7 @@ system_settings: {}
 
 ### 6. 高级配置 (Web 界面)
 启动服务后，访问 `设置` 页面可配置：
+- **下载与自动整理**：媒体根目录、自动整理开关、系列文件夹和剧集文件模板
 - **元数据 API Token** (TMDB / AniList / Bangumi)
 - **网络代理**：支持 HTTP、HTTPS、SOCKS5；可分别控制 Bangumi、Mikan、TMDB、AniList、Jellyfin、AI 与应用更新，并可直接测试当前输入的代理地址
 - **备份设置** (Cloudflare R2)

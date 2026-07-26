@@ -58,6 +58,15 @@ func syncDownloadLogStatuses(ctx context.Context) {
 	if err != nil {
 		return
 	}
+	if renameResult, renameErr := service.AutoRenameCompletedDownloads(client); renameErr != nil {
+		log.Printf("Worker: automatic download rename failed: %v", renameErr)
+	} else {
+		result.CompletedTargets = service.MergeCompletedTargets(result.CompletedTargets, renameResult)
+		if renameResult.Renamed > 0 || renameResult.Failed > 0 {
+			log.Printf("Worker: automatic download rename finished (renamed=%d skipped=%d failed=%d)",
+				renameResult.Renamed, renameResult.Skipped, renameResult.Failed)
+		}
+	}
 
 	if repairResult, err := service.RepairDownloadLogsFromLocalLibrary(6 * time.Hour); err != nil {
 		log.Printf("Worker: download log library repair failed: %v", err)
@@ -83,6 +92,23 @@ func syncDownloadLogStatuses(ctx context.Context) {
 	}
 
 	autoScanCompletedDownloads(result.CompletedTargets)
+	scheduleCompletedDownloadRescan(ctx, result.CompletedTargets)
+}
+
+func scheduleCompletedDownloadRescan(ctx context.Context, targets []string) {
+	if len(targets) == 0 {
+		return
+	}
+	queued := append([]string(nil), targets...)
+	go func() {
+		timer := time.NewTimer(15 * time.Second)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+			autoScanCompletedDownloads(queued)
+		case <-ctx.Done():
+		}
+	}()
 }
 
 func autoScanCompletedDownloads(targets []string) {
