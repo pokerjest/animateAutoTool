@@ -1,6 +1,7 @@
 package store
 
 import (
+	"strconv"
 	"strings"
 	"time"
 
@@ -202,4 +203,51 @@ func (s *DownloadLogStore) CountBySubscription(subscriptionID uint) (int64, erro
 		return 0, err
 	}
 	return count, nil
+}
+
+// CountDistinctEpisodesBySubscription returns the number of distinct episodes
+// represented by logs in the supplied statuses. Episode-less legacy logs fall
+// back to their release title so they still contribute to the count.
+func (s *DownloadLogStore) CountDistinctEpisodesBySubscription(subscriptionID uint, statuses []string) (int64, error) {
+	if s == nil || s.db == nil {
+		return 0, gorm.ErrInvalidDB
+	}
+	if len(statuses) == 0 {
+		return 0, nil
+	}
+
+	var logs []struct {
+		Episode string
+		Title   string
+	}
+	if err := s.db.Model(&model.DownloadLog{}).
+		Select("episode", "title").
+		Where("subscription_id = ? AND status IN ?", subscriptionID, statuses).
+		Scan(&logs).Error; err != nil {
+		return 0, err
+	}
+
+	unique := make(map[string]struct{}, len(logs))
+	for _, logEntry := range logs {
+		if episode := normalizeEpisodeIdentity(logEntry.Episode); episode != "" {
+			unique["episode:"+episode] = struct{}{}
+			continue
+		}
+		if title := strings.ToLower(strings.TrimSpace(logEntry.Title)); title != "" {
+			unique["title:"+title] = struct{}{}
+		}
+	}
+
+	return int64(len(unique)), nil
+}
+
+func normalizeEpisodeIdentity(episode string) string {
+	episode = strings.TrimSpace(episode)
+	if episode == "" {
+		return ""
+	}
+	if number, err := strconv.ParseFloat(episode, 64); err == nil {
+		return strconv.FormatFloat(number, 'f', -1, 64)
+	}
+	return strings.ToLower(episode)
 }

@@ -6,7 +6,8 @@ APP_NAME="animate-server"
 BIN_DIR="./bin"
 BIN_PATH="$BIN_DIR/$APP_NAME"
 PID_FILE="$BIN_DIR/server.pid"
-LOG_FILE="logs/server.log"
+LOG_DIR="logs"
+LOG_PATTERN="server-*.log"
 SRC_PATH="cmd/server/main.go"
 SERVER_PORT=8306
 VERSION_FILE="./VERSION"
@@ -18,7 +19,39 @@ YELLOW='\033[0;33m'
 NC='\033[0m' # No Color
 
 mkdir -p $BIN_DIR
-mkdir -p logs
+mkdir -p "$LOG_DIR"
+
+function latest_log_file() {
+    find "$LOG_DIR" -maxdepth 1 -type f -name "$LOG_PATTERN" -print 2>/dev/null | sort | tail -n 1
+}
+
+function follow_logs() {
+    local current_file=""
+    local tail_pid=""
+
+    function stop_log_tail() {
+        if [ -n "$tail_pid" ]; then
+            kill "$tail_pid" 2>/dev/null || true
+            wait "$tail_pid" 2>/dev/null || true
+        fi
+    }
+
+    trap 'stop_log_tail; exit 0' INT TERM
+    trap 'stop_log_tail' EXIT
+
+    while true; do
+        local latest_file
+        latest_file=$(latest_log_file)
+        if [ -n "$latest_file" ] && [ "$latest_file" != "$current_file" ]; then
+            stop_log_tail
+            current_file="$latest_file"
+            echo -e "${YELLOW}Following $current_file${NC}"
+            tail -n 100 -f "$current_file" &
+            tail_pid=$!
+        fi
+        sleep 2
+    done
+}
 
 function get_pid_by_port() {
     lsof -ti :$SERVER_PORT
@@ -140,7 +173,7 @@ function start() {
     fi
 
     echo -e "${GREEN}Starting $APP_NAME...${NC}"
-    nohup $BIN_PATH >> $LOG_FILE 2>&1 &
+    nohup "$BIN_PATH" >/dev/null 2>&1 &
     NEW_PID=$!
     echo $NEW_PID > $PID_FILE
     
@@ -150,7 +183,7 @@ function start() {
             for pid in "${PORT_PIDS[@]}"; do
                 if [ "$pid" = "$NEW_PID" ]; then
                     echo -e "${GREEN}Server started with PID $NEW_PID.${NC}"
-                    echo -e "Logs: ${YELLOW}$LOG_FILE${NC}"
+                    echo -e "Logs: ${YELLOW}$LOG_DIR/server-YYYYMMDD-HH.log${NC}"
                     return
                 fi
             done
@@ -162,7 +195,12 @@ function start() {
 
     rm -f "$PID_FILE"
     echo -e "${RED}Server failed to start. Check logs.${NC}"
-    tail -n 20 $LOG_FILE
+    LATEST_LOG=$(latest_log_file)
+    if [ -n "$LATEST_LOG" ]; then
+        tail -n 20 "$LATEST_LOG"
+    else
+        echo -e "${YELLOW}No hourly server log was created.${NC}"
+    fi
     exit 1
 }
 
@@ -215,7 +253,7 @@ case $CMD in
         status
         ;;
     log)
-        tail -f $LOG_FILE
+        follow_logs
         ;;
     *)
         echo "Usage: $0 {start|stop|restart|build|run|status|log}"

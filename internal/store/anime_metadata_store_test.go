@@ -38,11 +38,17 @@ func TestAnimeMetadataStoreNilSafety(t *testing.T) {
 	if _, err := s.FindByAniListID(1); err != gorm.ErrInvalidDB {
 		t.Errorf("FindByAniListID nil: got %v", err)
 	}
+	if _, err := s.FindByExternalIDsIncludingDeleted(1, 0, 0); err != gorm.ErrInvalidDB {
+		t.Errorf("FindByExternalIDsIncludingDeleted nil: got %v", err)
+	}
 	if err := s.Create(&model.AnimeMetadata{}); err != gorm.ErrInvalidDB {
 		t.Errorf("Create nil: got %v", err)
 	}
 	if err := s.Save(&model.AnimeMetadata{}); err != gorm.ErrInvalidDB {
 		t.Errorf("Save nil: got %v", err)
+	}
+	if err := s.SaveIncludingDeleted(&model.AnimeMetadata{}); err != gorm.ErrInvalidDB {
+		t.Errorf("SaveIncludingDeleted nil: got %v", err)
 	}
 	if _, err := s.ListAll(); err != gorm.ErrInvalidDB {
 		t.Errorf("ListAll nil: got %v", err)
@@ -116,6 +122,29 @@ func TestAnimeMetadataStoreFindByExternalIDs(t *testing.T) {
 
 	if _, err := s.FindByBangumiID(999); !errors.Is(err, gorm.ErrRecordNotFound) {
 		t.Errorf("expected ErrRecordNotFound, got %v", err)
+	}
+}
+
+func TestAnimeMetadataStoreFindAndRestoreSoftDeletedExternalID(t *testing.T) {
+	s := setupAnimeMetadataStore(t)
+	m := &model.AnimeMetadata{Title: "Archived", BangumiID: 44}
+	if err := s.Create(m); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := db.DB.Delete(m).Error; err != nil {
+		t.Fatalf("soft delete: %v", err)
+	}
+
+	found, err := s.FindByExternalIDsIncludingDeleted(44, 0, 0)
+	if err != nil || found.ID != m.ID || !found.DeletedAt.Valid {
+		t.Fatalf("expected soft-deleted metadata, got %+v / %v", found, err)
+	}
+	found.DeletedAt.Valid = false
+	if err := s.SaveIncludingDeleted(found); err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+	if _, err := s.FindByBangumiID(44); err != nil {
+		t.Fatalf("expected restored metadata to be visible: %v", err)
 	}
 }
 

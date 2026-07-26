@@ -231,6 +231,45 @@ func TestProcessSubscriptionPersistsIdleStateForEmptySubgroupRSS(t *testing.T) {
 	}
 }
 
+func TestBuildIdleRunSummaryDistinguishesCurrentRSSFromHistory(t *testing.T) {
+	mgr := &SubscriptionManager{}
+	tests := []struct {
+		name      string
+		total     int
+		filtered  int
+		duplicate int
+		want      string
+	}{
+		{
+			name:      "all resources already tracked",
+			total:     3,
+			duplicate: 3,
+			want:      "本次 RSS 返回 3 条资源，均已存在于历史下载记录",
+		},
+		{
+			name:     "all resources filtered",
+			total:    4,
+			filtered: 4,
+			want:     "本次 RSS 返回 4 条资源，均被过滤规则跳过",
+		},
+		{
+			name:      "mixed existing and filtered resources",
+			total:     5,
+			filtered:  2,
+			duplicate: 3,
+			want:      "本次 RSS 返回 5 条资源（过滤 2，已存在 3），未发现新增",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := mgr.buildIdleRunSummary(nil, tt.total, tt.filtered, tt.duplicate); got != tt.want {
+				t.Fatalf("buildIdleRunSummary() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestProcessSubscriptionFallsBackToBackupRSS(t *testing.T) {
 	withServiceTestDB(t)
 

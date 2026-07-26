@@ -42,7 +42,7 @@ status: prepare
 # 查看实时日志
 log:
 	@echo "正在查看日志 (Ctrl+C 退出)..."
-	@tail -f logs/server.log
+	@./scripts/manage.sh log
 
 # 打包发布 (需要传入版本号 v=x.y.z)
 package:
@@ -89,7 +89,7 @@ help:
 	@echo "  make stop     - 停止后台服务"
 	@echo "  make restart  - 重启服务"
 	@echo "  make status   - 查看服务运行状态 (PID)"
-	@echo "  make log      - 实时查看日志 (logs/server.log)"
+	@echo "  make log      - 实时查看按小时切分的服务日志"
 	@echo "  make package  - 打包发布 (用法: make package v=1.0.0)"
 	@echo "  make package-e2e - 打包当前平台并运行无头端到端验证"
 	@echo "  make doctor   - 输出当前系统健康摘要"

@@ -182,8 +182,8 @@ func TestLocalAnimeScanStatusEndpointRendersLatestSummary(t *testing.T) {
 	r := setupRouter()
 
 	service.GlobalScanStatus.Begin(2)
-	service.GlobalScanStatus.Advance("/library/Show A", 2, 1, nil)
-	service.GlobalScanStatus.Advance("/library/Show B", 0, 0, fmt.Errorf("permission denied"))
+	service.GlobalScanStatus.Advance("/library/Show A", &service.ScanResult{DiscoveredFiles: 24, CandidateSeries: 2, Added: 2, Updated: 1}, nil)
+	service.GlobalScanStatus.Advance("/library/Show B", nil, fmt.Errorf("permission denied"))
 	service.GlobalScanStatus.Finish()
 
 	cookie, _ := loginCookie(t, r, "admin")

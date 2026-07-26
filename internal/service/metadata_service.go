@@ -388,37 +388,29 @@ func (s *MetadataService) saveAndConsolidate(m *model.AnimeMetadata) {
 		return
 	}
 	if m.ID == 0 {
-		var existing *model.AnimeMetadata
-		if m.BangumiID != 0 {
-			if found, err := mStore.FindByBangumiID(m.BangumiID); err == nil {
-				existing = found
-			}
-		}
-		if existing == nil && m.TMDBID != 0 {
-			if found, err := mStore.FindByTMDBID(m.TMDBID); err == nil {
-				existing = found
-			}
-		}
-		if existing == nil && m.AniListID != 0 {
-			if found, err := mStore.FindByAniListID(m.AniListID); err == nil {
-				existing = found
-			}
-		}
-
+		existing := findExistingMetadataByProviderIDs(mStore, m)
 		if existing != nil {
-			if m.BangumiID != 0 {
-				existing.BangumiID = m.BangumiID
-			}
-			if m.TMDBID != 0 {
-				existing.TMDBID = m.TMDBID
-			}
-			if m.AniListID != 0 {
-				existing.AniListID = m.AniListID
+			mergeEnrichedMetadata(existing, m)
+			if err := mStore.SaveIncludingDeleted(existing); err != nil {
+				log.Printf("MetadataService: failed to reuse metadata %d for %q: %v", existing.ID, m.Title, err)
 			}
 			*m = *existing
 		} else {
 			if err := mStore.Create(m); err != nil {
-				log.Printf("MetadataService: failed to create metadata for %q: %v", m.Title, err)
+				// Another enrichment worker may have inserted the same provider ID,
+				// or a soft-deleted row may still own its unique index. Resolve and
+				// reuse that row after the failed insert instead of leaving m.ID at 0.
+				existing, findErr := mStore.FindByExternalIDsIncludingDeleted(m.BangumiID, m.TMDBID, m.AniListID)
+				if findErr != nil {
+					log.Printf("MetadataService: failed to create metadata for %q: %v", m.Title, err)
+					return
+				}
+				mergeEnrichedMetadata(existing, m)
+				if saveErr := mStore.SaveIncludingDeleted(existing); saveErr != nil {
+					log.Printf("MetadataService: failed to recover metadata %d for %q: %v", existing.ID, m.Title, saveErr)
+					return
+				}
+				*m = *existing
 			}
 		}
 	} else {
@@ -426,6 +418,87 @@ func (s *MetadataService) saveAndConsolidate(m *model.AnimeMetadata) {
 			log.Printf("MetadataService: failed to persist metadata %d: %v", m.ID, err)
 		}
 	}
+}
+
+func findExistingMetadataByProviderIDs(mStore interface {
+	FindByBangumiID(int) (*model.AnimeMetadata, error)
+	FindByTMDBID(int) (*model.AnimeMetadata, error)
+	FindByAniListID(int) (*model.AnimeMetadata, error)
+	FindByExternalIDsIncludingDeleted(int, int, int) (*model.AnimeMetadata, error)
+}, m *model.AnimeMetadata) *model.AnimeMetadata {
+	if m.BangumiID != 0 {
+		if found, err := mStore.FindByBangumiID(m.BangumiID); err == nil {
+			return found
+		}
+	}
+	if m.TMDBID != 0 {
+		if found, err := mStore.FindByTMDBID(m.TMDBID); err == nil {
+			return found
+		}
+	}
+	if m.AniListID != 0 {
+		if found, err := mStore.FindByAniListID(m.AniListID); err == nil {
+			return found
+		}
+	}
+	found, err := mStore.FindByExternalIDsIncludingDeleted(m.BangumiID, m.TMDBID, m.AniListID)
+	if err != nil {
+		return nil
+	}
+	return found
+}
+
+func mergeEnrichedMetadata(dst, src *model.AnimeMetadata) {
+	copyString := func(target *string, value string) {
+		if value != "" {
+			*target = value
+		}
+	}
+	copyInt := func(target *int, value int) {
+		if value != 0 {
+			*target = value
+		}
+	}
+	copyFloat := func(target *float64, value float64) {
+		if value != 0 {
+			*target = value
+		}
+	}
+	copyBytes := func(target *[]byte, value []byte) {
+		if len(value) != 0 {
+			*target = value
+		}
+	}
+
+	copyString(&dst.Title, src.Title)
+	copyString(&dst.Image, src.Image)
+	copyString(&dst.Summary, src.Summary)
+	copyString(&dst.AirDate, src.AirDate)
+	copyString(&dst.TitleCN, src.TitleCN)
+	copyString(&dst.TitleEN, src.TitleEN)
+	copyString(&dst.TitleJP, src.TitleJP)
+	copyInt(&dst.BangumiID, src.BangumiID)
+	copyInt(&dst.TMDBID, src.TMDBID)
+	copyInt(&dst.AniListID, src.AniListID)
+	copyString(&dst.BangumiTitle, src.BangumiTitle)
+	copyString(&dst.BangumiImage, src.BangumiImage)
+	copyString(&dst.BangumiSummary, src.BangumiSummary)
+	copyFloat(&dst.BangumiRating, src.BangumiRating)
+	copyBytes(&dst.BangumiImageRaw, src.BangumiImageRaw)
+	copyString(&dst.TMDBTitle, src.TMDBTitle)
+	copyString(&dst.TMDBImage, src.TMDBImage)
+	copyString(&dst.TMDBSummary, src.TMDBSummary)
+	copyFloat(&dst.TMDBRating, src.TMDBRating)
+	copyBytes(&dst.TMDBImageRaw, src.TMDBImageRaw)
+	copyString(&dst.AniListTitle, src.AniListTitle)
+	copyString(&dst.AniListImage, src.AniListImage)
+	copyString(&dst.AniListSummary, src.AniListSummary)
+	copyFloat(&dst.AniListRating, src.AniListRating)
+	copyBytes(&dst.AniListImageRaw, src.AniListImageRaw)
+	copyString(&dst.DataSource, src.DataSource)
+	copyInt(&dst.BangumiWatchedEps, src.BangumiWatchedEps)
+	copyInt(&dst.AniListWatchedEps, src.AniListWatchedEps)
+	dst.DeletedAt.Valid = false
 }
 
 func (s *MetadataService) setActiveFields(m *model.AnimeMetadata, rawQueryTitle string) {

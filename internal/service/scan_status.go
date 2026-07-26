@@ -12,6 +12,10 @@ type ScanRunStatus struct {
 	ProcessedDirectories int
 	AddedCount           int
 	UpdatedCount         int
+	RemovedCount         int
+	DiscoveredFiles      int
+	CandidateSeries      int
+	WalkErrorCount       int
 	FailedDirectories    int
 	CurrentDirectory     string
 	LastStartedAt        *time.Time
@@ -37,6 +41,10 @@ func (t *scanStatusTracker) Begin(total int) ScanRunStatus {
 		ProcessedDirectories: 0,
 		AddedCount:           0,
 		UpdatedCount:         0,
+		RemovedCount:         0,
+		DiscoveredFiles:      0,
+		CandidateSeries:      0,
+		WalkErrorCount:       0,
 		FailedDirectories:    0,
 		CurrentDirectory:     "",
 		LastStartedAt:        &now,
@@ -70,7 +78,7 @@ func (t *scanStatusTracker) Skip(summary string) ScanRunStatus {
 	return t.status
 }
 
-func (t *scanStatusTracker) Advance(dir string, added, updated int, err error) ScanRunStatus {
+func (t *scanStatusTracker) Advance(dir string, result *ScanResult, err error) ScanRunStatus {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -82,16 +90,24 @@ func (t *scanStatusTracker) Advance(dir string, added, updated int, err error) S
 	t.status.IsRunning = true
 	t.status.ProcessedDirectories++
 	t.status.CurrentDirectory = dir
-	t.status.AddedCount += added
-	t.status.UpdatedCount += updated
+	if result != nil {
+		t.status.AddedCount += result.Added
+		t.status.UpdatedCount += result.Updated
+		t.status.RemovedCount += result.Deleted
+		t.status.DiscoveredFiles += result.DiscoveredFiles
+		t.status.CandidateSeries += result.CandidateSeries
+		t.status.WalkErrorCount += result.WalkErrors
+	}
 	if err != nil {
 		t.status.FailedDirectories++
 		t.status.LastError = err.Error()
 	}
 	t.status.LastSummary = fmt.Sprintf(
-		"正在扫描第 %d/%d 个目录，累计新增 %d，更新 %d，失败 %d",
+		"正在扫描第 %d/%d 个目录，发现 %d 个媒体文件、%d 部候选番剧，新增 %d，更新 %d，失败 %d",
 		t.status.ProcessedDirectories,
 		maxInt(t.status.TotalDirectories, 1),
+		t.status.DiscoveredFiles,
+		t.status.CandidateSeries,
 		t.status.AddedCount,
 		t.status.UpdatedCount,
 		t.status.FailedDirectories,
@@ -112,10 +128,13 @@ func (t *scanStatusTracker) Finish() ScanRunStatus {
 	t.status.LastFinishedAt = &now
 	t.status.LastDuration = humanizeScanDuration(now.Sub(*t.status.LastStartedAt))
 	t.status.LastSummary = fmt.Sprintf(
-		"最近一轮扫描了 %d 个目录：新增 %d，更新 %d，失败 %d",
+		"最近一轮扫描了 %d 个目录：发现 %d 个媒体文件、%d 部候选番剧，新增 %d，更新 %d，移除 %d，失败 %d",
 		t.status.TotalDirectories,
+		t.status.DiscoveredFiles,
+		t.status.CandidateSeries,
 		t.status.AddedCount,
 		t.status.UpdatedCount,
+		t.status.RemovedCount,
 		t.status.FailedDirectories,
 	)
 	t.status.CurrentDirectory = ""

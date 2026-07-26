@@ -64,6 +64,9 @@ func TestDownloadLogStoreNilSafety(t *testing.T) {
 	if _, err := s.CountBySubscription(1); err != gorm.ErrInvalidDB {
 		t.Errorf("CountBySubscription nil: got %v", err)
 	}
+	if _, err := s.CountDistinctEpisodesBySubscription(1, []string{statusCompleted}); err != gorm.ErrInvalidDB {
+		t.Errorf("CountDistinctEpisodesBySubscription nil: got %v", err)
+	}
 }
 
 func TestDownloadLogStoreEmptyInputShortCircuits(t *testing.T) {
@@ -210,5 +213,36 @@ func TestDownloadLogStoreCountBySubscription(t *testing.T) {
 	}
 	if count != 0 {
 		t.Fatalf("expected 0 logs for unknown sub, got %d", count)
+	}
+}
+
+func TestDownloadLogStoreCountsDistinctTrackedEpisodes(t *testing.T) {
+	s := setupDownloadLogStore(t)
+
+	seedLog(t, statusCompleted, "/x/01.mkv", 7, "01")
+	seedLog(t, statusDownloading, "", 7, "1") // same episode, different formatting
+	seedLog(t, statusDownloading, "", 7, "02")
+	seedLog(t, statusFailed, "", 7, "03")
+	seedLog(t, statusArchived, "", 7, "04")
+	specialA := seedLog(t, statusCompleted, "/x/special-a.mkv", 7, "")
+	specialB := seedLog(t, statusCompleted, "/x/special-b.mkv", 7, "")
+	if err := db.DB.Model(specialA).Update("title", "special a").Error; err != nil {
+		t.Fatalf("rename first special: %v", err)
+	}
+	if err := db.DB.Model(specialB).Update("title", "special b").Error; err != nil {
+		t.Fatalf("rename second special: %v", err)
+	}
+
+	count, err := s.CountDistinctEpisodesBySubscription(7, []string{statusDownloading, statusCompleted, "renamed"})
+	if err != nil {
+		t.Fatalf("CountDistinctEpisodesBySubscription: %v", err)
+	}
+	if count != 4 {
+		t.Fatalf("expected 4 distinct tracked episodes, got %d", count)
+	}
+
+	count, err = s.CountDistinctEpisodesBySubscription(7, nil)
+	if err != nil || count != 0 {
+		t.Fatalf("empty statuses: count=%d err=%v", count, err)
 	}
 }

@@ -55,6 +55,22 @@ func TestSubscriptionCardEndpointReturnsLatestRunState(t *testing.T) {
 	assert.Contains(t, w.Body.String(), `data-status-label="部分失败"`)
 }
 
+func TestNormalizeSubscriptionRunSummaryClarifiesLegacyCounts(t *testing.T) {
+	tests := map[string]string{
+		"检查到 3 集，但都已经在下载记录中":                       "本次 RSS 返回 3 条资源，均已存在于历史下载记录",
+		"检查到 3 集，但都已经在下载记录中；主 RSS 暂时不可用，已使用备用 RSS": "本次 RSS 返回 3 条资源，均已存在于历史下载记录；主 RSS 暂时不可用，已使用备用 RSS",
+		"检查到 4 集，但都被过滤规则跳过":                        "本次 RSS 返回 4 条资源，均被过滤规则跳过",
+		"未发现新剧集（过滤 2，已存在 3）":                       "本次 RSS 返回 5 条资源（过滤 2，已存在 3），未发现新增",
+		"新增 1 集待下载": "新增 1 集待下载",
+	}
+
+	for input, want := range tests {
+		if got := normalizeSubscriptionRunSummary(input); got != want {
+			t.Fatalf("normalizeSubscriptionRunSummary(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
 func TestSchedulerStatusEndpointRendersLatestSummary(t *testing.T) {
 	resetAuthFixtures(t)
 	r := setupRouter()

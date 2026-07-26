@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/pokerjest/animateAutoTool/internal/bangumi"
+	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 )
 
@@ -164,5 +165,45 @@ func TestApplyBangumiSubjectReplacesStaleLocalizedTitles(t *testing.T) {
 	}
 	if meta.AirDate != "2025-04-03" {
 		t.Fatalf("expected AirDate to be replaced, got %q", meta.AirDate)
+	}
+}
+
+func TestSaveAndConsolidateReusesExistingProviderIdentity(t *testing.T) {
+	withServiceTestDB(t)
+	existing := &model.AnimeMetadata{Title: "Old title", BangumiID: 8080, BangumiTitle: "Old title"}
+	if err := db.DB.Create(existing).Error; err != nil {
+		t.Fatalf("create existing metadata: %v", err)
+	}
+
+	incoming := &model.AnimeMetadata{Title: "New title", BangumiID: 8080, BangumiTitle: "New title", TMDBID: 9090}
+	NewMetadataService().saveAndConsolidate(incoming)
+
+	if incoming.ID != existing.ID {
+		t.Fatalf("expected metadata %d to be reused, got %d", existing.ID, incoming.ID)
+	}
+	if incoming.Title != "New title" || incoming.TMDBID != 9090 {
+		t.Fatalf("expected enriched fields to be retained, got %+v", incoming)
+	}
+}
+
+func TestSaveAndConsolidateRestoresSoftDeletedProviderIdentity(t *testing.T) {
+	withServiceTestDB(t)
+	existing := &model.AnimeMetadata{Title: "Archived", BangumiID: 8181}
+	if err := db.DB.Create(existing).Error; err != nil {
+		t.Fatalf("create existing metadata: %v", err)
+	}
+	if err := db.DB.Delete(existing).Error; err != nil {
+		t.Fatalf("soft delete metadata: %v", err)
+	}
+
+	incoming := &model.AnimeMetadata{Title: "Restored", BangumiID: 8181}
+	NewMetadataService().saveAndConsolidate(incoming)
+
+	if incoming.ID != existing.ID || incoming.DeletedAt.Valid {
+		t.Fatalf("expected soft-deleted row to be restored, got %+v", incoming)
+	}
+	var count int64
+	if err := db.DB.Model(&model.AnimeMetadata{}).Where("bangumi_id = ?", 8181).Count(&count).Error; err != nil || count != 1 {
+		t.Fatalf("expected one active metadata row, count=%d err=%v", count, err)
 	}
 }

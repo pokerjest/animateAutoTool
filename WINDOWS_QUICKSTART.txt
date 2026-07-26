@@ -24,14 +24,14 @@ Animate Auto Tool - Windows Quick Start
    - open-ui.bat : open the Web UI in your browser
    - open-data.bat : open the local data folder
    - open-config.bat : open config.yaml in Notepad
-   - view-logs.bat : open logs\server.log
+   - view-logs.bat : open the latest hourly server log
 
 4. Open the Web UI.
    Default address:
    http://127.0.0.1:8306/login
 
 5. If startup fails, check:
-   logs\server.log
+   logs\server-YYYYMMDD-HH.log
 
 6. qBittorrent can be configured later.
    You can complete first-run setup first, then connect qB from Settings.

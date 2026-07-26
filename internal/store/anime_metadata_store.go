@@ -71,6 +71,38 @@ func (s *AnimeMetadataStore) FindByAniListID(id int) (*model.AnimeMetadata, erro
 	return &m, nil
 }
 
+// FindByExternalIDsIncludingDeleted resolves an existing provider identity even
+// when an earlier metadata row was soft deleted. Provider IDs remain unique in
+// SQLite after a soft delete, so callers must reuse that row instead of trying
+// to insert another one.
+func (s *AnimeMetadataStore) FindByExternalIDsIncludingDeleted(bangumiID, tmdbID, aniListID int) (*model.AnimeMetadata, error) {
+	if s == nil || s.db == nil {
+		return nil, gorm.ErrInvalidDB
+	}
+	identities := []struct {
+		column string
+		value  int
+	}{
+		{column: "bangumi_id", value: bangumiID},
+		{column: "tmdb_id", value: tmdbID},
+		{column: "ani_list_id", value: aniListID},
+	}
+	for _, identity := range identities {
+		if identity.value == 0 {
+			continue
+		}
+		var m model.AnimeMetadata
+		err := s.db.Unscoped().Where(identity.column+" = ?", identity.value).First(&m).Error
+		if err == nil {
+			return &m, nil
+		}
+		if err != gorm.ErrRecordNotFound {
+			return nil, err
+		}
+	}
+	return nil, gorm.ErrRecordNotFound
+}
+
 func (s *AnimeMetadataStore) Create(m *model.AnimeMetadata) error {
 	if s == nil || s.db == nil {
 		return gorm.ErrInvalidDB
@@ -83,6 +115,13 @@ func (s *AnimeMetadataStore) Save(m *model.AnimeMetadata) error {
 		return gorm.ErrInvalidDB
 	}
 	return retrySQLiteBusy(func() error { return s.db.Save(m).Error })
+}
+
+func (s *AnimeMetadataStore) SaveIncludingDeleted(m *model.AnimeMetadata) error {
+	if s == nil || s.db == nil {
+		return gorm.ErrInvalidDB
+	}
+	return retrySQLiteBusy(func() error { return s.db.Unscoped().Save(m).Error })
 }
 
 func (s *AnimeMetadataStore) ListAll() ([]model.AnimeMetadata, error) {

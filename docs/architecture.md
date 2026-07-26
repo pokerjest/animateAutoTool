@@ -172,8 +172,9 @@ var migrations = []migration{
 
 ## 日志
 
-- 主进程 `cmd/server/main.go` 的 `configureLogging` 把 stderr / stdout 同时写到 `logs/server.log`
-- 启动时调用 `rotateLogFile`：单文件 ≥ 10 MB 触发滚动，最多保留 5 份（`.1` ~ `.5`）
+- 主进程 `cmd/server/main.go` 的 `configureLogging` 把 stderr / stdout 写到按本地时间分时的 `logs/server-YYYYMMDD-HH.log`
+- 运行跨过整点后，首条新日志自动切换到新的小时文件；最多保留最近 168 个小时文件（7 天）
+- 旧版本留下的 `logs/server.log` 不会被自动删除，升级后可按需手动归档
 - 不引入 lumberjack 等第三方依赖
 
 ## 自更新（`internal/updater`）

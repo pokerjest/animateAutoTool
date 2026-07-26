@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue'
-import { useQuery, useQueryClient } from '@tanstack/vue-query'
+import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
+import { useInfiniteQuery, useQueryClient } from '@tanstack/vue-query'
 import { CircleAlert, FolderCog, FolderPlus, Play, RefreshCw, Search, Sparkles, Trash2, WandSparkles } from '@lucide/vue'
-import { api, handlePosterError, posterURL } from '../api/client'
+import { api, apiEnvelope, handlePosterError, posterURL } from '../api/client'
 import type { LocalAnime, MetadataSearchResult, TaskAccepted } from '../api/types'
 import AppDialog from '../components/AppDialog.vue'
 import AutoLoadSentinel from '../components/AutoLoadSentinel.vue'
@@ -20,12 +20,30 @@ interface Payload { directories:Directory[]; items:LocalAnime[]; scan_status:Rec
 interface RenameItem { anime_name:string; original:string; new:string; path:string }
 
 const ui=useUIStore(),qc=useQueryClient(),actions=useAsyncActions(),search=ref(''),adding=ref(false),dirPath=ref(''),deleteDir=ref<Directory|null>(null),renameDir=ref<Directory|null>(null),renamePattern=ref('{Title} S{Season}E{Ep}'),renamePreview=ref<RenameItem[]>([]),selected=ref<LocalAnime|null>(null),matchQuery=ref(''),matchSource=ref('bangumi'),matchResults=ref<MetadataSearchResult[]>([])
-const query=useQuery({queryKey:['local-anime'],queryFn:()=>api<Payload>('/local-anime')})
-const items=computed(()=>{const q=search.value.toLowerCase();return(query.data.value?.items||[]).filter(i=>`${i.title} ${i.metadata?.title_cn||''}`.toLowerCase().includes(q))})
-const visibleCount=ref(24)
-const visibleItems=computed(()=>items.value.slice(0,visibleCount.value))
-const canLoadMore=computed(()=>visibleItems.value.length<items.value.length)
-watch(search,()=>{visibleCount.value=24})
+const debouncedSearch=ref('')
+let searchTimer:ReturnType<typeof setTimeout>|undefined
+watch(search,value=>{
+  if(searchTimer)clearTimeout(searchTimer)
+  searchTimer=setTimeout(()=>{debouncedSearch.value=value.trim()},250)
+})
+onBeforeUnmount(()=>{if(searchTimer)clearTimeout(searchTimer)})
+const query=useInfiniteQuery({
+  queryKey:computed(()=>['local-anime',debouncedSearch.value]),
+  initialPageParam:1,
+  queryFn:({pageParam})=>apiEnvelope<Payload>(`/local-anime?page=${pageParam}&page_size=48&q=${encodeURIComponent(debouncedSearch.value)}`),
+  getNextPageParam:lastPage=>{
+    const page=lastPage.meta?.page??1
+    const pageSize=lastPage.meta?.page_size??lastPage.data.items.length
+    const total=lastPage.meta?.total??lastPage.data.items.length
+    return page*pageSize<total?page+1:undefined
+  },
+})
+const pages=computed(()=>query.data.value?.pages||[])
+const firstPage=computed(()=>pages.value[0]?.data)
+const items=computed(()=>pages.value.flatMap(page=>page.data.items))
+const totalItems=computed(()=>pages.value[0]?.meta?.total??items.value.length)
+const remainingItems=computed(()=>Math.max(0,totalItems.value-items.value.length))
+async function loadMore(){if(query.hasNextPage.value&&!query.isFetchingNextPage.value)await query.fetchNextPage()}
 async function scan(){try{await actions.runTask('scan',()=>api<TaskAccepted>('/local-anime/scan',{method:'POST'}),'本地扫描','scan','正在扫描本地媒体目录');ui.toast('本地扫描已经启动')}catch(e){ui.toast(e instanceof Error?e.message:'扫描失败','error')}}
 async function chooseDir(){try{await actions.run('choose-dir',async()=>{const result=await api<{path:string}>('/system/pick-directory',{method:'POST',body:JSON.stringify({title:'选择媒体目录',default_path:dirPath.value}),headers:{'Content-Type':'application/json'}});if(result.path)dirPath.value=result.path})}catch(e){ui.toast(e instanceof Error?e.message:'目录选择不可用','error')}}
 async function add(){try{await actions.runTask('add-dir',async()=>{const task=await api<TaskAccepted>('/local-directories',{method:'POST',body:JSON.stringify({path:dirPath.value}),headers:{'Content-Type':'application/json'}});dirPath.value='';adding.value=false;ui.toast('目录已添加，扫描已经启动');qc.invalidateQueries({queryKey:['local-anime']});return task},'本地扫描','scan','目录已添加，正在扫描本地媒体')}catch(e){ui.toast(e instanceof Error?e.message:'添加失败','error')}}
@@ -42,11 +60,12 @@ const resultName=(item:MetadataSearchResult)=>item.name_cn||item.name||'未命�
 <template>
   <div class="page-grid">
     <PageHeader eyebrow="ON DEVICE" title="本地番剧" description="扫描本地媒体，检查元数据，并从同一工作区进入播放。"><button class="btn btn-secondary" @click="adding=true"><FolderPlus :size="17"/>添加目录</button><AsyncButton class="btn btn-primary" :loading="actions.isBusy('scan','local-scan')" loading-label="扫描中…" @click="scan"><RefreshCw :size="17"/>重新扫描</AsyncButton></PageHeader>
-    <section v-if="query.data.value?.diagnostics.length" class="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200"><div class="flex items-start gap-3"><CircleAlert class="shrink-0"/><div><strong>媒体库有 {{ query.data.value.diagnostics.length }} 项需要关注</strong><p class="mt-1 text-sm">{{ query.data.value.diagnostics[0].Title||query.data.value.diagnostics[0].title }}：{{ query.data.value.diagnostics[0].Message||query.data.value.diagnostics[0].message }}</p></div></div></section>
-    <section class="panel p-4"><div class="grid gap-3 lg:grid-cols-[1fr_auto]"><label class="search-field"><Search :size="18" aria-hidden="true"/><input v-model="search" class="field field-leading-icon" placeholder="搜索本地番剧" aria-label="搜索本地番剧"/></label><span class="badge self-center">{{ items.length }} 部本地番剧</span></div><div v-if="query.data.value?.directories.length" class="mt-4 grid gap-2 lg:grid-cols-2"><article v-for="dir in query.data.value.directories" :key="dir.ID" class="panel-muted flex min-w-0 items-center gap-3 p-3"><FolderCog class="shrink-0 text-[var(--sky)]" :size="19"/><div class="min-w-0 flex-1"><p class="truncate text-sm font-bold">{{ dir.path }}</p><p class="muted text-xs">扫描根目录</p></div><button class="btn btn-quiet h-11 w-11 p-0" aria-label="批量重命名" @click="renameDir=dir;renamePreview=[]"><WandSparkles :size="16"/></button><button class="btn btn-danger h-11 w-11 p-0" aria-label="移除目录" @click="deleteDir=dir"><Trash2 :size="16"/></button></article></div></section>
+    <section v-if="firstPage?.diagnostics.length" class="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200"><div class="flex items-start gap-3"><CircleAlert class="shrink-0"/><div><strong>媒体库有 {{ firstPage.diagnostics.length }} 项需要关注</strong><p class="mt-1 text-sm">{{ firstPage.diagnostics[0].Title||firstPage.diagnostics[0].title }}：{{ firstPage.diagnostics[0].Message||firstPage.diagnostics[0].message }}</p></div></div></section>
+    <section class="panel p-4"><div class="grid gap-3 lg:grid-cols-[1fr_auto]"><label class="search-field"><Search :size="18" aria-hidden="true"/><input v-model="search" class="field field-leading-icon" placeholder="搜索本地番剧" aria-label="搜索本地番剧"/></label><span class="badge self-center">{{ totalItems }} 部本地番剧</span></div><div v-if="firstPage?.directories.length" class="mt-4 grid gap-2 lg:grid-cols-2"><article v-for="dir in firstPage.directories" :key="dir.ID" class="panel-muted flex min-w-0 items-center gap-3 p-3"><FolderCog class="shrink-0 text-[var(--sky)]" :size="19"/><div class="min-w-0 flex-1"><p class="truncate text-sm font-bold">{{ dir.path }}</p><p class="muted text-xs">扫描根目录</p></div><button class="btn btn-quiet h-11 w-11 p-0" aria-label="批量重命名" @click="renameDir=dir;renamePreview=[]"><WandSparkles :size="16"/></button><button class="btn btn-danger h-11 w-11 p-0" aria-label="移除目录" @click="deleteDir=dir"><Trash2 :size="16"/></button></article></div></section>
     <StateBlock v-if="query.isLoading.value" state="loading"/><StateBlock v-else-if="query.isError.value" state="error" title="本地媒体加载失败" :retrying="query.isFetching.value" @retry="query.refetch()"/><StateBlock v-else-if="!items.length" state="empty" title="还没有扫描到本地番剧" description="先添加包含番剧文件夹的根目录，然后运行一次扫描。"/>
-    <section v-else class="poster-grid"><PosterCard v-for="item in visibleItems" :key="item.ID" :title="item.metadata?.title_cn||item.metadata?.title||item.title" :image="posterURL(item.metadata||{image:item.image},{width:360})" :meta="`${item.file_count} 集 · 第 ${item.season||1} 季`" :badges="item.has_repair_actions?['待完善']:[]"><div class="mt-3 grid gap-2"><RouterLink class="btn btn-primary w-full text-xs" :to="`/player?anime=${item.ID}`"><Play :size="14"/>查看与播放</RouterLink><button class="btn btn-secondary w-full text-xs" @click="selected=item;matchQuery=item.title"><Sparkles :size="14"/>元数据与匹配</button></div></PosterCard></section>
-    <AutoLoadSentinel v-if="canLoadMore" :remaining="items.length-visibleItems.length" @load="visibleCount+=24"/>
+    <section v-else class="poster-grid"><PosterCard v-for="item in items" :key="item.ID" :title="item.metadata?.title_cn||item.metadata?.title||item.title" :image="posterURL(item.metadata||{image:item.image},{width:360})" :meta="`${item.file_count} 集 · 第 ${item.season||1} 季`" :badges="item.has_repair_actions?['待完善']:[]"><div class="mt-3 grid gap-2"><RouterLink class="btn btn-primary w-full text-xs" :to="`/player?anime=${item.ID}`"><Play :size="14"/>查看与播放</RouterLink><button class="btn btn-secondary w-full text-xs" @click="selected=item;matchQuery=item.title"><Sparkles :size="14"/>元数据与匹配</button></div></PosterCard></section>
+    <AutoLoadSentinel v-if="query.hasNextPage.value" :remaining="remainingItems" @load="loadMore"/>
+    <p v-if="query.isFetchingNextPage.value" class="muted py-3 text-center text-sm" role="status" aria-live="polite">正在加载更多本地番剧…</p>
 
     <AppDialog :open="adding" title="添加媒体目录" description="目录会在后台扫描，不会移动已有文件。" @update:open="adding=$event"><form @submit.prevent="add"><label class="label">绝对路径<div class="flex gap-2"><input v-model="dirPath" class="field" placeholder="/Volumes/Anime" required/><AsyncButton class="btn btn-secondary shrink-0" :loading="actions.isBusy('choose-dir')" loading-label="选择中…" @click="chooseDir">选择</AsyncButton></div></label><div class="mt-6 flex justify-end"><AsyncButton type="submit" class="btn btn-primary" :loading="actions.isBusy('add-dir','local-scan')" loading-label="扫描中…">添加并扫描</AsyncButton></div></form></AppDialog>
     <AppDialog :open="Boolean(renameDir)" :title="`整理 ${renameDir?.path||''}`" description="先预览所有文件名；确认后才会更新磁盘文件与数据库记录。" wide @update:open="v=>{if(!v){renameDir=null;renamePreview=[]}}"><label class="label">命名模板<input v-model="renamePattern" class="field font-mono"/></label><div v-if="renamePreview.length" class="mt-5 max-h-80 space-y-2 overflow-y-auto"><div v-for="item in renamePreview" :key="item.path" class="panel-muted p-3 text-sm"><p class="muted line-through">{{ item.original }}</p><p class="mt-1 font-bold text-[var(--success)]">{{ item.new }}</p></div></div><p v-else class="panel-muted muted mt-5 p-5 text-center text-sm">生成预览后再确认重命名。</p><div class="mt-6 flex justify-end gap-2"><AsyncButton class="btn btn-secondary" :loading="Boolean(renameDir&&actions.isBusy(`rename-preview-${renameDir.ID}`))" loading-label="生成中…" @click="previewRename">生成预览</AsyncButton><AsyncButton class="btn btn-primary" :disabled="!renamePreview.length" :loading="Boolean(renameDir&&actions.isBusy(`rename-apply-${renameDir.ID}`))" loading-label="应用中…" @click="applyRename">应用 {{ renamePreview.length }} 项</AsyncButton></div></AppDialog>

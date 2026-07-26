@@ -28,7 +28,7 @@ type Subscription struct {
 	LastEp              int        `json:"last_ep"`                                  // 最后集数
 	IsActive            bool       `json:"is_active"`                                // 激活状态
 	Summary             string     `json:"summary"`                                  // 简介
-	DownloadedCount     int64      `json:"downloaded_count" gorm:"-"`                // 实际已下载的集数 (动态计算)
+	DownloadedCount     int64      `json:"downloaded_count" gorm:"-"`                // 已加入下载且未归档的去重集数 (动态计算)
 	LastCheckAt         *time.Time `json:"last_check_at"`
 	LastSuccessAt       *time.Time `json:"last_success_at"`
 	LastRunStatus       string     `json:"last_run_status"`

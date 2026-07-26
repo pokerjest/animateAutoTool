@@ -205,7 +205,13 @@ paths:
                       data: { $ref: "#/components/schemas/RandomBackground" }
         "404": { $ref: "#/components/responses/Error" }
   /local-anime:
-    get: { operationId: getLocalAnime, parameters: [{ $ref: "#/components/parameters/Page" }, { $ref: "#/components/parameters/PageSize" }], responses: { "200": { $ref: "#/components/responses/Paginated" } } }
+    get:
+      operationId: getLocalAnime
+      parameters:
+        - { $ref: "#/components/parameters/Page" }
+        - { $ref: "#/components/parameters/PageSize" }
+        - { name: q, in: query, description: Search local and metadata titles, schema: { type: string, maxLength: 200 } }
+      responses: { "200": { $ref: "#/components/responses/Paginated" } }
   /local-anime/scan:
     post: { operationId: scanLocalAnime, responses: { "202": { $ref: "#/components/responses/TaskAccepted" } } }
   /local-directories:

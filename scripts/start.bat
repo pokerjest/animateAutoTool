@@ -3,7 +3,6 @@ setlocal
 cd /d "%~dp0"
 set "APP_EXE=%CD%\bin\animate-server.exe"
 set "LOG_DIR=%CD%\logs"
-set "LOG_FILE=%LOG_DIR%\server.log"
 set "PID_FILE=%LOG_DIR%\animate-server.pid"
 
 if not exist "%CD%\config.yaml" if exist "%CD%\config.yaml.example" (
@@ -60,14 +59,14 @@ powershell -NoProfile -NonInteractive -Command "$pidValue = (Get-Content -Litera
 if %ERRORLEVEL% NEQ 0 (
     echo Animate Auto Tool exited during startup.
     echo For startup troubleshooting, try run.bat to keep the server in the foreground.
-    if exist "%LOG_FILE%" echo If %LOG_FILE% already exists, check it for early startup logs.
+    echo Run view-logs.bat to open the latest hourly log.
     del "%PID_FILE%" >nul 2>nul
     pause
     exit /b 1
 )
 
 echo Started in background.
-echo After initialization completes, application logs will be written to %LOG_FILE%.
+echo After initialization completes, hourly logs will be written to %LOG_DIR%\server-YYYYMMDD-HH.log.
 echo PID file: %PID_FILE%
 echo Open UI: run open-ui.bat
 exit /b 0

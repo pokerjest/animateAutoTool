@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -18,7 +19,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	appconfig "github.com/pokerjest/animateAutoTool/internal/config"
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/httpx"
 	"github.com/pokerjest/animateAutoTool/internal/model"
@@ -719,22 +719,7 @@ func DeleteR2BackupHandler(c *gin.Context) {
 }
 
 func debugLog(format string, v ...interface{}) {
-	logPath := filepath.Join(appconfig.LogsDir(), "server_debug.log")
-	_ = os.MkdirAll(filepath.Dir(logPath), 0755)
-	//nolint:gosec // logPath is derived from the application's controlled logs directory.
-	f, err := os.OpenFile(filepath.Clean(logPath), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		fmt.Println("Error opening debug log:", err)
-		return
-	}
-	defer safeio.Close(f)
-	msg := fmt.Sprintf(format, v...)
-	if len(msg) == 0 || msg[len(msg)-1] != '\n' {
-		msg += "\n"
-	}
-	if _, err := f.WriteString(time.Now().Format("2006/01/02 15:04:05") + " " + msg); err != nil {
-		fmt.Println("Error writing to debug log:", err)
-	}
+	log.Printf(format, v...)
 }
 
 func TestR2ConnectionHandler(c *gin.Context) {

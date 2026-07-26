@@ -10,7 +10,7 @@ export class ApiError extends Error {
   }
 }
 
-export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
+async function apiPayload(path: string, init: RequestInit = {}): Promise<unknown> {
   const headers = new Headers(init.headers)
   const isForm = init.body instanceof FormData
   if (init.body && !isForm && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
@@ -22,8 +22,17 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     const message = typeof payload === 'string' ? payload : payload?.error?.message || payload?.error || payload?.message || '请求失败'
     throw new ApiError(response.status, message, payload)
   }
-  if (typeof payload === 'object' && payload && 'data' in payload) return payload.data as T
-  return payload as T
+  return payload
+}
+
+export async function apiEnvelope<T>(path: string, init: RequestInit = {}): Promise<ApiEnvelope<T>> {
+  const payload = await apiPayload(path, init)
+  if (typeof payload === 'object' && payload && 'data' in payload) return payload as ApiEnvelope<T>
+  return { data: payload as T }
+}
+
+export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
+  return (await apiEnvelope<T>(path, init)).data
 }
 
 export const jsonBody = (value: unknown): RequestInit => ({ body: JSON.stringify(value) })

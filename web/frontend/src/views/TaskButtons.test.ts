@@ -58,7 +58,7 @@ describe('background task buttons', () => {
   it('tracks local scans independently from the request lifetime', async () => {
     vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input)
-      if (path.endsWith('/api/v1/local-anime')) return response({ directories: [], items: [], scan_status: {}, diagnostics: [] })
+      if (path.includes('/api/v1/local-anime?')) return response({ directories: [], items: [], scan_status: {}, diagnostics: [] })
       if (path.endsWith('/api/v1/local-anime/scan') && init?.method === 'POST') return response({ task_id: 'local-scan', status: 'running' }, 202)
       throw new Error(`unexpected request: ${path}`)
     }))

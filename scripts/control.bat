@@ -6,7 +6,7 @@ set "APP_NAME=animate-server.exe"
 set "BIN_DIR=bin"
 set "BIN_PATH=%BIN_DIR%\%APP_NAME%"
 set "PID_FILE=%BIN_DIR%\server.pid"
-set "LOG_FILE=logs\server.log"
+set "LOG_HINT=logs\server-YYYYMMDD-HH.log"
 set "SRC_PATH=cmd/server/main.go"
 
 if not exist "%BIN_DIR%" mkdir "%BIN_DIR%"
@@ -60,16 +60,16 @@ goto help
     if !ERRORLEVEL! neq 0 exit /b 1
 
     echo Starting %APP_NAME%...
-    start /B "" "%BIN_PATH%" > "%LOG_FILE%" 2>&1
+    start /B "" "%BIN_PATH%" >nul 2>&1
     
     timeout /t 1 >nul
     for /f "tokens=2" %%a in ('tasklist /nh /fi "imagename eq %APP_NAME%"') do set PID=%%a
     
     if defined PID (
         echo !PID! > "%PID_FILE%"
-        echo Started with PID !PID!. Logs are redirected to %LOG_FILE%.
+        echo Started with PID !PID!. Hourly logs: %LOG_HINT%.
     ) else (
-        echo Started, but could not capture PID. Check %LOG_FILE% for details.
+        echo Started, but could not capture PID. Check %LOG_HINT% for details.
     )
     exit /b 0
 

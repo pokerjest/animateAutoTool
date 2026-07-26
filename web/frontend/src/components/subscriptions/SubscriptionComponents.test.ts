@@ -68,4 +68,19 @@ describe('subscription presentational components', () => {
     expect(wrapper.emitted('edit')).toHaveLength(1)
     expect(isBusy).toHaveBeenCalledWith('run-7', 'subscription-7')
   })
+
+  it('labels the historical tracked count separately from the latest RSS result', () => {
+    const wrapper = mount(SubscriptionCard, {
+      props: {
+        item: subscription({
+          downloaded_count: 12,
+          last_run_summary: '本次 RSS 返回 3 条资源，均已存在于历史下载记录',
+        }),
+        isBusy: () => false,
+      },
+    })
+
+    expect(wrapper.text()).toContain('已加入下载 12 / 12 集')
+    expect(wrapper.text()).toContain('本次 RSS 返回 3 条资源，均已存在于历史下载记录')
+  })
 })

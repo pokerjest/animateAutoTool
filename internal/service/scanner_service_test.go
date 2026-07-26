@@ -35,6 +35,8 @@ func TestScannerGroupsLooseFilesAndNestedSeasonDirectories(t *testing.T) {
 
 	result, err := NewScannerService().ScanDirectory(&directory)
 	require.NoError(t, err)
+	require.Equal(t, 4, result.DiscoveredFiles)
+	require.Equal(t, 2, result.CandidateSeries)
 	require.Equal(t, 2, result.Added)
 
 	var animes []model.LocalAnime

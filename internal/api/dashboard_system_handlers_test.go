@@ -25,7 +25,7 @@ func TestDashboardTaskOverviewEndpointRendersStatuses(t *testing.T) {
 
 	scheduler.GlobalRunStatus.Begin("auto", 3)
 	service.GlobalScanStatus.Begin(2)
-	service.GlobalScanStatus.Advance("/library/a", 1, 0, nil)
+	service.GlobalScanStatus.Advance("/library/a", &service.ScanResult{DiscoveredFiles: 12, CandidateSeries: 1, Added: 1}, nil)
 	if service.GlobalRefreshStatus.TryStart() {
 		service.GlobalRefreshStatus.SetTotal(5)
 		service.GlobalRefreshStatus.UpdateProgress(2, "Test Metadata")

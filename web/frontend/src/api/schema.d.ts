@@ -2116,6 +2116,8 @@ export interface operations {
             query?: {
                 page?: components["parameters"]["Page"];
                 page_size?: components["parameters"]["PageSize"];
+                /** @description Search local and metadata titles */
+                q?: string;
             };
             header?: never;
             path?: never;

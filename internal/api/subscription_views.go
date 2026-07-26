@@ -111,7 +111,7 @@ func newSubscriptionTrendItem(sub model.Subscription) SubscriptionTrendItem {
 		Title:            sub.Title,
 		Status:           sub.LastRunStatus,
 		StatusLabel:      subscriptionStatusLabel(sub.LastRunStatus),
-		LastRunSummary:   sub.LastRunSummary,
+		LastRunSummary:   normalizeSubscriptionRunSummary(sub.LastRunSummary),
 		LastError:        sub.LastError,
 		LastNewDownloads: sub.LastNewDownloads,
 		LastCheckLabel:   "未知",
@@ -141,14 +141,41 @@ func populateSubscriptionStat(sub *model.Subscription) {
 	if sub == nil {
 		return
 	}
+	sub.LastRunSummary = normalizeSubscriptionRunSummary(sub.LastRunSummary)
 	logStore := downloadLogStore()
 	if logStore == nil {
 		return
 	}
 
-	count, _ := logStore.CountBySubscription(sub.ID)
+	count, _ := logStore.CountDistinctEpisodesBySubscription(sub.ID, []string{"downloading", "completed", "renamed"})
 	sub.DownloadedCount = count
 	populateSubscriptionActionHints(sub)
+}
+
+func normalizeSubscriptionRunSummary(summary string) string {
+	summary = strings.TrimSpace(summary)
+	var total int
+	if _, err := fmt.Sscanf(summary, "检查到 %d 集，但都被过滤规则跳过", &total); err == nil {
+		legacy := fmt.Sprintf("检查到 %d 集，但都被过滤规则跳过", total)
+		if strings.HasPrefix(summary, legacy) {
+			return fmt.Sprintf("本次 RSS 返回 %d 条资源，均被过滤规则跳过", total) + strings.TrimPrefix(summary, legacy)
+		}
+	}
+	if _, err := fmt.Sscanf(summary, "检查到 %d 集，但都已经在下载记录中", &total); err == nil {
+		legacy := fmt.Sprintf("检查到 %d 集，但都已经在下载记录中", total)
+		if strings.HasPrefix(summary, legacy) {
+			return fmt.Sprintf("本次 RSS 返回 %d 条资源，均已存在于历史下载记录", total) + strings.TrimPrefix(summary, legacy)
+		}
+	}
+
+	var filtered, duplicate int
+	if _, err := fmt.Sscanf(summary, "未发现新剧集（过滤 %d，已存在 %d）", &filtered, &duplicate); err == nil {
+		legacy := fmt.Sprintf("未发现新剧集（过滤 %d，已存在 %d）", filtered, duplicate)
+		if strings.HasPrefix(summary, legacy) {
+			return fmt.Sprintf("本次 RSS 返回 %d 条资源（过滤 %d，已存在 %d），未发现新增", filtered+duplicate, filtered, duplicate) + strings.TrimPrefix(summary, legacy)
+		}
+	}
+	return summary
 }
 
 func loadSubscriptionCard(id uint) (model.Subscription, error) {
@@ -182,10 +209,10 @@ func populateSubscriptionActionHints(sub *model.Subscription) {
 			sub.BaseRSSURL = baseRSS
 		}
 	}
-	if strings.Contains(sub.LastRunSummary, filteredAllHint) && strings.TrimSpace(sub.FilterRule) != "" {
+	if (strings.Contains(sub.LastRunSummary, filteredAllHint) || strings.Contains(sub.LastRunSummary, legacyFilteredAllHint)) && strings.TrimSpace(sub.FilterRule) != "" {
 		sub.CanClearFilter = true
 	}
-	if strings.Contains(sub.LastRunSummary, duplicateOnlyHint) && hasResettableSubscriptionLogs(sub.ID, staleLogResetAge) {
+	if (strings.Contains(sub.LastRunSummary, duplicateOnlyHint) || strings.Contains(sub.LastRunSummary, legacyDuplicateOnlyHint)) && hasResettableSubscriptionLogs(sub.ID, staleLogResetAge) {
 		sub.CanResetStaleLogs = true
 	}
 	sub.HasRepairActions = subscriptionHasRepairActions(sub)

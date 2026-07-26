@@ -147,6 +147,12 @@ if [ "$ready" -ne 1 ]; then
     exit 1
 fi
 
+HOURLY_LOG=$(find "$PACKAGE_DIR/logs" -maxdepth 1 -type f -name 'server-*.log' -print -quit 2>/dev/null || true)
+if [ -z "$HOURLY_LOG" ]; then
+    echo "Packaged server did not create an hourly server log." >&2
+    exit 1
+fi
+
 export PACKAGE_E2E_BASE_URL="http://127.0.0.1:$PORT"
 export PACKAGE_E2E_VERSION="$VERSION"
 (

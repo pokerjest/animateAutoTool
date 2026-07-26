@@ -29,6 +29,13 @@ const displayTitle = computed(() => (
   props.item.metadata?.title_cn || props.item.metadata?.title || props.item.title
 ))
 
+const downloadProgressLabel = computed(() => {
+  const total = props.item.expected_episodes
+  return total > 0
+    ? `已加入下载 ${props.item.downloaded_count} / ${total} 集`
+    : `已加入下载 ${props.item.downloaded_count} 集`
+})
+
 const repairActions = computed<RepairAction[]>(() => [
   { name: 'use-base-rss', label: '改用主 RSS', visible: Boolean(props.item.can_use_base_rss) },
   { name: 'clear-filter', label: '清空过滤', visible: Boolean(props.item.can_clear_filter) },
@@ -71,8 +78,7 @@ function isRepairBusy(name: string) {
         </span>
       </div>
       <p class="muted mt-1 truncate text-sm">
-        {{ item.subtitle_group || '未指定字幕组' }} · 已下载 {{ item.downloaded_count }}
-        <span v-if="item.expected_episodes"> / {{ item.expected_episodes }}</span>
+        {{ item.subtitle_group || '未指定字幕组' }} · {{ downloadProgressLabel }}
       </p>
       <p class="mt-2 text-xs" :class="item.last_error_display ? 'text-[var(--danger)]' : 'muted'">
         {{ item.last_error_display || item.last_run_summary || '等待首次检查' }}

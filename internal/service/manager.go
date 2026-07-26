@@ -439,11 +439,11 @@ func (m *SubscriptionManager) buildIdleRunSummary(sub *model.Subscription, total
 		}
 		return "RSS 当前没有可用剧集"
 	case filtered > 0 && duplicate == 0:
-		return fmt.Sprintf("检查到 %d 集，但都被过滤规则跳过", total)
+		return fmt.Sprintf("本次 RSS 返回 %d 条资源，均被过滤规则跳过", total)
 	case duplicate > 0 && filtered == 0:
-		return fmt.Sprintf("检查到 %d 集，但都已经在下载记录中", total)
+		return fmt.Sprintf("本次 RSS 返回 %d 条资源，均已存在于历史下载记录", total)
 	case filtered > 0 || duplicate > 0:
-		return fmt.Sprintf("未发现新剧集（过滤 %d，已存在 %d）", filtered, duplicate)
+		return fmt.Sprintf("本次 RSS 返回 %d 条资源（过滤 %d，已存在 %d），未发现新增", total, filtered, duplicate)
 	default:
 		return "未发现可下载新剧集"
 	}

@@ -60,10 +60,13 @@ func NewScannerService() *ScannerService {
 
 // ScanResult 代表扫描结果 stats
 type ScanResult struct {
-	DirectoryID uint
-	Added       int
-	Updated     int
-	Deleted     int
+	DirectoryID     uint
+	DiscoveredFiles int
+	CandidateSeries int
+	WalkErrors      int
+	Added           int
+	Updated         int
+	Deleted         int
 }
 
 type scannedMediaFile struct {
@@ -121,13 +124,7 @@ func (s *ScannerService) ScanAll() error {
 	for i := range dirs {
 		d := &dirs[i]
 		res, scanErr := s.scanDirectory(d, claimedFiles)
-		added := 0
-		updated := 0
-		if res != nil {
-			added = res.Added
-			updated = res.Updated
-		}
-		event.GlobalBus.Publish(event.EventScanRun, GlobalScanStatus.Advance(d.Path, added, updated, scanErr))
+		event.GlobalBus.Publish(event.EventScanRun, GlobalScanStatus.Advance(d.Path, res, scanErr))
 		if scanErr != nil {
 			log.Printf("ScannerService: Failed to completely scan directory %s: %v", d.Path, scanErr)
 		}
@@ -180,7 +177,12 @@ func (s *ScannerService) scanDirectory(dir *model.LocalAnimeDirectory, claimedFi
 		return nil, err
 	}
 
-	res := &ScanResult{DirectoryID: dir.ID}
+	res := &ScanResult{
+		DirectoryID:     dir.ID,
+		DiscoveredFiles: len(mediaFiles),
+		CandidateSeries: len(candidates),
+		WalkErrors:      len(walkErrors),
+	}
 	usedAnimeIDs := make(map[uint]struct{})
 	for i := range candidates {
 		candidate := &candidates[i]
@@ -249,9 +251,13 @@ func (s *ScannerService) scanDirectory(dir *model.LocalAnimeDirectory, claimedFi
 		}
 	}
 
-	log.Printf("ScannerService: Scan complete. Added: %d, Updated: %d, Removed: %d", res.Added, res.Updated, res.Deleted)
+	log.Printf(
+		"ScannerService: Scan complete for %s. Media files: %d, candidate series: %d, added: %d, updated: %d, removed: %d, walk errors: %d",
+		root, res.DiscoveredFiles, res.CandidateSeries, res.Added, res.Updated, res.Deleted, res.WalkErrors,
+	)
 	event.GlobalBus.Publish(event.EventScanComplete, map[string]interface{}{
 		"scope": "directory", "directory_id": dir.ID, "directory": root,
+		"discovered_files": res.DiscoveredFiles, "candidate_series": res.CandidateSeries, "walk_errors": res.WalkErrors,
 		"added": res.Added, "updated": res.Updated, "deleted": res.Deleted,
 	})
 

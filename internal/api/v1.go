@@ -571,13 +571,26 @@ func V1LocalAnimeHandler(c *gin.Context) {
 	var dirs []model.LocalAnimeDirectory
 	var items []model.LocalAnime
 	page, pageSize := v1Pagination(c, 100)
+	search := strings.TrimSpace(c.Query("q"))
 	var total int64
 	db.DB.Order("id ASC").Find(&dirs)
-	db.DB.Model(&model.LocalAnime{}).Count(&total)
-	db.DB.Preload("Metadata").Order("id DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&items)
+	query := db.DB.Model(&model.LocalAnime{})
+	if search != "" {
+		like := "%" + escapeV1Like(search) + "%"
+		query = query.Joins("LEFT JOIN anime_metadata ON anime_metadata.id = local_animes.metadata_id AND anime_metadata.deleted_at IS NULL").
+			Where(`local_animes.title LIKE ? ESCAPE '\' OR anime_metadata.title LIKE ? ESCAPE '\' OR anime_metadata.title_cn LIKE ? ESCAPE '\' OR anime_metadata.title_jp LIKE ? ESCAPE '\' OR anime_metadata.title_en LIKE ? ESCAPE '\'`, like, like, like, like, like)
+	}
+	query.Count(&total)
+	query.Preload("Metadata").Order("local_animes.id DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&items)
 	populateLocalAnimeActionHints(items)
 	diagnostics, _ := service.ListOpenLibraryIssues(50)
 	c.JSON(http.StatusOK, v1Envelope{Data: gin.H{"directories": dirs, "items": items, "scan_status": service.GlobalScanStatus.Snapshot(), "diagnostics": diagnostics}, Meta: map[string]any{"page": page, "page_size": pageSize, "total": total}})
+}
+
+func escapeV1Like(value string) string {
+	value = strings.ReplaceAll(value, `\`, `\\`)
+	value = strings.ReplaceAll(value, `%`, `\%`)
+	return strings.ReplaceAll(value, `_`, `\_`)
 }
 
 func V1LocalAnimeEpisodesHandler(c *gin.Context) {
@@ -619,7 +632,11 @@ func V1LocalScanHandler(c *gin.Context) {
 		}
 		service.NewAgentService().RunAgentForLibrary()
 		triggerJellyfinLibraryRefresh(context.Background())
-		taskstate.Global.Complete(taskID, "本地扫描完成")
+		summary := service.GlobalScanStatus.Snapshot().LastSummary
+		if summary == "" {
+			summary = "本地扫描完成"
+		}
+		taskstate.Global.Complete(taskID, summary)
 	}()
 	v1Message(c, http.StatusAccepted, "本地扫描已经启动", gin.H{"task_id": taskID, "status": "running"})
 }

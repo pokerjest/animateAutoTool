@@ -23,8 +23,10 @@ import (
 )
 
 const emptySubgroupFeedHint = "当前字幕组 RSS 为空"
-const filteredAllHint = "都被过滤规则跳过"
-const duplicateOnlyHint = "都已经在下载记录中"
+const filteredAllHint = "均被过滤规则跳过"
+const legacyFilteredAllHint = "都被过滤规则跳过"
+const duplicateOnlyHint = "均已存在于历史下载记录"
+const legacyDuplicateOnlyHint = "都已经在下载记录中"
 const staleLogResetAge = 24 * time.Hour
 
 func subscriptionNotFound(c *gin.Context) {
