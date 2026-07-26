@@ -91,6 +91,7 @@ type restoreData struct {
 	dirs     []model.LocalAnimeDirectory
 	animes   []model.LocalAnime
 	episodes []model.LocalEpisode
+	playback []model.PlaybackHistory
 	users    []model.User
 }
 
@@ -120,6 +121,12 @@ func (s *RestoreService) readBackupData(srcDB *gorm.DB, options RestoreOptions) 
 		eg.Go(func() error { return srcDB.Find(&d.dirs).Error })
 		eg.Go(func() error { return srcDB.Find(&d.animes).Error })
 		eg.Go(func() error { return srcDB.Find(&d.episodes).Error })
+		eg.Go(func() error {
+			if !srcDB.Migrator().HasTable(&model.PlaybackHistory{}) {
+				return nil
+			}
+			return srcDB.Find(&d.playback).Error
+		})
 	}
 	if options.Users {
 		eg.Go(func() error { return srcDB.Find(&d.users).Error })
@@ -206,6 +213,7 @@ func (s *RestoreService) writeRestoreData(tx *gorm.DB, d *restoreData, options R
 	}
 
 	if options.Local {
+		tx.Exec("DELETE FROM playback_histories")
 		tx.Exec("DELETE FROM local_episodes")
 		tx.Exec("DELETE FROM local_animes")
 		tx.Exec("DELETE FROM local_anime_directories")
@@ -222,6 +230,11 @@ func (s *RestoreService) writeRestoreData(tx *gorm.DB, d *restoreData, options R
 		}
 		if len(d.episodes) > 0 {
 			if err := createBatch(&d.episodes); err != nil {
+				return err
+			}
+		}
+		if len(d.playback) > 0 {
+			if err := createBatch(&d.playback); err != nil {
 				return err
 			}
 		}

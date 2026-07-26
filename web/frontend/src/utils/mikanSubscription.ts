@@ -18,7 +18,12 @@ export function mikanBaseRSS(mikanID: string) {
 export function buildMikanSelection(
   anime: MikanDiscoveryItem & { season: string },
   group: MikanSubgroup,
-  filters: { resolution_filter?: ResolutionFilter; subtitle_language?: SubtitleLanguage } = {},
+  filters: {
+    filter_rule?: string
+    exclude_rule?: string
+    resolution_filter?: ResolutionFilter
+    subtitle_language?: SubtitleLanguage
+  } = {},
 ): MikanSubscriptionSelection {
   const baseRSS = mikanBaseRSS(anime.mikan_id)
   const isAll = group.is_all || !group.id
@@ -30,11 +35,32 @@ export function buildMikanSelection(
     subgroup_id: isAll ? '' : group.id,
     subtitle_group: isAll ? '' : group.name,
     rss_url: isAll ? baseRSS : `${baseRSS}&subgroupid=${encodeURIComponent(group.id)}`,
-    backup_rss_url: isAll ? '' : baseRSS,
-    filter_rule: isAll ? '' : escapeMikanFilter(group.name),
+    backup_rss_url: '',
+    filter_rule: filters.filter_rule?.trim() || '',
+    exclude_rule: filters.exclude_rule?.trim() || '',
     resolution_filter: filters.resolution_filter || '',
     subtitle_language: filters.subtitle_language || '',
     allow_multi_subgroup: isAll,
+  }
+}
+
+export function regexRuleError(value: string) {
+  const expression = value.trim()
+  if (!expression) return ''
+  try {
+    new RegExp(expression)
+    return ''
+  } catch (error) {
+    return error instanceof Error ? error.message.replace(/^Invalid regular expression:\s*/i, '') : '正则表达式格式错误'
+  }
+}
+
+function regexRuleMatches(title: string, expression: string) {
+  if (!expression.trim()) return false
+  try {
+    return new RegExp(expression).test(title)
+  } catch {
+    return false
   }
 }
 
@@ -60,7 +86,11 @@ export function mikanEpisodeMatchesFilters(
   episode: MikanEpisode,
   resolution: ResolutionFilter,
   language: SubtitleLanguage,
+  includeRule = '',
+  excludeRule = '',
 ) {
+  if (excludeRule.trim() && regexRuleMatches(episode.title, excludeRule)) return false
+  if (includeRule.trim() && !regexRuleMatches(episode.title, includeRule)) return false
   if (resolution && normalizedResolution(episode) !== resolution) return false
   if (!language) return true
   const detected = subtitleLanguages(episode.title)

@@ -2,6 +2,9 @@ package db
 
 import (
 	"fmt"
+	"net/url"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/pokerjest/animateAutoTool/internal/model"
@@ -65,6 +68,53 @@ var migrations = []migration{
 			return tx.AutoMigrate(&model.Subscription{})
 		},
 	},
+	{
+		ID:          "007_playback_history",
+		Description: "Create per-user playback history for continue watching",
+		Apply: func(tx *gorm.DB) error {
+			return tx.AutoMigrate(&model.PlaybackHistory{})
+		},
+	},
+	{
+		ID:          "008_remove_redundant_mikan_subgroup_rules",
+		Description: "Remove generated subgroup filters and aggregate fallbacks from subgroup-specific Mikan feeds",
+		Apply:       removeRedundantMikanSubgroupRules,
+	},
+}
+
+func removeRedundantMikanSubgroupRules(tx *gorm.DB) error {
+	var subscriptions []model.Subscription
+	if err := tx.Find(&subscriptions).Error; err != nil {
+		return err
+	}
+	for i := range subscriptions {
+		sub := &subscriptions[i]
+		group := strings.TrimSpace(sub.SubtitleGroup)
+		parsed, err := url.Parse(strings.TrimSpace(sub.RSSUrl))
+		if group == "" || err != nil || !strings.EqualFold(parsed.Hostname(), "mikanani.me") || parsed.Query().Get("subgroupid") == "" {
+			continue
+		}
+
+		changes := map[string]any{}
+		filter := strings.TrimSpace(sub.FilterRule)
+		if filter == group || filter == regexp.QuoteMeta(group) {
+			changes["filter_rule"] = ""
+		}
+
+		query := parsed.Query()
+		query.Del("subgroupid")
+		parsed.RawQuery = query.Encode()
+		if backup, backupErr := url.Parse(strings.TrimSpace(sub.BackupRSSUrl)); backupErr == nil && backup.String() == parsed.String() {
+			changes["backup_rss_url"] = ""
+		}
+
+		if len(changes) > 0 {
+			if err := tx.Model(&model.Subscription{}).Where("id = ?", sub.ID).Updates(changes).Error; err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func backfillSubscriptionMikanIDs(tx *gorm.DB) error {
@@ -98,6 +148,7 @@ func autoMigrateCoreSchema(tx *gorm.DB) error {
 		&model.LibraryIssue{},
 		&model.AnimeMetadata{},
 		&model.User{},
+		&model.PlaybackHistory{},
 	)
 }
 

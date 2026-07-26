@@ -1,11 +1,13 @@
 package downloader
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"log"
 	"net/http"
+	"net/http/cookiejar"
 	"path/filepath"
 	"strings"
 	"time"
@@ -32,11 +34,12 @@ func NewQBittorrentClient(baseURL string) *QBittorrentClient {
 	// 确保 baseURL 不以 / 结尾
 	baseURL = strings.TrimSuffix(baseURL, "/")
 
+	jar, _ := cookiejar.New(nil)
 	client := httpx.NewRestyClient(5*time.Second, "", nil).
 		SetBaseURL(baseURL).
 		SetHeader("Referer", baseURL).
 		SetHeader("Origin", baseURL).
-		SetCookieJar(nil) // Keep Jar just in case, but we will manual override
+		SetCookieJar(jar)
 
 	client.SetRetryCount(3).SetRetryWaitTime(2 * time.Second)
 
@@ -57,11 +60,12 @@ func (q *QBittorrentClient) Login(username, password string) error {
 }
 
 func (q *QBittorrentClient) LoginContext(ctx context.Context, username, password string) error {
-	if username == "" && password == "" {
-		if _, err := q.GetVersionContext(ctx); err == nil {
-			log.Printf("DEBUG: qBittorrent is reachable without explicit login; using localhost-auth bypass")
-			return nil
-		}
+	// qBittorrent may bypass authentication for localhost or configured IP
+	// subnets. In that mode the login endpoint can return "Ok." without a SID
+	// cookie, so probe an authenticated endpoint before attempting credentials.
+	if _, err := q.GetVersionContext(ctx); err == nil {
+		log.Printf("DEBUG: qBittorrent API is accessible without a session cookie; using IP/localhost auth bypass")
+		return nil
 	}
 
 	resp, err := httpx.NewRequest(ctx, q.client).
@@ -82,9 +86,28 @@ func (q *QBittorrentClient) LoginContext(ctx context.Context, username, password
 	// Store cookies manually
 	q.cookies = resp.Cookies()
 
-	// qBit 登录失败在 body 返回 "Fails."
-	if resp.String() == "Fails." {
+	if resp.StatusCode() != http.StatusOK {
+		return fmt.Errorf("login failed: %s", resp.Status())
+	}
+
+	// qBit 登录失败在 body 返回 "Fails."；不同版本可能带换行。
+	if strings.EqualFold(strings.TrimSpace(resp.String()), "Fails.") {
 		return errors.New("login failed: invalid credentials")
+	}
+	if !strings.EqualFold(strings.TrimSpace(resp.String()), "Ok.") {
+		return fmt.Errorf("login failed: unexpected response %q", strings.TrimSpace(resp.String()))
+	}
+
+	// A standard login returns SID. If a proxy or an auth-bypass rule omits it,
+	// accept the connection only after a protected endpoint succeeds.
+	if _, verifyErr := q.GetVersionContext(ctx); verifyErr != nil {
+		if len(q.cookies) == 0 {
+			return fmt.Errorf("login returned Ok but no session cookie was issued and API verification failed: %w", verifyErr)
+		}
+		return fmt.Errorf("login session verification failed: %w", verifyErr)
+	}
+	if len(q.cookies) == 0 {
+		log.Printf("DEBUG: qBittorrent login returned no cookie, but API verification succeeded; using auth bypass")
 	}
 
 	return nil
@@ -95,20 +118,10 @@ func (q *QBittorrentClient) AddTorrent(torrentURL, savePath, category string, pa
 }
 
 func (q *QBittorrentClient) AddTorrentContext(ctx context.Context, torrentURL, savePath, category string, paused bool) error {
-	pausedStr := "false"
-	if paused {
-		pausedStr = "true"
-	}
-
+	form := q.torrentOptions(savePath, category, paused)
+	form["urls"] = torrentURL
 	req := httpx.NewRequest(ctx, q.client).
-		SetFormData(map[string]string{
-			"urls":        torrentURL,
-			"savepath":    savePath,
-			"category":    category,
-			"paused":      pausedStr,
-			"autoTMM":     "false", // 禁用自动种子管理，以便使用自定义路径
-			"root_folder": "true",  // 创建根目录
-		}).
+		SetFormData(form).
 		SetHeader("Referer", q.baseURL+"/"). // Add trailing slash to match browser
 		SetHeader("Origin", q.baseURL)
 
@@ -116,8 +129,6 @@ func (q *QBittorrentClient) AddTorrentContext(ctx context.Context, torrentURL, s
 	if len(q.cookies) > 0 {
 		req.SetCookies(q.cookies)
 		log.Printf("DEBUG: Manually attaching %d cookies", len(q.cookies))
-	} else {
-		log.Printf("WARNING: No cookies to attach! Login might have failed silently or didn't set cookies.")
 	}
 
 	resp, err := req.Post("/api/v2/torrents/add")
@@ -126,11 +137,63 @@ func (q *QBittorrentClient) AddTorrentContext(ctx context.Context, torrentURL, s
 		return err
 	}
 
-	if resp.StatusCode() != http.StatusOK {
-		return fmt.Errorf("failed to add torrent, status: %s, body: %s", resp.Status(), resp.String())
+	return validateAddTorrentResponse(resp)
+}
+
+func (q *QBittorrentClient) AddTorrentFileContext(ctx context.Context, filename string, data []byte, savePath, category string, paused bool) error {
+	filename = strings.TrimSpace(filename)
+	if filename == "" {
+		return errors.New("failed to add torrent file: filename is empty")
+	}
+	if len(data) == 0 {
+		return errors.New("failed to add torrent file: file is empty")
 	}
 
-	return nil
+	req := httpx.NewRequest(ctx, q.client).
+		SetFormData(q.torrentOptions(savePath, category, paused)).
+		SetFileReader("torrents", filename, bytes.NewReader(data)).
+		SetHeader("Referer", q.baseURL+"/").
+		SetHeader("Origin", q.baseURL)
+	if len(q.cookies) > 0 {
+		req.SetCookies(q.cookies)
+	}
+
+	resp, err := req.Post("/api/v2/torrents/add")
+	if err != nil {
+		return err
+	}
+	return validateAddTorrentResponse(resp)
+}
+
+func (q *QBittorrentClient) torrentOptions(savePath, category string, paused bool) map[string]string {
+	pausedStr := "false"
+	if paused {
+		pausedStr = "true"
+	}
+	return map[string]string{
+		"savepath":    savePath,
+		"category":    category,
+		"paused":      pausedStr,
+		"autoTMM":     "false", // 禁用自动种子管理，以便使用自定义路径
+		"root_folder": "true",  // 创建根目录
+	}
+}
+
+func validateAddTorrentResponse(resp *resty.Response) error {
+	if resp == nil {
+		return errors.New("failed to add torrent: empty qBittorrent response")
+	}
+	body := strings.TrimSpace(resp.String())
+	if resp.StatusCode() != http.StatusOK {
+		return fmt.Errorf("failed to add torrent, status: %s, body: %s", resp.Status(), body)
+	}
+	if body == "" || strings.EqualFold(body, "Ok.") {
+		return nil
+	}
+	if strings.EqualFold(body, "Fails.") {
+		return errors.New("qBittorrent rejected the torrent (Fails.)")
+	}
+	return fmt.Errorf("qBittorrent returned an unexpected add response: %q", body)
 }
 
 func (q *QBittorrentClient) Ping() error {

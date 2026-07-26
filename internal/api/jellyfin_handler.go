@@ -13,11 +13,11 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/pokerjest/animateAutoTool/internal/bangumi"
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/httpx"
 	"github.com/pokerjest/animateAutoTool/internal/jellyfin"
 	"github.com/pokerjest/animateAutoTool/internal/model"
+	"github.com/pokerjest/animateAutoTool/internal/store"
 )
 
 type PlayInfoResponse struct {
@@ -433,6 +433,21 @@ func GetPlayInfoHandler(c *gin.Context) {
 		played = details.UserData.Played
 		episodeFavorite = details.UserData.IsFavorite
 	}
+	// AnimateTool's per-user record takes precedence over the configured
+	// Jellyfin user's shared resume point. Jellyfin remains the fallback for
+	// users upgrading from versions without local playback history.
+	if userID, userErr := currentSessionUserID(c); userErr == nil {
+		if history, historyErr := store.NewPlaybackHistoryStore(db.DB).Find(userID, ep.ID); historyErr == nil {
+			if history.Completed {
+				resume = 0
+			} else {
+				resume = history.PositionTicks
+			}
+			if history.DurationTicks > 0 {
+				runtimeTicks = history.DurationTicks
+			}
+		}
+	}
 
 	c.JSON(http.StatusOK, PlayInfoResponse{
 		StreamURL:       proxyUrl,
@@ -533,132 +548,6 @@ func UpdateJellyfinSeriesStateHandler(c *gin.Context) {
 		return
 	}
 	v1Data(c, http.StatusOK, gin.H{"favorite": *input.Favorite})
-}
-
-// ReportProgressHandler receives progress updates from frontend and forwards to Jellyfin
-func ReportProgressHandler(c *gin.Context) {
-	var body struct {
-		EpisodeID uint   `json:"episode_id"` // Local Episode ID
-		Event     string `json:"event"`      // "timeupdate", "pause", "timeupdate", "ended"
-		Ticks     int64  `json:"ticks"`      // Current position in ticks
-	}
-	if err := c.ShouldBindJSON(&body); err != nil {
-		jsonBadRequest(c, "播放进度请求格式不正确")
-		return
-	}
-
-	// 1. Fetch Episode Linkage
-	var ep model.LocalEpisode
-	if err := db.DB.First(&ep, body.EpisodeID).Error; err != nil {
-		log.Printf("[DEBUG] PlayInfo: Episode %d not found in DB", body.EpisodeID)
-		jsonNotFound(c, "未找到对应的剧集")
-		return
-	}
-
-	// Need Metadata to find Series ID
-	var anime model.LocalAnime
-	if err := db.DB.Preload("Metadata").First(&anime, ep.LocalAnimeID).Error; err != nil {
-		log.Printf("[DEBUG] PlayInfo: Anime for episode %d not found", body.EpisodeID)
-		c.Status(http.StatusNotFound)
-		return
-	}
-
-	log.Printf("[DEBUG] PlayInfo: Requesting playback for Ep %d (Order: %d, Path: %s)", ep.ID, ep.EpisodeNum, ep.Path)
-
-	// 2. Setup Jellyfin Client
-	urlValue := configValue(model.ConfigKeyJellyfinUrl)
-	apiKey := configValue(model.ConfigKeyJellyfinApiKey)
-	if urlValue == "" || apiKey == "" {
-		c.Status(http.StatusServiceUnavailable) // Not configured
-		return
-	}
-	client := newConfiguredJellyfinClient(urlValue, apiKey)
-
-	users, _ := client.GetUsers()
-	if len(users) > 0 {
-		client.UserID = users[0].Id
-	} else {
-		c.Status(http.StatusInternalServerError)
-		return
-	}
-
-	// 3. Resolve Jellyfin Item ID (Cache optimized)
-	seriesId := anime.JellyfinSeriesID
-
-	if seriesId == "" {
-		if anime.Metadata.BangumiID != 0 {
-			seriesId, _ = client.GetItemByProviderID("bangumi", strconv.Itoa(anime.Metadata.BangumiID))
-			if seriesId == "" {
-				seriesId, _ = client.GetItemByProviderID("Bangumi", strconv.Itoa(anime.Metadata.BangumiID))
-			}
-		} else if anime.Metadata.TMDBID != 0 {
-			seriesId, _ = client.GetItemByProviderID("tmdb", strconv.Itoa(anime.Metadata.TMDBID))
-		}
-
-		if seriesId != "" {
-			anime.JellyfinSeriesID = seriesId
-			if err := localAnimeStore().SaveAnime(&anime); err != nil {
-				log.Printf("WARN: cache Jellyfin series id for anime %d failed: %v", anime.ID, err)
-			}
-		}
-	}
-
-	if seriesId == "" {
-		c.Status(http.StatusNotFound)
-		return
-	}
-
-	itemId := ep.JellyfinItemID
-	if itemId == "" {
-		id, _, err := client.GetEpisodeFromSeries(seriesId, ep.SeasonNum, ep.EpisodeNum)
-		if err != nil {
-			c.Status(http.StatusNotFound)
-			return
-		}
-		itemId = id
-		ep.JellyfinItemID = itemId
-		if err := localAnimeStore().SaveEpisode(&ep); err != nil {
-			log.Printf("WARN: cache Jellyfin item id for episode %d failed: %v", ep.ID, err)
-		}
-	}
-
-	// 4. Act on Event
-	switch body.Event {
-	case "ended":
-		if err := client.MarkPlayed(itemId); err != nil {
-			log.Printf("Jellyfin MarkPlayed failed: %v", err)
-		}
-
-		// Sync to Bangumi (Async)
-		if anime.Metadata.BangumiID != 0 {
-			go func(bgmID int, epNum int) {
-				token := configValue(model.ConfigKeyBangumiAccessToken)
-				if token != "" {
-					bgmClient := bangumi.NewClient("", "", "")
-					applyProxyToBangumiClient(bgmClient)
-
-					if err := bgmClient.UpdateWatchedEpisodes(token, bgmID, epNum); err != nil {
-						log.Printf("Failed to sync progress to Bangumi: %v", err)
-					} else {
-						log.Printf("Synced progress to Bangumi: Subject %d Ep %d", bgmID, epNum)
-					}
-				}
-			}(anime.Metadata.BangumiID, ep.EpisodeNum)
-		}
-	case "pause", "destroy":
-		if err := client.UpdateProgress(itemId, body.Ticks); err != nil {
-			log.Printf("Jellyfin UpdateProgress failed: %v", err)
-		}
-	case "timeupdate":
-		// Only update every X seconds/calls?
-		// Frontend should debounce this.
-		if err := client.UpdateProgress(itemId, body.Ticks); err != nil {
-			// Verbose logging might be too much here, maybe only on debug?
-			log.Printf("Jellyfin UpdateProgress failed: %v", err)
-		}
-	}
-
-	c.Status(http.StatusOK)
 }
 
 // ProxyVideoHandler proxies the video stream from Jellyfin to the client

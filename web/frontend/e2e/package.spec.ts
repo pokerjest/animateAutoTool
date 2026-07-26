@@ -53,5 +53,12 @@ test('packaged binary serves the embedded app and completes first-run setup', as
   ).toBeVisible()
   await expect(page.getByLabel('搜索订阅')).toBeVisible()
 
+  const playerResponse = await page.goto('/player')
+  expect(playerResponse?.status()).toBe(200)
+  await expect(page.getByText('还没有可继续观看的内容')).toBeVisible()
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(page.getByRole('navigation', { name: '移动端主导航' })).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBeTruthy()
+
   expect(runtimeErrors, runtimeErrors.join('\n')).toEqual([])
 })

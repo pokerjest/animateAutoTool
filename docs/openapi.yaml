@@ -259,6 +259,35 @@ paths:
             video/*:
               schema: { type: string, format: binary }
         "404": { description: Episode or Jellyfin item not found }
+  /playback/continue:
+    get:
+      operationId: getContinueWatching
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 10, default: 10 } }
+      responses:
+        "200":
+          description: Per-user continue-watching list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Envelope" }
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/ContinueWatchingResponse" }
+        "401": { $ref: "#/components/responses/Error" }
+  /playback/progress:
+    post:
+      operationId: reportPlaybackProgress
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PlaybackProgressInput" }
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
   /jellyfin/progress:
     post:
       operationId: reportJellyfinProgress
@@ -421,8 +450,8 @@ components:
         subtitle_group: { type: string }
         season: { type: string }
         backup_rss_url: { type: string, format: uri }
-        filter_rule: { type: string }
-        exclude_rule: { type: string }
+        filter_rule: { type: string, description: Optional RE2 regular expression that the release title must match. Subgroup-specific Mikan feeds do not generate this automatically. }
+        exclude_rule: { type: string, description: Optional RE2 regular expression; matching release titles are rejected. }
         resolution_filter: { type: string, enum: ["", 2160p, 1080p, 720p], description: Optional release resolution filter. }
         subtitle_language: { type: string, enum: ["", chs, cht, chs_cht], description: Optional subtitle language filter; chs and cht also match bilingual releases. }
         expected_episodes: { type: integer, minimum: 0 }
@@ -548,11 +577,36 @@ components:
         favorite: { type: boolean }
     PlaybackProgressInput:
       type: object
-      required: [episode_id, event, ticks]
+      required: [episode_id, event, ticks, duration_ticks]
       properties:
         episode_id: { type: integer, minimum: 1 }
-        event: { type: string, enum: [timeupdate, pause, ended, destroy] }
+        event: { type: string, enum: [playing, timeupdate, seeked, pause, ended, stop, destroy, restart] }
         ticks: { type: integer, format: int64, minimum: 0 }
+        duration_ticks: { type: integer, format: int64, minimum: 0 }
+    ContinueWatchingItem:
+      type: object
+      required: [anime_id, episode_id, title, episode_title, image, season, episode, position_ticks, duration_ticks, progress_percent, remaining_seconds, updated_at, stream_url]
+      properties:
+        anime_id: { type: integer, minimum: 1 }
+        episode_id: { type: integer, minimum: 1 }
+        title: { type: string }
+        episode_title: { type: string }
+        image: { type: string }
+        season: { type: integer, minimum: 0 }
+        episode: { type: integer, minimum: 0 }
+        position_ticks: { type: integer, format: int64, minimum: 0 }
+        duration_ticks: { type: integer, format: int64, minimum: 0 }
+        progress_percent: { type: number, minimum: 0, maximum: 100 }
+        remaining_seconds: { type: integer, format: int64, minimum: 0 }
+        updated_at: { type: string, format: date-time }
+        stream_url: { type: string, pattern: "^/api/v1/jellyfin/stream/" }
+    ContinueWatchingResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/ContinueWatchingItem" }
     Envelope:
       type: object
       required: [data]

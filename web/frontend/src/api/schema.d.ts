@@ -825,6 +825,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/playback/continue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getContinueWatching"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/playback/progress": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["reportPlaybackProgress"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/jellyfin/progress": {
         parameters: {
             query?: never;
@@ -1295,7 +1327,9 @@ export interface components {
             season?: string;
             /** Format: uri */
             backup_rss_url?: string;
+            /** @description Optional RE2 regular expression that the release title must match. Subgroup-specific Mikan feeds do not generate this automatically. */
             filter_rule?: string;
+            /** @description Optional RE2 regular expression; matching release titles are rejected. */
             exclude_rule?: string;
             /**
              * @description Optional release resolution filter.
@@ -1409,9 +1443,33 @@ export interface components {
         PlaybackProgressInput: {
             episode_id: number;
             /** @enum {string} */
-            event: "timeupdate" | "pause" | "ended" | "destroy";
+            event: "playing" | "timeupdate" | "seeked" | "pause" | "ended" | "stop" | "destroy" | "restart";
             /** Format: int64 */
             ticks: number;
+            /** Format: int64 */
+            duration_ticks: number;
+        };
+        ContinueWatchingItem: {
+            anime_id: number;
+            episode_id: number;
+            title: string;
+            episode_title: string;
+            image: string;
+            season: number;
+            episode: number;
+            /** Format: int64 */
+            position_ticks: number;
+            /** Format: int64 */
+            duration_ticks: number;
+            progress_percent: number;
+            /** Format: int64 */
+            remaining_seconds: number;
+            /** Format: date-time */
+            updated_at: string;
+            stream_url: string;
+        };
+        ContinueWatchingResponse: {
+            items: components["schemas"]["ContinueWatchingItem"][];
         };
         Envelope: {
             data: unknown;
@@ -2392,6 +2450,49 @@ export interface operations {
                 };
                 content?: never;
             };
+        };
+    };
+    getContinueWatching: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Per-user continue-watching list */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["ContinueWatchingResponse"];
+                    };
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    reportPlaybackProgress: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlaybackProgressInput"];
+            };
+        };
+        responses: {
+            200: components["responses"]["Success"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
         };
     };
     reportJellyfinProgress: {

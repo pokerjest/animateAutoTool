@@ -41,6 +41,9 @@ func TestRunMigrationsRecordsCurrentVersionAndIsIdempotent(t *testing.T) {
 	if !target.Migrator().HasTable(&model.Subscription{}) {
 		t.Fatal("expected subscriptions table to exist")
 	}
+	if !target.Migrator().HasTable(&model.PlaybackHistory{}) {
+		t.Fatal("expected playback_histories table to exist")
+	}
 
 	var count int64
 	if err := target.Model(&SchemaMigration{}).Count(&count).Error; err != nil {
@@ -168,5 +171,57 @@ func TestMikanIDMigrationBackfillsOnlyMissingOfficialRSSAssociations(t *testing.
 	}
 	if got[2].MikanID != "" {
 		t.Fatalf("expected external RSS to remain untouched, got %q", got[2].MikanID)
+	}
+}
+
+func TestMikanSubgroupRuleMigrationRemovesOnlyGeneratedRedundancy(t *testing.T) {
+	target, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "mikan-subgroup-rules.db")), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite db: %v", err)
+	}
+	t.Cleanup(func() { closeTestDB(t, target) })
+	if err := autoMigrateCoreSchema(target); err != nil {
+		t.Fatalf("migrate core schema: %v", err)
+	}
+	if err := target.AutoMigrate(&SchemaMigration{}); err != nil {
+		t.Fatalf("migrate schema history: %v", err)
+	}
+	for _, item := range migrations {
+		if item.ID == "008_remove_redundant_mikan_subgroup_rules" {
+			break
+		}
+		if err := target.Create(&SchemaMigration{ID: item.ID, Description: item.Description}).Error; err != nil {
+			t.Fatalf("seed migration %s: %v", item.ID, err)
+		}
+	}
+
+	items := []model.Subscription{
+		{Title: "Generated", RSSUrl: "https://mikanani.me/RSS/Bangumi?bangumiId=4024&subgroupid=615", BackupRSSUrl: "https://mikanani.me/RSS/Bangumi?bangumiId=4024", SubtitleGroup: "Kirara Fantasia", FilterRule: "Kirara Fantasia"},
+		{Title: "Escaped", RSSUrl: "https://mikanani.me/RSS/Bangumi?bangumiId=4025&subgroupid=616", BackupRSSUrl: "https://mikanani.me/RSS/Bangumi?bangumiId=4025", SubtitleGroup: "A+B [1080p]", FilterRule: `A\+B \[1080p\]`},
+		{Title: "Custom", RSSUrl: "https://mikanani.me/RSS/Bangumi?bangumiId=4026&subgroupid=617", BackupRSSUrl: "https://mikanani.me/RSS/Bangumi?bangumiId=4026", SubtitleGroup: "ANi", FilterRule: `1080[Pp].*(CHS|简中)`},
+		{Title: "Aggregate", RSSUrl: "https://mikanani.me/RSS/Bangumi?bangumiId=4027", SubtitleGroup: "ANi", FilterRule: "ANi"},
+	}
+	if err := target.Create(&items).Error; err != nil {
+		t.Fatalf("seed subscriptions: %v", err)
+	}
+	if err := RunMigrations(target); err != nil {
+		t.Fatalf("run subgroup cleanup migration: %v", err)
+	}
+
+	var got []model.Subscription
+	if err := target.Order("id").Find(&got).Error; err != nil {
+		t.Fatalf("load subscriptions: %v", err)
+	}
+	if got[0].FilterRule != "" || got[0].BackupRSSUrl != "" {
+		t.Fatalf("expected generated values to be cleared, got filter=%q backup=%q", got[0].FilterRule, got[0].BackupRSSUrl)
+	}
+	if got[1].FilterRule != "" || got[1].BackupRSSUrl != "" {
+		t.Fatalf("expected escaped generated values to be cleared, got filter=%q backup=%q", got[1].FilterRule, got[1].BackupRSSUrl)
+	}
+	if got[2].FilterRule != `1080[Pp].*(CHS|简中)` || got[2].BackupRSSUrl != "" {
+		t.Fatalf("expected custom regex to remain while generated backup is cleared, got filter=%q backup=%q", got[2].FilterRule, got[2].BackupRSSUrl)
+	}
+	if got[3].FilterRule != "ANi" {
+		t.Fatalf("expected aggregate feed rule to remain, got %q", got[3].FilterRule)
 	}
 }

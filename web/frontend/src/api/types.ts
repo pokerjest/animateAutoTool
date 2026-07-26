@@ -17,6 +17,8 @@ export type RandomBackground = components['schemas']['RandomBackground']
 export type JellyfinPlayInfo = components['schemas']['JellyfinPlayInfo']
 export type PlaybackDiagnostic = components['schemas']['PlaybackDiagnostic']
 export type PlaybackProgressInput = components['schemas']['PlaybackProgressInput']
+export type ContinueWatchingItem = components['schemas']['ContinueWatchingItem']
+export type ContinueWatchingResponse = components['schemas']['ContinueWatchingResponse']
 export interface MikanSubscriptionSelection {
   mikan_id: string
   title: string
@@ -27,6 +29,7 @@ export interface MikanSubscriptionSelection {
   rss_url: string
   backup_rss_url: string
   filter_rule: string
+  exclude_rule: string
   resolution_filter: ResolutionFilter
   subtitle_language: SubtitleLanguage
   allow_multi_subgroup: boolean

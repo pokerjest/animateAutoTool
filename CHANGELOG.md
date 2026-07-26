@@ -8,6 +8,22 @@
 
 ## [Unreleased]
 
+## [0.8.6] - 2026-07-26
+
+### Added
+- 新增全局常驻播放器、迷你播放器和继续观看入口，网页内切换路由时保持同一个视频实例、缓冲状态与播放位置。
+- 新增按 AnimateTool 用户隔离的播放历史，并与 Jellyfin 共享播放进度；首页可按最近观看顺序一键续播。
+- Mikan 订阅新增用户自定义必须包含和必须不含正则，可在订阅前预览筛选结果。
+
+### Changed
+- Mikan 字幕组专属 RSS 不再重复添加字幕组过滤规则，多字幕组与全部字幕组模式会保留用户自定义规则。
+- HTTP 种子改由 AnimateTool 使用 Mikan 网络与代理配置下载，再以文件方式上传至 qBittorrent；磁力链接继续使用原有添加方式。
+
+### Fixed
+- 修复 qBittorrent 登录成功但 Cookie 数量为零时被误判的问题，支持 qBittorrent 的 IP/localhost 免认证模式并验证真实 API 会话。
+- 修复 qBittorrent 添加接口返回 HTTP 200 但正文为 `Fails.` 时仍被记录为成功，以及 qBittorrent 主机无法访问 Mikan 时种子静默添加失败的问题。
+- 修复字幕组专属 RSS 与自动字幕组正则叠加后重复筛选的问题，并通过幂等迁移清理历史自动规则。
+
 ## [0.8.5] - 2026-07-26
 
 ### Added
@@ -206,7 +222,8 @@
 
 ---
 
-[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v0.8.5...HEAD
+[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v0.8.6...HEAD
+[0.8.6]: https://github.com/pokerjest/animateAutoTool/compare/v0.8.5...v0.8.6
 [0.8.5]: https://github.com/pokerjest/animateAutoTool/compare/v0.8.4...v0.8.5
 [0.8.0]: https://github.com/pokerjest/animateAutoTool/compare/v0.7.4...v0.8.0
 [0.7.4]: https://github.com/pokerjest/animateAutoTool/compare/v0.7.3...v0.7.4

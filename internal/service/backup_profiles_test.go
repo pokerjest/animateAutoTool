@@ -4,10 +4,56 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 )
+
+func TestFullBackupRestoresPlaybackHistoryWithLocalLibrary(t *testing.T) {
+	db.InitDB(":memory:")
+	t.Cleanup(func() { _ = db.CloseDB() })
+
+	directory := model.LocalAnimeDirectory{Path: "/media/anime"}
+	if err := db.DB.Create(&directory).Error; err != nil {
+		t.Fatalf("seed local directory: %v", err)
+	}
+	anime := model.LocalAnime{DirectoryID: directory.ID, Title: "Restore Playback", Path: "/media/anime/restore-playback"}
+	if err := db.DB.Create(&anime).Error; err != nil {
+		t.Fatalf("seed local anime: %v", err)
+	}
+	episode := model.LocalEpisode{LocalAnimeID: anime.ID, Title: "Episode 1", EpisodeNum: 1, SeasonNum: 1, Path: "/media/anime/restore-playback/01.mkv"}
+	if err := db.DB.Create(&episode).Error; err != nil {
+		t.Fatalf("seed local episode: %v", err)
+	}
+	watchedAt := time.Date(2026, 7, 26, 12, 30, 0, 0, time.UTC)
+	history := model.PlaybackHistory{UserID: 7, LocalAnimeID: anime.ID, LocalEpisodeID: episode.ID, PositionTicks: 600, DurationTicks: 1000, LastEvent: "pause", LastPlayedAt: watchedAt}
+	if err := db.DB.Create(&history).Error; err != nil {
+		t.Fatalf("seed playback history: %v", err)
+	}
+
+	backupPath := t.TempDir() + "/full.db"
+	if err := CreateBackupFile(backupPath, BackupModeFull); err != nil {
+		t.Fatalf("create full backup: %v", err)
+	}
+	if err := db.DB.Exec("DELETE FROM playback_histories").Error; err != nil {
+		t.Fatalf("clear playback history: %v", err)
+	}
+
+	if err := NewRestoreService().PerformRestore(backupPath, RestoreOptions{Local: true}); err != nil {
+		t.Fatalf("restore local library: %v", err)
+	}
+	var restored model.PlaybackHistory
+	if err := db.DB.Where("user_id = ? AND local_episode_id = ?", 7, episode.ID).First(&restored).Error; err != nil {
+		t.Fatalf("load restored playback history: %v", err)
+	}
+	if restored.PositionTicks != 600 || restored.DurationTicks != 1000 || restored.LastEvent != "pause" {
+		t.Fatalf("unexpected restored playback history: %+v", restored)
+	}
+	if !restored.LastPlayedAt.Equal(watchedAt) {
+		t.Fatalf("expected last played at %v, got %v", watchedAt, restored.LastPlayedAt)
+	}
+}
 
 func TestCreateSettingsBackupFileIncludesOnlyGlobalConfigs(t *testing.T) {
 	db.InitDB(":memory:")

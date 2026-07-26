@@ -4,16 +4,19 @@ import { buildMikanSelection, mikanEpisodeMatchesFilters, switchToMikanAggregate
 const anime = { mikan_id: '3141', title: '测试番剧', image: 'poster.jpg', season: '2026 夏季番组' }
 
 describe('Mikan subscription strategy', () => {
-  it('builds a subgroup feed with aggregate fallback and escaped filter', () => {
+  it('builds a subgroup feed without a redundant subgroup filter', () => {
     const result = buildMikanSelection(anime, { id: '583', name: 'A+B [1080p]', is_all: false }, {
+      filter_rule: '1080[Pp].*(CHS|简中)',
+      exclude_rule: '(720[Pp]|合集)',
       resolution_filter: '1080p',
       subtitle_language: 'chs',
     })
     expect(result).toMatchObject({
       rss_url: 'https://mikanani.me/RSS/Bangumi?bangumiId=3141&subgroupid=583',
-      backup_rss_url: 'https://mikanani.me/RSS/Bangumi?bangumiId=3141',
+      backup_rss_url: '',
       subtitle_group: 'A+B [1080p]',
-      filter_rule: 'A\\+B \\[1080p\\]',
+      filter_rule: '1080[Pp].*(CHS|简中)',
+      exclude_rule: '(720[Pp]|合集)',
       resolution_filter: '1080p',
       subtitle_language: 'chs',
       allow_multi_subgroup: false,
@@ -34,6 +37,8 @@ describe('Mikan subscription strategy', () => {
     const spacedFileSize = episode('[Group] Test - 01 [1080P][1.5 GB]', '1080p')
 
     expect(mikanEpisodeMatchesFilters(simplified, '1080p', 'chs')).toBe(true)
+    expect(mikanEpisodeMatchesFilters(simplified, '1080p', 'chs', '1080[Pp].*CHS')).toBe(true)
+    expect(mikanEpisodeMatchesFilters(simplified, '1080p', 'chs', '', '(CHS|简中)')).toBe(false)
     expect(mikanEpisodeMatchesFilters(simplified, '720p', 'chs')).toBe(false)
     expect(mikanEpisodeMatchesFilters(bilingual, '1080p', 'chs_cht')).toBe(true)
     expect(mikanEpisodeMatchesFilters(fileSize, '1080p', 'chs')).toBe(false)
@@ -47,6 +52,7 @@ describe('Mikan subscription strategy', () => {
       backup_rss_url: '',
       subtitle_group: '',
       filter_rule: '',
+      exclude_rule: '',
       allow_multi_subgroup: true,
     })
   })

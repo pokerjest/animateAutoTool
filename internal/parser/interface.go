@@ -54,3 +54,10 @@ type ContextRSSParser interface {
 	GetSubgroupsContext(ctx context.Context, bangumiID string) ([]Subgroup, error)
 	GetDashboardContext(ctx context.Context, year, season string) (*MikanDashboard, error)
 }
+
+// TorrentFetcher downloads a .torrent referenced by an RSS item. Keeping this
+// on the parser side lets the download reuse the source-specific HTTP client,
+// including its proxy settings.
+type TorrentFetcher interface {
+	FetchTorrentContext(ctx context.Context, rawURL string) (filename string, data []byte, err error)
+}

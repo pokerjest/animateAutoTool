@@ -1,8 +1,10 @@
 package parser
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -115,6 +117,75 @@ func TestMikanSearchAndSubgroups(t *testing.T) {
 	}
 	if subgroups[1].Name != mikanTestSubgroupANi || subgroups[2].ID != "382" {
 		t.Fatalf("unexpected subgroups: %+v", subgroups)
+	}
+}
+
+func TestMikanFetchTorrent(t *testing.T) {
+	t.Parallel()
+
+	torrentData := []byte("d4:infod4:name4:testee")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Disposition", `attachment; filename="episode-01.torrent"`)
+		_, _ = w.Write(torrentData)
+	}))
+	defer server.Close()
+
+	client := NewMikanParser()
+	filename, data, err := client.FetchTorrentContext(context.Background(), server.URL+"/download/ignored")
+	if err != nil {
+		t.Fatalf("fetch torrent: %v", err)
+	}
+	if filename != "episode-01.torrent" {
+		t.Fatalf("unexpected filename: %q", filename)
+	}
+	if string(data) != string(torrentData) {
+		t.Fatalf("unexpected torrent data: %q", data)
+	}
+}
+
+func TestMikanFetchTorrentRejectsInvalidResponses(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		handler http.HandlerFunc
+		want    string
+	}{
+		{
+			name: "html instead of torrent",
+			handler: func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte("<html>access denied</html>"))
+			},
+			want: "not a bencoded torrent",
+		},
+		{
+			name: "empty body",
+			handler: func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusOK)
+			},
+			want: "response is empty",
+		},
+		{
+			name: "oversized body",
+			handler: func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Length", strconv.Itoa(maxTorrentFileSize+1))
+				w.WriteHeader(http.StatusOK)
+			},
+			want: "exceeds 10 MiB limit",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(tt.handler)
+			defer server.Close()
+
+			client := NewMikanParser()
+			_, _, err := client.FetchTorrentContext(context.Background(), server.URL+"/episode.torrent")
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("expected error containing %q, got %v", tt.want, err)
+			}
+		})
 	}
 }
 

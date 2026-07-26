@@ -1,11 +1,20 @@
 package downloader
 
 import (
+	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
+)
+
+const (
+	qbLoginPath   = "/api/v2/auth/login"
+	qbVersionPath = "/api/v2/app/version"
+	qbAddPath     = "/api/v2/torrents/add"
+	qbTestCookie  = "cookie-value"
 )
 
 func TestQBittorrentClientLoginAddListAndRename(t *testing.T) {
@@ -15,7 +24,7 @@ func TestQBittorrentClientLoginAddListAndRename(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/api/v2/auth/login":
+		case qbLoginPath:
 			if err := r.ParseForm(); err != nil {
 				t.Fatalf("parse login form: %v", err)
 			}
@@ -25,9 +34,9 @@ func TestQBittorrentClientLoginAddListAndRename(t *testing.T) {
 			if got := r.Form.Get("password"); got != "secret" {
 				t.Fatalf("unexpected password: %q", got)
 			}
-			http.SetCookie(w, &http.Cookie{Name: "SID", Value: "cookie-value"})
+			http.SetCookie(w, &http.Cookie{Name: "SID", Value: qbTestCookie})
 			_, _ = w.Write([]byte("Ok."))
-		case "/api/v2/torrents/add":
+		case qbAddPath:
 			if err := r.ParseForm(); err != nil {
 				t.Fatalf("parse add form: %v", err)
 			}
@@ -40,12 +49,12 @@ func TestQBittorrentClientLoginAddListAndRename(t *testing.T) {
 			if got := r.Form.Get("category"); got != "anime" {
 				t.Fatalf("unexpected category: %q", got)
 			}
-			if cookie, err := r.Cookie("SID"); err == nil && cookie.Value == "cookie-value" {
+			if cookie, err := r.Cookie("SID"); err == nil && cookie.Value == qbTestCookie {
 				sawLoginCookie = true
 			}
 			w.WriteHeader(http.StatusOK)
 		case "/api/v2/torrents/info":
-			if cookie, err := r.Cookie("SID"); err != nil || cookie.Value != "cookie-value" {
+			if cookie, err := r.Cookie("SID"); err != nil || cookie.Value != qbTestCookie {
 				t.Fatalf("expected auth cookie on list request, err=%v cookie=%v", err, cookie)
 			}
 			w.Header().Set("Content-Type", "application/json")
@@ -64,7 +73,11 @@ func TestQBittorrentClientLoginAddListAndRename(t *testing.T) {
 				t.Fatalf("unexpected newPath: %q", got)
 			}
 			w.WriteHeader(http.StatusOK)
-		case "/api/v2/app/version":
+		case qbVersionPath:
+			if cookie, err := r.Cookie("SID"); err != nil || cookie.Value != qbTestCookie {
+				http.Error(w, "Forbidden", http.StatusForbidden)
+				return
+			}
 			_, _ = w.Write([]byte("5.0.4"))
 		default:
 			t.Fatalf("unexpected path: %s", r.URL.Path)
@@ -100,10 +113,14 @@ func TestQBittorrentClientLoginFailure(t *testing.T) {
 	t.Parallel()
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v2/auth/login" {
+		switch r.URL.Path {
+		case qbVersionPath:
+			http.Error(w, "Forbidden", http.StatusForbidden)
+		case qbLoginPath:
+			_, _ = w.Write([]byte("Fails.\n"))
+		default:
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
-		_, _ = w.Write([]byte("Fails."))
 	}))
 	defer server.Close()
 
@@ -111,6 +128,127 @@ func TestQBittorrentClientLoginFailure(t *testing.T) {
 	err := client.Login("admin", "wrong")
 	if err == nil || !strings.Contains(err.Error(), "invalid credentials") {
 		t.Fatalf("expected invalid credentials error, got %v", err)
+	}
+}
+
+func TestQBittorrentClientUploadsTorrentFile(t *testing.T) {
+	t.Parallel()
+
+	torrentData := []byte("d4:infod4:name12:episode.mkvee")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != qbAddPath {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if err := r.ParseMultipartForm(1 << 20); err != nil {
+			t.Fatalf("parse multipart form: %v", err)
+		}
+		file, header, err := r.FormFile("torrents")
+		if err != nil {
+			t.Fatalf("read torrents file field: %v", err)
+		}
+		defer func() {
+			if closeErr := file.Close(); closeErr != nil {
+				t.Errorf("close uploaded torrent: %v", closeErr)
+			}
+		}()
+		if header.Filename != "episode.torrent" {
+			t.Fatalf("unexpected filename: %q", header.Filename)
+		}
+		got, err := io.ReadAll(file)
+		if err != nil {
+			t.Fatalf("read uploaded torrent: %v", err)
+		}
+		if string(got) != string(torrentData) {
+			t.Fatalf("unexpected torrent payload: %q", got)
+		}
+		if got := r.FormValue("savepath"); got != "/downloads/anime" {
+			t.Fatalf("unexpected savepath: %q", got)
+		}
+		if got := r.FormValue("category"); got != "Anime" {
+			t.Fatalf("unexpected category: %q", got)
+		}
+		if got := r.FormValue("paused"); got != "true" {
+			t.Fatalf("unexpected paused option: %q", got)
+		}
+		_, _ = w.Write([]byte("Ok."))
+	}))
+	defer server.Close()
+
+	client := NewQBittorrentClient(server.URL)
+	if err := client.AddTorrentFileContext(context.Background(), "episode.torrent", torrentData, "/downloads/anime", "Anime", true); err != nil {
+		t.Fatalf("upload torrent file: %v", err)
+	}
+}
+
+func TestQBittorrentClientRejectsFailsAddResponse(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != qbAddPath {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		_, _ = w.Write([]byte("Fails.\n"))
+	}))
+	defer server.Close()
+
+	client := NewQBittorrentClient(server.URL)
+	err := client.AddTorrent("magnet:?xt=urn:btih:rejected", "", "", false)
+	if err == nil || !strings.Contains(err.Error(), "rejected") {
+		t.Fatalf("expected qBittorrent rejection error, got %v", err)
+	}
+}
+
+func TestQBittorrentClientAcceptsIPAuthBypassWithoutCookie(t *testing.T) {
+	t.Parallel()
+
+	loginCalls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case qbVersionPath:
+			_, _ = w.Write([]byte("5.1.0"))
+		case "/api/v2/torrents/info":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[]`))
+		case qbLoginPath:
+			loginCalls++
+			_, _ = w.Write([]byte("Ok."))
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := NewQBittorrentClient(server.URL)
+	if err := client.Login("admin", "secret"); err != nil {
+		t.Fatalf("auth bypass should be accepted: %v", err)
+	}
+	if loginCalls != 0 {
+		t.Fatalf("expected protected endpoint probe to avoid redundant login, got %d login calls", loginCalls)
+	}
+	if _, err := client.ListTorrents(); err != nil {
+		t.Fatalf("list through auth bypass: %v", err)
+	}
+}
+
+func TestQBittorrentClientRejectsOkLoginWithoutCookieWhenAPIRemainsForbidden(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case qbVersionPath:
+			http.Error(w, "Forbidden", http.StatusForbidden)
+		case qbLoginPath:
+			_, _ = w.Write([]byte("Ok."))
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := NewQBittorrentClient(server.URL)
+	err := client.Login("admin", "secret")
+	if err == nil || !strings.Contains(err.Error(), "no session cookie") {
+		t.Fatalf("expected missing-session diagnostic, got %v", err)
 	}
 }
 

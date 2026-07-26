@@ -21,3 +21,9 @@ type ContextDownloader interface {
 	AddTorrentContext(ctx context.Context, url, savePath, category string, paused bool) error
 	PingContext(ctx context.Context) error
 }
+
+// TorrentFileDownloader uploads torrent metadata directly to a downloader.
+// This avoids requiring the downloader host itself to reach the RSS provider.
+type TorrentFileDownloader interface {
+	AddTorrentFileContext(ctx context.Context, filename string, data []byte, savePath, category string, paused bool) error
+}

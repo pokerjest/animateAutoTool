@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query'
 import { createPinia, setActivePinia } from 'pinia'
+import { createMemoryHistory, createRouter } from 'vue-router'
 import DashboardView from './DashboardView.vue'
 import LibraryView from './LibraryView.vue'
 import LocalAnimeView from './LocalAnimeView.vue'
@@ -17,9 +18,10 @@ function mountView(component: Parameters<typeof mount>[0]) {
   const pinia = createPinia()
   setActivePinia(pinia)
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
+  const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/:pathMatch(.*)*', component: { template: '<div />' } }] })
   const wrapper = mount(component, {
     global: {
-      plugins: [pinia, [VueQueryPlugin, { queryClient }]],
+      plugins: [pinia, router, [VueQueryPlugin, { queryClient }]],
       stubs: { RouterLink: { template: '<a><slot /></a>' } },
     },
   })
@@ -39,6 +41,7 @@ describe('background task buttons', () => {
     vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input)
       if (path.endsWith('/api/v1/dashboard')) return response({ active_subscriptions: 0, downloads: 0, library_items: 0, local_series: 0, open_issues: 0, services: {}, tasks: [], recent_downloads: [] })
+      if (path.includes('/api/v1/playback/continue')) return response({ items: [] })
       if (path.endsWith('/api/v1/tasks/sync') && init?.method === 'POST') return response({ task_id: 'manual-sync', status: 'running' }, 202)
       throw new Error(`unexpected request: ${path}`)
     }))

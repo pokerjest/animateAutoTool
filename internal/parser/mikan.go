@@ -1,12 +1,17 @@
 package parser
 
 import (
+	"bytes"
 	"context"
 	"encoding/xml"
 	"fmt"
 	"html"
+	"io"
 	"log"
+	"mime"
+	"net/http"
 	"net/url"
+	"path"
 	"regexp"
 	"strconv"
 	"strings"
@@ -19,6 +24,8 @@ import (
 type MikanParser struct {
 	client *resty.Client
 }
+
+const maxTorrentFileSize = 10 << 20
 
 func NewMikanParser() *MikanParser {
 	client := httpx.NewRestyClient(10*time.Second, "", nil)
@@ -75,6 +82,77 @@ func (p *MikanParser) SetProxy(proxyURL string) error {
 
 func (p *MikanParser) Name() string {
 	return "Mikan Project"
+}
+
+// FetchTorrentContext downloads a Mikan torrent using the same client as RSS
+// discovery, so a configured Mikan proxy is honored. qBittorrent can then
+// receive the file directly even when its own host cannot reach Mikan.
+func (p *MikanParser) FetchTorrentContext(ctx context.Context, rawURL string) (string, []byte, error) {
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
+		return "", nil, fmt.Errorf("torrent URL is empty")
+	}
+
+	resp, err := httpx.NewRequest(ctx, p.client).
+		SetDoNotParseResponse(true).
+		Get(rawURL)
+	if err != nil {
+		return "", nil, fmt.Errorf("download torrent: %w", err)
+	}
+	if resp.RawBody() == nil {
+		return "", nil, fmt.Errorf("download torrent: empty response body")
+	}
+	defer func() {
+		if closeErr := resp.RawBody().Close(); closeErr != nil {
+			log.Printf("Mikan torrent response close failed: %v", closeErr)
+		}
+	}()
+
+	if resp.StatusCode() != http.StatusOK {
+		return "", nil, fmt.Errorf("download torrent: unexpected status %s", resp.Status())
+	}
+	if resp.RawResponse != nil && resp.RawResponse.ContentLength > maxTorrentFileSize {
+		return "", nil, fmt.Errorf("download torrent: file exceeds %d MiB limit", maxTorrentFileSize>>20)
+	}
+
+	data, err := io.ReadAll(io.LimitReader(resp.RawBody(), maxTorrentFileSize+1))
+	if err != nil {
+		return "", nil, fmt.Errorf("download torrent body: %w", err)
+	}
+	if len(data) > maxTorrentFileSize {
+		return "", nil, fmt.Errorf("download torrent: file exceeds %d MiB limit", maxTorrentFileSize>>20)
+	}
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 {
+		return "", nil, fmt.Errorf("download torrent: response is empty")
+	}
+	if trimmed[0] != 'd' {
+		return "", nil, fmt.Errorf("download torrent: response is not a bencoded torrent file")
+	}
+
+	return torrentResponseFilename(rawURL, resp.Header()), data, nil
+}
+
+func torrentResponseFilename(rawURL string, header http.Header) string {
+	filename := ""
+	if disposition := header.Get("Content-Disposition"); disposition != "" {
+		if _, params, err := mime.ParseMediaType(disposition); err == nil {
+			filename = params["filename"]
+		}
+	}
+	if filename == "" {
+		if parsed, err := url.Parse(rawURL); err == nil {
+			filename = path.Base(parsed.Path)
+		}
+	}
+	filename = path.Base(strings.ReplaceAll(strings.TrimSpace(filename), `\`, "/"))
+	if filename == "" || filename == "." || filename == "/" {
+		filename = "mikan.torrent"
+	}
+	if !strings.HasSuffix(strings.ToLower(filename), ".torrent") {
+		filename += ".torrent"
+	}
+	return filename
 }
 
 // RSS/Atom XML 结构定义

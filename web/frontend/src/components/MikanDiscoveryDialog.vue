@@ -15,7 +15,7 @@ import type {
 import AppDialog from './AppDialog.vue'
 import AsyncButton from './AsyncButton.vue'
 import StateBlock from './StateBlock.vue'
-import { buildMikanSelection, mikanEpisodeMatchesFilters } from '../utils/mikanSubscription'
+import { buildMikanSelection, mikanEpisodeMatchesFilters, regexRuleError } from '../utils/mikanSubscription'
 
 const props = withDefaults(defineProps<{ open: boolean; initialSearch?: string; saving?: boolean }>(), { initialSearch: '', saving: false })
 const emit = defineEmits<{
@@ -53,6 +53,8 @@ const selectedAnime = ref<SelectedAnime | null>(null)
 const selectedSubgroup = ref<MikanSubgroup | null>(null)
 const resolutionFilter = ref<ResolutionFilter>('')
 const subtitleLanguage = ref<SubtitleLanguage>('')
+const includeRule = ref('')
+const excludeRule = ref('')
 
 const dashboard = useQuery({
   queryKey: computed(() => ['mikan-dashboard', selectedYear.value, selectedSeason.value]),
@@ -85,8 +87,11 @@ const episodes = useQuery({
 const dashboardItems = computed(() => dashboard.data.value?.days?.[activeDay.value] || [])
 const groupItems = computed(() => subgroups.data.value?.items || [])
 const filteredEpisodes = computed(() => (episodes.data.value?.items || []).filter(episode => (
-  mikanEpisodeMatchesFilters(episode, resolutionFilter.value, subtitleLanguage.value)
+  mikanEpisodeMatchesFilters(episode, resolutionFilter.value, subtitleLanguage.value, includeRule.value, excludeRule.value)
 )))
+const includeRuleError = computed(() => regexRuleError(includeRule.value))
+const excludeRuleError = computed(() => regexRuleError(excludeRule.value))
+const hasRegexError = computed(() => Boolean(includeRuleError.value || excludeRuleError.value))
 const dialogTitle = computed(() => step.value === 'subgroups' ? '选择字幕组' : '从 Mikan 发现番剧')
 const dialogDescription = computed(() => step.value === 'subgroups'
   ? '先检查字幕组最近发布的资源，再确认订阅策略。'
@@ -113,6 +118,8 @@ watch(() => props.open, open => {
   selectedSubgroup.value = null
   resolutionFilter.value = ''
   subtitleLanguage.value = ''
+  includeRule.value = ''
+  excludeRule.value = ''
   submittedSearch.value = initialSearch
   searchText.value = initialSearch
 }, { immediate: true })
@@ -130,6 +137,8 @@ function chooseAnime(item: MikanDiscoveryItem, season = '') {
   selectedSubgroup.value = null
   resolutionFilter.value = ''
   subtitleLanguage.value = ''
+  includeRule.value = ''
+  excludeRule.value = ''
   step.value = 'subgroups'
 }
 
@@ -142,6 +151,8 @@ function backToBrowse() {
 function confirmSelection() {
   if (!selectedAnime.value || !selectedSubgroup.value) return
   emit('select', buildMikanSelection(selectedAnime.value, selectedSubgroup.value, {
+    filter_rule: includeRule.value,
+    exclude_rule: excludeRule.value,
     resolution_filter: resolutionFilter.value,
     subtitle_language: subtitleLanguage.value,
   }))
@@ -220,6 +231,16 @@ function confirmSelection() {
 
           <div class="panel-muted mt-4 grid gap-3 p-4">
             <h3 class="font-black">资源筛选</h3>
+            <label class="label" for="mikan-include-rule">
+              必须包含（正则）
+              <input id="mikan-include-rule" v-model="includeRule" class="field font-mono" placeholder="例如：1080[Pp].*(CHS|简中)" spellcheck="false" />
+              <span v-if="includeRuleError" class="text-xs text-[var(--danger)]" role="alert">正则错误：{{ includeRuleError }}</span>
+            </label>
+            <label class="label" for="mikan-exclude-rule">
+              必须不含（正则）
+              <input id="mikan-exclude-rule" v-model="excludeRule" class="field font-mono" placeholder="例如：(720[Pp]|合集|NCOP)" spellcheck="false" />
+              <span v-if="excludeRuleError" class="text-xs text-[var(--danger)]" role="alert">正则错误：{{ excludeRuleError }}</span>
+            </label>
             <label class="label" for="mikan-resolution-filter">
               清晰度
               <select id="mikan-resolution-filter" v-model="resolutionFilter" class="field">
@@ -238,7 +259,7 @@ function confirmSelection() {
                 <option value="chs_cht">简繁双语</option>
               </select>
             </label>
-            <p class="muted text-xs">清晰度、字幕语言会与字幕组及高级规则同时生效。</p>
+            <p class="muted text-xs">正则匹配资源标题；字幕组专属 RSS 已经限定字幕组，不会再自动添加重复规则。</p>
           </div>
         </section>
 
@@ -259,7 +280,7 @@ function confirmSelection() {
 
       <div class="mt-6 flex flex-wrap justify-end gap-2">
         <button class="btn btn-secondary" type="button" @click="backToBrowse">重新选择番剧</button>
-        <AsyncButton class="btn btn-primary" :disabled="!selectedSubgroup || subgroups.isError.value" :loading="saving || episodes.isFetching.value" :loading-label="saving ? '正在添加…' : '读取资源中…'" data-testid="confirm-mikan-selection" @click="confirmSelection">使用此订阅源</AsyncButton>
+        <AsyncButton class="btn btn-primary" :disabled="!selectedSubgroup || subgroups.isError.value || hasRegexError" :loading="saving || episodes.isFetching.value" :loading-label="saving ? '正在添加…' : '读取资源中…'" data-testid="confirm-mikan-selection" @click="confirmSelection">使用此订阅源</AsyncButton>
       </div>
     </template>
   </AppDialog>

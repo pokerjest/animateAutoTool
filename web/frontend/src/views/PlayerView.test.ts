@@ -1,8 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { defineComponent, nextTick } from 'vue'
 import { flushPromises, mount } from '@vue/test-utils'
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query'
 import { createPinia } from 'pinia'
-import { createMemoryHistory, createRouter } from 'vue-router'
+import { createMemoryHistory, createRouter, RouterView } from 'vue-router'
+import PlaybackHost from '../components/PlaybackHost.vue'
+import { usePlaybackStore } from '../stores/playback'
+import { useSessionStore } from '../stores/session'
 import PlayerView from './PlayerView.vue'
 
 function envelope(data: unknown) {
@@ -13,142 +17,157 @@ function raw(data: unknown) {
   return Promise.resolve(new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } }))
 }
 
+function playerFetch(direct = false) {
+  return vi.fn((input: RequestInfo | URL) => {
+    const path = String(input)
+    if (path.includes('/api/v1/playback/continue')) return envelope({ items: [] })
+    if (path.endsWith('/api/v1/local-anime/1/episodes')) {
+      return envelope({
+        anime: { ID: 1, title: '测试番剧', summary: '', image: '', metadata: { title_cn: '测试番剧', bangumi_id: 99 } },
+        episodes: [
+          { id: 11, name: '01.mkv', episode: 1, season: 1, playable: true, thumbnail: '', overview: '', duration: '24m', progress_percent: 50, resume_ticks: 500_000_000 },
+          { id: 12, name: '02.mkv', episode: 2, season: 1, playable: true, thumbnail: '', overview: '', duration: '24m' },
+        ],
+        collection_status: { bangumi_watched_count: 0, anilist_watched_count: 0 },
+      })
+    }
+    if (path.includes('/api/v1/jellyfin/play/')) {
+      const episodeID = path.endsWith('/12') ? 12 : 11
+      return raw({
+        stream_url: `/api/v1/jellyfin/stream/${episodeID}`,
+        direct_stream_url: direct ? `https://media.example-tailnet.ts.net/Videos/${episodeID}/stream` : '',
+        resume_ticks: episodeID === 11 ? 500_000_000 : 0,
+        runtime_ticks: 14_400_000_000,
+        played: false,
+        episode_favorite: false,
+        series_favorite: false,
+        media: { container: 'mkv', size: 1_073_741_824, bitrate: 8_000_000, width: 1920, height: 1080, video_codec: 'hevc', audio_codec: 'aac', audio_channels: 2, subtitle_count: 3 },
+        poster_url: '', title: '测试番剧', episode_title: `Episode ${episodeID}`,
+      })
+    }
+    if (path.endsWith('/api/v1/playback/progress')) return envelope({ position_ticks: 0 })
+    throw new Error(`unexpected request: ${path}`)
+  })
+}
+
+async function mountPlayer(fetchMock: ReturnType<typeof vi.fn>) {
+  vi.stubGlobal('fetch', fetchMock)
+  const sendBeacon = vi.fn(() => true)
+  Object.defineProperty(navigator, 'sendBeacon', { value: sendBeacon, configurable: true })
+  vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined)
+  vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined)
+  vi.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(() => undefined)
+  const Other = defineComponent({ template: '<div>其他页面</div>' })
+  const router = createRouter({
+    history: createMemoryHistory(),
+    routes: [{ path: '/player', component: PlayerView }, { path: '/other', component: Other }],
+  })
+  await router.push('/player?anime=1&episode=11')
+  await router.isReady()
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
+  const pinia = createPinia()
+  const Root = defineComponent({ components: { PlaybackHost, RouterView }, template: '<PlaybackHost/><RouterView/>' })
+  const wrapper = mount(Root, {
+    attachTo: document.body,
+    global: { plugins: [pinia, router, [VueQueryPlugin, { queryClient }]] },
+  })
+  await vi.waitFor(() => expect(wrapper.find('video').exists()).toBe(true))
+  return { wrapper, router, queryClient, playback: usePlaybackStore(pinia), sendBeacon }
+}
+
 afterEach(() => {
+  vi.useRealTimers()
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
+  localStorage.removeItem('player.sourceMode')
   document.body.innerHTML = ''
 })
 
-describe('PlayerView Jellyfin direct playback', () => {
-  it('prefers the configured Tailscale stream and falls back to the proxy on failure', async () => {
-    const fetchMock = vi.fn((input: RequestInfo | URL) => {
-      const path = String(input)
-      if (path.endsWith('/api/v1/local-anime/1/episodes')) {
-        return envelope({
-          anime: { ID: 1, title: '测试番剧', summary: '', image: '', metadata: { title_cn: '测试番剧', bangumi_id: 99 } },
-          episodes: [{ id: 11, name: '01.mkv', episode: 1, season: 1, playable: true, thumbnail: '', overview: '', duration: '24m' }],
-          collection_status: { bangumi_watched_count: 0, anilist_watched_count: 0 },
-        })
-      }
-      if (path.endsWith('/api/v1/jellyfin/play/11')) {
-        return raw({
-          stream_url: '/api/v1/jellyfin/stream/11',
-          direct_stream_url: 'https://media.example-tailnet.ts.net/Videos/episode-1/stream?api_key=token&static=true',
-          resume_ticks: 0,
-        })
-      }
-      throw new Error(`unexpected request: ${path}`)
-    })
+describe('Plex-style global playback', () => {
+  it('waits for first-run setup before loading continue watching', async () => {
+    const fetchMock = vi.fn(() => envelope({ items: [] }))
     vi.stubGlobal('fetch', fetchMock)
-
-    const router = createRouter({
-      history: createMemoryHistory(),
-      routes: [{ path: '/player', component: PlayerView }],
-    })
-    await router.push('/player?anime=1')
+    const Other = defineComponent({ template: '<div>初始化页面</div>' })
+    const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/other', component: Other }] })
+    await router.push('/other')
     await router.isReady()
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
-    const wrapper = mount(PlayerView, {
-      attachTo: document.body,
-      global: { plugins: [createPinia(), router, [VueQueryPlugin, { queryClient }]] },
+    const pinia = createPinia()
+    const session = useSessionStore(pinia)
+    session.state = {
+      authenticated: true,
+      setup_pending: true,
+      local_setup_available: false,
+      local_recovery_available: false,
+      version: 'test',
+      recovery_local_only: true,
+    }
+    const wrapper = mount(PlaybackHost, {
+      global: { plugins: [pinia, router, [VueQueryPlugin, { queryClient }]] },
     })
 
-    await vi.waitFor(() => expect(wrapper.find('video').exists()).toBe(true))
-    expect(wrapper.get('video').attributes('src')).toContain('media.example-tailnet.ts.net')
-    expect(wrapper.text()).toContain('Tailscale 直连')
-
-    await wrapper.get('video').trigger('error')
     await flushPromises()
-    expect(wrapper.get('video').attributes('src')).toBe('/api/v1/jellyfin/stream/11')
-    expect(wrapper.text()).toContain('服务端代理')
+    expect(fetchMock).not.toHaveBeenCalled()
 
+    session.state.setup_pending = false
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/v1/playback/continue?limit=10', expect.any(Object)))
     wrapper.unmount()
     queryClient.clear()
   })
 
-  it('controls Jellyfin user state, displays media details, and continues with the next episode', async () => {
-    const playMock = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined)
-    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input)
-      if (path.endsWith('/api/v1/local-anime/1/episodes')) {
-        return envelope({
-          anime: { ID: 1, title: '测试番剧', summary: '', image: '', metadata: { title_cn: '测试番剧', bangumi_id: 99 } },
-          episodes: [
-            { id: 11, name: '01.mkv', episode: 1, season: 1, playable: true, thumbnail: '', overview: '', duration: '24m', progress_percent: 50 },
-            { id: 12, name: '02.mkv', episode: 2, season: 1, playable: true, thumbnail: '', overview: '', duration: '24m' },
-          ],
-          collection_status: { bangumi_watched_count: 0, anilist_watched_count: 0 },
-        })
-      }
-      if (path.includes('/api/v1/jellyfin/play/')) {
-        const episodeID = path.endsWith('/12') ? 12 : 11
-        return raw({
-          stream_url: `/api/v1/jellyfin/stream/${episodeID}`,
-          direct_stream_url: '',
-          resume_ticks: 0,
-          runtime_ticks: 14_400_000_000,
-          played: false,
-          episode_favorite: false,
-          series_favorite: false,
-          media: {
-            container: 'mkv', size: 1_073_741_824, bitrate: 8_000_000,
-            width: 1920, height: 1080, video_codec: 'hevc', audio_codec: 'aac', audio_channels: 2, subtitle_count: 3,
-          },
-          poster_url: '', title: '测试番剧', episode_title: `Episode ${episodeID}`,
-        })
-      }
-      if (path.endsWith('/api/v1/jellyfin/episodes/11/user-state')) {
-        const body = JSON.parse(String(init?.body || '{}')) as { played?: boolean; favorite?: boolean }
-        return envelope({ played: body.played ?? true, favorite: body.favorite ?? false })
-      }
-      if (path.endsWith('/api/v1/jellyfin/series/1/user-state')) return envelope({ favorite: true })
-      if (path.endsWith('/api/v1/jellyfin/progress')) return raw({ ok: true })
-      throw new Error(`unexpected request: ${path}`)
-    })
-    vi.stubGlobal('fetch', fetchMock)
+  it('keeps the same video element and source while navigating to another page', async () => {
+    const mounted = await mountPlayer(playerFetch())
+    await vi.waitFor(() => expect(mounted.wrapper.get('video').attributes('src')).toBe('/api/v1/jellyfin/stream/11'))
+    const originalVideo = mounted.wrapper.get('video').element
 
-    const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/player', component: PlayerView }] })
-    await router.push('/player?anime=1')
-    await router.isReady()
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
-    const wrapper = mount(PlayerView, {
-      attachTo: document.body,
-      global: { plugins: [createPinia(), router, [VueQueryPlugin, { queryClient }]] },
-    })
-    const button = (label: string) => {
-      const match = wrapper.findAll('button').find(item => item.text().includes(label))
-      if (!match) throw new Error(`missing button: ${label}`)
-      return match
-    }
+    await mounted.router.push('/other')
+    await flushPromises()
 
-    await vi.waitFor(() => expect(wrapper.text()).toContain('1920×1080'))
-    expect(wrapper.text()).toContain('HEVC')
-    expect(wrapper.text()).toContain('AAC · 2 声道')
-    expect(wrapper.text()).toContain('8.0 Mbps')
-    expect(wrapper.text()).toContain('1.0 GB')
-    expect(wrapper.text()).toContain('3 条字幕')
-    expect(wrapper.text()).toContain('Jellyfin 已播放 50%')
+    expect(mounted.wrapper.get('video').element).toBe(originalVideo)
+    expect(mounted.wrapper.get('video').attributes('src')).toBe('/api/v1/jellyfin/stream/11')
+    expect(mounted.wrapper.text()).toContain('其他页面')
+    expect(mounted.wrapper.text()).toContain('测试番剧')
 
-    await button('标记已看').trigger('click')
-    await vi.waitFor(() => expect(wrapper.text()).toContain('设为未看'))
-    await button('收藏本集').trigger('click')
-    await vi.waitFor(() => expect(wrapper.text()).toContain('已收藏本集'))
-    await button('收藏到 Jellyfin').trigger('click')
-    await vi.waitFor(() => expect(wrapper.text()).toContain('已收藏整部'))
+    window.dispatchEvent(new PageTransitionEvent('pagehide'))
+    expect(mounted.sendBeacon).toHaveBeenCalledWith('/api/v1/playback/progress', expect.any(Blob))
+    mounted.wrapper.unmount()
+    mounted.queryClient.clear()
+  })
 
-    await button('下一集').trigger('click')
-    await vi.waitFor(() => expect(wrapper.get('video').attributes('src')).toBe('/api/v1/jellyfin/stream/12'))
-    await button('上一集').trigger('click')
-    await vi.waitFor(() => expect(wrapper.get('video').attributes('src')).toBe('/api/v1/jellyfin/stream/11'))
-    await wrapper.get('video').trigger('ended')
-    await vi.waitFor(() => expect(wrapper.get('video').attributes('src')).toBe('/api/v1/jellyfin/stream/12'))
-    await wrapper.get('video').trigger('loadedmetadata')
-    expect(playMock).toHaveBeenCalledOnce()
+  it('uses proxy by default and falls back from a stalled remembered direct stream', async () => {
+    vi.useFakeTimers()
+    localStorage.setItem('player.sourceMode', 'direct')
+    const mounted = await mountPlayer(playerFetch(true))
+    await vi.waitFor(() => expect(mounted.wrapper.get('video').attributes('src')).toContain('example-tailnet.ts.net'))
+    const video = mounted.wrapper.get('video')
+    Object.defineProperty(video.element, 'paused', { value: false, configurable: true })
 
-    expect(fetchMock).toHaveBeenCalledWith('/api/v1/jellyfin/episodes/11/user-state', expect.objectContaining({ method: 'PUT' }))
-    expect(fetchMock).toHaveBeenCalledWith('/api/v1/jellyfin/series/1/user-state', expect.objectContaining({ method: 'PUT' }))
-    wrapper.unmount()
-    queryClient.clear()
-    playMock.mockRestore()
+    await video.trigger('waiting')
+    vi.advanceTimersByTime(8_000)
+    await flushPromises()
+    await nextTick()
+
+    expect(mounted.wrapper.get('video').attributes('src')).toBe('/api/v1/jellyfin/stream/11')
+    expect(mounted.playback.sourceMode).toBe('proxy')
+    expect(localStorage.getItem('player.sourceMode')).toBe('proxy')
+    mounted.wrapper.unmount()
+    mounted.queryClient.clear()
+  })
+
+  it('advances to the next episode only after the ended event', async () => {
+    const mounted = await mountPlayer(playerFetch())
+    await vi.waitFor(() => expect(mounted.playback.current?.episodeId).toBe(11))
+    const video = mounted.wrapper.get('video')
+    Object.defineProperty(video.element, 'currentTime', { value: 1_300, writable: true, configurable: true })
+    Object.defineProperty(video.element, 'duration', { value: 1_440, configurable: true })
+
+    await video.trigger('timeupdate')
+    expect(mounted.playback.current?.episodeId).toBe(11)
+    await video.trigger('ended')
+    await vi.waitFor(() => expect(mounted.playback.current?.episodeId).toBe(12))
+    await vi.waitFor(() => expect(mounted.wrapper.get('video').attributes('src')).toBe('/api/v1/jellyfin/stream/12'))
+
+    mounted.wrapper.unmount()
+    mounted.queryClient.clear()
   })
 })

@@ -12,6 +12,7 @@ type ItemUserData struct {
 	Played                bool    `json:"Played"`
 	IsFavorite            bool    `json:"IsFavorite"`
 	PlayedPercentage      float64 `json:"PlayedPercentage"`
+	LastPlayedDate        string  `json:"LastPlayedDate"`
 }
 
 type MediaStream struct {
@@ -39,6 +40,12 @@ type ItemDetails struct {
 	RunTimeTicks int64         `json:"RunTimeTicks"`
 	UserData     ItemUserData  `json:"UserData"`
 	MediaSources []MediaSource `json:"MediaSources"`
+}
+
+type ResumeItem struct {
+	ID           string       `json:"Id"`
+	RunTimeTicks int64        `json:"RunTimeTicks"`
+	UserData     ItemUserData `json:"UserData"`
 }
 
 // GetItemInfo fetches details for an item (resume position, media sources)
@@ -69,6 +76,32 @@ func (c *Client) GetItemDetails(itemID string) (*ItemDetails, error) {
 		return nil, err
 	}
 	return &result, nil
+}
+
+// GetResumeItems returns the active Jellyfin user's unfinished video items.
+// AnimateTool maps these item IDs back to local episodes during the one-time
+// playback-history bootstrap performed after upgrading.
+func (c *Client) GetResumeItems(limit int) ([]ResumeItem, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	params := url.Values{}
+	params.Set("Fields", "RunTimeTicks,UserData")
+	params.Set("Limit", fmt.Sprintf("%d", limit))
+	params.Set("MediaTypes", "Video")
+	params.Set("Recursive", "true")
+	endpoint := fmt.Sprintf("/Users/%s/Items/Resume?%s", c.UserID, params.Encode())
+	resp, err := c.do("GET", endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	var result struct {
+		Items []ResumeItem `json:"Items"`
+	}
+	if err := json.Unmarshal(resp, &result); err != nil {
+		return nil, err
+	}
+	return result.Items, nil
 }
 
 // GetStreamURL generates a direct stream URL for the item

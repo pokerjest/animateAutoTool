@@ -33,6 +33,18 @@ type patternMatcher struct {
 	disabled bool
 }
 
+// ValidateSubscriptionPattern validates a user-authored include or exclude
+// rule. Runtime matching retains the legacy literal fallback so an old invalid
+// rule cannot break scheduling, while new and edited rules must be valid regex.
+func ValidateSubscriptionPattern(value string) error {
+	expression := strings.TrimSpace(value)
+	if expression == "" {
+		return nil
+	}
+	_, err := regexp.Compile(expression)
+	return err
+}
+
 func buildSubscriptionRuleSet(sub *model.Subscription) subscriptionRuleSet {
 	rules := subscriptionRuleSet{}
 	if sub == nil {
@@ -189,19 +201,8 @@ func (m patternMatcher) matches(ep parser.Episode) bool {
 }
 
 func subscriptionRuleCandidates(ep parser.Episode) []string {
-	seen := make(map[string]bool)
-	var candidates []string
-	add := func(value string) {
-		value = strings.TrimSpace(value)
-		if value == "" || seen[value] {
-			return
-		}
-		seen[value] = true
-		candidates = append(candidates, value)
-	}
-
-	add(ep.Title)
-	add(ep.SubGroup)
-	add(ep.AnimeIdentify)
-	return candidates
+	// Match the same user-visible release name that qBittorrent filters use.
+	// Subtitle-group selection belongs to the RSS URL and must not silently
+	// satisfy a custom title regex through parsed metadata.
+	return []string{strings.TrimSpace(ep.Title)}
 }

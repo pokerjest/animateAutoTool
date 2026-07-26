@@ -518,10 +518,33 @@ func (m *SubscriptionManager) parseRSS(ctx context.Context, feedURL string) ([]p
 }
 
 func (m *SubscriptionManager) addTorrent(ctx context.Context, torrentURL, savePath, category string, paused bool) error {
+	if isHTTPURL(torrentURL) {
+		fetcher, canFetch := m.RSSParser.(parser.TorrentFetcher)
+		uploader, canUpload := m.Downloader.(downloader.TorrentFileDownloader)
+		if canFetch && canUpload {
+			filename, data, err := fetcher.FetchTorrentContext(ctx, torrentURL)
+			if err != nil {
+				return fmt.Errorf("fetch torrent file through RSS client: %w", err)
+			}
+			if err := uploader.AddTorrentFileContext(ctx, filename, data, savePath, category, paused); err != nil {
+				return fmt.Errorf("upload torrent file to downloader: %w", err)
+			}
+			return nil
+		}
+	}
+
 	if ctxDownloader, ok := m.Downloader.(downloader.ContextDownloader); ok {
 		return ctxDownloader.AddTorrentContext(ctx, torrentURL, savePath, category, paused)
 	}
 	return m.Downloader.AddTorrent(torrentURL, savePath, category, paused)
+}
+
+func isHTTPURL(raw string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(parsed.Scheme, "http") || strings.EqualFold(parsed.Scheme, "https")
 }
 
 func joinDownloadPath(base, child string) string {

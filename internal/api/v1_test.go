@@ -596,7 +596,7 @@ func TestV1SubscriptionPersistsMikanAssociationWithoutUsingBangumiSubjectID(t *t
 
 	r := setupRouter()
 	cookie, _ := loginCookie(t, r, "admin")
-	body := `{"title":"测试番剧","rss_url":"https://mikanani.me/RSS/Bangumi?bangumiId=3141&subgroupid=583","backup_rss_url":"https://mikanani.me/RSS/Bangumi?bangumiId=3141","mikan_id":"3141","image":"https://mikanani.me/poster.jpg","subtitle_group":"ANi","season":"2026 夏季番组","filter_rule":"ANi","resolution_filter":"1080p","subtitle_language":"chs","stale_after_hours":168}`
+	body := `{"title":"测试番剧","rss_url":"https://mikanani.me/RSS/Bangumi?bangumiId=3141&subgroupid=583","mikan_id":"3141","image":"https://mikanani.me/poster.jpg","subtitle_group":"ANi","season":"2026 夏季番组","resolution_filter":"1080p","subtitle_language":"chs","stale_after_hours":168}`
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/subscriptions", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -614,11 +614,13 @@ func TestV1SubscriptionPersistsMikanAssociationWithoutUsingBangumiSubjectID(t *t
 	assert.Equal(t, "https://mikanani.me/poster.jpg", created.Image)
 	assert.Equal(t, "1080p", created.ResolutionFilter)
 	assert.Equal(t, "chs", created.SubtitleLanguage)
+	assert.Empty(t, created.FilterRule, "subgroup-specific Mikan feeds must not generate a duplicate subgroup rule")
+	assert.Empty(t, created.BackupRSSUrl, "subgroup-specific Mikan feeds must not silently fall back to the aggregate feed")
 	var incorrectMetadataCount int64
 	require.NoError(t, db.DB.Model(&model.AnimeMetadata{}).Where("bangumi_id = ?", 3141).Count(&incorrectMetadataCount).Error)
 	assert.Zero(t, incorrectMetadataCount, "Mikan identifiers must never be stored as bgm.tv subject IDs")
 
-	updateBody := `{"title":"测试番剧","rss_url":"https://mikanani.me/RSS/Bangumi?bangumiId=3141","mikan_id":"3141","image":"https://mikanani.me/new.jpg","subtitle_group":"","season":"2026 夏季番组","filter_rule":"","resolution_filter":"2160p","subtitle_language":"chs_cht","allow_multi_subgroup":true,"stale_after_hours":168}`
+	updateBody := `{"title":"测试番剧","rss_url":"https://mikanani.me/RSS/Bangumi?bangumiId=3141","mikan_id":"3141","image":"https://mikanani.me/new.jpg","subtitle_group":"","season":"2026 夏季番组","filter_rule":"2160[Pp].*(CHS|简中)","exclude_rule":"(合集|NCOP)","resolution_filter":"2160p","subtitle_language":"chs_cht","allow_multi_subgroup":true,"stale_after_hours":168}`
 	w = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodPut, "/api/v1/subscriptions/"+strconv.FormatUint(uint64(created.ID), 10), bytes.NewBufferString(updateBody))
 	req.Header.Set("Content-Type", "application/json")
@@ -629,7 +631,8 @@ func TestV1SubscriptionPersistsMikanAssociationWithoutUsingBangumiSubjectID(t *t
 	require.NoError(t, db.DB.First(&created, created.ID).Error)
 	assert.Equal(t, "3141", created.MikanID)
 	assert.Empty(t, created.SubtitleGroup)
-	assert.Empty(t, created.FilterRule)
+	assert.Equal(t, "2160[Pp].*(CHS|简中)", created.FilterRule)
+	assert.Equal(t, "(合集|NCOP)", created.ExcludeRule)
 	assert.True(t, created.AllowMultiSubgroup)
 	assert.Equal(t, "https://mikanani.me/new.jpg", created.Image)
 	assert.Equal(t, "2160p", created.ResolutionFilter)
@@ -644,6 +647,16 @@ func TestV1SubscriptionPersistsMikanAssociationWithoutUsingBangumiSubjectID(t *t
 	r.ServeHTTP(w, req)
 	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
 	assert.Contains(t, w.Body.String(), `"code":"invalid_subscription_filter"`)
+
+	invalidRegexBody := strings.Replace(updateBody, `"filter_rule":"2160[Pp].*(CHS|简中)"`, `"filter_rule":"[未闭合"`, 1)
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPut, "/api/v1/subscriptions/"+strconv.FormatUint(uint64(created.ID), 10), bytes.NewBufferString(invalidRegexBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Cookie", cookie)
+	markLocalRequest(req)
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), "包含规则不是有效正则")
 }
 
 func TestRestoringSubscriptionRefreshesMikanAssociationFields(t *testing.T) {

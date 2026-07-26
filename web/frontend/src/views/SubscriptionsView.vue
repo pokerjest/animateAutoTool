@@ -22,7 +22,7 @@ import SubscriptionHistoryDialog from '../components/subscriptions/SubscriptionH
 import SubscriptionOverview from '../components/subscriptions/SubscriptionOverview.vue'
 import { useAsyncActions } from '../composables/useAsyncActions'
 import { useUIStore } from '../stores/ui'
-import { switchToMikanAggregate } from '../utils/mikanSubscription'
+import { regexRuleError, switchToMikanAggregate } from '../utils/mikanSubscription'
 
 interface SubscriptionPayload {
   items: Subscription[]
@@ -132,6 +132,9 @@ const batchItems = computed(() => batchText.value
 const formTitle = computed(() => editing.value ? '编辑订阅' : '添加订阅')
 const historyTitle = computed(() => detailTarget.value?.title || '订阅历史')
 const deleteDescription = computed(() => `会同时删除 ${deleteTarget.value?.title || ''} 的下载记录，且无法撤销。`)
+const includeRuleError = computed(() => regexRuleError(form.filter_rule))
+const excludeRuleError = computed(() => regexRuleError(form.exclude_rule))
+const hasRegexError = computed(() => Boolean(includeRuleError.value || excludeRuleError.value))
 
 function resetForm() {
   Object.assign(form, createEmptyForm())
@@ -204,6 +207,7 @@ function applyMikanSelection(selection: MikanSubscriptionSelection) {
     rss_url: selection.rss_url,
     backup_rss_url: selection.backup_rss_url,
     filter_rule: selection.filter_rule,
+    exclude_rule: selection.exclude_rule,
     resolution_filter: selection.resolution_filter,
     subtitle_language: selection.subtitle_language,
     allow_multi_subgroup: selection.allow_multi_subgroup,
@@ -238,6 +242,10 @@ function setDeleteOpen(value: boolean) {
 }
 
 async function save() {
+  if (hasRegexError.value) {
+    ui.toast('请先修正包含或排除正则', 'error')
+    return
+  }
   try {
     await actions.run('save', async () => {
       const path = editing.value ? `/subscriptions/${editing.value.ID}` : '/subscriptions'
@@ -258,6 +266,10 @@ async function save() {
 
 async function validate() {
   if (!form.rss_url) return
+  if (hasRegexError.value) {
+    ui.toast('请先修正包含或排除正则', 'error')
+    return
+  }
   try {
     await actions.run('validate', async () => {
       const params = new URLSearchParams({
@@ -454,9 +466,10 @@ async function importBatch() {
           <label class="label">主 RSS 地址<input v-model="form.rss_url" class="field" type="url" required /></label>
           <label class="label">备用 RSS 地址<input v-model="form.backup_rss_url" class="field" type="url" /></label>
           <div class="grid gap-4 sm:grid-cols-2">
-            <label class="label">包含规则<input v-model="form.filter_rule" class="field" /></label>
-            <label class="label">排除规则<input v-model="form.exclude_rule" class="field" /></label>
+            <label class="label">必须包含（正则）<input v-model="form.filter_rule" class="field font-mono" placeholder="例如：1080[Pp].*(CHS|简中)" spellcheck="false" /><span v-if="includeRuleError" class="text-xs text-[var(--danger)]" role="alert">正则错误：{{ includeRuleError }}</span></label>
+            <label class="label">必须不含（正则）<input v-model="form.exclude_rule" class="field font-mono" placeholder="例如：(720[Pp]|合集|NCOP)" spellcheck="false" /><span v-if="excludeRuleError" class="text-xs text-[var(--danger)]" role="alert">正则错误：{{ excludeRuleError }}</span></label>
           </div>
+          <p class="muted -mt-2 text-xs">规则使用正则表达式匹配 RSS 资源标题；留空表示不限制。字幕组专属 Mikan RSS 不需要重复填写字幕组名称。</p>
           <div class="grid gap-4 sm:grid-cols-2">
             <label class="label">
               清晰度
@@ -521,6 +534,7 @@ async function importBatch() {
         <div class="mt-7 flex flex-wrap justify-end gap-2">
           <AsyncButton
             class="btn btn-secondary"
+            :disabled="hasRegexError"
             :loading="actions.isBusy('validate')"
             loading-label="校验中…"
             @click="validate"
@@ -530,6 +544,7 @@ async function importBatch() {
           <AsyncButton
             type="submit"
             class="btn btn-primary"
+            :disabled="hasRegexError"
             :loading="actions.isBusy('save')"
             loading-label="正在保存…"
           >

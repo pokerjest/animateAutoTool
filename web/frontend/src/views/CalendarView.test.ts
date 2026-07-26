@@ -20,8 +20,9 @@ const selection: MikanSubscriptionSelection = {
   subgroup_id: '583',
   subtitle_group: 'ANi',
   rss_url: 'https://mikanani.me/RSS/Bangumi?bangumiId=3141&subgroupid=583',
-  backup_rss_url: 'https://mikanani.me/RSS/Bangumi?bangumiId=3141',
-  filter_rule: 'ANi',
+  backup_rss_url: '',
+  filter_rule: '1080[Pp].*(CHS|简中)',
+  exclude_rule: '(合集|NCOP)',
   resolution_filter: '1080p',
   subtitle_language: 'chs',
   allow_multi_subgroup: false,
@@ -102,8 +103,9 @@ describe('CalendarView', () => {
       mikan_id: '3141',
       subtitle_group: 'ANi',
       rss_url: 'https://mikanani.me/RSS/Bangumi?bangumiId=3141&subgroupid=583',
-      backup_rss_url: 'https://mikanani.me/RSS/Bangumi?bangumiId=3141',
-      filter_rule: 'ANi',
+      backup_rss_url: '',
+      filter_rule: '1080[Pp].*(CHS|简中)',
+      exclude_rule: '(合集|NCOP)',
     })
   })
 })

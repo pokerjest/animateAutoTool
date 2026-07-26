@@ -15,8 +15,8 @@ type Subscription struct {
 	Image               string     `json:"image" form:"Image"`                        // 番剧封面图片 (RSS 原始封面)
 	SubtitleGroup       string     `json:"subtitle_group" form:"SubtitleGroup"`       // 字幕组名称
 	Season              string     `json:"season" form:"season"`                      // 季度
-	FilterRule          string     `json:"filter_rule" form:"FilterRule"`             // 过滤规则
-	ExcludeRule         string     `json:"exclude_rule" form:"ExcludeRule"`           // 排除规则
+	FilterRule          string     `json:"filter_rule" form:"FilterRule"`             // 必须命中的资源标题正则
+	ExcludeRule         string     `json:"exclude_rule" form:"ExcludeRule"`           // 命中后排除的资源标题正则
 	ResolutionFilter    string     `json:"resolution_filter" form:"ResolutionFilter"` // 清晰度过滤 (2160p/1080p/720p)
 	SubtitleLanguage    string     `json:"subtitle_language" form:"SubtitleLanguage"` // 字幕语言过滤 (chs/cht/chs_cht)
 	BackupRSSUrl        string     `json:"backup_rss_url" form:"BackupRSSUrl"`        // 备用 RSS
@@ -66,6 +66,22 @@ type User struct {
 	Username     string `json:"username" gorm:"uniqueIndex"`
 	PasswordHash string `json:"-"`    // 存储 bcrypt 哈希
 	Memo         string `json:"memo"` // 备注 (可存储明文恢复密码)
+}
+
+// PlaybackHistory stores the last known playback position for one user and
+// local episode. Jellyfin remains an external synchronization target, while
+// this local record makes continue-watching fast and resilient when Jellyfin
+// is temporarily unavailable.
+type PlaybackHistory struct {
+	gorm.Model
+	UserID         uint      `json:"user_id" gorm:"uniqueIndex:idx_playback_user_episode;index"`
+	LocalAnimeID   uint      `json:"local_anime_id" gorm:"index"`
+	LocalEpisodeID uint      `json:"local_episode_id" gorm:"uniqueIndex:idx_playback_user_episode;index"`
+	PositionTicks  int64     `json:"position_ticks"`
+	DurationTicks  int64     `json:"duration_ticks"`
+	Completed      bool      `json:"completed" gorm:"index"`
+	LastEvent      string    `json:"last_event" gorm:"size:24"`
+	LastPlayedAt   time.Time `json:"last_played_at" gorm:"index"`
 }
 
 // AuditLog 记录登录、密码变更、删除、备份恢复等敏感操作,

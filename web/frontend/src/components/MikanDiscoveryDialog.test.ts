@@ -85,6 +85,8 @@ describe('MikanDiscoveryDialog', () => {
     await waitForText(wrapper, '[ANi] 测试番剧 01 [1080P][CHS]')
     await wrapper.get('#mikan-resolution-filter').setValue('1080p')
     await wrapper.get('#mikan-subtitle-language').setValue('chs')
+    await wrapper.get('#mikan-include-rule').setValue('1080[Pp].*(CHS|简中)')
+    await wrapper.get('#mikan-exclude-rule').setValue('(合集|NCOP)')
     expect(wrapper.text()).toContain('预览命中 1 / 2')
     expect(wrapper.text()).not.toContain('[720P][CHT]')
     await wrapper.get('[data-testid="confirm-mikan-selection"]').trigger('click')
@@ -94,12 +96,32 @@ describe('MikanDiscoveryDialog', () => {
       title: '测试番剧',
       subtitle_group: 'ANi',
       rss_url: 'https://mikanani.me/RSS/Bangumi?bangumiId=3141&subgroupid=583',
-      backup_rss_url: 'https://mikanani.me/RSS/Bangumi?bangumiId=3141',
-      filter_rule: 'ANi',
+      backup_rss_url: '',
+      filter_rule: '1080[Pp].*(CHS|简中)',
+      exclude_rule: '(合集|NCOP)',
       resolution_filter: '1080p',
       subtitle_language: 'chs',
       allow_multi_subgroup: false,
     })
+  })
+
+  it('rejects an invalid custom regex before confirming the Mikan source', async () => {
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
+      const path = String(input)
+      if (path.includes('/mikan/dashboard')) return response({ season: '2026 夏季番组', days: { '1': [{ mikan_id: '9', title: '测试番剧', image: '' }] } })
+      if (path.includes('/mikan/subgroups')) return response({ items: [{ id: '8', name: '字幕组', is_all: false }] })
+      if (path.includes('/mikan/episodes')) return response({ mikan_id: '9', total: 1, items: [{ title: '[字幕组] 测试番剧 01 [1080P]', episode_num: '01', sub_group: '字幕组', resolution: '1080p', pub_date: '' }] })
+      throw new Error(`unexpected request: ${path}`)
+    }))
+
+    const wrapper = mountDialog()
+    await waitForText(wrapper, '测试番剧')
+    await buttonByText(wrapper, '测试番剧').trigger('click')
+    await waitForText(wrapper, '必须包含（正则）')
+    await wrapper.get('#mikan-include-rule').setValue('[未闭合')
+
+    expect(wrapper.text()).toContain('正则错误')
+    expect(wrapper.get('[data-testid="confirm-mikan-selection"]').attributes()).toHaveProperty('disabled')
   })
 
   it('shows a recoverable dashboard error and retries in place', async () => {

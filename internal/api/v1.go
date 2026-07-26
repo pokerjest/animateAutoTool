@@ -155,6 +155,8 @@ func initV1Routes(r *gin.Engine) {
 		protected.POST("/local-directories/:id/rename", V1RenameApplyHandler)
 		protected.GET("/jellyfin/stream/:id", ProxyVideoHandler)
 		protected.GET("/jellyfin/play/:id", GetPlayInfoHandler)
+		protected.GET("/playback/continue", ContinueWatchingHandler)
+		protected.POST("/playback/progress", ReportProgressHandler)
 		protected.PUT("/jellyfin/episodes/:id/user-state", UpdateJellyfinEpisodeStateHandler)
 		protected.PUT("/jellyfin/series/:id/user-state", UpdateJellyfinSeriesStateHandler)
 		protected.POST("/jellyfin/progress", ReportProgressHandler)

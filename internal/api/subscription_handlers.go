@@ -187,11 +187,6 @@ func createSubscriptionInternal(sub *model.Subscription) error {
 		sub.Metadata.Title = parser.CleanTitle(sub.Title)
 	}
 
-	// Auto-fill FilterRule from SubtitleGroup if FilterRule is empty
-	if sub.FilterRule == "" && sub.SubtitleGroup != "" && !sub.AllowMultiSubgroup {
-		sub.FilterRule = sub.SubtitleGroup
-	}
-
 	// Enrich Metadata (Bangumi & TMDB)
 	enrichSubscriptionMetadata(sub.Metadata, sub.Title)
 
@@ -270,11 +265,6 @@ func normalizeSubscriptionStrategy(sub *model.Subscription) {
 	if sub == nil {
 		return
 	}
-	if strings.TrimSpace(sub.BackupRSSUrl) == "" {
-		if baseRSS, ok := deriveBaseRSSURL(sub.RSSUrl); ok {
-			sub.BackupRSSUrl = baseRSS
-		}
-	}
 	sub.BackupRSSUrl = strings.TrimSpace(sub.BackupRSSUrl)
 	if sub.ExpectedEpisodes < 0 {
 		sub.ExpectedEpisodes = 0
@@ -291,6 +281,8 @@ func normalizeSubscriptionReleaseFilters(sub *model.Subscription) error {
 	if sub == nil {
 		return nil
 	}
+	sub.FilterRule = strings.TrimSpace(sub.FilterRule)
+	sub.ExcludeRule = strings.TrimSpace(sub.ExcludeRule)
 	resolution, ok := service.NormalizeResolutionFilter(sub.ResolutionFilter)
 	if !ok {
 		return fmt.Errorf("不支持的清晰度筛选: %s", strings.TrimSpace(sub.ResolutionFilter))
@@ -301,6 +293,12 @@ func normalizeSubscriptionReleaseFilters(sub *model.Subscription) error {
 	}
 	sub.ResolutionFilter = resolution
 	sub.SubtitleLanguage = language
+	if err := service.ValidateSubscriptionPattern(sub.FilterRule); err != nil {
+		return fmt.Errorf("包含规则不是有效正则: %v", err)
+	}
+	if err := service.ValidateSubscriptionPattern(sub.ExcludeRule); err != nil {
+		return fmt.Errorf("排除规则不是有效正则: %v", err)
+	}
 	return nil
 }
 

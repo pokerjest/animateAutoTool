@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -60,6 +61,38 @@ func (f *fakeDownloader) AddTorrent(url, savePath, category string, paused bool)
 	return nil
 }
 func (f *fakeDownloader) Ping() error { return nil }
+
+type fakeTorrentFetcher struct {
+	fakeRSSParser
+	filename string
+	data     []byte
+	fetched  []string
+	fetchErr error
+}
+
+func (f *fakeTorrentFetcher) FetchTorrentContext(_ context.Context, rawURL string) (string, []byte, error) {
+	f.fetched = append(f.fetched, rawURL)
+	return f.filename, f.data, f.fetchErr
+}
+
+type fakeTorrentFileDownloader struct {
+	fakeDownloader
+	uploadedFilename string
+	uploadedData     []byte
+	uploadedSavePath string
+	uploadedCategory string
+	uploadedPaused   bool
+	uploadErr        error
+}
+
+func (f *fakeTorrentFileDownloader) AddTorrentFileContext(_ context.Context, filename string, data []byte, savePath, category string, paused bool) error {
+	f.uploadedFilename = filename
+	f.uploadedData = append([]byte(nil), data...)
+	f.uploadedSavePath = savePath
+	f.uploadedCategory = category
+	f.uploadedPaused = paused
+	return f.uploadErr
+}
 
 func withServiceTestDB(t *testing.T) {
 	t.Helper()
@@ -128,6 +161,53 @@ func TestProcessSubscriptionPersistsSuccessState(t *testing.T) {
 	}
 	if runLogs[0].TriggerSource != "manual" {
 		t.Fatalf("expected manual trigger source, got %q", runLogs[0].TriggerSource)
+	}
+}
+
+func TestAddTorrentFetchesHTTPFileAndUploadsIt(t *testing.T) {
+	t.Parallel()
+
+	fetcher := &fakeTorrentFetcher{
+		filename: "episode.torrent",
+		data:     []byte("d4:infode"),
+	}
+	down := &fakeTorrentFileDownloader{}
+	mgr := &SubscriptionManager{RSSParser: fetcher, Downloader: down}
+
+	err := mgr.addTorrent(context.Background(), "https://mikanani.me/Download/2026/episode.torrent", "/downloads/show", "Anime", true)
+	if err != nil {
+		t.Fatalf("add HTTP torrent: %v", err)
+	}
+	if len(fetcher.fetched) != 1 {
+		t.Fatalf("expected one source fetch, got %d", len(fetcher.fetched))
+	}
+	if down.uploadedFilename != "episode.torrent" || string(down.uploadedData) != "d4:infode" {
+		t.Fatalf("unexpected uploaded torrent: filename=%q data=%q", down.uploadedFilename, down.uploadedData)
+	}
+	if down.uploadedSavePath != "/downloads/show" || down.uploadedCategory != "Anime" || !down.uploadedPaused {
+		t.Fatalf("unexpected upload options: path=%q category=%q paused=%v", down.uploadedSavePath, down.uploadedCategory, down.uploadedPaused)
+	}
+	if len(down.added) != 0 {
+		t.Fatalf("HTTP torrent should not use downloader-side URL fetch: %v", down.added)
+	}
+}
+
+func TestAddTorrentKeepsMagnetOnURLPath(t *testing.T) {
+	t.Parallel()
+
+	fetcher := &fakeTorrentFetcher{filename: "unused.torrent", data: []byte("d4:infode")}
+	down := &fakeTorrentFileDownloader{}
+	mgr := &SubscriptionManager{RSSParser: fetcher, Downloader: down}
+
+	magnet := "magnet:?xt=urn:btih:test"
+	if err := mgr.addTorrent(context.Background(), magnet, "/downloads/show", "Anime", false); err != nil {
+		t.Fatalf("add magnet: %v", err)
+	}
+	if len(fetcher.fetched) != 0 || down.uploadedFilename != "" {
+		t.Fatal("magnet should not be fetched or uploaded as a torrent file")
+	}
+	if len(down.added) != 1 || down.added[0] != magnet {
+		t.Fatalf("expected magnet URL path, got %v", down.added)
 	}
 }
 

@@ -5,12 +5,14 @@ import { Activity, ArchiveRestore, Bot, CalendarDays, ChevronRight, Clapperboard
 import { useUIStore } from '../stores/ui'
 import { useTaskStore } from '../stores/tasks'
 import { useSessionStore } from '../stores/session'
+import { usePlaybackStore } from '../stores/playback'
 import { useAsyncActions } from '../composables/useAsyncActions'
 import AsyncButton from './AsyncButton.vue'
 import AppBackground from './AppBackground.vue'
 import TaskCenter from './TaskCenter.vue'
+import PlaybackHost from './PlaybackHost.vue'
 
-const route = useRoute(); const router = useRouter(); const ui = useUIStore(); const tasks = useTaskStore(); const session = useSessionStore(); const actions = useAsyncActions()
+const route = useRoute(); const router = useRouter(); const ui = useUIStore(); const tasks = useTaskStore(); const session = useSessionStore(); const playback = usePlaybackStore(); const actions = useAsyncActions()
 const groups = [
   { label: '概览', links: [{ to: '/', label: '今日概览', icon: Home }, { to: '/calendar', label: '追番日历', icon: CalendarDays }] },
   { label: '追番', links: [{ to: '/subscriptions', label: '订阅管理', icon: Tv }, { to: '/assistant', label: 'AI 助手', icon: Bot }] },
@@ -21,7 +23,7 @@ const bottom = groups.flatMap(g => g.links).filter(l => ['/', '/calendar', '/sub
 const isActive = (to: string) => to === '/' ? route.path === '/' : route.path.startsWith(to)
 const themeIcon = computed(() => ui.theme === 'dark' ? Sun : MoonStar)
 const toggleTheme = () => ui.setTheme(document.documentElement.classList.contains('dark') ? 'light' : 'dark')
-const logout = async () => { try { await actions.run('logout', async () => { await session.logout(); await router.push('/login') }) } catch (error) { ui.toast(error instanceof Error ? error.message : '退出登录失败', 'error') } }
+const logout = async () => { try { await actions.run('logout', async () => { if (playback.current) await playback.stop(); await session.logout(); await router.push('/login') }) } catch (error) { ui.toast(error instanceof Error ? error.message : '退出登录失败', 'error') } }
 </script>
 
 <template>
@@ -58,7 +60,7 @@ const logout = async () => { try { await actions.run('logout', async () => { awa
       </button>
     </header>
 
-    <main id="main-content" class="min-w-0 px-3 pb-28 pt-24 lg:ml-[280px] lg:px-6 lg:pb-8"><div class="mx-auto max-w-[1440px]"><slot /></div></main>
+    <main id="main-content" class="min-w-0 px-3 pb-28 pt-24 lg:ml-[280px] lg:px-6 lg:pb-8"><div class="mx-auto max-w-[1440px]"><PlaybackHost /><slot /></div></main>
 
     <nav aria-label="移动端主导航" class="glass fixed inset-x-3 bottom-3 z-40 grid grid-cols-5 rounded-2xl p-1.5 lg:hidden">
       <RouterLink v-for="link in bottom" :key="link.to" :to="link.to" class="flex min-h-14 flex-col items-center justify-center gap-1 rounded-xl text-[.64rem] font-bold" :class="isActive(link.to) ? 'bg-[var(--brand-soft)] text-[var(--brand-strong)]' : 'muted'"><component :is="link.icon" :size="19" /><span>{{ link.label.slice(0, 4) }}</span></RouterLink>

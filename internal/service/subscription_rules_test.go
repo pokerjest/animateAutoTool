@@ -7,7 +7,7 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/parser"
 )
 
-func TestSubscriptionRuleSetMatchesSubtitleGroupWhenTitleLacksGroupName(t *testing.T) {
+func TestSubscriptionRuleSetDoesNotTreatParsedSubgroupAsTitleMatch(t *testing.T) {
 	rules := buildSubscriptionRuleSet(&model.Subscription{
 		Title:         "诈欺游戏",
 		SubtitleGroup: "ANi",
@@ -19,8 +19,8 @@ func TestSubscriptionRuleSetMatchesSubtitleGroupWhenTitleLacksGroupName(t *testi
 		SubGroup: "ANi",
 	}
 
-	if !rules.allows(episode) {
-		t.Fatal("expected subtitle-group rule to allow episode even when title lacks group name")
+	if rules.allows(episode) {
+		t.Fatal("expected custom regex to match only the release title, not parsed subgroup metadata")
 	}
 }
 
@@ -53,6 +53,15 @@ func TestSubscriptionRuleSetFallsBackToLiteralMatchForInvalidRegex(t *testing.T)
 
 	if !rules.allows(episode) {
 		t.Fatal("expected invalid regex to fall back to literal title match")
+	}
+}
+
+func TestValidateSubscriptionPattern(t *testing.T) {
+	if err := ValidateSubscriptionPattern(`1080[Pp].*(CHS|简中)`); err != nil {
+		t.Fatalf("expected valid custom regex: %v", err)
+	}
+	if err := ValidateSubscriptionPattern(`[未闭合`); err == nil {
+		t.Fatal("expected invalid custom regex to be rejected")
 	}
 }
 
