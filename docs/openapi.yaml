@@ -113,6 +113,26 @@ paths:
         - { name: mikan_id, in: query, required: true, schema: { type: string, pattern: "^[0-9]+$" } }
         - { name: subgroup_id, in: query, schema: { type: string, pattern: "^[0-9]+$" } }
       responses: { "200": { $ref: "#/components/responses/Success" }, "400": { $ref: "#/components/responses/Error" } }
+  /subscriptions/mikan/poster:
+    get:
+      operationId: getMikanPoster
+      parameters:
+        - { name: url, in: query, required: true, schema: { type: string, format: uri } }
+        - { name: width, in: query, schema: { type: integer, minimum: 64, maximum: 1280, default: 360 } }
+      responses:
+        "200":
+          description: Cached same-origin Mikan poster
+          content: { image/jpeg: { schema: { type: string, format: binary } } }
+        "400": { description: Invalid or untrusted poster URL }
+        "502": { description: Mikan poster unavailable }
+  /subscriptions/mikan/resolve:
+    get:
+      operationId: resolveMikanByBangumiSubject
+      description: Search Mikan by title and verify candidates using the bgm.tv subject link on each Mikan detail page.
+      parameters:
+        - { name: bangumi_subject_id, in: query, required: true, schema: { type: string, pattern: "^[0-9]+$" } }
+        - { name: q, in: query, required: true, schema: { type: string, minLength: 1 } }
+      responses: { "200": { $ref: "#/components/responses/Success" }, "400": { $ref: "#/components/responses/Error" }, "502": { $ref: "#/components/responses/Error" } }
   /subscriptions/mikan/subgroups:
     get:
       operationId: getMikanSubgroups
@@ -460,9 +480,10 @@ components:
         stale_after_hours: { type: integer, minimum: 1 }
     MikanDiscoveryItem:
       type: object
-      required: [mikan_id, title, image]
+      required: [mikan_id, bangumi_subject_id, title, image]
       properties:
-        mikan_id: { type: string }
+        mikan_id: { type: string, description: Mikan's own bangumi identifier used by Mikan RSS URLs. }
+        bangumi_subject_id: { type: string, description: bgm.tv subject identifier when verified from the Mikan detail page; empty when unresolved. }
         title: { type: string }
         image: { type: string }
     MikanDashboard:

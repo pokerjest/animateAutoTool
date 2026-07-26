@@ -8,6 +8,20 @@
 
 ## [Unreleased]
 
+## [0.8.7] - 2026-07-27
+
+### Added
+- 订阅管理卡片支持整卡进入详情；已扫描并完成 Jellyfin 关联的订阅可直接跳转播放器，继续沿用现有续播进度。
+- 新增 Mikan 海报同源代理、缓存与来源校验，远程设备直连图片失败时由 AnimateTool 主机代抓。
+
+### Changed
+- 追番日历从 Bangumi 添加订阅时，优先通过 Mikan 详情页中的 bgm.tv subject ID 精确匹配；中文名未命中时继续尝试原名。
+- 追番日历海报采用浏览器直连、主机代理、默认海报三级回退，Mikan 发现页采用相同的远程访问策略。
+
+### Fixed
+- 修复同名、译名或续作可能关联到错误 Mikan 番组的问题；精确解析失败时自动回退标题搜索，不阻塞手动选择。
+- 修复外部电脑和手机能打开页面但 Mikan、追番日历海报间歇加载失败的问题。
+
 ## [0.8.6] - 2026-07-26
 
 ### Added
@@ -222,7 +236,8 @@
 
 ---
 
-[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v0.8.6...HEAD
+[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v0.8.7...HEAD
+[0.8.7]: https://github.com/pokerjest/animateAutoTool/compare/v0.8.6...v0.8.7
 [0.8.6]: https://github.com/pokerjest/animateAutoTool/compare/v0.8.5...v0.8.6
 [0.8.5]: https://github.com/pokerjest/animateAutoTool/compare/v0.8.4...v0.8.5
 [0.8.0]: https://github.com/pokerjest/animateAutoTool/compare/v0.7.4...v0.8.0

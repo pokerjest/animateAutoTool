@@ -17,7 +17,18 @@ import AsyncButton from './AsyncButton.vue'
 import StateBlock from './StateBlock.vue'
 import { buildMikanSelection, mikanEpisodeMatchesFilters, regexRuleError } from '../utils/mikanSubscription'
 
-const props = withDefaults(defineProps<{ open: boolean; initialSearch?: string; saving?: boolean }>(), { initialSearch: '', saving: false })
+const props = withDefaults(defineProps<{
+  open: boolean
+  initialSearch?: string
+  initialSearchAliases?: string[]
+  initialBangumiSubjectId?: string
+  saving?: boolean
+}>(), {
+  initialSearch: '',
+  initialSearchAliases: () => [],
+  initialBangumiSubjectId: '',
+  saving: false,
+})
 const emit = defineEmits<{
   'update:open': [value: boolean]
   select: [selection: MikanSubscriptionSelection]
@@ -49,6 +60,8 @@ const selectedSeason = ref(seasonForMonth(now.getMonth()))
 const activeDay = ref(String(now.getDay()))
 const searchText = ref('')
 const submittedSearch = ref('')
+const resolveInitial = ref(false)
+const exactItems = ref<MikanDiscoveryItem[]>([])
 const selectedAnime = ref<SelectedAnime | null>(null)
 const selectedSubgroup = ref<MikanSubgroup | null>(null)
 const resolutionFilter = ref<ResolutionFilter>('')
@@ -62,10 +75,36 @@ const dashboard = useQuery({
   enabled: computed(() => props.open && step.value === 'browse' && tab.value === 'season'),
 })
 
+const initialResolveQueries = computed(() => Array.from(new Set(
+  [props.initialSearch, ...props.initialSearchAliases].map(value => value.trim()).filter(Boolean),
+)))
+
+const exactMatch = useQuery({
+  queryKey: computed(() => ['mikan-resolve', props.initialBangumiSubjectId, ...initialResolveQueries.value]),
+  queryFn: async () => {
+    let lastError: unknown
+    let successfulRequest = false
+    for (const query of initialResolveQueries.value) {
+      const params = new URLSearchParams({ bangumi_subject_id: props.initialBangumiSubjectId, q: query })
+      try {
+        const result = await api<{ items: MikanDiscoveryItem[] }>(`/subscriptions/mikan/resolve?${params}`)
+        successfulRequest = true
+        if (result.items.length) return result
+      } catch (error) {
+        lastError = error
+      }
+    }
+    if (successfulRequest) return { items: [] }
+    throw lastError instanceof Error ? lastError : new Error('无法通过 Bangumi ID 关联 Mikan')
+  },
+  enabled: computed(() => props.open && step.value === 'browse' && tab.value === 'search' && resolveInitial.value && Boolean(props.initialBangumiSubjectId) && initialResolveQueries.value.length > 0),
+  retry: false,
+})
+
 const searchResults = useQuery({
   queryKey: computed(() => ['mikan-search', submittedSearch.value]),
   queryFn: () => api<{ items: MikanDiscoveryItem[] }>(`/subscriptions/search?q=${encodeURIComponent(submittedSearch.value)}`),
-  enabled: computed(() => props.open && step.value === 'browse' && tab.value === 'search' && Boolean(submittedSearch.value)),
+  enabled: computed(() => props.open && step.value === 'browse' && tab.value === 'search' && !resolveInitial.value && exactItems.value.length === 0 && Boolean(submittedSearch.value)),
 })
 
 const subgroups = useQuery({
@@ -85,6 +124,7 @@ const episodes = useQuery({
 })
 
 const dashboardItems = computed(() => dashboard.data.value?.days?.[activeDay.value] || [])
+const displayedSearchItems = computed(() => exactItems.value.length ? exactItems.value : (searchResults.data.value?.items || []))
 const groupItems = computed(() => subgroups.data.value?.items || [])
 const filteredEpisodes = computed(() => (episodes.data.value?.items || []).filter(episode => (
   mikanEpisodeMatchesFilters(episode, resolutionFilter.value, subtitleLanguage.value, includeRule.value, excludeRule.value)
@@ -109,6 +149,19 @@ watch(() => subgroups.data.value, value => {
   selectedSubgroup.value = value?.items.find(item => item.is_all) || value?.items[0] || null
 })
 
+watch(() => exactMatch.data.value, value => {
+  if (!resolveInitial.value || !value) return
+  resolveInitial.value = false
+  exactItems.value = value.items
+  if (value.items.length === 1) chooseAnime(value.items[0])
+})
+
+watch(() => exactMatch.isError.value, failed => {
+  if (!failed || !resolveInitial.value) return
+  resolveInitial.value = false
+  exactItems.value = []
+})
+
 watch(() => props.open, open => {
   if (!open) return
   const initialSearch = props.initialSearch.trim()
@@ -116,6 +169,8 @@ watch(() => props.open, open => {
   step.value = 'browse'
   selectedAnime.value = null
   selectedSubgroup.value = null
+  exactItems.value = []
+  resolveInitial.value = Boolean(props.initialBangumiSubjectId.trim() && initialResolveQueries.value.length)
   resolutionFilter.value = ''
   subtitleLanguage.value = ''
   includeRule.value = ''
@@ -125,9 +180,10 @@ watch(() => props.open, open => {
 }, { immediate: true })
 
 function submitSearch() {
-  if (searchResults.isFetching.value) return
+  if (resolveInitial.value || searchResults.isFetching.value) return
   const query = searchText.value.trim()
   if (!query) return
+  exactItems.value = []
   if (submittedSearch.value === query) searchResults.refetch()
   else submittedSearch.value = query
 }
@@ -196,12 +252,14 @@ function confirmSelection() {
           <input id="mikan-search" v-model="searchText" class="field" placeholder="输入番剧名称" autocomplete="off" />
           <AsyncButton type="submit" class="btn btn-primary shrink-0" :disabled="!searchText.trim()" :loading="searchResults.isFetching.value" loading-label="搜索中…"><Search :size="17" />搜索</AsyncButton>
         </form>
-        <StateBlock v-if="searchResults.isLoading.value" class="mt-5" state="loading" title="正在搜索 Mikan" />
-        <StateBlock v-else-if="searchResults.isError.value" class="mt-5" state="error" title="搜索失败" description="请检查网络或代理设置后重试。" :retrying="searchResults.isFetching.value" @retry="searchResults.refetch()" />
+        <StateBlock v-if="resolveInitial && exactMatch.isFetching.value" class="mt-5" state="loading" title="正在按 Bangumi ID 精确关联 Mikan" description="会核对 Mikan 详情页中的 bgm.tv 条目链接。" />
+        <StateBlock v-else-if="!exactItems.length && searchResults.isLoading.value" class="mt-5" state="loading" title="正在搜索 Mikan" />
+        <StateBlock v-else-if="!exactItems.length && searchResults.isError.value" class="mt-5" state="error" title="搜索失败" description="请检查网络或代理设置后重试。" :retrying="searchResults.isFetching.value" @retry="searchResults.refetch()" />
         <StateBlock v-else-if="!submittedSearch" class="mt-5" state="empty" title="搜索 Mikan 番剧" description="输入中文、日文或英文番名均可。" />
-        <StateBlock v-else-if="!searchResults.data.value?.items.length" class="mt-5" state="empty" title="没有找到匹配番剧" description="尝试缩短关键词或使用原名搜索。" />
+        <StateBlock v-else-if="!displayedSearchItems.length" class="mt-5" state="empty" title="没有找到匹配番剧" description="尝试缩短关键词或使用原名搜索。" />
         <div v-else class="mt-5 grid gap-3 sm:grid-cols-2" data-testid="mikan-search-results">
-          <button v-for="item in searchResults.data.value?.items" :key="item.mikan_id" class="panel-muted flex min-h-28 items-center gap-4 p-3 text-left" @click="chooseAnime(item)">
+          <p v-if="exactItems.length" class="badge col-span-full w-fit">已通过 Bangumi ID 精确匹配</p>
+          <button v-for="item in displayedSearchItems" :key="item.mikan_id" class="panel-muted flex min-h-28 items-center gap-4 p-3 text-left" @click="chooseAnime(item)">
             <img :src="normalizePosterURL(item.image)" :alt="`${item.title} 海报`" loading="lazy" decoding="async" fetchpriority="low" class="h-24 w-16 rounded-xl object-cover" @error="handlePosterError($event)" />
             <span class="min-w-0"><strong class="line-clamp-2">{{ item.title }}</strong><small class="muted mt-2 block">Mikan #{{ item.mikan_id }}</small></span>
           </button>

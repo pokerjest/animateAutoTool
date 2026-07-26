@@ -36,14 +36,16 @@ func V1PickDirectoryHandler(c *gin.Context)   { v1RunJSONHandler(c, PickDirector
 type v1MikanClient interface {
 	ParseContext(context.Context, string) ([]parser.Episode, error)
 	SearchContext(context.Context, string) ([]parser.SearchResult, error)
+	ResolveBangumiSubjectContext(context.Context, string, string) ([]parser.SearchResult, error)
 	GetSubgroupsContext(context.Context, string) ([]parser.Subgroup, error)
 	GetDashboardContext(context.Context, string, string) (*parser.MikanDashboard, error)
 }
 
 type v1MikanDiscoveryItem struct {
-	MikanID string `json:"mikan_id"`
-	Title   string `json:"title"`
-	Image   string `json:"image"`
+	MikanID          string `json:"mikan_id"`
+	BangumiSubjectID string `json:"bangumi_subject_id"`
+	Title            string `json:"title"`
+	Image            string `json:"image"`
 }
 
 type v1MikanSubgroup struct {
@@ -64,9 +66,10 @@ func mikanDiscoveryItems(items []parser.SearchResult) []v1MikanDiscoveryItem {
 	result := make([]v1MikanDiscoveryItem, 0, len(items))
 	for _, item := range items {
 		result = append(result, v1MikanDiscoveryItem{
-			MikanID: strings.TrimSpace(item.MikanID),
-			Title:   strings.TrimSpace(item.Title),
-			Image:   strings.TrimSpace(item.Image),
+			MikanID:          strings.TrimSpace(item.MikanID),
+			BangumiSubjectID: strings.TrimSpace(item.BangumiSubjectID),
+			Title:            strings.TrimSpace(item.Title),
+			Image:            strings.TrimSpace(item.Image),
 		})
 	}
 	return result
@@ -98,6 +101,26 @@ func V1MikanSearchHandler(c *gin.Context) {
 	results, err := newV1MikanClient().SearchContext(c.Request.Context(), keyword)
 	if err != nil {
 		v1Error(c, http.StatusBadGateway, "mikan_search_failed", humanizeOperationError(err.Error()))
+		return
+	}
+	v1Data(c, http.StatusOK, gin.H{"items": mikanDiscoveryItems(results)})
+}
+
+func V1MikanResolveHandler(c *gin.Context) {
+	subjectID := strings.TrimSpace(c.Query("bangumi_subject_id"))
+	if !validMikanNumericID(subjectID) {
+		v1Error(c, http.StatusBadRequest, "invalid_bangumi_subject_id", "Bangumi 条目 ID 无效")
+		return
+	}
+	keyword := strings.TrimSpace(c.Query("q"))
+	if keyword == "" {
+		v1Error(c, http.StatusBadRequest, "search_query_required", "请输入搜索关键词")
+		return
+	}
+
+	results, err := newV1MikanClient().ResolveBangumiSubjectContext(c.Request.Context(), subjectID, keyword)
+	if err != nil {
+		v1Error(c, http.StatusBadGateway, "mikan_resolve_failed", humanizeOperationError(err.Error()))
 		return
 	}
 	v1Data(c, http.StatusOK, gin.H{"items": mikanDiscoveryItems(results)})

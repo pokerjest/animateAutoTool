@@ -21,9 +21,10 @@ type Episode struct {
 
 // SearchResult 代表搜索结果 (番剧维度)
 type SearchResult struct {
-	MikanID string // 蜜柑 ID (BangumiID)
-	Title   string // 番剧标题
-	Image   string // 封面图 URL
+	MikanID          string // Mikan 番组 ID
+	BangumiSubjectID string // bgm.tv subject ID，与 Mikan ID 相互独立
+	Title            string // 番剧标题
+	Image            string // 封面图 URL
 }
 
 // Subgroup 代表字幕组信息

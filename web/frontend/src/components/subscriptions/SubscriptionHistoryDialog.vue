@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { Clock3 } from '@lucide/vue'
+import { Clock3, PlayCircle } from '@lucide/vue'
+import { handlePosterError, posterURL } from '../../api/client'
+import type { Subscription } from '../../api/types'
 import AppDialog from '../AppDialog.vue'
 import StateBlock from '../StateBlock.vue'
 
@@ -9,6 +11,7 @@ defineProps<{
   loading: boolean
   error: boolean
   retrying: boolean
+  item?: Subscription | null
   runs: Array<Record<string, unknown>>
   logs: Array<Record<string, unknown>>
 }>()
@@ -16,6 +19,7 @@ defineProps<{
 const emit = defineEmits<{
   'update:open': [value: boolean]
   retry: []
+  play: [item: Subscription]
 }>()
 
 function field(row: Record<string, unknown>, primary: string, fallback: string) {
@@ -39,7 +43,29 @@ function field(row: Record<string, unknown>, primary: string, fallback: string) 
       :retrying="retrying"
       @retry="emit('retry')"
     />
-    <div v-else class="grid gap-5 lg:grid-cols-2">
+    <div v-else class="grid gap-5">
+      <section v-if="item" class="panel-muted grid gap-4 p-4 sm:grid-cols-[80px_1fr_auto] sm:items-center">
+        <img
+          :src="posterURL(item.metadata || { image: item.image }, { width: 160 })"
+          :alt="`${title} 海报`"
+          decoding="async"
+          class="h-28 w-20 rounded-xl object-cover"
+          @error="handlePosterError($event, item.image)"
+        />
+        <div class="min-w-0">
+          <div class="flex flex-wrap items-center gap-2">
+            <strong class="truncate text-lg">{{ title }}</strong>
+            <span v-if="item.library_stage" class="badge" :class="item.playable ? 'badge-success' : ''">{{ item.library_stage }}</span>
+          </div>
+          <p class="muted mt-1 text-sm">{{ item.subtitle_group || '未指定字幕组' }} · 已加入下载 {{ item.downloaded_count }} 集</p>
+          <p v-if="item.library_hint" class="muted mt-2 text-xs">{{ item.library_hint }}</p>
+        </div>
+        <button v-if="item.playable && item.local_anime_id" class="btn btn-primary" @click="emit('play', item)">
+          <PlayCircle :size="17" />查看与播放
+        </button>
+      </section>
+
+      <div class="grid gap-5 lg:grid-cols-2">
       <section>
         <h3 class="font-black">最近检查</h3>
         <div class="mt-3 space-y-2">
@@ -67,6 +93,7 @@ function field(row: Record<string, unknown>, primary: string, fallback: string) 
           </article>
         </div>
       </section>
+      </div>
     </div>
   </AppDialog>
 </template>

@@ -28,15 +28,18 @@ import (
 )
 
 type fakeV1MikanClient struct {
-	searchItems    []parser.SearchResult
-	dashboard      *parser.MikanDashboard
-	subgroups      []parser.Subgroup
-	episodes       []parser.Episode
-	lastSearch     string
-	lastYear       string
-	lastSeason     string
-	lastSubgroupID string
-	lastRSSURL     string
+	searchItems      []parser.SearchResult
+	resolvedItems    []parser.SearchResult
+	dashboard        *parser.MikanDashboard
+	subgroups        []parser.Subgroup
+	episodes         []parser.Episode
+	lastSearch       string
+	lastSubjectID    string
+	lastResolveQuery string
+	lastYear         string
+	lastSeason       string
+	lastSubgroupID   string
+	lastRSSURL       string
 }
 
 func (f *fakeV1MikanClient) ParseContext(_ context.Context, rssURL string) ([]parser.Episode, error) {
@@ -47,6 +50,12 @@ func (f *fakeV1MikanClient) ParseContext(_ context.Context, rssURL string) ([]pa
 func (f *fakeV1MikanClient) SearchContext(_ context.Context, keyword string) ([]parser.SearchResult, error) {
 	f.lastSearch = keyword
 	return f.searchItems, nil
+}
+
+func (f *fakeV1MikanClient) ResolveBangumiSubjectContext(_ context.Context, subjectID, keyword string) ([]parser.SearchResult, error) {
+	f.lastSubjectID = subjectID
+	f.lastResolveQuery = keyword
+	return f.resolvedItems, nil
 }
 
 func (f *fakeV1MikanClient) GetSubgroupsContext(_ context.Context, mikanID string) ([]parser.Subgroup, error) {
@@ -514,7 +523,8 @@ func TestV1MikanDiscoveryEndpointsUseTypedContracts(t *testing.T) {
 		episodes[i] = parser.Episode{Title: "Episode", EpisodeNum: "1", SubGroup: "ANi", Resolution: "1080p"}
 	}
 	fake := &fakeV1MikanClient{
-		searchItems: []parser.SearchResult{{MikanID: "3141", Title: "测试番剧", Image: "https://mikanani.me/poster.jpg"}},
+		searchItems:   []parser.SearchResult{{MikanID: "3141", Title: "测试番剧", Image: "https://mikanani.me/poster.jpg"}},
+		resolvedItems: []parser.SearchResult{{MikanID: "3141", BangumiSubjectID: "598058", Title: "测试番剧", Image: "https://mikanani.me/poster.jpg"}},
 		dashboard: &parser.MikanDashboard{Season: "2026 夏季番组", Days: map[string][]parser.SearchResult{
 			"1": {{MikanID: "3141", Title: "测试番剧", Image: "https://mikanani.me/poster.jpg"}},
 		}},
@@ -542,6 +552,13 @@ func TestV1MikanDiscoveryEndpointsUseTypedContracts(t *testing.T) {
 	assert.Contains(t, search.Body.String(), `"mikan_id":"3141"`)
 	assert.NotContains(t, search.Body.String(), `"MikanID"`)
 	assert.Equal(t, "测试", fake.lastSearch)
+
+	resolved := request("/api/v1/subscriptions/mikan/resolve?bangumi_subject_id=598058&q=%E6%B5%8B%E8%AF%95")
+	require.Equal(t, http.StatusOK, resolved.Code, resolved.Body.String())
+	assert.Contains(t, resolved.Body.String(), `"mikan_id":"3141"`)
+	assert.Contains(t, resolved.Body.String(), `"bangumi_subject_id":"598058"`)
+	assert.Equal(t, "598058", fake.lastSubjectID)
+	assert.Equal(t, "测试", fake.lastResolveQuery)
 
 	dashboard := request("/api/v1/subscriptions/mikan/dashboard?year=2026&season=%E5%A4%8F")
 	require.Equal(t, http.StatusOK, dashboard.Code, dashboard.Body.String())
@@ -575,6 +592,10 @@ func TestV1MikanDiscoveryEndpointsUseTypedContracts(t *testing.T) {
 	invalid := request("/api/v1/subscriptions/mikan/subgroups?mikan_id=not-a-number")
 	require.Equal(t, http.StatusBadRequest, invalid.Code)
 	assert.Contains(t, invalid.Body.String(), `"code":"invalid_mikan_id"`)
+
+	invalidSubject := request("/api/v1/subscriptions/mikan/resolve?bangumi_subject_id=not-a-number&q=test")
+	require.Equal(t, http.StatusBadRequest, invalidSubject.Code)
+	assert.Contains(t, invalidSubject.Body.String(), `"code":"invalid_bangumi_subject_id"`)
 }
 
 func TestV1SubscriptionPersistsMikanAssociationWithoutUsingBangumiSubjectID(t *testing.T) {

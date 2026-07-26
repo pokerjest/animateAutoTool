@@ -14,7 +14,7 @@ function response(data: unknown, status = 200) {
   return Promise.resolve(new Response(JSON.stringify(payload), { status, headers: { 'Content-Type': 'application/json' } }))
 }
 
-function mountDialog(props: { initialSearch?: string } = {}) {
+function mountDialog(props: { initialSearch?: string; initialSearchAliases?: string[]; initialBangumiSubjectId?: string } = {}) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
   return mount(MikanDiscoveryDialog, {
     attachTo: document.body,
@@ -43,6 +43,26 @@ afterEach(() => {
 })
 
 describe('MikanDiscoveryDialog', () => {
+  it('uses the Bangumi subject ID to open the exact Mikan match', async () => {
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const path = String(input)
+      if (path.includes('/mikan/resolve?') && path.includes('bangumi_subject_id=598058')) {
+        return response({ items: [{ mikan_id: '3997', bangumi_subject_id: '598058', title: '精确匹配番剧', image: 'poster.jpg' }] })
+      }
+      if (path.includes('/mikan/subgroups')) return response({ items: [{ id: '', name: '全部字幕组', is_all: true }, { id: '583', name: 'ANi', is_all: false }] })
+      if (path.includes('/mikan/episodes')) return response({ mikan_id: '3997', total: 0, items: [] })
+      throw new Error(`unexpected request: ${path}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const wrapper = mountDialog({ initialSearch: '可能重名的译名', initialBangumiSubjectId: '598058' })
+    await waitForText(wrapper, '精确匹配番剧')
+    await waitForText(wrapper, 'ANi')
+
+    expect(wrapper.text()).toContain('MIKAN #3997')
+    expect(fetchMock.mock.calls.some(call => String(call[0]).includes('/subscriptions/search'))).toBe(false)
+  })
+
   it('starts in Mikan search when an initial calendar title is provided', async () => {
     vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
       const path = String(input)

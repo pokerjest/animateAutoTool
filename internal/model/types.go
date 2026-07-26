@@ -54,6 +54,9 @@ type Subscription struct {
 	LibraryStage        string     `json:"library_stage" gorm:"-"`
 	LibraryTone         string     `json:"library_tone" gorm:"-"`
 	LibraryHint         string     `json:"library_hint" gorm:"-"`
+	LocalAnimeID        uint       `json:"local_anime_id" gorm:"-"`
+	LibraryEpisodeCount int64      `json:"library_episode_count" gorm:"-"`
+	Playable            bool       `json:"playable" gorm:"-"`
 
 	// Refactored Metadata
 	MetadataID *uint          `json:"metadata_id"`

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { CircleAlert, FilePenLine, History, Pause, Play, RefreshCw, Trash2 } from '@lucide/vue'
+import { CircleAlert, FilePenLine, Pause, Play, PlayCircle, RefreshCw, Trash2 } from '@lucide/vue'
 import { handlePosterError, posterURL } from '../../api/client'
 import type { Subscription } from '../../api/types'
 import AsyncButton from '../AsyncButton.vue'
@@ -17,10 +17,11 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
+  open: []
+  play: []
   toggle: []
   check: []
   repair: [name: string]
-  history: []
   edit: []
   remove: []
 }>()
@@ -45,6 +46,8 @@ const releaseFilterLabel = computed(() => {
   return parts.join(' · ')
 })
 
+const canPlay = computed(() => Boolean(props.item.playable && props.item.local_anime_id))
+
 const repairActions = computed<RepairAction[]>(() => [
   { name: 'use-base-rss', label: '改用主 RSS', visible: Boolean(props.item.can_use_base_rss) },
   { name: 'clear-filter', label: '清空过滤', visible: Boolean(props.item.can_clear_filter) },
@@ -64,18 +67,25 @@ function isRepairBusy(name: string) {
 </script>
 
 <template>
-  <article class="panel grid gap-4 p-4 md:grid-cols-[72px_1fr_auto] md:items-center">
+  <article class="panel group relative isolate grid gap-4 p-4 transition hover:ring-2 hover:ring-[var(--brand)] md:grid-cols-[72px_1fr_auto] md:items-center">
+    <button
+      type="button"
+      class="absolute inset-0 z-0 cursor-pointer rounded-[inherit] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)] focus-visible:ring-offset-2"
+      :aria-label="`查看 ${displayTitle} 订阅详情`"
+      data-testid="subscription-open"
+      @click="emit('open')"
+    />
     <img
       :src="posterURL(item.metadata || { image: item.image }, { width: 160 })"
       :alt="`${item.title} 海报`"
       loading="lazy"
       decoding="async"
       fetchpriority="low"
-      class="h-24 w-16 rounded-xl object-cover md:h-20 md:w-14"
+      class="pointer-events-none relative z-10 h-24 w-16 rounded-xl object-cover md:h-20 md:w-14"
       @error="handlePosterError($event, item.image)"
     />
 
-    <div class="min-w-0">
+    <div class="pointer-events-none relative z-10 min-w-0">
       <div class="flex flex-wrap items-center gap-2">
         <h3 class="truncate font-extrabold">{{ displayTitle }}</h3>
         <span class="badge" :class="item.is_active ? 'badge-success' : ''">
@@ -92,8 +102,11 @@ function isRepairBusy(name: string) {
       <p class="mt-2 text-xs" :class="item.last_error_display ? 'text-[var(--danger)]' : 'muted'">
         {{ item.last_error_display || item.last_run_summary || '等待首次检查' }}
       </p>
+      <p v-if="item.library_hint" class="muted mt-1 text-xs">
+        {{ item.library_hint }}
+      </p>
 
-      <div v-if="item.has_repair_actions && repairActions.length" class="mt-3 flex flex-wrap gap-2">
+      <div v-if="item.has_repair_actions && repairActions.length" class="pointer-events-auto mt-3 flex flex-wrap gap-2">
         <AsyncButton
           v-for="action in repairActions"
           :key="action.name"
@@ -107,7 +120,11 @@ function isRepairBusy(name: string) {
       </div>
     </div>
 
-    <div class="flex flex-wrap gap-2 md:justify-end">
+    <div class="relative z-10 flex flex-wrap gap-2 md:justify-end">
+      <button v-if="canPlay" class="btn btn-primary" aria-label="打开播放器" @click="emit('play')">
+        <PlayCircle :size="16" />
+        播放
+      </button>
       <AsyncButton
         class="btn btn-secondary"
         :loading="isBusy(`toggle-${item.ID}`)"
@@ -127,9 +144,6 @@ function isRepairBusy(name: string) {
         <RefreshCw :size="16" />
         检查
       </AsyncButton>
-      <button class="btn btn-quiet h-11 w-11 p-0" aria-label="查看历史" @click="emit('history')">
-        <History :size="17" />
-      </button>
       <button class="btn btn-quiet h-11 w-11 p-0" aria-label="编辑订阅" @click="emit('edit')">
         <FilePenLine :size="17" />
       </button>

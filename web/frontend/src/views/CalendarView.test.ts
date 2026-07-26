@@ -29,12 +29,12 @@ const selection: MikanSubscriptionSelection = {
 }
 
 const MikanDiscoveryDialogStub = defineComponent({
-  props: { open: Boolean, initialSearch: String },
+  props: { open: Boolean, initialSearch: String, initialBangumiSubjectId: String },
   emits: ['update:open', 'select'],
   setup(_props, { emit }) {
     return { choose: () => emit('select', selection) }
   },
-  template: '<div v-if="open" data-testid="mikan-dialog"><span>{{ initialSearch }}</span><button data-testid="choose-mikan" @click="choose">确认 Mikan 源</button></div>',
+  template: '<div v-if="open" data-testid="mikan-dialog"><span>{{ initialSearch }}</span><span data-testid="bangumi-subject-id">{{ initialBangumiSubjectId }}</span><button data-testid="choose-mikan" @click="choose">确认 Mikan 源</button></div>',
 })
 
 function response(data: unknown) {
@@ -87,13 +87,19 @@ describe('CalendarView', () => {
 
     await vi.waitFor(() => expect(wrapper.text()).toContain('测试番剧'))
     expect(wrapper.text()).not.toContain('查看详情')
+    expect(wrapper.get('img').attributes('src')).toBe('https://lain.bgm.tv/pic/cover/l/poster.jpg')
+    await wrapper.get('img').trigger('error')
     expect(wrapper.get('img').attributes('src')).toBe('/api/v1/calendar/posters/99?width=360')
 
     await wrapper.get('[data-testid="poster-open"]').trigger('click')
     expect(wrapper.text()).toContain('从 Mikan 添加订阅')
-    expect(wrapper.findAll('img').some(image => image.attributes('src') === '/api/v1/calendar/posters/99?width=720')).toBe(true)
+    const detailPoster = wrapper.findAll('img').find(image => image.classes().includes('rounded-2xl'))
+    expect(detailPoster?.attributes('src')).toBe('https://lain.bgm.tv/pic/cover/l/poster.jpg')
+    await detailPoster?.trigger('error')
+    expect(detailPoster?.attributes('src')).toBe('/api/v1/calendar/posters/99?width=720')
     await buttonByText(wrapper, '从 Mikan 添加订阅').trigger('click')
     expect(wrapper.get('[data-testid="mikan-dialog"]').text()).toContain('测试番剧')
+    expect(wrapper.get('[data-testid="bangumi-subject-id"]').text()).toBe('99')
 
     await wrapper.get('[data-testid="choose-mikan"]').trigger('click')
     await flushPromises()

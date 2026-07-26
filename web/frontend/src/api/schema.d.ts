@@ -357,6 +357,39 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/subscriptions/mikan/poster": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getMikanPoster"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/subscriptions/mikan/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Search Mikan by title and verify candidates using the bgm.tv subject link on each Mikan detail page. */
+        get: operations["resolveMikanByBangumiSubject"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/subscriptions/mikan/subgroups": {
         parameters: {
             query?: never;
@@ -1347,7 +1380,10 @@ export interface components {
             stale_after_hours?: number;
         };
         MikanDiscoveryItem: {
+            /** @description Mikan's own bangumi identifier used by Mikan RSS URLs. */
             mikan_id: string;
+            /** @description bgm.tv subject identifier when verified from the Mikan detail page; empty when unresolved. */
+            bangumi_subject_id: string;
             title: string;
             image: string;
         };
@@ -1937,6 +1973,60 @@ export interface operations {
         responses: {
             200: components["responses"]["Success"];
             400: components["responses"]["Error"];
+        };
+    };
+    getMikanPoster: {
+        parameters: {
+            query: {
+                url: string;
+                width?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Cached same-origin Mikan poster */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/jpeg": string;
+                };
+            };
+            /** @description Invalid or untrusted poster URL */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Mikan poster unavailable */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    resolveMikanByBangumiSubject: {
+        parameters: {
+            query: {
+                bangumi_subject_id: string;
+                q: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["Success"];
+            400: components["responses"]["Error"];
+            502: components["responses"]["Error"];
         };
     };
     getMikanSubgroups: {

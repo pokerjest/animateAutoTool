@@ -89,7 +89,7 @@ func TestV1CalendarPosterHandlerUsesFallbackAndThumbnailCache(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if format != "jpeg" || config.Width != 160 || config.Height != 240 {
+	if format != testPosterJPEGFormat || config.Width != 160 || config.Height != 240 {
 		t.Fatalf("thumbnail = %s %dx%d, want jpeg 160x240", format, config.Width, config.Height)
 	}
 }

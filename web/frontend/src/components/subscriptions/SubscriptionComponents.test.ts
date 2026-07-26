@@ -83,4 +83,27 @@ describe('subscription presentational components', () => {
     expect(wrapper.text()).toContain('已加入下载 12 / 12 集')
     expect(wrapper.text()).toContain('本次 RSS 返回 3 条资源，均已存在于历史下载记录')
   })
+
+  it('opens the whole card and exposes playback only for a playable local match', async () => {
+    const wrapper = mount(SubscriptionCard, {
+      props: {
+        item: subscription({
+          downloaded_count: 3,
+          local_anime_id: 42,
+          library_episode_count: 3,
+          library_stage: '可播放',
+          library_hint: '本地已入库 3 集，可直接播放。',
+          playable: true,
+        }),
+        isBusy: () => false,
+      },
+    })
+
+    await wrapper.get('[data-testid="subscription-open"]').trigger('click')
+    await wrapper.get('button[aria-label="打开播放器"]').trigger('click')
+
+    expect(wrapper.emitted('open')).toHaveLength(1)
+    expect(wrapper.emitted('play')).toHaveLength(1)
+    expect(wrapper.text()).toContain('本地已入库 3 集')
+  })
 })

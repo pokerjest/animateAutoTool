@@ -13,6 +13,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+const testPosterJPEGFormat = "jpeg"
+
 func testPosterPNG(t *testing.T, width, height int) []byte {
 	t.Helper()
 	img := image.NewRGBA(image.Rect(0, 0, width, height))
@@ -50,7 +52,7 @@ func TestServePosterImageThumbnailAndConditionalCache(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decode thumbnail: %v", err)
 	}
-	if format != "jpeg" || config.Width != 320 || config.Height != 480 {
+	if format != testPosterJPEGFormat || config.Width != 320 || config.Height != 480 {
 		t.Fatalf("unexpected thumbnail: format=%s size=%dx%d", format, config.Width, config.Height)
 	}
 

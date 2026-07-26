@@ -123,6 +123,8 @@ func initV1Routes(r *gin.Engine) {
 		protected.GET("/subscriptions/rss-preview", V1RSSPreviewHandler)
 		protected.GET("/subscriptions/mikan/dashboard", V1MikanDashboardHandler)
 		protected.GET("/subscriptions/mikan/episodes", V1MikanEpisodesHandler)
+		protected.GET("/subscriptions/mikan/poster", V1MikanPosterHandler)
+		protected.GET("/subscriptions/mikan/resolve", V1MikanResolveHandler)
 		protected.GET("/subscriptions/mikan/subgroups", V1MikanSubgroupsHandler)
 		protected.PUT("/subscriptions/:id", V1UpdateSubscriptionHandler)
 		protected.POST("/subscriptions/:id/toggle", V1SubscriptionActionHandler("toggle"))

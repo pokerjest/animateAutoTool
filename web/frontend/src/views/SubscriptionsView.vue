@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
+import { useRouter } from 'vue-router'
 import { Plus, Sparkles, Upload } from '@lucide/vue'
 import { api } from '../api/client'
 import type {
@@ -78,6 +79,7 @@ function createEmptyForm() {
 }
 
 const ui = useUIStore()
+const router = useRouter()
 const queryClient = useQueryClient()
 const actions = useAsyncActions()
 const search = ref('')
@@ -153,6 +155,12 @@ function openBatch() {
 
 function openHistory(item: Subscription) {
   detailTarget.value = item
+}
+
+function playSubscription(item: Subscription) {
+  if (!item.playable || !item.local_anime_id) return
+  detailTarget.value = null
+  void router.push({ path: '/player', query: { anime: String(item.local_anime_id) } })
 }
 
 function confirmDelete(item: Subscription) {
@@ -427,10 +435,11 @@ async function importBatch() {
         :key="item.ID"
         :item="item"
         :is-busy="actions.isBusy"
+        @open="openHistory(item)"
+        @play="playSubscription(item)"
         @toggle="operate(item, 'toggle')"
         @check="operate(item, 'run')"
         @repair="repair(item, $event)"
-        @history="openHistory(item)"
         @edit="openEdit(item)"
         @remove="confirmDelete(item)"
       />
@@ -578,10 +587,12 @@ async function importBatch() {
       :loading="history.isLoading.value"
       :error="history.isError.value"
       :retrying="history.isFetching.value"
+      :item="history.data.value?.Subscription || detailTarget"
       :runs="history.data.value?.Runs || []"
       :logs="history.data.value?.Logs || []"
       @update:open="setHistoryOpen"
       @retry="history.refetch()"
+      @play="playSubscription"
     />
 
     <ConfirmDialog

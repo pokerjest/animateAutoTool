@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/go-resty/resty/v2"
@@ -117,6 +118,55 @@ func TestMikanSearchAndSubgroups(t *testing.T) {
 	}
 	if subgroups[1].Name != mikanTestSubgroupANi || subgroups[2].ID != "382" {
 		t.Fatalf("unexpected subgroups: %+v", subgroups)
+	}
+}
+
+func TestMikanResolveBangumiSubjectUsesVerifiedDetailLinkAndCache(t *testing.T) {
+	t.Parallel()
+
+	var searchRequests atomic.Int32
+	var detailRequests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/Home/Search":
+			searchRequests.Add(1)
+			_, _ = w.Write([]byte(`
+				<a href="/Home/Bangumi/7393141"><span data-src="/images/right.jpg"></span><div class="an-text" title="精确匹配"></div></a>
+				<a href="/Home/Bangumi/7393999"><span data-src="/images/wrong.jpg"></span><div class="an-text" title="同名但错误"></div></a>
+			`))
+		case "/Home/Bangumi/7393141":
+			detailRequests.Add(1)
+			_, _ = w.Write([]byte(`<a href="https://bgm.tv/subject/7598058">Bangumi</a>`))
+		case "/Home/Bangumi/7393999":
+			detailRequests.Add(1)
+			_, _ = w.Write([]byte(`<a href="https://bgm.tv/subject/7000001">Bangumi</a>`))
+		default:
+			t.Errorf("unexpected path: %s", r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	mikan := &MikanParser{client: resty.New()}
+	mikan.client.SetTransport(rewriteMikanTransport(server.URL))
+
+	results, err := mikan.ResolveBangumiSubjectContext(context.Background(), "7598058", "测试番剧")
+	if err != nil {
+		t.Fatalf("resolve Bangumi subject failed: %v", err)
+	}
+	if len(results) != 1 || results[0].MikanID != "7393141" {
+		t.Fatalf("unexpected exact results: %+v", results)
+	}
+	if results[0].BangumiSubjectID != "7598058" {
+		t.Fatalf("unexpected Bangumi subject ID: %q", results[0].BangumiSubjectID)
+	}
+
+	cached, err := mikan.ResolveBangumiSubjectContext(context.Background(), "7598058", "另一个译名")
+	if err != nil || len(cached) != 1 {
+		t.Fatalf("read cached exact result: results=%+v err=%v", cached, err)
+	}
+	if searchRequests.Load() != 1 || detailRequests.Load() != 2 {
+		t.Fatalf("expected cached second resolve, search=%d detail=%d", searchRequests.Load(), detailRequests.Load())
 	}
 }
 

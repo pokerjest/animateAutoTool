@@ -43,7 +43,32 @@ export function normalizePosterURL(image?: string) {
   const value = image?.trim()
   if (!value) return noPosterURL
   if (value.startsWith('/api/posters/')) return `/api/v1/posters/${value.slice('/api/posters/'.length)}`
+
   return value
+}
+
+function mikanPosterSource(image?: string) {
+  const value = image?.trim()
+  if (!value) return ''
+  try {
+    const parsed = new URL(value)
+    if (parsed.protocol === 'https:' && ['mikanani.me', 'www.mikanani.me'].includes(parsed.hostname.toLowerCase())) {
+      return parsed.toString()
+    }
+  } catch {
+    return ''
+  }
+  return ''
+}
+
+export function mikanPosterProxyURL(image?: string, width = 360) {
+  const source = mikanPosterSource(image)
+  if (!source) return ''
+  const params = new URLSearchParams({
+    url: source,
+    width: String(Math.max(64, Math.min(1280, Math.round(width)))),
+  })
+  return `/api/v1/subscriptions/mikan/poster?${params}`
 }
 
 interface PosterRecord { ID?: number; id?: number; image?: string; Image?: string; UpdatedAt?: string; updated_at?: string }
@@ -72,15 +97,34 @@ export function posterURL(item: PosterRecord, options: PosterOptions = {}) {
   return normalizePosterURL(image)
 }
 
-export function calendarPosterURL(subjectID?: number, image?: string, width = 360) {
-  if (!subjectID || !image?.trim()) return normalizePosterURL(image)
+export function calendarPosterURL(_subjectID?: number, image?: string, _width = 360) {
+  return normalizePosterURL(image)
+}
+
+export function calendarPosterProxyURL(subjectID?: number, width = 360) {
+  if (!subjectID) return ''
   return `/api/v1/calendar/posters/${subjectID}?width=${Math.max(64, Math.min(1280, Math.round(width)))}`
 }
 
 export function handlePosterError(event: Event, ...fallbacks: Array<string | undefined>) {
   const image = event.currentTarget
-  if (!(image instanceof HTMLImageElement)) return
+  if (!(image instanceof HTMLImageElement)) return false
   const current = image.getAttribute('src') || ''
+
+  // Prefer direct Mikan loading when the browser can reach it. Remote devices
+  // that cannot will transparently retry through the AnimateTool host.
+  const mikanProxy = mikanPosterProxyURL(current)
+  if (mikanProxy) {
+    image.src = mikanProxy
+    return true
+  }
+  if (current.startsWith('/api/v1/subscriptions/mikan/poster?')) {
+    image.src = noPosterURL
+    return true
+  }
+
   const next = [...fallbacks.map(normalizePosterURL), noPosterURL].find(candidate => candidate !== current)
-  if (next) image.src = next
+  if (!next) return false
+  image.src = next
+  return true
 }

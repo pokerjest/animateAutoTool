@@ -15,6 +15,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-resty/resty/v2"
@@ -25,7 +26,32 @@ type MikanParser struct {
 	client *resty.Client
 }
 
-const maxTorrentFileSize = 10 << 20
+const (
+	maxTorrentFileSize     = 10 << 20
+	mikanMappingCacheTTL   = 12 * time.Hour
+	mikanMappingConcurrent = 4
+)
+
+type cachedMikanSubject struct {
+	subjectID string
+	expiresAt time.Time
+}
+
+type cachedMikanResults struct {
+	items     []SearchResult
+	expiresAt time.Time
+}
+
+var mikanBangumiMappings = struct {
+	sync.RWMutex
+	byMikan   map[string]cachedMikanSubject
+	bySubject map[string]cachedMikanResults
+}{
+	byMikan:   make(map[string]cachedMikanSubject),
+	bySubject: make(map[string]cachedMikanResults),
+}
+
+var mikanBangumiSubjectLinkRegex = regexp.MustCompile(`(?i)https?://(?:bgm\.tv|bangumi\.tv|chii\.in)/subject/(\d+)`)
 
 func NewMikanParser() *MikanParser {
 	client := httpx.NewRestyClient(10*time.Second, "", nil)
@@ -341,6 +367,153 @@ func (p *MikanParser) SearchContext(ctx context.Context, keyword string) ([]Sear
 	}
 
 	return results, nil
+}
+
+// ResolveBangumiSubjectContext searches Mikan by title, then verifies each
+// candidate against the bgm.tv subject link published on its Mikan detail
+// page. Mikan IDs and bgm.tv subject IDs are deliberately kept separate.
+func (p *MikanParser) ResolveBangumiSubjectContext(ctx context.Context, subjectID, keyword string) ([]SearchResult, error) {
+	subjectID = strings.TrimSpace(subjectID)
+	keyword = strings.TrimSpace(keyword)
+	if _, err := strconv.ParseUint(subjectID, 10, 64); err != nil {
+		return nil, fmt.Errorf("invalid Bangumi subject ID")
+	}
+	if keyword == "" {
+		return nil, fmt.Errorf("mikan search keyword is empty")
+	}
+	if cached, ok := cachedMikanResultsForSubject(subjectID); ok {
+		return cached, nil
+	}
+
+	candidates, err := p.SearchContext(ctx, keyword)
+	if err != nil {
+		return nil, err
+	}
+	if len(candidates) == 0 {
+		return []SearchResult{}, nil
+	}
+
+	matched := make([]bool, len(candidates))
+	seen := make(map[string]struct{}, len(candidates))
+	semaphore := make(chan struct{}, mikanMappingConcurrent)
+	var wg sync.WaitGroup
+	var resultMu sync.Mutex
+	var firstErr error
+
+	for index := range candidates {
+		mikanID := strings.TrimSpace(candidates[index].MikanID)
+		if _, duplicate := seen[mikanID]; mikanID == "" || duplicate {
+			continue
+		}
+		seen[mikanID] = struct{}{}
+		wg.Add(1)
+		go func(candidateIndex int, candidateMikanID string) {
+			defer wg.Done()
+			select {
+			case semaphore <- struct{}{}:
+				defer func() { <-semaphore }()
+			case <-ctx.Done():
+				resultMu.Lock()
+				if firstErr == nil {
+					firstErr = ctx.Err()
+				}
+				resultMu.Unlock()
+				return
+			}
+
+			resolvedSubjectID, resolveErr := p.bangumiSubjectIDContext(ctx, candidateMikanID)
+			resultMu.Lock()
+			defer resultMu.Unlock()
+			if resolveErr != nil {
+				if firstErr == nil {
+					firstErr = resolveErr
+				}
+				return
+			}
+			if resolvedSubjectID == subjectID {
+				matched[candidateIndex] = true
+			}
+		}(index, mikanID)
+	}
+	wg.Wait()
+
+	results := make([]SearchResult, 0, len(candidates))
+	for index, isMatch := range matched {
+		if !isMatch {
+			continue
+		}
+		item := candidates[index]
+		item.BangumiSubjectID = subjectID
+		results = append(results, item)
+	}
+	if len(results) > 0 {
+		cacheMikanResultsForSubject(subjectID, results)
+		return results, nil
+	}
+	if firstErr != nil {
+		return nil, firstErr
+	}
+	return []SearchResult{}, nil
+}
+
+func (p *MikanParser) bangumiSubjectIDContext(ctx context.Context, mikanID string) (string, error) {
+	if subjectID, ok := cachedSubjectForMikan(mikanID); ok {
+		return subjectID, nil
+	}
+
+	detailURL := fmt.Sprintf("https://mikanani.me/Home/Bangumi/%s", url.PathEscape(mikanID))
+	resp, err := httpx.NewRequest(ctx, p.client).Get(detailURL)
+	if err != nil {
+		return "", err
+	}
+	if resp.IsError() {
+		return "", fmt.Errorf("mikan detail request returned HTTP %d", resp.StatusCode())
+	}
+
+	match := mikanBangumiSubjectLinkRegex.FindStringSubmatch(html.UnescapeString(string(resp.Body())))
+	subjectID := ""
+	if len(match) > 1 {
+		subjectID = match[1]
+	}
+	cacheSubjectForMikan(mikanID, subjectID)
+	return subjectID, nil
+}
+
+func cachedSubjectForMikan(mikanID string) (string, bool) {
+	now := time.Now()
+	mikanBangumiMappings.RLock()
+	cached, ok := mikanBangumiMappings.byMikan[mikanID]
+	mikanBangumiMappings.RUnlock()
+	if !ok || !now.Before(cached.expiresAt) {
+		return "", false
+	}
+	return cached.subjectID, true
+}
+
+func cacheSubjectForMikan(mikanID, subjectID string) {
+	mikanBangumiMappings.Lock()
+	mikanBangumiMappings.byMikan[mikanID] = cachedMikanSubject{subjectID: subjectID, expiresAt: time.Now().Add(mikanMappingCacheTTL)}
+	mikanBangumiMappings.Unlock()
+}
+
+func cachedMikanResultsForSubject(subjectID string) ([]SearchResult, bool) {
+	now := time.Now()
+	mikanBangumiMappings.RLock()
+	cached, ok := mikanBangumiMappings.bySubject[subjectID]
+	mikanBangumiMappings.RUnlock()
+	if !ok || !now.Before(cached.expiresAt) {
+		return nil, false
+	}
+	return append([]SearchResult(nil), cached.items...), true
+}
+
+func cacheMikanResultsForSubject(subjectID string, items []SearchResult) {
+	mikanBangumiMappings.Lock()
+	mikanBangumiMappings.bySubject[subjectID] = cachedMikanResults{
+		items:     append([]SearchResult(nil), items...),
+		expiresAt: time.Now().Add(mikanMappingCacheTTL),
+	}
+	mikanBangumiMappings.Unlock()
 }
 
 func (p *MikanParser) GetSubgroups(bangumiID string) ([]Subgroup, error) {

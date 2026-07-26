@@ -245,6 +245,9 @@ func resetSubscriptionActionHints(sub *model.Subscription) {
 	sub.LibraryStage = ""
 	sub.LibraryTone = ""
 	sub.LibraryHint = ""
+	sub.LocalAnimeID = 0
+	sub.LibraryEpisodeCount = 0
+	sub.Playable = false
 	sub.LastErrorDisplay = humanizeOperationError(sub.LastError)
 }
 
@@ -326,12 +329,19 @@ func appendStrategyHint(sub *model.Subscription, hint string) {
 	sub.StrategyHint = sub.StrategyHint + " " + hint
 }
 
-func populateSubscriptionLibraryState(sub *model.Subscription) {
-	if sub == nil || db.DB == nil {
-		return
-	}
+type subscriptionEpisodeStats struct {
+	LocalAnimeID         uint  `gorm:"column:local_anime_id"`
+	EpisodeCount         int64 `gorm:"column:episode_count"`
+	JellyfinEpisodeCount int64 `gorm:"column:jellyfin_episode_count"`
+}
 
-	animeIDs := make([]uint, 0, 2)
+type subscriptionLocalMatch struct {
+	AnimeID      uint
+	EpisodeCount int64
+	Playable     bool
+}
+
+func findSubscriptionLocalAnimes(sub *model.Subscription) ([]model.LocalAnime, error) {
 	var localAnimes []model.LocalAnime
 	query := db.DB.Model(&model.LocalAnime{})
 	switch {
@@ -344,36 +354,81 @@ func populateSubscriptionLibraryState(sub *model.Subscription) {
 		cleanTitle := parser.CleanTitle(sub.Title)
 		query = query.Where("title = ? OR title = ?", sub.Title, cleanTitle)
 	}
-	if err := query.Find(&localAnimes).Error; err != nil || len(localAnimes) == 0 {
+	err := query.Order("local_animes.id ASC").Find(&localAnimes).Error
+	return localAnimes, err
+}
+
+func loadSubscriptionEpisodeStats(animeIDs []uint) (map[uint]subscriptionEpisodeStats, error) {
+	var rows []subscriptionEpisodeStats
+	err := db.DB.Model(&model.LocalEpisode{}).
+		Select("local_anime_id, COUNT(*) AS episode_count, SUM(CASE WHEN jellyfin_item_id <> '' THEN 1 ELSE 0 END) AS jellyfin_episode_count").
+		Where("local_anime_id IN ?", animeIDs).
+		Group("local_anime_id").
+		Scan(&rows).Error
+	statsByAnime := make(map[uint]subscriptionEpisodeStats, len(rows))
+	for _, item := range rows {
+		statsByAnime[item.LocalAnimeID] = item
+	}
+	return statsByAnime, err
+}
+
+func selectSubscriptionLocalMatch(localAnimes []model.LocalAnime, statsByAnime map[uint]subscriptionEpisodeStats) subscriptionLocalMatch {
+	selected := subscriptionLocalMatch{}
+	selectedScore := -1
+	for _, anime := range localAnimes {
+		stats := statsByAnime[anime.ID]
+		hasSeries := strings.TrimSpace(anime.JellyfinSeriesID) != ""
+		playable := stats.EpisodeCount > 0 && (hasSeries || stats.JellyfinEpisodeCount > 0)
+		score := 0
+		if stats.EpisodeCount > 0 {
+			score = 1
+		}
+		if playable {
+			score = 2
+		}
+		if score > selectedScore || (score == selectedScore && stats.EpisodeCount > selected.EpisodeCount) {
+			selectedScore = score
+			selected = subscriptionLocalMatch{AnimeID: anime.ID, EpisodeCount: stats.EpisodeCount, Playable: playable}
+		}
+	}
+	return selected
+}
+
+func populateSubscriptionLibraryState(sub *model.Subscription) {
+	if sub == nil || db.DB == nil {
 		return
 	}
 
-	hasSeriesInJellyfin := false
-	for _, anime := range localAnimes {
-		animeIDs = append(animeIDs, anime.ID)
-		if strings.TrimSpace(anime.JellyfinSeriesID) != "" {
-			hasSeriesInJellyfin = true
-		}
-	}
-	if len(animeIDs) == 0 {
+	localAnimes, err := findSubscriptionLocalAnimes(sub)
+	if err != nil || len(localAnimes) == 0 {
 		return
 	}
+	animeIDs := make([]uint, 0, len(localAnimes))
+	for _, anime := range localAnimes {
+		animeIDs = append(animeIDs, anime.ID)
+	}
+	statsByAnime, err := loadSubscriptionEpisodeStats(animeIDs)
+	if err != nil {
+		return
+	}
+	localMatch := selectSubscriptionLocalMatch(localAnimes, statsByAnime)
+	if localMatch.AnimeID == 0 {
+		return
+	}
+	sub.LocalAnimeID = localMatch.AnimeID
+	sub.LibraryEpisodeCount = localMatch.EpisodeCount
+	sub.Playable = localMatch.Playable
 	jellyfinConfigured := strings.TrimSpace(configValue(model.ConfigKeyJellyfinUrl)) != "" &&
 		strings.TrimSpace(configValue(model.ConfigKeyJellyfinApiKey)) != ""
 
-	var totalEpisodes int64
-	db.DB.Model(&model.LocalEpisode{}).Where("local_anime_id IN ?", animeIDs).Count(&totalEpisodes)
+	totalEpisodes := localMatch.EpisodeCount
 	if totalEpisodes > 0 {
 		sub.LibraryStage = "已入库"
 		sub.LibraryTone = "info"
 		sub.LibraryHint = fmt.Sprintf("本地媒体库已识别 %d 集。", totalEpisodes)
 	}
 
-	var jellyfinEpisodeCount int64
-	db.DB.Model(&model.LocalEpisode{}).
-		Where("local_anime_id IN ? AND jellyfin_item_id <> ''", animeIDs).
-		Count(&jellyfinEpisodeCount)
-	if hasSeriesInJellyfin || jellyfinEpisodeCount > 0 {
+	if sub.Playable {
 		sub.LibraryStage = "可播放"
 		sub.LibraryTone = subscriptionToneSuccess
 		if totalEpisodes > 0 {
