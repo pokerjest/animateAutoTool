@@ -229,7 +229,7 @@ export const usePlaybackStore = defineStore('playback', {
         stallTimer = null
         if (!this.usingDirect || !this.stalled || this.seeking || this.video?.paused) return
         void this.switchSource('proxy').then(() => {
-          useUIStore().toast('Tailscale 直连持续卡顿，已从当前位置切换到服务端代理', 'info')
+          useUIStore().toast('Jellyfin 直连持续卡顿，已从当前位置切换到 AnimateTool 代理', 'info')
         })
       }, 8_000)
     },
@@ -246,7 +246,7 @@ export const usePlaybackStore = defineStore('playback', {
     onError() {
       clearStallTimer()
       if (this.usingDirect && this.playInfo?.stream_url) {
-        void this.switchSource('proxy').then(() => useUIStore().toast('Tailscale 直连不可用，已切换到服务端代理', 'info'))
+        void this.switchSource('proxy').then(() => useUIStore().toast('Jellyfin 直连不可用，已切换到 AnimateTool 代理', 'info'))
         return
       }
       this.error = '视频流加载失败，请检查 Jellyfin 连接和浏览器编码支持。'

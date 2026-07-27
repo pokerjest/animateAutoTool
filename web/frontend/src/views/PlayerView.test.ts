@@ -154,6 +154,30 @@ describe('Plex-style global playback', () => {
     mounted.queryClient.clear()
   })
 
+  it('keeps playback configuration in settings and only selects the source in the player', async () => {
+    const mounted = await mountPlayer(playerFetch(true))
+    await vi.waitFor(() => expect(mounted.wrapper.get('video').attributes('src')).toBe('/api/v1/jellyfin/stream/11'))
+
+    const sourceButtons = mounted.wrapper.findAll('[role="group"][aria-label="播放线路"] button')
+    expect(sourceButtons).toHaveLength(2)
+    expect(sourceButtons[0].text()).toContain('Jellyfin 直连')
+    expect(sourceButtons[0].text()).toContain('需要 Tailscale 或局域网')
+    expect(sourceButtons[1].text()).toContain('AnimateTool 代理')
+    expect(sourceButtons[1].text()).toContain('适合 Cloudflare 或公网')
+    expect(sourceButtons[1].attributes('aria-pressed')).toBe('true')
+
+    await sourceButtons[0].trigger('click')
+    expect(mounted.wrapper.get('video').attributes('src')).toContain('example-tailnet.ts.net')
+    expect(localStorage.getItem('player.sourceMode')).toBe('direct')
+
+    await sourceButtons[1].trigger('click')
+    expect(mounted.wrapper.get('video').attributes('src')).toBe('/api/v1/jellyfin/stream/11')
+    expect(localStorage.getItem('player.sourceMode')).toBe('proxy')
+
+    mounted.wrapper.unmount()
+    mounted.queryClient.clear()
+  })
+
   it('advances to the next episode only after the ended event', async () => {
     const mounted = await mountPlayer(playerFetch())
     await vi.waitFor(() => expect(mounted.playback.current?.episodeId).toBe(11))

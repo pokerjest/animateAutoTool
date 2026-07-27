@@ -89,9 +89,28 @@ function ended() {
         <p class="muted mt-1 text-sm">第 {{ playback.current.episode || '?' }} 集 · {{ playback.current.episodeTitle }}</p>
       </div>
       <div class="flex flex-wrap items-center gap-2">
-        <span class="badge" :class="playback.usingDirect ? 'badge-success' : ''"><Network v-if="playback.usingDirect" :size="13" /><Server v-else :size="13" />{{ playback.usingDirect ? 'Tailscale 直连' : '服务端代理' }}</span>
-        <button v-if="playback.playInfo?.direct_stream_url" class="btn btn-quiet" :disabled="playback.usingDirect" @click="playback.switchSource('direct')">使用直连</button>
-        <button class="btn btn-quiet" :disabled="!playback.usingDirect" @click="playback.switchSource('proxy')">使用代理</button>
+        <span class="badge" :class="playback.usingDirect ? 'badge-success' : ''"><Network v-if="playback.usingDirect" :size="13" /><Server v-else :size="13" />{{ playback.usingDirect ? 'Jellyfin 直连' : 'AnimateTool 代理' }}</span>
+        <div class="flex flex-wrap gap-2" role="group" aria-label="播放线路">
+          <button
+            v-if="playback.playInfo?.direct_stream_url"
+            class="btn btn-quiet h-auto min-h-11 flex-col items-start gap-0.5 px-3 py-2"
+            :class="playback.usingDirect ? 'bg-[var(--brand-soft)] text-[var(--brand-strong)]' : ''"
+            :aria-pressed="playback.usingDirect"
+            @click="playback.switchSource('direct')"
+          >
+            <span>Jellyfin 直连</span>
+            <small class="text-[11px] font-medium opacity-70">需要 Tailscale 或局域网</small>
+          </button>
+          <button
+            class="btn btn-quiet h-auto min-h-11 flex-col items-start gap-0.5 px-3 py-2"
+            :class="!playback.usingDirect ? 'bg-[var(--brand-soft)] text-[var(--brand-strong)]' : ''"
+            :aria-pressed="!playback.usingDirect"
+            @click="playback.switchSource('proxy')"
+          >
+            <span>AnimateTool 代理</span>
+            <small class="text-[11px] font-medium opacity-70">适合 Cloudflare 或公网</small>
+          </button>
+        </div>
         <button class="btn btn-secondary" @click="playback.restart"><RotateCcw :size="16" />从头播放</button>
       </div>
     </div>

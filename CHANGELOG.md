@@ -8,6 +8,15 @@
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-07-27
+
+### Changed
+- 将 Jellyfin 的后端连接地址和浏览器直连地址集中到“系统设置 → 媒体服务”，播放器页面只保留播放线路选择。
+- 播放器线路统一显示为“Jellyfin 直连”和“AnimateTool 代理”，并补充 Tailscale、局域网、Cloudflare 与公网场景说明。
+
+### Fixed
+- 直连持续卡顿或不可用时，提示改为明确说明已切换到 AnimateTool 代理，避免将配置方式误解为必须使用 Tailscale。
+
 ## [0.9.0] - 2026-07-27
 
 ### Added
@@ -272,7 +281,8 @@
 
 ---
 
-[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v0.9.1...HEAD
+[0.9.1]: https://github.com/pokerjest/animateAutoTool/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/pokerjest/animateAutoTool/compare/v0.8.9...v0.9.0
 [0.8.9]: https://github.com/pokerjest/animateAutoTool/compare/v0.8.8...v0.8.9
 [0.8.8]: https://github.com/pokerjest/animateAutoTool/compare/v0.8.7...v0.8.8

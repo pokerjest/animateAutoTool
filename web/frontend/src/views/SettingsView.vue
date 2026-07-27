@@ -12,14 +12,20 @@ import { useAsyncActions } from '../composables/useAsyncActions'
 import { useUIStore, type BackgroundMode, type ThemeMode } from '../stores/ui'
 
 interface SettingsData{values:Record<string,string>;configured:Record<string,boolean>;stats:Record<string,unknown>;request_ip?:string}
-interface Field { key:string; label:string; type?:'text'|'password'|'select'|'boolean'; options?:Array<{value:string;label:string}> }
+interface Field { key:string; label:string; type?:'text'|'password'|'select'|'boolean'; options?:Array<{value:string;label:string}>; placeholder?:string; description?:string }
 interface Group { id:string;label:string;icon:unknown;fields:Field[];providers?:string[] }
 interface MediaApp { id:string;title:string;eyebrow:string;description:string;icon:unknown;fields:Field[];provider?:string }
 interface AuditEntry { id:number;created_at:string;username:string;action:string;outcome:string;ip:string;target_type:string;target_id:string }
-const jellyfinFields:Field[]=[{key:'jellyfin_url',label:'服务端连接地址'},{key:'jellyfin_direct_url',label:'浏览器直连地址（Tailscale）'},{key:'jellyfin_username',label:'用户名'},{key:'jellyfin_password',label:'密码',type:'password'},{key:'jellyfin_api_key',label:'API Key',type:'password'}]
+const jellyfinFields:Field[]=[
+  {key:'jellyfin_url',label:'AnimateTool 连接地址',placeholder:'例如 http://127.0.0.1:8096',description:'由 AnimateTool 后端访问 Jellyfin，建议填写本机地址、局域网地址或服务器可达的 Tailscale 地址。'},
+  {key:'jellyfin_direct_url',label:'浏览器直连地址（可选）',placeholder:'例如 https://jellyfin.example-tailnet.ts.net',description:'由观看设备直接访问 Jellyfin，适合已连接 Tailscale 或处于同一局域网的设备；留空后播放器只显示 AnimateTool 代理。'},
+  {key:'jellyfin_username',label:'用户名'},
+  {key:'jellyfin_password',label:'密码',type:'password'},
+  {key:'jellyfin_api_key',label:'API Key',type:'password'},
+]
 const alistFields:Field[]=[{key:'alist_url',label:'服务地址'},{key:'alist_token',label:'Token',type:'password'}]
 const mediaApps:MediaApp[]=[
-  {id:'jellyfin',title:'Jellyfin',eyebrow:'媒体服务器',description:'负责媒体库管理、剧集信息同步与在线播放。',icon:Film,fields:jellyfinFields,provider:'jellyfin'},
+  {id:'jellyfin',title:'Jellyfin',eyebrow:'媒体服务器',description:'在这里完成服务器连接和播放线路配置；播放器页面只负责选择线路。',icon:Film,fields:jellyfinFields,provider:'jellyfin'},
   {id:'alist',title:'AList',eyebrow:'文件聚合',description:'连接独立的 AList 服务，用于访问聚合后的文件资源。',icon:Cloud,fields:alistFields},
 ]
 const groups:Group[]=[
@@ -40,7 +46,7 @@ const maintenance=useQuery({queryKey:['maintenance'],queryFn:()=>api<Record<stri
 watchEffect(()=>{if(query.data.value)Object.assign(form,query.data.value.values)})
 const group=computed(()=>groups.find(g=>g.id===active.value)||groups[0])
 const isSecret=(field:Field)=>field.type==='password'
-const fieldPlaceholder=(field:Field)=>field.key==='proxy_url'?'例如 http://127.0.0.1:7890 或 socks5://127.0.0.1:7890':field.key==='jellyfin_direct_url'?'例如 https://media.example-tailnet.ts.net':isSecret(field)&&query.data.value?.configured[field.key]?'已配置；留空表示保持不变':''
+const fieldPlaceholder=(field:Field)=>field.placeholder||(field.key==='proxy_url'?'例如 http://127.0.0.1:7890 或 socks5://127.0.0.1:7890':isSecret(field)&&query.data.value?.configured[field.key]?'已配置；留空表示保持不变':'')
 async function save(){try{await actions.run('save',async()=>{await api('/settings',{method:'PUT',body:JSON.stringify({values:form}),headers:{'Content-Type':'application/json'}});ui.toast('设置已保存并同步到本地 config.yaml');qc.invalidateQueries({queryKey:['settings']})})}catch(e){ui.toast(e instanceof Error?e.message:'保存失败','error')}}
 async function testProvider(provider:string){connection[provider]=null;try{await actions.run(`provider-${provider}`,async()=>{connection[provider]=await api(`/settings/connections/${provider}`)})}catch(e){connection[provider]={connected:false,detail:e instanceof Error?e.message:'连接失败'}}}
 async function testProxy(){connection.proxy=null;try{await actions.run('test-proxy',async()=>{connection.proxy=await api('/settings/proxy/test',{method:'POST',body:JSON.stringify({proxy_url:form.proxy_url||''}),headers:{'Content-Type':'application/json'}})})}catch(e){connection.proxy={connected:false,detail:e instanceof Error?e.message:'代理连接失败'}}}
@@ -61,8 +67,10 @@ const updater=computed(()=>(maintenance.data.value?.updater||{}) as Record<strin
           <span class="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-[var(--surface-solid)] text-[var(--sky)] shadow-sm"><component :is="app.icon" :size="20"/></span>
           <div class="min-w-0"><p class="eyebrow">{{ app.eyebrow }}</p><h4 class="mt-0.5 text-lg font-black">{{ app.title }}</h4><p class="muted mt-1 text-sm leading-5">{{ app.description }}</p></div>
         </header>
-        <div class="mt-5 grid gap-5 md:grid-cols-2"><label v-for="field in app.fields" :key="field.key" class="label">{{ field.label }}<input v-model="form[field.key]" class="field" :type="isSecret(field)?'password':'text'" :autocomplete="isSecret(field)?'new-password':'off'" :data-1p-ignore="isSecret(field)?'true':undefined" :placeholder="fieldPlaceholder(field)"/><span v-if="isSecret(field)&&query.data.value?.configured[field.key]" class="flex items-center gap-1 text-xs font-normal text-[var(--success)]"><KeyRound :size="12"/>凭据已安全保存</span></label></div>
-        <div v-if="app.id==='jellyfin'" class="mt-5 flex items-start gap-3 rounded-xl border border-[var(--line)] bg-[var(--surface-solid)] p-4 text-sm leading-6 muted"><Network class="mt-1 shrink-0 text-[var(--sky)]" :size="18"/><span>服务端地址供 AnimateTool 后端访问；浏览器直连地址供手机或平板通过 Tailscale 直接拉取视频。留空时全部走 AnimateTool 代理。使用 HTTPS 页面时，直连地址也应使用 HTTPS。</span></div>
+        <div class="mt-5 grid gap-5 md:grid-cols-2"><label v-for="field in app.fields" :key="field.key" class="label">{{ field.label }}<input v-model="form[field.key]" class="field" :type="isSecret(field)?'password':'text'" :autocomplete="isSecret(field)?'new-password':'off'" :data-1p-ignore="isSecret(field)?'true':undefined" :placeholder="fieldPlaceholder(field)"/><span v-if="field.description" class="text-xs font-normal leading-5 muted">{{ field.description }}</span><span v-if="isSecret(field)&&query.data.value?.configured[field.key]" class="flex items-center gap-1 text-xs font-normal text-[var(--success)]"><KeyRound :size="12"/>凭据已安全保存</span></label></div>
+        <div v-if="app.id==='jellyfin'" class="mt-5 rounded-xl border border-[var(--line)] bg-[var(--surface-solid)] p-4 text-sm leading-6" data-testid="jellyfin-playback-help">
+          <div class="flex items-start gap-3"><Network class="mt-1 shrink-0 text-[var(--sky)]" :size="18"/><div><strong>播放线路说明</strong><p class="muted mt-1">Jellyfin 直连由观看设备直接拉取视频，需要连接 Tailscale 或处于可访问 Jellyfin 的局域网；AnimateTool 代理由服务器转发视频，适合 Cloudflare 和其他公网入口。使用 HTTPS 页面时，浏览器直连地址也应使用 HTTPS。</p></div></div>
+        </div>
         <AsyncButton v-if="app.provider" class="mt-4 min-h-16 w-full rounded-xl border border-[var(--line)] bg-[var(--surface-solid)] p-3 text-left" :loading="actions.isBusy(`provider-${app.provider}`)" loading-label="连接测试中…" @click="testProvider(app.provider)"><div class="flex items-center justify-between"><strong>测试 {{ app.title }} 连接</strong><RefreshCw :size="15" class="text-[var(--sky)]"/></div><p class="mt-1 text-xs" :class="connection[app.provider]?.connected?'text-[var(--success)]':'muted'">{{ connection[app.provider]?(connection[app.provider]?.connected?`已连接 ${connection[app.provider]?.account||''}`:connection[app.provider]?.detail):'点击测试当前已保存配置' }}</p></AsyncButton>
       </section>
     </div>
