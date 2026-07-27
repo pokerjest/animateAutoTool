@@ -13,6 +13,11 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/safeio"
 )
 
+const (
+	playbackSourceProxy  = "proxy"
+	playbackSourceDirect = "direct"
+)
+
 func GetJellyfinStatusHandler(c *gin.Context) {
 	style := c.Query("style")
 	serveConnectionStatusFragment(c, jellyfinConnectionStatusView(""), RenderJellyfinStatus(style))
@@ -43,9 +48,9 @@ func CheckJellyfinConnection() (bool, string) {
 
 func CheckJellyfinConnectionForSource(source string) (bool, string) {
 	switch strings.ToLower(strings.TrimSpace(source)) {
-	case "", "proxy":
+	case "", playbackSourceProxy:
 		return CheckJellyfinConnection()
-	case "direct":
+	case playbackSourceDirect:
 		directURL := strings.TrimSpace(configValue(model.ConfigKeyJellyfinDirectUrl))
 		if directURL == "" {
 			return false, "Jellyfin 直连地址未配置"

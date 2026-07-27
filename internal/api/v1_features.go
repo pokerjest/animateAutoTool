@@ -564,19 +564,19 @@ func V1ConnectionStatusHandler(c *gin.Context) {
 		}
 	case "jellyfin":
 		source := strings.ToLower(strings.TrimSpace(c.Query("source")))
-		if source != "" && source != "proxy" && source != "direct" {
+		if source != "" && source != playbackSourceProxy && source != playbackSourceDirect {
 			v1Error(c, http.StatusBadRequest, "invalid_playback_source", "播放线路只能是 proxy 或 direct")
 			return
 		}
 		connected, detail = CheckJellyfinConnectionForSource(source)
 		v1Data(c, http.StatusOK, gin.H{
-			"provider":    provider,
-			"source":      sourceOrProxy(source),
+			"provider":     provider,
+			"source":       sourceOrProxy(source),
 			"source_label": playbackSourceLabel(source),
-			"connected":   connected,
-			"detail":      detail,
-			"account":     account,
-			"checked_at":  time.Now(),
+			"connected":    connected,
+			"detail":       detail,
+			"account":      account,
+			"checked_at":   time.Now(),
 		})
 		return
 	case "bangumi":
@@ -602,13 +602,13 @@ func V1ConnectionStatusHandler(c *gin.Context) {
 
 func sourceOrProxy(source string) string {
 	if strings.TrimSpace(source) == "" {
-		return "proxy"
+		return playbackSourceProxy
 	}
 	return strings.ToLower(strings.TrimSpace(source))
 }
 
 func playbackSourceLabel(source string) string {
-	if sourceOrProxy(source) == "direct" {
+	if sourceOrProxy(source) == playbackSourceDirect {
 		return "Jellyfin 直连"
 	}
 	return "AnimateTool 代理"
