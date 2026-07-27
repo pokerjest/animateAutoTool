@@ -1,0 +1,7 @@
+mkdocs==1.6.1
+mkdocs-material==9.6.15
+mkdocs-swagger-ui-tag==0.7.1
+pymdown-extensions==10.16.1
+Pygments==2.19.2
+jieba==0.42.1
+openapi-spec-validator==0.7.2

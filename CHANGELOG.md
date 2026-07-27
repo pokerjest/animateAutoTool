@@ -8,6 +8,12 @@
 
 ## [Unreleased]
 
+### Changed
+- 将项目说明收敛为精简 README，并新增基于 MkDocs Material 的多页中文文档站。
+- 补充 TMDB、AniList、Bangumi、Jellyfin、R2、AI 和 Dynu 的官方凭据获取与验证入口。
+- 新增 DDNS、双重 NAT、CGNAT、反向代理、Cloudflare Tunnel、Tailscale、FRP 和 IPv6 的公网访问指南。
+- 将 Windows Cloudflare Tunnel 的 DNS、Fake-IP、7844 和 HTTP/2 排障过程整理为脱敏 runbook。
+
 ## [0.9.1] - 2026-07-27
 
 ### Changed

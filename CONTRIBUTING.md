@@ -19,6 +19,7 @@
 ### 前置要求
 
 - Go 1.25+
+- Python 3.13+、MkDocs Material（修改文档站时）
 - (Linux) `libgtk-3-dev libappindicator3-dev` 用于系统托盘
 - qBittorrent 4.0+(集成测试需要,本地开发可跳过)
 - `golangci-lint` v2.11+(本地跑 lint 用)
@@ -82,6 +83,21 @@ go test ./... -race                        # 并发竞态
 go test ./... -coverprofile=cover.out      # 覆盖率
 ```
 
+### 文档站检查
+
+文档站使用 MkDocs Material，源码在 `docs/`，构建输出在 `build/docs-site/`：
+
+```bash
+python3 -m venv .venv-docs
+source .venv-docs/bin/activate
+python -m pip install -r requirements-docs.txt
+mkdocs serve
+mkdocs build --strict
+python -m openapi_spec_validator docs/openapi.yaml
+```
+
+修改外部服务入口时，只使用官方文档或控制台链接，并同步更新根目录的 `docs-link-definitions.md`。示例中的域名、IP、Token、Cookie 和密码必须使用占位符。
+
 ## 提交 PR
 
 1. **先开 Issue 讨论大改动**——避免做完才发现方向不对。小修不必。
@@ -92,6 +108,7 @@ go test ./... -coverprofile=cover.out      # 覆盖率
    - [ ] `gofmt` / `goimports` 已格式化
    - [ ] 新增/修改功能有测试
    - [ ] 文档已同步(README / `docs/` / 代码注释)
+   - [ ] 若修改文档站,`mkdocs build --strict` 和 OpenAPI 校验已通过
    - [ ] 涉及数据库的改动有 migration
 4. **PR 描述**要写清楚:做了什么、为什么、影响范围、如何手测。
 5. CI 全绿后等待 review。
@@ -124,7 +141,9 @@ internal/
   httpx/         统一 HTTP 客户端
   db/            数据库连接与 migration
 web/             HTML 模板与静态资源
-docs/            架构、发版、QA 清单
+docs/            MkDocs 文档源文件、API、部署、排障和 QA 清单
+mkdocs.yml       文档站导航与主题配置
+requirements-docs.txt  文档构建依赖
 scripts/         运维脚本
 ```
 

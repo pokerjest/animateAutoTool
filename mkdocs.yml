@@ -1,0 +1,120 @@
+site_name: Animate Auto Tool
+site_description: 自托管动漫订阅、下载、整理与播放工作台
+site_url: https://pokerjest.github.io/animateAutoTool/
+repo_url: https://github.com/pokerjest/animateAutoTool
+repo_name: pokerjest/animateAutoTool
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  language: zh
+  favicon: assets/favicon.svg
+  logo: assets/logo.svg
+  font: false
+  features:
+    - navigation.instant
+    - navigation.instant.progress
+    - navigation.sections
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.action.edit
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/brightness-7
+        name: 切换深色模式
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: 切换亮色模式
+    - scheme: default
+      toggle:
+        icon: material/brightness-auto
+        name: 使用系统主题
+
+plugins:
+  - search:
+      lang:
+        - zh
+        - en
+  - swagger-ui-tag
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets:
+      auto_append:
+        - docs-link-definitions.md
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - tables
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/pokerjest/animateAutoTool
+
+extra_css:
+  - stylesheets/extra.css
+
+exclude_docs: |
+  _generated/
+
+site_dir: build/docs-site
+strict: true
+use_directory_urls: true
+
+nav:
+  - 首页: index.md
+  - 开始使用:
+      - 快速开始: getting-started.md
+      - 安装与部署: installation.md
+      - 首次初始化与安全边界: first-run-security.md
+  - 配置指南:
+      - 配置总览: configuration/index.md
+      - qBittorrent 与自动整理: configuration/downloader.md
+      - Jellyfin、AList 与播放线路: configuration/media-services.md
+      - 元数据 API: configuration/metadata-apis.md
+      - AI 与 OpenAI-compatible 服务: configuration/ai.md
+      - Cloudflare R2 备份: configuration/r2-backup.md
+      - 网络代理: configuration/proxy.md
+  - 日常使用:
+      - 订阅与筛选: usage/subscriptions.md
+      - 本地媒体库与整理: usage/library.md
+      - 播放器与继续观看: usage/player.md
+      - 备份、恢复与诊断: usage/backup-diagnostics.md
+  - 公网访问:
+      - 方案决策树: remote-access/index.md
+      - DDNS 与动态公网地址: remote-access/ddns.md
+      - 反向代理与 HTTPS: remote-access/reverse-proxy.md
+      - Cloudflare Tunnel: remote-access/cloudflare-tunnel.md
+      - Windows Cloudflare 排障实录: remote-access/cloudflare-troubleshooting.md
+      - Tailscale: remote-access/tailscale.md
+      - FRP: remote-access/frp.md
+      - IPv6: remote-access/ipv6.md
+  - 故障排查:
+      - 故障排查总览: troubleshooting/index.md
+      - API 与服务连接: troubleshooting/integrations.md
+      - 日志、健康检查与诊断包: troubleshooting/diagnostics.md
+  - 开发者:
+      - REST API 参考: api.md
+      - OpenAPI 文件: openapi.yaml
+      - 系统架构: architecture.md
+      - 移动端 QA 清单: mobile-qa-checklist.md
+      - 发版清单: release-checklist.md
+      - 贡献指南: https://github.com/pokerjest/animateAutoTool/blob/main/CONTRIBUTING.md

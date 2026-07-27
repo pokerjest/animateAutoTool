@@ -1,0 +1,81 @@
+:root {
+  --md-text-font: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --md-code-font: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  --md-primary-fg-color: #b94e78;
+  --md-primary-fg-color--light: #e776a4;
+  --md-primary-fg-color--dark: #8f3c60;
+  --md-accent-fg-color: #7ab5d5;
+  --md-code-bg-color: #fff8fb;
+  --md-typeset-a-color: #a94470;
+}
+
+[data-md-color-scheme="slate"] {
+  --md-default-bg-color: #18151a;
+  --md-default-fg-color: #f8eef5;
+  --md-default-fg-color--light: #b6aab5;
+  --md-code-bg-color: #241f26;
+  --md-typeset-a-color: #f09ac0;
+}
+
+.md-header {
+  background:
+    radial-gradient(circle at 12% 0%, rgba(231, 118, 164, .24), transparent 22rem),
+    linear-gradient(120deg, #29232d, #4b3850);
+}
+
+.md-tabs {
+  background: rgba(41, 35, 45, .96);
+}
+
+.md-button {
+  border-radius: .65rem;
+  font-weight: 700;
+}
+
+.md-typeset .md-button--primary {
+  background: #29232d;
+  border-color: #29232d;
+  color: #fff;
+}
+
+[data-md-color-scheme="slate"] .md-typeset .md-button--primary {
+  background: #0f0c12;
+  border-color: #0f0c12;
+  color: #fff;
+}
+
+.md-typeset h1,
+.md-typeset h2,
+.md-typeset h3 {
+  letter-spacing: -.02em;
+}
+
+.md-typeset .grid.cards > ul > li,
+.md-typeset .grid.cards > ol > li {
+  border-radius: .9rem;
+}
+
+.hero-grid {
+  align-items: center;
+}
+
+.hero-grid img {
+  max-width: 260px;
+  margin: auto;
+  filter: drop-shadow(0 18px 30px rgba(185, 78, 120, .22));
+}
+
+.integration-table td:first-child,
+.integration-table th:first-child {
+  white-space: nowrap;
+}
+
+.swagger-ui {
+  margin-top: 1.2rem;
+}
+
+@media (max-width: 600px) {
+  .md-typeset .hero-grid img {
+    max-width: 180px;
+  }
+}

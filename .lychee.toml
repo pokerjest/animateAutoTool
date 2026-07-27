@@ -1,0 +1,15 @@
+max_redirects = 10
+timeout = 30
+retry_wait_time = 2
+max_retries = 2
+accept = [200, 206, 301, 302, 303, 307, 308, 401, 403, 429]
+
+exclude = [
+  "^http://127\\.0\\.0\\.1",
+  "^http://localhost",
+  "^https://anime\\.example\\.com",
+  "^https://api\\.example\\.com",
+  "^https://files\\.example\\.com",
+  "^https://mikan\\.example\\.invalid",
+  "^https://vps\\.example\\.com",
+]

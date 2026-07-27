@@ -28,7 +28,10 @@ internal/
 pkg/rss/              # 对外可复用的 RSS 包
 web/                  # Vue 前端源码 + Vite 产物 + embed.go
 scripts/              # 部署/打包脚本
-docs/                 # 本文件、release-checklist、mobile-qa-checklist
+docs/                 # MkDocs 文档源文件（配置、API、公网访问、QA 清单）
+mkdocs.yml            # 文档站导航、主题和严格构建配置
+requirements-docs.txt # 固定的文档构建依赖
+build/docs-site/      # MkDocs 生成目录（不提交）
 ```
 
 ## 数据访问：Store + Access Helper
@@ -162,6 +165,8 @@ var migrations = []migration{
 4. `AuthMiddleware` — 会话校验，未登录 401 / 重定向 `/login`
 5. `DirectLocalOnlyMiddleware` — 仅用于 `/recover`，强制 loopback + 拒绝 forwarded headers
 
+完整的 `/api/v1` 路由契约维护在 [`openapi.yaml`](openapi.yaml)，用户可读的认证、示例和安全说明见 [`api.md`](api.md)。
+
 ## 配置与安全
 
 - 业务密码存 bcrypt，bootstrap admin 初始密码写 `data/bootstrap/admin.json`，但不会下发给浏览器；首次启动可通过仅限 localhost 的 `/api/v1/session/bootstrap` 建立初始化会话，首次改密后凭据与入口同时失效
@@ -198,6 +203,18 @@ var migrations = []migration{
 - 用 `db.InitDB(":memory:")` + `t.Cleanup(...)` 跑独立 SQLite，不依赖外部服务
 - 外部 HTTP 适配器（bangumi / tmdb / parser 等）用 `httptest.Server` mock
 - 不写依赖真实 qBittorrent / Jellyfin / TMDB 的集成测试
+
+### 文档站
+
+文档正文以 `docs/` 下的 Markdown 为唯一来源。修改导航、外部链接或 API 契约后，至少运行：
+
+```bash
+python -m pip install -r requirements-docs.txt
+mkdocs build --strict
+python -m openapi_spec_validator docs/openapi.yaml
+```
+
+Pages 工作流会在发布前重复严格构建和 OpenAPI 校验。
 
 ## 离线 CLI
 

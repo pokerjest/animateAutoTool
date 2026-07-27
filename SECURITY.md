@@ -6,17 +6,17 @@ Animate Auto Tool 是个人维护的开源项目,**仅最新一个发布版本**
 
 | 版本 | 是否接收安全修复 |
 | --- | --- |
-| 最新 minor(当前为 `0.5.x`) | ✅ |
+| 最新稳定版本（以 [Releases 页](https://github.com/pokerjest/animateAutoTool/releases) 为准） | ✅ |
 | 历史版本 | ❌ — 请先升级 |
 
 建议始终通过应用内自更新或 [Releases 页](https://github.com/pokerjest/animateAutoTool/releases) 升级到最新版本,所有发布资产都附带 `SHA256SUMS.txt` 可校验完整性。
 
 ## 安全边界(部署前必读)
 
-请先阅读 [README 的"公网部署前先理解安全边界"](README.md#0-公网部署前先理解安全边界)。要点:
+请先阅读[在线文档的安全边界](https://pokerjest.github.io/animateAutoTool/first-run-security/)。要点:
 
 - 首次初始化只允许 `localhost` 直连。
-- 公网部署必须经 HTTPS 反向代理,并正确配置 `server.public_url` 与 `server.trusted_proxies`。
+- 公网部署必须经 HTTPS 反向代理、Cloudflare Access 或 VPN,并正确配置 `server.public_url` 与 `server.trusted_proxies`。
 - 不要把 `0.0.0.0/0` 或整段内网写进 `trusted_proxies`。
 - 忘记密码恢复 `/recover` 仅接受本机直连,不通过反向代理。
 - 应用登录密码以 bcrypt 哈希保存；外部服务 Token / 密码保存在本机数据库，并镜像到 `config.yaml`（Unix 权限为 `0600`，Windows 依赖所在目录 ACL）；Web 界面不会回显明文。

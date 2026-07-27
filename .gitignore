@@ -78,3 +78,6 @@ animateTool
 .appdata_test*/
 appdata_test*/
 internal/api/data/
+
+# MkDocs documentation build output
+/build/docs-site/
