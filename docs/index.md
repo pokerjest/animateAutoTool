@@ -1,5 +1,15 @@
 # Animate Auto Tool
 
+<p class="page-lead">
+一个面向自托管用户的动漫订阅、下载、整理、元数据聚合与播放工作台。先用最短路径完成部署，再按需接入媒体服务、外部 API、备份和公网访问。
+</p>
+
+<div class="quick-facts">
+  <span>单机 / NAS / 小型服务器</span>
+  <span>Windows · macOS · Linux · Docker</span>
+  <span>本机优先，公网访问可选</span>
+</div>
+
 <div class="grid cards" markdown>
 
 -   :material-download-circle:{ .lg .middle } __从零开始__
