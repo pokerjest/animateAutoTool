@@ -8,6 +8,19 @@
 
 ## [Unreleased]
 
+## [0.8.9] - 2026-07-27
+
+### Added
+- 新增健康诊断异常日志与消费式导出；仅记录需要开发者介入的问题，下载后清理已导出的诊断记录。
+- 本地番剧新增单项整理、勾选批量整理和全选当前搜索结果，执行前可预览目标路径、冲突、附属文件与做种状态。
+
+### Changed
+- Jellyfin 已扫描条目会自动建立本地关联，下载完成后自动刷新媒体库并同步最新条目。
+- 现有番剧整理复用 Jellyfin/Plex 命名模板，字幕、NFO 与图片跟随移动，并在整理完成后重扫本地索引和刷新 Jellyfin。
+
+### Fixed
+- 整理现有文件时增加目标冲突、源文件变化、非法路径和 qBittorrent 做种保护，避免覆盖文件或中断不可靠映射的多文件种子。
+
 ## [0.8.8] - 2026-07-27
 
 ### Added
@@ -244,7 +257,8 @@
 
 ---
 
-[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v0.8.8...HEAD
+[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v0.8.9...HEAD
+[0.8.9]: https://github.com/pokerjest/animateAutoTool/compare/v0.8.8...v0.8.9
 [0.8.8]: https://github.com/pokerjest/animateAutoTool/compare/v0.8.7...v0.8.8
 [0.8.7]: https://github.com/pokerjest/animateAutoTool/compare/v0.8.6...v0.8.7
 [0.8.6]: https://github.com/pokerjest/animateAutoTool/compare/v0.8.5...v0.8.6

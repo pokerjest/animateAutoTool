@@ -195,7 +195,7 @@
             <div class="text-[11px] text-gray-400 italic">还没有执行记录</div>
             {{ end }}
 
-            {{ if .HasRepairActions }}
+			{{ if or .HasRepairActions .CanRetryUpgrade .CanRefreshLibrary }}
             <div class="space-y-2 rounded-xl border border-sky-100 bg-sky-50/60 px-2.5 py-2.5">
                 <div class="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wide text-sky-700">
                     <span class="inline-flex h-4 w-4 items-center justify-center rounded-md bg-white text-[9px] shadow-sm">🛠</span>
@@ -295,14 +295,14 @@
                 {{ if .CanRefreshLibrary }}
                 <div class="flex items-center justify-between gap-3 rounded-lg border border-teal-100 bg-teal-50/80 px-2.5 py-2">
                     <div class="min-w-0 text-[10px] text-teal-700 leading-relaxed">
-                        这条订阅已经入库，但 Jellyfin 还没建立条目，可以主动触发一次媒体库刷新。
+						本地文件已经识别，正在等待 Jellyfin 扫描；点击按钮会立即请求 Jellyfin 扫描媒体库。
                     </div>
                     <button
                         hx-post="/api/subscriptions/{{ .ID }}/refresh-library"
                         hx-target="#sub-card-{{.ID}}"
                         hx-swap="outerHTML swap:120ms settle:220ms"
                         class="shrink-0 rounded-lg border border-teal-200 bg-white px-2.5 py-1 text-[10px] font-bold text-teal-700 hover:bg-teal-50 transition">
-                        刷新媒体库
+						同步 Jellyfin
                     </button>
                 </div>
                 {{ end }}

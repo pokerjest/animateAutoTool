@@ -1,6 +1,7 @@
 package taskstate
 
 import (
+	"log"
 	"sort"
 	"strings"
 	"sync"
@@ -79,6 +80,7 @@ func (r *Registry) Fail(taskID string, err error) Task {
 	previous.TaskID = taskID
 	previous.Status = StatusError
 	previous.Message = message
+	log.Printf("Task failed: id=%s kind=%s title=%q error=%s", taskID, previous.Kind, previous.Title, message)
 	return r.update(previous)
 }
 

@@ -45,6 +45,10 @@ function mountView() {
       stubs: {
         RouterLink: { template: '<a><slot /></a>' },
         AutoLoadSentinel: { template: '<button data-testid="load-more" @click="$emit(\'load\')">load</button>' },
+        LocalOrganizeDialog: {
+          props: ['open', 'selection'],
+          template: '<div v-if="open" data-testid="organize-selection">{{ JSON.stringify(selection) }}</div>',
+        },
       },
     },
   })
@@ -92,5 +96,24 @@ describe('LocalAnimeView pagination', () => {
     await vi.waitFor(() => expect(wrapper.text()).toContain('1 部本地番剧'))
     expect(wrapper.text()).toContain('跨页命中')
     expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('page=1&page_size=48&q=%E8%B7%A8%E9%A1%B5%E5%91%BD%E4%B8%AD'), expect.anything())
+  })
+
+  it('supports explicit and server-wide search-result batch selection', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => response([anime(1, '番剧 A'), anime(2, '番剧 B')], 1, 48, 198)))
+    const wrapper = mountView()
+    await vi.waitFor(() => expect(wrapper.text()).toContain('198 部本地番剧'))
+
+    await wrapper.findAll('button').find(button => button.text().includes('批量整理'))!.trigger('click')
+    const selectButtons = wrapper.findAll('button').filter(button => button.text().includes('选择此番剧'))
+    await selectButtons[0].trigger('click')
+    await wrapper.findAll('button').find(button => button.text().includes('预览并整理'))!.trigger('click')
+    expect(wrapper.get('[data-testid="organize-selection"]').text()).toContain('"anime_ids":[1]')
+
+    await wrapper.findAll('button').find(button => button.text().includes('全选当前搜索结果'))!.trigger('click')
+    await wrapper.findAll('button').filter(button => button.text().includes('取消选择'))[0].trigger('click')
+    await wrapper.findAll('button').find(button => button.text().includes('预览并整理'))!.trigger('click')
+    const selection = wrapper.get('[data-testid="organize-selection"]').text()
+    expect(selection).toContain('"mode":"query"')
+    expect(selection).toContain('"exclude_ids":[1]')
   })
 })

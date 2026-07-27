@@ -3,7 +3,7 @@
 <div align="center">
 
 ![Go Version](https://img.shields.io/badge/Go-1.25-00ADD8?style=for-the-badge&logo=go)
-![Version](https://img.shields.io/badge/Version-v0.8.8-blue?style=for-the-badge)
+![Version](https://img.shields.io/badge/Version-v0.8.9-blue?style=for-the-badge)
 ![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)
 ![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/pokerjest/animateAutoTool/go.yml?style=for-the-badge)
 
@@ -87,7 +87,7 @@ Animate Auto Tool 是一个基于 Go 1.25 开发的自动化动漫下载工具�
    - 如需前台调试，请双击 `run.bat`。
 
 > [!NOTE]
-> GitHub Actions 会同时产出带版本号的目录包、单文件 Windows `exe`，以及 macOS `dmg`，例如 `animate-server_v0.8.8_linux_amd64.tar.gz`、`animate-server_v0.8.8_windows_amd64.exe`、`animate-server_v0.8.8_darwin_arm64.dmg`。同时会产出 `SHA256SUMS.txt` 供应用内自动更新校验完整性使用。
+> GitHub Actions 会同时产出带版本号的目录包、单文件 Windows `exe`，以及 macOS `dmg`，例如 `animate-server_v0.8.9_linux_amd64.tar.gz`、`animate-server_v0.8.9_windows_amd64.exe`、`animate-server_v0.8.9_darwin_arm64.dmg`。同时会产出 `SHA256SUMS.txt` 供应用内自动更新校验完整性使用。
 
 #### macOS / Linux 用户
 1. 解压下载的 `.tar.gz` 压缩包。

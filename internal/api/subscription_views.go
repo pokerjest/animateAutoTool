@@ -1,6 +1,8 @@
 package api
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -343,19 +345,71 @@ type subscriptionLocalMatch struct {
 
 func findSubscriptionLocalAnimes(sub *model.Subscription) ([]model.LocalAnime, error) {
 	var localAnimes []model.LocalAnime
-	query := db.DB.Model(&model.LocalAnime{})
-	switch {
-	case sub.MetadataID != nil && *sub.MetadataID != 0:
-		query = query.Where("metadata_id = ?", *sub.MetadataID)
-	case sub.Metadata != nil && sub.Metadata.BangumiID != 0:
-		query = query.Joins("JOIN anime_metadata ON anime_metadata.id = local_animes.metadata_id").
-			Where("anime_metadata.bangumi_id = ?", sub.Metadata.BangumiID)
-	default:
-		cleanTitle := parser.CleanTitle(sub.Title)
-		query = query.Where("title = ? OR title = ?", sub.Title, cleanTitle)
+	if sub.MetadataID != nil && *sub.MetadataID != 0 {
+		if err := db.DB.Where("metadata_id = ?", *sub.MetadataID).Order("local_animes.id ASC").Find(&localAnimes).Error; err != nil || len(localAnimes) > 0 {
+			return localAnimes, err
+		}
 	}
-	err := query.Order("local_animes.id ASC").Find(&localAnimes).Error
-	return localAnimes, err
+	if sub.Metadata != nil && sub.Metadata.BangumiID != 0 {
+		if err := db.DB.Model(&model.LocalAnime{}).
+			Joins("JOIN anime_metadata ON anime_metadata.id = local_animes.metadata_id").
+			Where("anime_metadata.bangumi_id = ?", sub.Metadata.BangumiID).
+			Order("local_animes.id ASC").Find(&localAnimes).Error; err != nil || len(localAnimes) > 0 {
+			return localAnimes, err
+		}
+	}
+
+	titles := subscriptionLocalTitleCandidates(sub)
+	if len(titles) == 0 {
+		return nil, nil
+	}
+	if err := db.DB.Where("title IN ?", titles).Order("local_animes.id ASC").Find(&localAnimes).Error; err != nil {
+		return nil, err
+	}
+	// Files organized from a subscription use the subscription metadata title.
+	// Link a single unambiguous fallback match so later Jellyfin reconciliation
+	// can use provider IDs without requiring a manual local-library visit.
+	if len(localAnimes) == 1 && localAnimes[0].MetadataID == nil && sub.MetadataID != nil && *sub.MetadataID != 0 {
+		if err := db.DB.Model(&model.LocalAnime{}).Where("id = ? AND metadata_id IS NULL", localAnimes[0].ID).
+			Update("metadata_id", *sub.MetadataID).Error; err == nil {
+			metadataID := *sub.MetadataID
+			localAnimes[0].MetadataID = &metadataID
+		}
+	}
+	return localAnimes, nil
+}
+
+func subscriptionLocalTitleCandidates(sub *model.Subscription) []string {
+	if sub == nil {
+		return nil
+	}
+	values := []string{sub.Title, parser.CleanTitle(sub.Title)}
+	if sub.Metadata != nil {
+		values = append(values,
+			sub.Metadata.Title,
+			sub.Metadata.TitleCN,
+			sub.Metadata.TitleEN,
+			sub.Metadata.TitleJP,
+			sub.Metadata.BangumiTitle,
+			sub.Metadata.TMDBTitle,
+			sub.Metadata.AniListTitle,
+		)
+	}
+	seen := make(map[string]struct{}, len(values)*2)
+	result := make([]string, 0, len(values)*2)
+	for _, value := range values {
+		for _, candidate := range []string{strings.TrimSpace(value), parser.CleanTitle(value)} {
+			if candidate == "" {
+				continue
+			}
+			if _, ok := seen[candidate]; ok {
+				continue
+			}
+			seen[candidate] = struct{}{}
+			result = append(result, candidate)
+		}
+	}
+	return result
 }
 
 func loadSubscriptionEpisodeStats(animeIDs []uint) (map[uint]subscriptionEpisodeStats, error) {
@@ -437,9 +491,9 @@ func populateSubscriptionLibraryState(sub *model.Subscription) {
 			sub.LibraryHint = "Jellyfin 已建立条目，可直接播放。"
 		}
 	} else if totalEpisodes > 0 && jellyfinConfigured {
-		sub.LibraryStage = "待同步到媒体库"
+		sub.LibraryStage = "等待 Jellyfin 扫描"
 		sub.LibraryTone = subscriptionToneWarning
-		sub.LibraryHint = fmt.Sprintf("本地已经识别 %d 集，但 Jellyfin 还没有建立条目；建议触发一次库刷新。", totalEpisodes)
+		sub.LibraryHint = fmt.Sprintf("本地已识别 %d 集，正在等待 Jellyfin 扫描媒体文件；点击“同步 Jellyfin”可立即请求扫描。", totalEpisodes)
 		sub.CanRefreshLibrary = true
 	}
 
@@ -456,6 +510,29 @@ func populateSubscriptionLibraryState(sub *model.Subscription) {
 			} else {
 				sub.LibraryHint = strings.TrimSpace(sub.LibraryHint + " " + formatUpgradeHint(lowResEpisodes))
 			}
+		}
+	}
+}
+
+func waitForSubscriptionJellyfinMatch(ctx context.Context, subscriptionID uint) error {
+	ticker := time.NewTicker(3 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		if _, err := service.SyncJellyfinLibraryMappings(ctx); err != nil {
+			return err
+		}
+		card, err := loadSubscriptionCard(subscriptionID)
+		if err != nil {
+			return err
+		}
+		if card.Playable {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return errors.New("等待 Jellyfin 扫描超时：已接收扫描请求，但 50 秒内仍未识别该番剧；请确认媒体库包含下载目录，并检查 tvshow.nfo")
+		case <-ticker.C:
 		}
 	}
 }

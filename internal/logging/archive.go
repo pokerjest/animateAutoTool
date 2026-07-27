@@ -20,6 +20,11 @@ type hourlyLogFile struct {
 	hour time.Time
 }
 
+type ArchiveAttachment struct {
+	Name string
+	Data []byte
+}
+
 // CreateRecentArchive packages the newest valid hourly log files into a
 // temporary ZIP. The caller owns the returned path and must remove it.
 func CreateRecentArchive(dir, prefix string, limit int, now time.Time) (path, filename string, included []string, err error) {
@@ -57,6 +62,104 @@ func CreateRecentArchive(dir, prefix string, limit int, now time.Time) (path, fi
 	}
 
 	return tempPath, fmt.Sprintf("animate-auto-tool-logs-%s.zip", now.Format("20060102-150405")), included, nil
+}
+
+// CreateHealthArchive packages sparse issue-only health logs together with
+// generated system snapshots. Unlike CreateRecentArchive, this succeeds when
+// no health log exists because the snapshots still help diagnose current
+// state.
+func CreateHealthArchive(dir, prefix string, limit int, now time.Time, attachments []ArchiveAttachment) (path, filename string, included []string, err error) {
+	files, err := recentHourlyFiles(dir, prefix, limit)
+	if err != nil && !errors.Is(err, ErrNoHourlyLogs) {
+		return "", "", nil, err
+	}
+	if errors.Is(err, ErrNoHourlyLogs) {
+		files = nil
+	}
+
+	temp, err := os.CreateTemp("", "animate-auto-tool-health-*.zip")
+	if err != nil {
+		return "", "", nil, err
+	}
+	tempPath := temp.Name()
+	cleanup := func() {
+		_ = temp.Close()
+		_ = os.Remove(tempPath)
+	}
+
+	archive := zip.NewWriter(temp)
+	seen := make(map[string]struct{}, len(attachments)+len(files))
+	for _, attachment := range attachments {
+		name := strings.TrimSpace(attachment.Name)
+		if name == "" || filepath.Base(name) != name {
+			_ = archive.Close()
+			cleanup()
+			return "", "", nil, fmt.Errorf("invalid health archive attachment name %q", name)
+		}
+		if _, exists := seen[name]; exists {
+			continue
+		}
+		seen[name] = struct{}{}
+		entry, createErr := archive.CreateHeader(&zip.FileHeader{Name: name, Method: zip.Deflate})
+		if createErr != nil {
+			_ = archive.Close()
+			cleanup()
+			return "", "", nil, createErr
+		}
+		if _, writeErr := entry.Write(attachment.Data); writeErr != nil {
+			_ = archive.Close()
+			cleanup()
+			return "", "", nil, writeErr
+		}
+		included = append(included, name)
+	}
+	for _, file := range files {
+		if _, exists := seen[file.name]; exists {
+			continue
+		}
+		if err := addLogToArchive(archive, file); err != nil {
+			_ = archive.Close()
+			cleanup()
+			return "", "", nil, err
+		}
+		included = append(included, file.name)
+	}
+	if err := archive.Close(); err != nil {
+		cleanup()
+		return "", "", nil, err
+	}
+	if err := temp.Close(); err != nil {
+		_ = os.Remove(tempPath)
+		return "", "", nil, err
+	}
+	return tempPath, fmt.Sprintf("animate-auto-tool-health-%s.zip", now.Format("20060102-150405")), included, nil
+}
+
+// RemoveArchivedHourlyLogs removes only validated hourly files that were
+// already copied into an archive. Snapshot data lives in the database and is
+// intentionally untouched, so unresolved problems appear in later exports.
+func RemoveArchivedHourlyLogs(dir, prefix string, included []string) error {
+	dir = strings.TrimSpace(dir)
+	prefix = strings.TrimSpace(prefix)
+	if dir == "" || prefix == "" {
+		return errors.New("log directory and prefix are required")
+	}
+	baseDir := filepath.Clean(dir)
+	namePrefix := prefix + "-"
+	for _, name := range included {
+		name = strings.TrimSpace(name)
+		if filepath.Base(name) != name || !strings.HasPrefix(name, namePrefix) || !strings.HasSuffix(name, ".log") {
+			continue
+		}
+		hourText := strings.TrimSuffix(strings.TrimPrefix(name, namePrefix), ".log")
+		if _, err := time.ParseInLocation(hourlyTimestampLayout, hourText, time.Local); err != nil {
+			continue
+		}
+		if err := os.Remove(filepath.Join(baseDir, name)); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	return nil
 }
 
 func recentHourlyFiles(dir, prefix string, limit int) ([]hourlyLogFile, error) {

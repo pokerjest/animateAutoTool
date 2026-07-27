@@ -106,4 +106,24 @@ describe('subscription presentational components', () => {
     expect(wrapper.emitted('play')).toHaveLength(1)
     expect(wrapper.text()).toContain('本地已入库 3 集')
   })
+
+  it('explains pending Jellyfin scans with a specific sync action', async () => {
+    const wrapper = mount(SubscriptionCard, {
+      props: {
+        item: subscription({
+          local_anime_id: 42,
+          library_episode_count: 3,
+          library_stage: '等待 Jellyfin 扫描',
+          library_hint: '本地已识别 3 集，正在等待 Jellyfin 扫描媒体文件；点击“同步 Jellyfin”可立即请求扫描。',
+          can_refresh_library: true,
+        }),
+        isBusy: () => false,
+      },
+    })
+
+    expect(wrapper.text()).toContain('同步 Jellyfin')
+    expect(wrapper.text()).toContain('正在等待 Jellyfin 扫描媒体文件')
+    await wrapper.findAll('button').find(button => button.text().includes('同步 Jellyfin'))!.trigger('click')
+    expect(wrapper.emitted('repair')).toEqual([['refresh-library']])
+  })
 })

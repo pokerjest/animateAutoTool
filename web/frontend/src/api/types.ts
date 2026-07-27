@@ -35,6 +35,12 @@ export interface MikanSubscriptionSelection {
   allow_multi_subgroup: boolean
 }
 export interface LocalAnime { ID: number; title: string; image: string; path: string; file_count: number; total_size: number; season: number; summary: string; metadata?: Metadata; has_repair_actions: boolean }
+export type LocalOrganizeSelection =
+  | { mode: 'ids'; anime_ids: number[] }
+  | { mode: 'query'; query: string; exclude_ids?: number[] }
+export type LocalOrganizeChange = components['schemas']['LocalOrganizeChange']
+export type LocalOrganizeAnimePreview = components['schemas']['LocalOrganizeAnimePreview']
+export type LocalOrganizePreview = components['schemas']['LocalOrganizePreview']
 export interface LibraryItem extends Metadata { is_subscribed: boolean; is_local: boolean; local_anime_id: number }
 export interface TaskCard { title: string; status_label: string; status_tone: string; summary: string; detail?: string; progress_text?: string; display_error?: string }
 export interface Dashboard { active_subscriptions: number; downloads: number; library_items: number; local_series: number; open_issues: number; services: Record<string, boolean>; tasks: TaskCard[]; recent_downloads: Array<{ ID: number; Title: string; Status: string; Episode: string }> }

@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -292,14 +293,7 @@ func ScanLocalDirectoryHandler(c *gin.Context) {
 }
 
 func triggerJellyfinLibraryRefresh(ctx context.Context) {
-	jellyfinURL := configValue(model.ConfigKeyJellyfinUrl)
-	jellyfinAPIKey := configValue(model.ConfigKeyJellyfinApiKey)
-	if jellyfinURL == "" || jellyfinAPIKey == "" {
-		return
-	}
-
-	client := newConfiguredJellyfinClient(jellyfinURL, jellyfinAPIKey)
-	if err := client.RequestLibraryRefreshContext(ctx); err != nil {
+	if err := service.RequestJellyfinLibraryRefresh(ctx); err != nil && !errors.Is(err, service.ErrJellyfinNotConfigured) {
 		log.Printf("Jellyfin library refresh failed: %v", err)
 	}
 }

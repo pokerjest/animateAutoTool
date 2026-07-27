@@ -55,7 +55,7 @@ const repairActions = computed<RepairAction[]>(() => [
   { name: 'retry-missing', label: '重检缺集', visible: Boolean(props.item.can_retry_missing) },
   { name: 'recheck-stale', label: '重检停滞', visible: Boolean(props.item.can_retry_stale) },
   { name: 'retry-upgrade', label: '重试升级', visible: Boolean(props.item.can_retry_upgrade) },
-  { name: 'refresh-library', label: '刷新媒体库', visible: Boolean(props.item.can_refresh_library) },
+  { name: 'refresh-library', label: '同步 Jellyfin', visible: Boolean(props.item.can_refresh_library) },
 ].filter(action => action.visible))
 
 function isRepairBusy(name: string) {
@@ -106,7 +106,7 @@ function isRepairBusy(name: string) {
         {{ item.library_hint }}
       </p>
 
-      <div v-if="item.has_repair_actions && repairActions.length" class="pointer-events-auto mt-3 flex flex-wrap gap-2">
+      <div v-if="repairActions.length" class="pointer-events-auto mt-3 flex flex-wrap gap-2">
         <AsyncButton
           v-for="action in repairActions"
           :key="action.name"

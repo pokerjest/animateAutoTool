@@ -1,6 +1,7 @@
 package jellyfin
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -135,6 +136,51 @@ type ItemResponse struct {
 			Played                bool
 		}
 	}
+}
+
+// LibrarySeries is the small subset of a Jellyfin library item needed to
+// associate an AnimateTool local series without opening the player first.
+type LibrarySeries struct {
+	ID          string
+	Name        string
+	ProviderIDs map[string]string
+}
+
+// ListLibrarySeriesContext returns the TV/movie catalogue together with its
+// provider IDs. Fetching the catalogue once avoids one Jellyfin request per
+// subscription when the subscriptions page reconciles media-server state.
+func (c *Client) ListLibrarySeriesContext(ctx context.Context) ([]LibrarySeries, error) {
+	params := url.Values{}
+	params.Set("Recursive", "true")
+	params.Set("IncludeItemTypes", "Series,Movie")
+	params.Set("Fields", "ProviderIds")
+	params.Set("Limit", "10000")
+
+	resp, err := c.doContext(ctx, "GET", "/Items?"+params.Encode(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var result struct {
+		Items []struct {
+			ID          string            `json:"Id"`
+			Name        string            `json:"Name"`
+			ProviderIDs map[string]string `json:"ProviderIds"`
+		} `json:"Items"`
+	}
+	if err := json.Unmarshal(resp, &result); err != nil {
+		return nil, err
+	}
+
+	items := make([]LibrarySeries, 0, len(result.Items))
+	for _, item := range result.Items {
+		items = append(items, LibrarySeries{
+			ID:          strings.TrimSpace(item.ID),
+			Name:        strings.TrimSpace(item.Name),
+			ProviderIDs: item.ProviderIDs,
+		})
+	}
+	return items, nil
 }
 
 // GetItemByProviderID finds a Series/Item by its provider ID (e.g. Bangumi, TMDB)

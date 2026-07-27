@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"log"
 	"net/url"
 	"os"
@@ -106,9 +107,57 @@ func scheduleCompletedDownloadRescan(ctx context.Context, targets []string) {
 		select {
 		case <-timer.C:
 			autoScanCompletedDownloads(queued)
+			// The second scan runs after qBittorrent has settled renamed/moved
+			// files. Enriching metadata here writes provider IDs to tvshow.nfo,
+			// then Jellyfin can scan and be reconciled without a user opening the
+			// local-anime or player page first.
+			service.NewAgentService().RunAgentForLibrary()
+			syncCompletedDownloadsToJellyfin(ctx)
 		case <-ctx.Done():
 		}
 	}()
+}
+
+func syncCompletedDownloadsToJellyfin(ctx context.Context) {
+	if err := service.RequestJellyfinLibraryRefresh(ctx); err != nil {
+		if !errors.Is(err, service.ErrJellyfinNotConfigured) {
+			log.Printf("Worker: Jellyfin library refresh after download failed: %v", err)
+		}
+		return
+	}
+	log.Printf("Worker: requested Jellyfin library scan after completed download")
+
+	for attempt := 0; attempt < 6; attempt++ {
+		timer := time.NewTimer(5 * time.Second)
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			return
+		}
+
+		result, err := service.SyncJellyfinLibraryMappings(ctx)
+		if err != nil {
+			log.Printf("Worker: Jellyfin library reconciliation after download failed: %v", err)
+			return
+		}
+		if result.MatchedSeries > 0 {
+			log.Printf("Worker: linked %d local series to Jellyfin after download", result.MatchedSeries)
+			event.GlobalBus.Publish(event.EventMetadataUpdated, map[string]interface{}{
+				"type": "jellyfin_library_sync", "status": "completed", "matched_series": result.MatchedSeries,
+			})
+			return
+		}
+		if result.PendingSeries == 0 {
+			return
+		}
+	}
+	log.Printf("Worker: Jellyfin accepted the scan request but pending series were not visible after 30 seconds")
 }
 
 func autoScanCompletedDownloads(targets []string) {

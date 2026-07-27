@@ -29,7 +29,7 @@ func repairPendingSummary(action repairAction) string {
 	case repairActionRetryUpgrade:
 		return "已触发洗版检查，建议查看是否出现更优片源"
 	case repairActionRefreshLibrary:
-		return "已触发媒体库刷新，建议稍后确认是否进入可播放状态"
+		return "已请求 Jellyfin 扫描媒体库，系统会自动等待并更新播放状态"
 	default:
 		return "已执行智能修复，建议立即重新检查"
 	}
@@ -50,7 +50,7 @@ func repairActionLabel(action repairAction) string {
 	case repairActionRetryUpgrade:
 		return "已触发洗版检查"
 	case repairActionRefreshLibrary:
-		return "已触发媒体库刷新"
+		return "正在等待 Jellyfin 扫描"
 	case repairActionRetryScrape:
 		return "已尝试重新抓取"
 	default:
@@ -77,7 +77,7 @@ func repairSuccessToast(action repairAction) string {
 	case repairActionRetryUpgrade:
 		return "已启动洗版检查，请查看是否出现更优资源"
 	case repairActionRefreshLibrary:
-		return "已请求刷新媒体库，请稍后查看是否进入可播放状态"
+		return "已请求 Jellyfin 扫描媒体库，系统会自动更新播放状态"
 	case repairActionRetryScrape:
 		return "本地番剧已完成重新抓取"
 	case repairActionSyncDownloads:

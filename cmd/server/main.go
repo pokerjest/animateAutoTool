@@ -29,7 +29,9 @@ import (
 
 const (
 	serverLogPrefix   = "server"
+	healthLogPrefix   = "health"
 	serverLogMaxFiles = 24 * 7
+	healthLogMaxFiles = 24 * 7
 )
 
 func main() {
@@ -141,23 +143,44 @@ func configureLogging() func() {
 		log.Printf("Failed to initialize hourly logs in %s: %v", logDir, err)
 		return func() {}
 	}
+	healthFile, err := applogging.NewHealthWriter(logDir, healthLogPrefix, healthLogMaxFiles)
+	if err != nil {
+		log.Printf("Failed to initialize health diagnostics in %s: %v", logDir, err)
+		healthFile = nil
+	}
 
 	releaseMode := strings.EqualFold(strings.TrimSpace(config.AppConfig.Server.Mode), "release")
 	if runtime.GOOS == "windows" && releaseMode {
-		log.SetOutput(file)
-		gin.DefaultWriter = file
-		gin.DefaultErrorWriter = file
+		output := io.Writer(file)
+		if healthFile != nil {
+			output = io.MultiWriter(file, healthFile)
+		}
+		log.SetOutput(output)
+		gin.DefaultWriter = output
+		gin.DefaultErrorWriter = output
 		return func() {
 			_ = file.Close()
+			if healthFile != nil {
+				_ = healthFile.Close()
+			}
 		}
 	}
 
-	stdout := io.MultiWriter(os.Stdout, file)
-	stderr := io.MultiWriter(os.Stderr, file)
+	stdoutWriters := []io.Writer{os.Stdout, file}
+	stderrWriters := []io.Writer{os.Stderr, file}
+	if healthFile != nil {
+		stdoutWriters = append(stdoutWriters, healthFile)
+		stderrWriters = append(stderrWriters, healthFile)
+	}
+	stdout := io.MultiWriter(stdoutWriters...)
+	stderr := io.MultiWriter(stderrWriters...)
 	log.SetOutput(stderr)
 	gin.DefaultWriter = stdout
 	gin.DefaultErrorWriter = stderr
 	return func() {
 		_ = file.Close()
+		if healthFile != nil {
+			_ = healthFile.Close()
+		}
 	}
 }

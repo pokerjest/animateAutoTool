@@ -234,6 +234,33 @@ paths:
       responses: { "200": { $ref: "#/components/responses/Paginated" } }
   /local-anime/scan:
     post: { operationId: scanLocalAnime, responses: { "202": { $ref: "#/components/responses/TaskAccepted" } } }
+  /local-anime/organize/preview:
+    post:
+      operationId: previewLocalAnimeOrganize
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/LocalOrganizePreviewInput" } } } }
+      responses:
+        "200":
+          description: Short-lived, source-fingerprinted organization plan
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/LocalOrganizePreview" }
+        "400": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+  /local-anime/organize:
+    post:
+      operationId: applyLocalAnimeOrganize
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/LocalOrganizeApplyInput" } } } }
+      responses:
+        "202": { $ref: "#/components/responses/TaskAccepted" }
+        "400": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "410": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
   /local-directories:
     post: { operationId: addLocalDirectory, requestBody: { $ref: "#/components/requestBodies/JsonObject" }, responses: { "202": { $ref: "#/components/responses/TaskAccepted" } } }
   /local-directories/{id}:
@@ -360,6 +387,22 @@ paths:
             application/zip:
               schema: { type: string, format: binary }
         "404": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
+  /diagnostics/health/export:
+    get:
+      operationId: exportHealthDiagnostics
+      description: Downloads an issue-only health log plus redacted runtime, database, task, subscription, and media-library snapshots for developer debugging.
+      responses:
+        "200":
+          description: Health diagnostics archive
+          headers:
+            Content-Disposition: { schema: { type: string } }
+            X-Health-Event-File-Count: { schema: { type: integer, minimum: 0 } }
+            X-Diagnostic-Snapshot-Count: { schema: { type: integer, minimum: 1 } }
+            X-Health-Logs-Consumed: { schema: { type: string, enum: ["true"] } }
+          content:
+            application/zip:
+              schema: { type: string, format: binary }
         "500": { $ref: "#/components/responses/Error" }
   /backup:
     get: { operationId: getBackupStatus, responses: { "200": { $ref: "#/components/responses/Success" } } }
@@ -549,6 +592,62 @@ components:
       required: [url]
       properties:
         url: { type: string, pattern: "^/api/v1/posters/" }
+    LocalOrganizeSelection:
+      type: object
+      required: [mode]
+      properties:
+        mode: { type: string, enum: [ids, query] }
+        anime_ids: { type: array, items: { type: integer, minimum: 1 }, uniqueItems: true }
+        query: { type: string, maxLength: 200 }
+        exclude_ids: { type: array, items: { type: integer, minimum: 1 }, uniqueItems: true }
+    LocalOrganizePreviewInput:
+      type: object
+      required: [selection]
+      properties:
+        selection: { $ref: "#/components/schemas/LocalOrganizeSelection" }
+        series_template: { type: string }
+        episode_template: { type: string }
+    LocalOrganizeApplyInput:
+      type: object
+      required: [plan_id]
+      properties:
+        plan_id: { type: string, minLength: 1 }
+        include_anime_ids: { type: array, items: { type: integer, minimum: 1 }, uniqueItems: true }
+    LocalOrganizeChange:
+      type: object
+      required: [kind, original, target, status, managed_by_qb]
+      properties:
+        kind: { type: string, enum: [video, subtitle, nfo, image, series_asset] }
+        original: { type: string }
+        target: { type: string }
+        status: { type: string, enum: [ready, unchanged, conflict, skipped] }
+        reason: { type: string }
+        managed_by_qb: { type: boolean }
+    LocalOrganizeAnimePreview:
+      type: object
+      required: [anime_id, title, source_path, target_path, metadata_matched, warnings, changes]
+      properties:
+        anime_id: { type: integer, minimum: 1 }
+        title: { type: string }
+        source_path: { type: string }
+        target_path: { type: string }
+        metadata_matched: { type: boolean }
+        warnings: { type: array, items: { type: string } }
+        changes: { type: array, items: { $ref: "#/components/schemas/LocalOrganizeChange" } }
+    LocalOrganizePreview:
+      type: object
+      required: [plan_id, expires_at, series_template, episode_template, selected_count, change_count, unchanged_count, conflict_count, skipped_count, items]
+      properties:
+        plan_id: { type: string, minLength: 1 }
+        expires_at: { type: string, format: date-time }
+        series_template: { type: string }
+        episode_template: { type: string }
+        selected_count: { type: integer, minimum: 1 }
+        change_count: { type: integer, minimum: 0 }
+        unchanged_count: { type: integer, minimum: 0 }
+        conflict_count: { type: integer, minimum: 0 }
+        skipped_count: { type: integer, minimum: 0 }
+        items: { type: array, items: { $ref: "#/components/schemas/LocalOrganizeAnimePreview" } }
     PlaybackDiagnostic:
       type: object
       required: [code, summary, hint, can_use_direct_link]

@@ -254,6 +254,18 @@ func (s *LocalAnimeStore) SaveAnime(anime *model.LocalAnime) error {
 	return retrySQLiteBusy(func() error { return s.db.Save(anime).Error })
 }
 
+// UpdateJellyfinSeriesID updates only the external media-server association.
+// Keeping this narrow avoids overwriting scanner changes when reconciliation
+// runs concurrently with a local-library scan.
+func (s *LocalAnimeStore) UpdateJellyfinSeriesID(id uint, seriesID string) error {
+	if s == nil || s.db == nil {
+		return gorm.ErrInvalidDB
+	}
+	return retrySQLiteBusy(func() error {
+		return s.db.Model(&model.LocalAnime{}).Where("id = ?", id).Update("jellyfin_series_id", seriesID).Error
+	})
+}
+
 func (s *LocalAnimeStore) FindEpisodeByPath(path string) (*model.LocalEpisode, error) {
 	if s == nil || s.db == nil {
 		return nil, gorm.ErrInvalidDB

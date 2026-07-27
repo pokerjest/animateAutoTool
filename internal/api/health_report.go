@@ -96,7 +96,7 @@ func buildRecommendations(report HealthReport) []string {
 		recommendations = append(recommendations, "在订阅页优先处理“长期无进展”或“疑似缺集”的条目。")
 	}
 	if report.SubscriptionsPendingSync > 0 {
-		recommendations = append(recommendations, "有订阅已经入库但还没变成可播放，建议触发一次 Jellyfin 库刷新。")
+		recommendations = append(recommendations, "有订阅已在本地入库但 Jellyfin 尚未识别；请在订阅卡片点击“同步 Jellyfin”，系统会请求扫描并自动确认结果。")
 	}
 	if report.OpenLibraryIssues > 0 {
 		recommendations = append(recommendations, "本地媒体库仍有打开的诊断问题，建议进入本地番剧页查看修复建议。")

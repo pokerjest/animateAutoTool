@@ -98,6 +98,7 @@ const batchPreview = ref<Array<Record<string, unknown>>>([])
 const query = useQuery({
   queryKey: ['subscriptions'],
   queryFn: () => api<SubscriptionPayload>('/subscriptions'),
+  refetchInterval: 30_000,
 })
 
 const history = useQuery({
@@ -322,14 +323,15 @@ async function operate(item: Subscription, name: 'run' | 'toggle') {
 
 async function repair(item: Subscription, name: string) {
   try {
+    const syncingJellyfin = name === 'refresh-library'
     await actions.runTask(
       `repair-${item.ID}-${name}`,
       () => api<TaskAccepted>(`/subscriptions/${item.ID}/repair/${name}`, { method: 'POST' }),
-      '订阅修复',
+      syncingJellyfin ? '同步 Jellyfin' : '订阅修复',
       'subscription-repair',
-      `正在修复 ${item.title}`,
+      syncingJellyfin ? `正在请求 Jellyfin 扫描并识别 ${item.title}` : `正在修复 ${item.title}`,
     )
-    ui.toast('修复任务已经启动')
+    ui.toast(syncingJellyfin ? '已请求 Jellyfin 扫描，识别完成后会自动更新播放状态' : '修复任务已经启动')
   } catch (error) {
     ui.toast(error instanceof Error ? error.message : '修复失败', 'error')
   }

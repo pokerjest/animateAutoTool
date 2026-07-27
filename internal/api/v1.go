@@ -2,12 +2,12 @@ package api
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log"
 	"net/http"
 	"net/url"
 	"os"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -154,6 +154,8 @@ func initV1Routes(r *gin.Engine) {
 		protected.DELETE("/local-directories/:id", V1DeleteLocalDirectoryHandler)
 		protected.POST("/local-anime/:id/refresh-metadata", V1RefreshLocalMetadataHandler)
 		protected.POST("/local-anime/:id/source", V1LocalAnimeSourceHandler)
+		protected.POST("/local-anime/organize/preview", V1PreviewLocalOrganizeHandler)
+		protected.POST("/local-anime/organize", V1ApplyLocalOrganizeHandler)
 		protected.POST("/local-directories/:id/rename-preview", V1RenamePreviewHandler)
 		protected.POST("/local-directories/:id/rename", V1RenameApplyHandler)
 		protected.GET("/jellyfin/stream/:id", ProxyVideoHandler)
@@ -180,6 +182,7 @@ func initV1Routes(r *gin.Engine) {
 		protected.GET("/health", V1HealthHandler)
 		protected.GET("/runtime", V1RuntimeHandler)
 		protected.GET("/diagnostics/logs/export", V1ExportDiagnosticLogsHandler)
+		protected.GET("/diagnostics/health/export", V1ExportHealthDiagnosticsHandler)
 		protected.GET("/audit-logs", V1AuditLogsHandler)
 		protected.GET("/settings", V1SettingsHandler)
 		protected.PUT("/settings", V1UpdateSettingsHandler)
@@ -407,7 +410,19 @@ func V1SubscriptionsHandler(c *gin.Context) {
 		v1Error(c, http.StatusInternalServerError, "subscriptions_unavailable", "无法读取订阅")
 		return
 	}
+	// The first pass also links newly scanned files back to their subscription
+	// metadata. Jellyfin reconciliation can then resolve those records during
+	// the same request instead of waiting for a player page to be opened.
 	populateSubscriptionStats(items)
+	syncContext, cancelSync := context.WithTimeout(c.Request.Context(), 5*time.Second)
+	syncResult, syncErr := service.SyncJellyfinLibraryMappings(syncContext)
+	if syncErr != nil && !errors.Is(syncErr, service.ErrJellyfinNotConfigured) {
+		log.Printf("subscription Jellyfin state reconciliation failed: %v", syncErr)
+	}
+	cancelSync()
+	if syncResult.MatchedSeries > 0 {
+		populateSubscriptionStats(items)
+	}
 	page, pageSize := v1Pagination(c, 100)
 	total := len(items)
 	start := min((page-1)*pageSize, total)
@@ -783,9 +798,7 @@ func V1DeleteR2Handler(c *gin.Context) {
 func V1HealthHandler(c *gin.Context) { v1Data(c, http.StatusOK, buildHealthReport()) }
 
 func V1RuntimeHandler(c *gin.Context) {
-	var mem runtime.MemStats
-	runtime.ReadMemStats(&mem)
-	v1Data(c, http.StatusOK, gin.H{"uptime_seconds": int64(time.Since(runtimeStatsStartedAt).Seconds()), "go": gin.H{"goroutines": runtime.NumGoroutine(), "gomaxprocs": runtime.GOMAXPROCS(0), "num_cpu": runtime.NumCPU()}, "memory": gin.H{"heap_alloc_bytes": mem.HeapAlloc, "sys_bytes": mem.Sys}, "gc": gin.H{"num_gc": mem.NumGC}})
+	v1Data(c, http.StatusOK, buildRuntimeSnapshot())
 }
 
 var v1SecretConfigKeys = map[string]bool{

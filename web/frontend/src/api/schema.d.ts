@@ -697,6 +697,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/local-anime/organize/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["previewLocalAnimeOrganize"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/local-anime/organize": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["applyLocalAnimeOrganize"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/local-directories": {
         parameters: {
             query?: never;
@@ -979,6 +1011,23 @@ export interface paths {
         };
         /** @description Downloads a ZIP containing up to the newest three hourly server log files. */
         get: operations["exportDiagnosticLogs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/diagnostics/health/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Downloads an issue-only health log plus redacted runtime, database, task, subscription, and media-library snapshots for developer debugging. */
+        get: operations["exportHealthDiagnostics"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1432,6 +1481,54 @@ export interface components {
         };
         RandomBackground: {
             url: string;
+        };
+        LocalOrganizeSelection: {
+            /** @enum {string} */
+            mode: "ids" | "query";
+            anime_ids?: number[];
+            query?: string;
+            exclude_ids?: number[];
+        };
+        LocalOrganizePreviewInput: {
+            selection: components["schemas"]["LocalOrganizeSelection"];
+            series_template?: string;
+            episode_template?: string;
+        };
+        LocalOrganizeApplyInput: {
+            plan_id: string;
+            include_anime_ids?: number[];
+        };
+        LocalOrganizeChange: {
+            /** @enum {string} */
+            kind: "video" | "subtitle" | "nfo" | "image" | "series_asset";
+            original: string;
+            target: string;
+            /** @enum {string} */
+            status: "ready" | "unchanged" | "conflict" | "skipped";
+            reason?: string;
+            managed_by_qb: boolean;
+        };
+        LocalOrganizeAnimePreview: {
+            anime_id: number;
+            title: string;
+            source_path: string;
+            target_path: string;
+            metadata_matched: boolean;
+            warnings: string[];
+            changes: components["schemas"]["LocalOrganizeChange"][];
+        };
+        LocalOrganizePreview: {
+            plan_id: string;
+            /** Format: date-time */
+            expires_at: string;
+            series_template: string;
+            episode_template: string;
+            selected_count: number;
+            change_count: number;
+            unchanged_count: number;
+            conflict_count: number;
+            skipped_count: number;
+            items: components["schemas"]["LocalOrganizeAnimePreview"][];
         };
         PlaybackDiagnostic: {
             code: string;
@@ -2370,6 +2467,54 @@ export interface operations {
             202: components["responses"]["TaskAccepted"];
         };
     };
+    previewLocalAnimeOrganize: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LocalOrganizePreviewInput"];
+            };
+        };
+        responses: {
+            /** @description Short-lived, source-fingerprinted organization plan */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["LocalOrganizePreview"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+        };
+    };
+    applyLocalAnimeOrganize: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LocalOrganizeApplyInput"];
+            };
+        };
+        responses: {
+            202: components["responses"]["TaskAccepted"];
+            400: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            410: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+        };
+    };
     addLocalDirectory: {
         parameters: {
             query?: never;
@@ -2698,6 +2843,31 @@ export interface operations {
                 };
             };
             404: components["responses"]["Error"];
+            500: components["responses"]["Error"];
+        };
+    };
+    exportHealthDiagnostics: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Health diagnostics archive */
+            200: {
+                headers: {
+                    "Content-Disposition"?: string;
+                    "X-Health-Event-File-Count"?: number;
+                    "X-Diagnostic-Snapshot-Count"?: number;
+                    "X-Health-Logs-Consumed"?: "true";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/zip": string;
+                };
+            };
             500: components["responses"]["Error"];
         };
     };

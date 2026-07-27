@@ -1,6 +1,7 @@
 package service
 
 import (
+	"log"
 	"strings"
 	"time"
 
@@ -32,6 +33,9 @@ func ReportLibraryIssue(input LibraryIssueInput) error {
 	if db.DB == nil || strings.TrimSpace(input.IssueKey) == "" {
 		return nil
 	}
+	log.Printf("WARN: health issue reported type=%s key=%s title=%q path=%q message=%s hint=%s",
+		strings.TrimSpace(input.IssueType), strings.TrimSpace(input.IssueKey), strings.TrimSpace(input.Title),
+		strings.TrimSpace(input.DirectoryPath), strings.TrimSpace(input.Message), strings.TrimSpace(input.Hint))
 
 	now := time.Now()
 	issue := model.LibraryIssue{}

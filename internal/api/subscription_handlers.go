@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -141,8 +142,16 @@ func SubscriptionsHandler(c *gin.Context) {
 	if err != nil {
 		log.Printf("Error fetching subscriptions: %v", err)
 	}
-
 	populateSubscriptionStats(subs)
+	syncContext, cancelSync := context.WithTimeout(c.Request.Context(), 5*time.Second)
+	syncResult, syncErr := service.SyncJellyfinLibraryMappings(syncContext)
+	if syncErr != nil && !errors.Is(syncErr, service.ErrJellyfinNotConfigured) {
+		log.Printf("subscription Jellyfin state reconciliation failed: %v", syncErr)
+	}
+	cancelSync()
+	if syncResult.MatchedSeries > 0 {
+		populateSubscriptionStats(subs)
+	}
 
 	data := SubscriptionsData{
 		SkipLayout:      skip,

@@ -9,6 +9,7 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/service"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
 
@@ -483,14 +484,51 @@ func TestPopulateSubscriptionActionHintsMarksLibraryPendingSyncWhenJellyfinConfi
 
 	populateSubscriptionActionHints(&sub)
 
-	assert.Equal(t, "待同步到媒体库", sub.LibraryStage)
+	assert.Equal(t, "等待 Jellyfin 扫描", sub.LibraryStage)
 	assert.Equal(t, "warning", sub.LibraryTone)
-	assert.Contains(t, sub.LibraryHint, "建议触发一次库刷新")
+	assert.Contains(t, sub.LibraryHint, "正在等待 Jellyfin 扫描媒体文件")
+	assert.Contains(t, sub.LibraryHint, "同步 Jellyfin")
 	assert.Equal(t, localAnime.ID, sub.LocalAnimeID)
 	assert.EqualValues(t, 1, sub.LibraryEpisodeCount)
 	assert.False(t, sub.Playable)
 	assert.True(t, sub.CanRefreshLibrary)
 	assert.False(t, sub.HasRepairActions, "a media-server refresh recommendation must not create a permanent issue")
+}
+
+func TestPopulateSubscriptionActionHintsLinksNewlyScannedTitleMatch(t *testing.T) {
+	if err := db.DB.Exec("DELETE FROM subscriptions").Error; err != nil {
+		t.Fatalf("failed to clear subscriptions: %v", err)
+	}
+	if err := db.DB.Exec("DELETE FROM anime_metadata").Error; err != nil {
+		t.Fatalf("failed to clear metadata: %v", err)
+	}
+	if err := db.DB.Exec("DELETE FROM local_animes").Error; err != nil {
+		t.Fatalf("failed to clear local anime: %v", err)
+	}
+	if err := db.DB.Exec("DELETE FROM local_episodes").Error; err != nil {
+		t.Fatalf("failed to clear local episodes: %v", err)
+	}
+
+	metadata := model.AnimeMetadata{Title: "下载后自动匹配番剧", BangumiID: 99001}
+	require.NoError(t, db.DB.Create(&metadata).Error)
+	sub := model.Subscription{
+		Title: "下载后自动匹配番剧", RSSUrl: "https://example.test/download-match", MetadataID: &metadata.ID, Metadata: &metadata,
+	}
+	require.NoError(t, db.DB.Create(&sub).Error)
+	localAnime := model.LocalAnime{Title: "下载后自动匹配番剧"}
+	require.NoError(t, db.DB.Create(&localAnime).Error)
+	require.NoError(t, db.DB.Create(&model.LocalEpisode{
+		LocalAnimeID: localAnime.ID, SeasonNum: 1, EpisodeNum: 1, Path: "/tmp/download-match-s01e01.mkv",
+	}).Error)
+
+	populateSubscriptionActionHints(&sub)
+
+	assert.Equal(t, localAnime.ID, sub.LocalAnimeID)
+	assert.EqualValues(t, 1, sub.LibraryEpisodeCount)
+	var updated model.LocalAnime
+	require.NoError(t, db.DB.First(&updated, localAnime.ID).Error)
+	require.NotNil(t, updated.MetadataID)
+	assert.Equal(t, metadata.ID, *updated.MetadataID)
 }
 
 func TestRenderSubscriptionCardTemplateIncludesLifecycleAndRepairActions(t *testing.T) {
@@ -540,9 +578,9 @@ func TestRenderSubscriptionCardTemplateIncludesPendingLibraryRefreshAction(t *te
 		Model:             gorm.Model{ID: 88},
 		Title:             "Pending Library Show",
 		RSSUrl:            "https://example.test/pending-library",
-		LibraryStage:      "待同步到媒体库",
+		LibraryStage:      "等待 Jellyfin 扫描",
 		LibraryTone:       "warning",
-		LibraryHint:       "本地已经识别 3 集，但 Jellyfin 还没有建立条目；建议触发一次库刷新。",
+		LibraryHint:       "本地已识别 3 集，正在等待 Jellyfin 扫描媒体文件；点击“同步 Jellyfin”可立即请求扫描。",
 		CanRefreshLibrary: true,
 		HasRepairActions:  true,
 	})
@@ -550,8 +588,8 @@ func TestRenderSubscriptionCardTemplateIncludesPendingLibraryRefreshAction(t *te
 		t.Fatalf("failed to render template: %v", err)
 	}
 
-	assert.Contains(t, html, "待同步到媒体库")
-	assert.Contains(t, html, "刷新媒体库")
+	assert.Contains(t, html, "等待 Jellyfin 扫描")
+	assert.Contains(t, html, "同步 Jellyfin")
 	assert.Contains(t, html, "/api/subscriptions/88/refresh-library")
 }
 

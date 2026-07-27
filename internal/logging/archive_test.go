@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -72,6 +73,56 @@ func TestCreateRecentArchiveIncludesNewestThreeHourlyLogs(t *testing.T) {
 		}
 		if string(content) != logs[file.Name] {
 			t.Fatalf("%s content = %q", file.Name, content)
+		}
+	}
+}
+
+func TestCreateHealthArchiveIncludesSnapshotsWithoutIssueLogs(t *testing.T) {
+	dir := t.TempDir()
+	path, filename, included, err := CreateHealthArchive(dir, "health", 168, time.Date(2026, 7, 27, 13, 14, 15, 0, time.Local), []ArchiveAttachment{
+		{Name: "health-report.json", Data: []byte(`{"health_tone":"amber"}`)},
+		{Name: "README.txt", Data: []byte("developer diagnostics")},
+	})
+	if err != nil {
+		t.Fatalf("CreateHealthArchive: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Remove(path) })
+	if filename != "animate-auto-tool-health-20260727-131415.zip" {
+		t.Fatalf("filename = %q", filename)
+	}
+	if !reflect.DeepEqual(included, []string{"health-report.json", "README.txt"}) {
+		t.Fatalf("included = %#v", included)
+	}
+	archive, err := zip.OpenReader(path)
+	if err != nil {
+		t.Fatalf("open archive: %v", err)
+	}
+	defer func() { _ = archive.Close() }()
+	if len(archive.File) != 2 {
+		t.Fatalf("archive files = %d", len(archive.File))
+	}
+}
+
+func TestRemoveArchivedHourlyLogsConsumesOnlyValidatedHealthLogs(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"health-20260727-12.log", "health-20260727-13.log", "server-20260727-13.log", "health-current.log"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(name), 0o600); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	if err := RemoveArchivedHourlyLogs(dir, "health", []string{
+		"README.txt", "health-20260727-12.log", "health-20260727-13.log", "health-current.log", "../outside.log",
+	}); err != nil {
+		t.Fatalf("RemoveArchivedHourlyLogs: %v", err)
+	}
+	for _, name := range []string{"health-20260727-12.log", "health-20260727-13.log"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); !os.IsNotExist(err) {
+			t.Fatalf("expected %s to be removed, err=%v", name, err)
+		}
+	}
+	for _, name := range []string{"server-20260727-13.log", "health-current.log"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
+			t.Fatalf("expected %s to remain: %v", name, err)
 		}
 	}
 }

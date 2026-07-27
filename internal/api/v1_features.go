@@ -313,7 +313,13 @@ func V1SubscriptionRepairHandler(c *gin.Context) {
 		case "reset-logs":
 			runErr = resetStaleLogsAndRecheck(target, staleLogResetAge)
 		case "refresh-library":
-			triggerJellyfinLibraryRefresh(context.Background())
+			refreshContext, cancel := context.WithTimeout(context.Background(), 50*time.Second)
+			runErr = service.RequestJellyfinLibraryRefresh(refreshContext)
+			if runErr == nil {
+				taskstate.Global.Progress(taskID, "Jellyfin 已接收扫描请求，正在等待识别该番剧", 1, 2)
+				runErr = waitForSubscriptionJellyfinMatch(refreshContext, target.ID)
+			}
+			cancel()
 		default:
 			target.LastRunSummary = "修复检查已启动"
 			target.LastError = ""
@@ -331,7 +337,11 @@ func V1SubscriptionRepairHandler(c *gin.Context) {
 			taskstate.Global.Fail(taskID, runErr)
 			return
 		}
-		taskstate.Global.Complete(taskID, "订阅修复完成")
+		if requested == "refresh-library" {
+			taskstate.Global.Complete(taskID, "Jellyfin 已识别该番剧，现在可以直接播放")
+		} else {
+			taskstate.Global.Complete(taskID, "订阅修复完成")
+		}
 	}(sub, action)
 	v1Message(c, http.StatusAccepted, "修复任务已经启动", gin.H{"task_id": taskID, "status": "running"})
 }
