@@ -1,0 +1,503 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#fff8fb" />
+    <meta
+      name="description"
+      content="Animate Auto Tool 使用说明书：安装、配置、Mikan 订阅、Jellyfin 播放、扫描整理、备份恢复与故障排查。"
+    />
+    <title>Animate Auto Tool · 使用说明书</title>
+    <link rel="stylesheet" href="assets/docs.css" />
+    <script defer src="assets/docs.js"></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="#top" aria-label="回到说明书首页">
+        <span class="brand-mark" aria-hidden="true">✦</span>
+        <span>
+          <strong>Animate Auto Tool</strong>
+          <small>使用说明书</small>
+        </span>
+      </a>
+      <div class="topbar-actions">
+        <button class="icon-button" type="button" data-theme-toggle aria-label="切换深色模式">◐</button>
+        <a class="button button-soft" href="https://github.com/pokerjest/animateAutoTool/releases/latest">下载最新版本</a>
+        <a class="button button-dark" href="https://github.com/pokerjest/animateAutoTool">GitHub</a>
+      </div>
+    </header>
+
+    <div class="mobile-toolbar">
+      <button class="button button-soft" type="button" data-menu-toggle aria-expanded="false">目录</button>
+      <label class="mobile-search">
+        <span class="sr-only">搜索说明书</span>
+        <input type="search" placeholder="搜索说明书" data-search />
+      </label>
+    </div>
+
+    <div class="page-shell" id="top">
+      <aside class="sidebar" data-sidebar>
+        <div class="sidebar-search">
+          <label>
+            <span class="sr-only">搜索说明书</span>
+            <input type="search" placeholder="搜索：Jellyfin、Mikan、备份…" data-search />
+          </label>
+          <p class="search-hint">输入关键词，快速定位操作步骤</p>
+        </div>
+        <nav aria-label="说明书目录">
+          <p class="nav-heading">开始使用</p>
+          <a href="#overview">工具简介</a>
+          <a href="#install">安装与启动</a>
+          <a href="#first-run">首次初始化</a>
+          <p class="nav-heading">日常使用</p>
+          <a href="#media-services">媒体服务</a>
+          <a href="#subscriptions">订阅与筛选</a>
+          <a href="#library">本地番剧与整理</a>
+          <a href="#calendar">追番日历</a>
+          <a href="#player">播放器与线路</a>
+          <p class="nav-heading">维护与排错</p>
+          <a href="#backup">备份与恢复</a>
+          <a href="#security">安全与公网访问</a>
+          <a href="#logs">日志与健康诊断</a>
+          <a href="#troubleshooting">常见问题</a>
+          <p class="nav-heading">开发者</p>
+          <a href="#source-build">从源码构建</a>
+        </nav>
+      </aside>
+
+      <main class="content">
+        <section class="hero" data-searchable data-keywords="首页 Animate Auto Tool 使用说明书">
+          <div class="hero-copy">
+            <p class="eyebrow">ANIME MEDIA WORKSPACE</p>
+            <h1>从订阅到播放，<br /><em>一步一步用好 Animate Auto Tool</em></h1>
+            <p class="hero-lead">
+              这是一份面向普通用户的中文说明书。第一次使用时从“安装与启动”开始；已经在使用的用户可以直接搜索
+              Mikan、Jellyfin、qBittorrent、备份或故障关键词。
+            </p>
+            <div class="hero-actions">
+              <a class="button button-dark" href="#install">开始安装</a>
+              <a class="button button-outline" href="#media-services">先看媒体服务配置</a>
+            </div>
+          </div>
+          <div class="hero-card" aria-label="使用流程">
+            <span class="hero-card-kicker">推荐流程</span>
+            <strong>安装 → 初始化 → 配置服务 → 添加订阅 → 自动下载 → 播放</strong>
+            <div class="hero-orbit" aria-hidden="true">
+              <span>RSS</span><span>Jellyfin</span><span>qB</span><span>媒体库</span>
+            </div>
+          </div>
+        </section>
+
+        <div class="notice notice-info" data-searchable data-keywords="版本 v0.9.1 更新">
+          <span class="notice-icon" aria-hidden="true">i</span>
+          <p>
+            本说明书对应当前主线版本 <strong>v0.9.1</strong>。配置项名称以应用里的“系统设置”为准；如果升级后页面和说明存在差异，请优先参考应用界面提示。
+          </p>
+        </div>
+
+        <section id="overview" class="doc-section" data-searchable data-keywords="工具简介 功能 订阅 下载 元数据">
+          <div class="section-heading">
+            <p class="eyebrow">01 · OVERVIEW</p>
+            <h2>工具简介</h2>
+            <p>Animate Auto Tool 是一个可以长期运行在自己电脑或服务器上的动漫媒体工作台。</p>
+          </div>
+          <div class="feature-grid">
+            <article class="feature-card">
+              <span class="feature-icon">⌁</span>
+              <h3>订阅 Mikan</h3>
+              <p>按季度或关键词发现番组，选择字幕组，并用包含/排除正则控制想要的资源。</p>
+            </article>
+            <article class="feature-card">
+              <span class="feature-icon">◎</span>
+              <h3>管理媒体库</h3>
+              <p>扫描本地文件、匹配番剧和剧集信息，整理为 Jellyfin 与 Plex 容易识别的目录结构。</p>
+            </article>
+            <article class="feature-card">
+              <span class="feature-icon">▶</span>
+              <h3>继续观看</h3>
+              <p>支持 Jellyfin 直连和 AnimateTool 代理，路由切换后保留播放位置并同步共享进度。</p>
+            </article>
+            <article class="feature-card">
+              <span class="feature-icon">⌂</span>
+              <h3>自托管与备份</h3>
+              <p>数据保存在本机 SQLite 和配置文件中，可导出备份、健康日志和诊断包，方便迁移与排错。</p>
+            </article>
+          </div>
+        </section>
+
+        <section id="install" class="doc-section" data-searchable data-keywords="安装 启动 Windows macOS Linux Docker 下载">
+          <div class="section-heading">
+            <p class="eyebrow">02 · INSTALL</p>
+            <h2>安装与启动</h2>
+            <p>普通用户优先下载 GitHub Releases 中的预编译包，不需要安装 Go。</p>
+          </div>
+          <div class="steps">
+            <article class="step">
+              <span class="step-number">01</span>
+              <div>
+                <h3>选择对应系统的发行包</h3>
+                <p>
+                  Windows 选择 <code>_windows_amd64.zip</code> 或单文件 <code>.exe</code>；Apple 芯片选择
+                  <code>_darwin_arm64.dmg</code>；Intel Mac 选择 <code>_darwin_amd64.dmg</code>；Linux 选择对应架构的
+                  <code>.tar.gz</code>。
+                </p>
+              </div>
+            </article>
+            <article class="step">
+              <span class="step-number">02</span>
+              <div>
+                <h3>解压到一个固定目录</h3>
+                <p>不要把程序放在临时下载目录。程序会在运行目录旁保存 <code>config.yaml</code>、<code>data/</code> 和日志目录。</p>
+              </div>
+            </article>
+            <article class="step">
+              <span class="step-number">03</span>
+              <div>
+                <h3>启动服务并打开网页</h3>
+                <p>
+                  Windows 双击 <code>start.bat</code>；macOS/Linux 执行 <code>./start.sh</code>。然后打开
+                  <code>http://localhost:8306</code>。
+                </p>
+              </div>
+            </article>
+          </div>
+          <div class="callout-grid">
+            <div class="callout">
+              <h3>Windows</h3>
+              <p>需要调试时使用 <code>run.bat</code>，停止服务使用 <code>stop.bat</code>。如果 Windows 防火墙弹窗，请允许当前网络环境访问。</p>
+            </div>
+            <div class="callout">
+              <h3>macOS / Linux</h3>
+              <p>如果脚本没有执行权限，可以先运行 <code>chmod +x start.sh scripts/*.sh</code>，再启动服务。</p>
+            </div>
+            <div class="callout">
+              <h3>Docker</h3>
+              <p>仓库提供 <code>docker-compose.yml</code> 示例。正式使用前请确认 <code>data</code>、下载目录和 qBittorrent 数据目录已经正确挂载。</p>
+            </div>
+          </div>
+        </section>
+
+        <section id="first-run" class="doc-section" data-searchable data-keywords="首次初始化 登录 管理员 localhost 密码">
+          <div class="section-heading">
+            <p class="eyebrow">03 · FIRST RUN</p>
+            <h2>首次初始化</h2>
+            <p>第一次启动请在运行软件的那台电脑上完成初始化，这是系统刻意设置的安全边界。</p>
+          </div>
+          <div class="two-column">
+            <div>
+              <h3>推荐做法</h3>
+              <ol class="numbered-list">
+                <li>在本机打开 <code>http://localhost:8306</code>。</li>
+                <li>点击“开始初始化”，设置自己的管理员用户名和密码。</li>
+                <li>初始化完成后回到登录页，使用新密码登录。</li>
+                <li>之后再按需要配置反向代理、Tailscale 或 IP 白名单。</li>
+              </ol>
+            </div>
+            <div class="notice notice-warn">
+              <span class="notice-icon" aria-hidden="true">!</span>
+              <p>
+                远程设备不能代替本机完成首次初始化。忘记密码时也必须在本机访问
+                <code>/recover</code>；不要把恢复链接暴露到公网。
+              </p>
+            </div>
+          </div>
+        </section>
+
+        <section id="media-services" class="doc-section" data-searchable data-keywords="媒体服务 Jellyfin qBittorrent AList R2 直连 代理 Tailscale">
+          <div class="section-heading">
+            <p class="eyebrow">04 · MEDIA SERVICES</p>
+            <h2>媒体服务配置</h2>
+            <p>所有需要填写的服务连接信息都在“系统设置 → 媒体服务”里完成，播放器页面只负责选择线路。</p>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>服务</th><th>主要用途</th><th>常见配置</th></tr>
+              </thead>
+              <tbody>
+                <tr><td><strong>Jellyfin</strong></td><td>媒体库、剧集信息、播放和共享进度</td><td>连接地址、用户名、密码或 API Key</td></tr>
+                <tr><td><strong>qBittorrent</strong></td><td>接收磁力/RSS 任务并下载文件</td><td>Web UI 地址、用户名、密码</td></tr>
+                <tr><td><strong>AList</strong></td><td>可选的文件聚合服务</td><td>服务地址、Token</td></tr>
+                <tr><td><strong>Cloudflare R2</strong></td><td>可选的备份存储</td><td>Endpoint、Bucket、Access Key、Secret</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="route-card">
+            <div>
+              <span class="route-label route-direct">Jellyfin 直连</span>
+              <h3>观看设备直接访问 Jellyfin</h3>
+              <p>适合观看设备已经连接 Tailscale，或设备和 Jellyfin 在同一个局域网内。速度通常更直接，但每台观看设备都必须能访问这个地址。</p>
+            </div>
+            <code>浏览器直连地址（可选）</code>
+          </div>
+          <div class="route-card">
+            <div>
+              <span class="route-label route-proxy">AnimateTool 代理</span>
+              <h3>由 AnimateTool 后端转发视频</h3>
+              <p>适合 Cloudflare Tunnel、反向代理或普通公网访问。观看设备不需要安装 Tailscale，但视频流量会经过 AnimateTool 主机。</p>
+            </div>
+            <code>AnimateTool 连接地址</code>
+          </div>
+          <div class="notice notice-info">
+            <span class="notice-icon" aria-hidden="true">i</span>
+            <p>HTTPS 页面应配 HTTPS 的浏览器直连地址，否则浏览器可能拦截混合内容。没有直连地址时，播放器会只显示 AnimateTool 代理。</p>
+          </div>
+        </section>
+
+        <section id="subscriptions" class="doc-section" data-searchable data-keywords="Mikan 订阅 字幕组 正则 1080 简中 繁中 RSS">
+          <div class="section-heading">
+            <p class="eyebrow">05 · SUBSCRIPTIONS</p>
+            <h2>订阅与资源筛选</h2>
+            <p>订阅时可以关联 Mikan 番组、选择字幕组，并用规则筛选清晰度、语言和其他文件名信息。</p>
+          </div>
+          <div class="subsection">
+            <h3>添加一个 Mikan 订阅</h3>
+            <ol class="numbered-list">
+              <li>打开“订阅管理”，点击“添加订阅”或“发现番剧”。</li>
+              <li>在“季度番组”或“搜索”里找到目标番剧。</li>
+              <li>选择指定字幕组，或选择“全部字幕组”。</li>
+              <li>确认最近资源预览，再返回订阅表单。</li>
+              <li>填写下载器、保存目录和筛选规则后保存。</li>
+            </ol>
+          </div>
+          <div class="subsection">
+            <h3>字幕组和正则怎么配</h3>
+            <p>指定字幕组时，系统会优先使用字幕组专属 RSS；选择“全部字幕组”时使用聚合 RSS。你仍然可以自己写包含和排除规则。</p>
+            <div class="code-grid">
+              <div class="code-card">
+                <div class="code-card-head"><strong>必须包含</strong><button type="button" data-copy="1080p">复制</button></div>
+                <pre><code>1080p</code></pre>
+                <p>只接收文件名中带 1080p 的资源。</p>
+              </div>
+              <div class="code-card">
+                <div class="code-card-head"><strong>语言筛选</strong><button type="button" data-copy="(?i)(简中|简体)">复制</button></div>
+                <pre><code>(?i)(简中|简体)</code></pre>
+                <p><code>(?i)</code> 表示忽略大小写。</p>
+              </div>
+              <div class="code-card">
+                <div class="code-card-head"><strong>排除资源</strong><button type="button" data-copy="(?i)(1080p WEB-DL|繁中)">复制</button></div>
+                <pre><code>(?i)(1080p WEB-DL|繁中)</code></pre>
+                <p>命中任意关键词时排除。</p>
+              </div>
+            </div>
+            <div class="notice notice-warn">
+              <span class="notice-icon" aria-hidden="true">!</span>
+              <p>规则是叠加关系：必须包含规则会缩小结果，必须不含规则会继续排除。规则写得过严时，订阅可能看起来“没有新资源”。</p>
+            </div>
+          </div>
+        </section>
+
+        <section id="library" class="doc-section" data-searchable data-keywords="本地番剧 扫描 整理 重命名 Jellyfin Plex Season">
+          <div class="section-heading">
+            <p class="eyebrow">06 · LIBRARY</p>
+            <h2>本地番剧与文件整理</h2>
+            <p>扫描根目录后，应用会识别视频文件、匹配番剧和剧集，并把结果显示在“本地番剧”。</p>
+          </div>
+          <div class="path-diagram">
+            <div class="path-node"><span>媒体根目录</span><strong>动画</strong></div>
+            <div class="path-arrow">→</div>
+            <div class="path-node"><span>系列目录</span><strong>葬送的芙莉莲</strong></div>
+            <div class="path-arrow">→</div>
+            <div class="path-node"><span>季度目录</span><strong>Season 01</strong></div>
+            <div class="path-arrow">→</div>
+            <div class="path-node"><span>剧集文件</span><strong>S01E01.mkv</strong></div>
+          </div>
+          <div class="two-column">
+            <div>
+              <h3>扫描建议</h3>
+              <ul class="check-list">
+                <li>把不同番剧放在同一个扫描根目录下的独立目录。</li>
+                <li>首次扫描等待任务中心显示完成，不要重复点击扫描。</li>
+                <li>扫描漏项时先检查文件权限、符号链接和目录是否在扫描根目录内。</li>
+                <li>同一系列不同季度尽量保留清晰的季度信息。</li>
+              </ul>
+            </div>
+            <div>
+              <h3>整理前先预览</h3>
+              <p>在“本地番剧”中选择单项或批量整理。系统会先列出原路径、目标路径、冲突、附属字幕/NFO/图片和做种保护状态；确认后才执行，不覆盖已有目标文件。</p>
+            </div>
+          </div>
+        </section>
+
+        <section id="calendar" class="doc-section" data-searchable data-keywords="追番日历 Bangumi 添加订阅 海报 星期">
+          <div class="section-heading">
+            <p class="eyebrow">07 · CALENDAR</p>
+            <h2>追番日历</h2>
+            <p>追番日历用于查看每天更新的番剧。点击海报即可进入详情；从详情添加订阅时会优先关联 Mikan 源。</p>
+          </div>
+          <div class="tip-list">
+            <div><span>01</span><p>海报加载失败时，应用会尝试浏览器直连、主机代理和默认图片回退。</p></div>
+            <div><span>02</span><p>Bangumi ID 不一定能直接命中 Mikan，应用会优先尝试 Mikan 对应的 bgm.tv subject ID，再回退标题匹配。</p></div>
+            <div><span>03</span><p>如果没有找到 Mikan 番组，仍可以回到订阅表单手动填写 RSS，不会阻塞订阅。</p></div>
+          </div>
+        </section>
+
+        <section id="player" class="doc-section" data-searchable data-keywords="播放器 Jellyfin 直连 AnimateTool 代理 Tailscale Cloudflare 继续观看 共享进度">
+          <div class="section-heading">
+            <p class="eyebrow">08 · PLAYER</p>
+            <h2>播放器与播放线路</h2>
+            <p>播放时只需要选择线路，连接地址和凭据统一在系统设置中维护。</p>
+          </div>
+          <div class="player-grid">
+            <article class="player-card">
+              <span class="route-label route-direct">Jellyfin 直连</span>
+              <h3>需要 Tailscale 或局域网</h3>
+              <ul class="check-list">
+                <li>观看设备直接请求 Jellyfin。</li>
+                <li>适合局域网或已经安装 Tailscale 的手机、平板和电脑。</li>
+                <li>直连持续卡顿 8 秒或不可用时，会从当前位置自动回退到代理。</li>
+              </ul>
+            </article>
+            <article class="player-card">
+              <span class="route-label route-proxy">AnimateTool 代理</span>
+              <h3>适合 Cloudflare 或公网</h3>
+              <ul class="check-list">
+                <li>观看设备只需要能打开 AnimateTool。</li>
+                <li>适合 Cloudflare Tunnel、反向代理和外部访问。</li>
+                <li>视频流量经过 AnimateTool 主机，主机上行带宽会成为重要因素。</li>
+              </ul>
+            </article>
+          </div>
+          <div class="subsection">
+            <h3>继续观看</h3>
+            <p>播放器会保存当前用户的观看进度，并与 Jellyfin 共享。回到首页的“继续观看”区域后，点击卡片即可从上次位置恢复；也可以选择“从头播放”。只有真正播放结束才会标记为完成。</p>
+          </div>
+        </section>
+
+        <section id="backup" class="doc-section" data-searchable data-keywords="备份 恢复 SQLite config.yaml R2">
+          <div class="section-heading">
+            <p class="eyebrow">09 · BACKUP</p>
+            <h2>备份与恢复</h2>
+            <p>迁移电脑或升级前，建议先在“备份与恢复”中导出备份。</p>
+          </div>
+          <div class="two-column">
+            <div>
+              <h3>建议备份内容</h3>
+              <ul class="check-list">
+                <li>全量备份：数据库、订阅、下载记录、播放历史和系统配置。</li>
+                <li>系统设置备份：只迁移连接配置和应用设置。</li>
+                <li>Cloudflare R2 配置备份：只迁移 R2 连接信息，不覆盖其他设置。</li>
+              </ul>
+            </div>
+            <div class="notice notice-warn">
+              <span class="notice-icon" aria-hidden="true">!</span>
+              <p>备份文件可能包含服务地址、Token 和 API Key。请像对待密码一样保存，不要上传到公开仓库或发到公开聊天中。</p>
+            </div>
+          </div>
+          <div class="subsection">
+            <h3>恢复前检查</h3>
+            <p>确认目标版本支持该备份格式，并先停止正在运行的扫描、整理和下载任务。恢复完成后检查 Jellyfin、qBittorrent 和媒体根目录，再重新扫描受影响的库。</p>
+          </div>
+        </section>
+
+        <section id="security" class="doc-section" data-searchable data-keywords="安全 公网 反向代理 HTTPS localhost IP 白名单 免密">
+          <div class="section-heading">
+            <p class="eyebrow">10 · SECURITY</p>
+            <h2>安全与公网访问</h2>
+            <p>本项目可以自托管，但“能打开网页”不等于“已经安全”。</p>
+          </div>
+          <div class="security-grid">
+            <article><strong>HTTPS</strong><span>公网访问时优先使用 HTTPS，避免登录凭据和 Cookie 明文传输。</span></article>
+            <article><strong>trusted_proxies</strong><span>只填写你控制的反向代理 IP，不要填整个公网或内网范围。</span></article>
+            <article><strong>本机恢复</strong><span>首次初始化和忘记密码恢复只允许 localhost，不能从外部设备完成。</span></article>
+            <article><strong>IP 白名单</strong><span>只添加明确可信的单个 IP 或网段；免密写操作仍受同源保护。</span></article>
+          </div>
+          <div class="code-card wide">
+            <div class="code-card-head"><strong>配置文件位置</strong><button type="button" data-copy="config.yaml">复制</button></div>
+            <pre><code>程序目录/
+├── config.yaml       # 系统设置同步副本，含敏感配置
+├── data/             # SQLite、bootstrap 和运行数据
+└── logs/             # 按小时切分的运行日志</code></pre>
+          </div>
+        </section>
+
+        <section id="logs" class="doc-section" data-searchable data-keywords="日志 健康诊断 导出 debug 开发者">
+          <div class="section-heading">
+            <p class="eyebrow">11 · OBSERVABILITY</p>
+            <h2>日志与健康诊断</h2>
+            <p>遇到问题时，先查看健康页和日志，再把必要的信息反馈给开发者。</p>
+          </div>
+          <div class="log-cards">
+            <article>
+              <span class="log-badge">普通日志</span>
+              <h3>按小时查看运行过程</h3>
+              <p>用于排查订阅检查、扫描、下载、网络请求和播放器代理等常规过程。日志文件会按小时切分，避免单文件无限增长。</p>
+            </article>
+            <article>
+              <span class="log-badge log-badge-alert">健康诊断</span>
+              <h3>只导出需要开发者介入的问题</h3>
+              <p>健康诊断包包含当前异常、运行时状态和脱敏快照。导出下载后会消费掉本次诊断记录，适合直接反馈给开发者。</p>
+            </article>
+          </div>
+          <div class="notice notice-info">
+            <span class="notice-icon" aria-hidden="true">i</span>
+            <p>反馈前请同时写清楚：发生时间、访问设备、使用的线路（直连/代理）、操作步骤、是否经过 Cloudflare/Tailscale，以及是否能稳定复现。</p>
+          </div>
+        </section>
+
+        <section id="troubleshooting" class="doc-section" data-searchable data-keywords="故障排查 Bangumi API 图片 加载 视频 qB Cookie 连接失败">
+          <div class="section-heading">
+            <p class="eyebrow">12 · TROUBLESHOOTING</p>
+            <h2>常见问题</h2>
+            <p>先判断问题发生在“应用主机”“观看设备”还是“外部服务”，通常能更快定位。</p>
+          </div>
+          <details class="faq" open>
+            <summary>Bangumi API 连接失败，但账号密码验证正常</summary>
+            <p>先在运行 AnimateTool 的主机上测试外网连通性。若主机访问 Bangumi 超时，而浏览器能访问，说明是主机网络、DNS、出口防火墙或代理配置问题；不要只看浏览器是否能打开网页。</p>
+          </details>
+          <details class="faq">
+            <summary>手机图片加载失败，电脑却正常</summary>
+            <p>优先检查手机到 AnimateTool 的网络稳定性、图片来源域名和反向代理超时。应用会尝试主机代理和缓存；如果所有来源都失败，请导出健康诊断包。</p>
+          </details>
+          <details class="faq">
+            <summary>视频提示加载失败，应该选哪条线路？</summary>
+            <p>Cloudflare 或普通公网访问优先选“AnimateTool 代理”；手机和 Jellyfin 在同一局域网，或手机已连接 Tailscale 时可以选“Jellyfin 直连”。直连持续卡顿时应用会自动回退代理。</p>
+          </details>
+          <details class="faq">
+            <summary>qBittorrent 登录成功，但 Cookie 数量显示为 0</summary>
+            <p>Cookie 数量不是唯一判断条件。确认 Web UI 地址、端口、登录接口返回正文和实际 API 会话是否可用；如果 qB 使用 IP/localhost 免认证模式，也应以真实 API 请求结果为准。</p>
+          </details>
+          <details class="faq">
+            <summary>扫描出来的数量少于 Jellyfin</summary>
+            <p>确认扫描根目录、文件权限、目录层级和文件扩展名。先让扫描任务完成，再看健康页中的扫描进度和异常；对漏扫或重复条目可以在本地番剧页面重新扫描并整理。</p>
+          </details>
+        </section>
+
+        <section id="source-build" class="doc-section" data-searchable data-keywords="源码 构建 开发 Go Node npm 测试">
+          <div class="section-heading">
+            <p class="eyebrow">13 · DEVELOPERS</p>
+            <h2>从源码构建</h2>
+            <p>开发者需要 Go 1.25+、Node.js 22 和 npm。</p>
+          </div>
+          <div class="code-card wide">
+            <div class="code-card-head"><strong>macOS / Linux</strong><button type="button" data-copy="git clone https://github.com/pokerjest/animateAutoTool.git">复制</button></div>
+            <pre><code>git clone https://github.com/pokerjest/animateAutoTool.git
+cd animateAutoTool
+./scripts/setup.sh
+./scripts/manage.sh start</code></pre>
+          </div>
+          <div class="command-list">
+            <code>make frontend-test</code><span>运行前端测试</span>
+            <code>go test ./...</code><span>运行 Go 测试</span>
+            <code>make lint</code><span>运行 golangci-lint</span>
+            <code>make package v=v0.9.1</code><span>生成发行包</span>
+          </div>
+        </section>
+
+        <footer class="doc-footer">
+          <div>
+            <strong>还没找到答案？</strong>
+            <p>请带上健康诊断包、复现步骤和运行环境，在 GitHub Issues 中提交问题。</p>
+          </div>
+          <a class="button button-dark" href="https://github.com/pokerjest/animateAutoTool/issues/new/choose">提交问题</a>
+        </footer>
+      </main>
+    </div>
+
+    <div class="search-empty" data-search-empty hidden>
+      <strong>没有找到匹配内容</strong>
+      <p>试试搜索“Jellyfin”“订阅”“扫描”“播放器”或“备份”。</p>
+    </div>
+  </body>
+</html>
