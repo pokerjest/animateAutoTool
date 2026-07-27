@@ -8,6 +8,17 @@
 
 ## [Unreleased]
 
+## [0.9.2.1] - 2026-07-27
+
+### Changed
+- 播放线路收敛为 AnimateTool 代理和 Jellyfin 直连，并移到完整播放器视频下方；选择后固定使用当前线路，不再因卡顿或播放错误自动回退。
+- 当前前端屏蔽 NetBird 配置和线路入口，旧配置、签名接口与流媒体路由继续保留用于兼容已有客户端和链接。
+- Jellyfin 连接测试按当前浏览器保存的播放线路执行；媒体模式仅在 Jellyfin 地址与 API Key 均已配置后启用，媒体导航不再显示系统设置。
+- 调整媒体首页、媒体库筛选、播放器控制区和 Jellyfin 设置卡片的桌面与移动端布局。
+
+### Fixed
+- 更新器支持比较四段版本号，确保 `v0.9.2.1` 能被 `v0.9.2` 正确识别为新版本。
+
 ## [0.9.2] - 2026-07-27
 
 ### Added
@@ -294,7 +305,8 @@
 
 ---
 
-[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v0.9.2...HEAD
+[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v0.9.2.1...HEAD
+[0.9.2.1]: https://github.com/pokerjest/animateAutoTool/compare/v0.9.2...v0.9.2.1
 [0.9.2]: https://github.com/pokerjest/animateAutoTool/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/pokerjest/animateAutoTool/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/pokerjest/animateAutoTool/compare/v0.8.9...v0.9.0

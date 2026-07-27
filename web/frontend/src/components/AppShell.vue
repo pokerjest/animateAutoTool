@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Activity, CalendarDays, ChevronRight, Clapperboard, Download, Film, Home, Library, LogOut, Menu, MoonStar, Settings, ShieldCheck, Sparkles, Sun, Tv, X } from '@lucide/vue'
 import { useUIStore } from '../stores/ui'
@@ -23,7 +23,6 @@ const manageGroups = [
 const mediaGroups = [
   { label: '观看', links: [{ to: '/media', label: '媒体首页', icon: Home }, { to: '/media/library/all', label: '媒体库', icon: Film }] },
   { label: '收藏', links: [{ to: '/media?section=continue', label: '继续观看', icon: Download }, { to: '/media?section=favorites', label: '收藏', icon: Library }] },
-  { label: '系统', links: [{ to: '/settings', label: '系统设置', icon: Settings }] },
 ]
 const groups = computed(() => workspace.isMedia ? mediaGroups : manageGroups)
 const bottom = computed(() => groups.value.flatMap(g => g.links).slice(0, 4))
@@ -38,12 +37,24 @@ const themeIcon = computed(() => ui.theme === 'dark' ? Sun : MoonStar)
 const toggleTheme = () => ui.setTheme(document.documentElement.classList.contains('dark') ? 'light' : 'dark')
 async function switchWorkspace(mode: WorkspaceMode) {
   if (mode === workspace.mode) return
+  if (mode === 'media') {
+    const configured = await workspace.ensureMediaConfigured()
+    if (configured === false) {
+      workspace.setMode('manage')
+      ui.toast('请先在系统设置中配置 Jellyfin，再进入媒体模式', 'info')
+      await router.push({ path: '/settings', query: { focus: 'media' } })
+      return
+    }
+  }
   if (mode === 'manage') playback.pauseForWorkspaceSwitch()
   workspace.setMode(mode)
   const target = workspace.routeFor(mode)
   await router.push(target)
 }
 const logout = async () => { try { await actions.run('logout', async () => { if (playback.current) await playback.stop(); await session.logout(); await router.push('/login') }) } catch (error) { ui.toast(error instanceof Error ? error.message : '退出登录失败', 'error') } }
+onMounted(() => {
+  if (session.authenticated && !session.setupPending) void workspace.refreshMediaAvailability()
+})
 </script>
 
 <template>
@@ -78,7 +89,7 @@ const logout = async () => { try { await actions.run('logout', async () => { if 
       <div class="flex items-center gap-2">
         <div class="hidden items-center rounded-xl border border-[var(--line)] bg-[var(--surface-solid)] p-1 sm:flex" role="group" aria-label="工作区模式">
           <button type="button" class="min-h-9 rounded-lg px-3 text-xs font-black transition" :class="workspace.isManage ? 'bg-[var(--brand-soft)] text-[var(--brand-strong)]' : 'muted'" :aria-pressed="workspace.isManage" @click="switchWorkspace('manage')">管理模式</button>
-          <button type="button" class="min-h-9 rounded-lg px-3 text-xs font-black transition" :class="workspace.isMedia ? 'bg-[var(--brand-soft)] text-[var(--brand-strong)]' : 'muted'" :aria-pressed="workspace.isMedia" @click="switchWorkspace('media')">媒体模式</button>
+          <button type="button" class="min-h-9 rounded-lg px-3 text-xs font-black transition disabled:cursor-not-allowed disabled:opacity-50" :class="workspace.isMedia ? 'bg-[var(--brand-soft)] text-[var(--brand-strong)]' : 'muted'" :aria-pressed="workspace.isMedia" :disabled="workspace.mediaConfigured === false" :title="workspace.mediaConfigured === false ? '请先配置 Jellyfin' : undefined" @click="switchWorkspace('media')">媒体模式</button>
         </div>
         <button class="btn btn-secondary relative" type="button" @click="ui.taskOpen = true" aria-label="打开任务中心">
           <Activity :size="18" /><span class="hidden sm:inline">任务中心</span><span v-if="tasks.runningCount" class="badge badge-warning">{{ tasks.runningCount }}</span>
@@ -97,7 +108,7 @@ const logout = async () => { try { await actions.run('logout', async () => { if 
       <button class="absolute inset-0 bg-black/45" type="button" aria-label="关闭导航" @click="ui.mobileMore=false"></button>
       <aside class="glass absolute inset-y-0 right-0 w-[min(88vw,360px)] overflow-y-auto rounded-l-[2rem] p-5">
         <div class="mb-5 flex items-center justify-between"><div><p class="eyebrow">导航</p><h2 class="text-xl font-black">所有功能</h2></div><button class="btn btn-quiet h-11 w-11 p-0" @click="ui.mobileMore=false" aria-label="关闭"><X /></button></div>
-        <div class="mb-4 flex items-center gap-2 rounded-xl border border-[var(--line)] bg-[var(--surface-solid)] p-1"><button class="min-h-10 flex-1 rounded-lg text-xs font-black" :class="workspace.isManage?'bg-[var(--brand-soft)] text-[var(--brand-strong)]':'muted'" @click="switchWorkspace('manage');ui.mobileMore=false">管理模式</button><button class="min-h-10 flex-1 rounded-lg text-xs font-black" :class="workspace.isMedia?'bg-[var(--brand-soft)] text-[var(--brand-strong)]':'muted'" @click="switchWorkspace('media');ui.mobileMore=false">媒体模式</button></div>
+        <div class="mb-4 flex items-center gap-2 rounded-xl border border-[var(--line)] bg-[var(--surface-solid)] p-1"><button class="min-h-10 flex-1 rounded-lg text-xs font-black" :class="workspace.isManage?'bg-[var(--brand-soft)] text-[var(--brand-strong)]':'muted'" @click="switchWorkspace('manage');ui.mobileMore=false">管理模式</button><button class="min-h-10 flex-1 rounded-lg text-xs font-black disabled:cursor-not-allowed disabled:opacity-50" :class="workspace.isMedia?'bg-[var(--brand-soft)] text-[var(--brand-strong)]':'muted'" :disabled="workspace.mediaConfigured === false" @click="switchWorkspace('media');ui.mobileMore=false">媒体模式</button></div>
         <div v-for="group in groups" :key="group.label" class="mb-5"><h3 class="mb-2 px-2 text-xs font-extrabold muted">{{ group.label }}</h3><RouterLink v-for="link in group.links" :key="link.to" :to="link.to" class="mb-1 flex min-h-12 items-center gap-3 rounded-xl px-3 font-bold" :class="isActive(link.to) ? 'bg-[var(--brand-soft)] text-[var(--brand-strong)]' : ''" @click="ui.mobileMore=false"><component :is="link.icon" :size="19" />{{ link.label }}</RouterLink></div>
         <div class="panel-muted mt-6 grid gap-2 p-3">
           <button class="btn btn-secondary w-full justify-start" type="button" @click="toggleTheme" aria-label="切换明暗主题"><component :is="themeIcon" :size="18" />切换明暗主题</button>

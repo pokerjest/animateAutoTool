@@ -1,4 +1,5 @@
 import { defineStore } from 'pinia'
+import { api } from '../api/client'
 
 export type WorkspaceMode = 'manage' | 'media'
 
@@ -20,6 +21,8 @@ export const useWorkspaceStore = defineStore('workspace', {
     mode: readMode() as WorkspaceMode,
     lastManageRoute: readRoute(manageRouteKey, '/'),
     lastMediaRoute: readRoute(mediaRouteKey, '/media'),
+    mediaConfigured: null as boolean | null,
+    mediaStatusLoading: false,
   }),
   getters: {
     isManage: state => state.mode === 'manage',
@@ -44,6 +47,26 @@ export const useWorkspaceStore = defineStore('workspace', {
     },
     routeFor(mode: WorkspaceMode) {
       return mode === 'media' ? this.lastMediaRoute || '/media' : this.lastManageRoute || '/'
+    },
+    async refreshMediaAvailability() {
+      this.mediaStatusLoading = true
+      try {
+        const payload = await api<{ providers?: Array<{ id?: string; configured?: boolean }> }>('/media/providers')
+        const jellyfin = payload.providers?.find(provider => provider.id === 'jellyfin')
+        this.mediaConfigured = Boolean(jellyfin?.configured)
+      } catch {
+        this.mediaConfigured = null
+      } finally {
+        this.mediaStatusLoading = false
+      }
+      return this.mediaConfigured
+    },
+    async ensureMediaConfigured() {
+      if (this.mediaConfigured === null) await this.refreshMediaAvailability()
+      return this.mediaConfigured
+    },
+    invalidateMediaAvailability() {
+      this.mediaConfigured = null
     },
     syncRouteWorkspace(workspace: unknown) {
       if (workspace === 'media' || workspace === 'manage') this.setMode(workspace)

@@ -3,7 +3,7 @@ import { api } from '../api/client'
 import type { ContinueWatchingItem, JellyfinPlayInfo, PlaybackProgressInput } from '../api/types'
 import { useUIStore } from './ui'
 
-export type PlaybackSourceMode = 'proxy' | 'direct' | 'netbird'
+export type PlaybackSourceMode = 'proxy' | 'direct'
 
 export type ActivePlaybackInfo = {
   provider?: string
@@ -40,21 +40,19 @@ interface StartOptions {
 }
 
 let prepareRequest = 0
-let stallTimer: ReturnType<typeof setTimeout> | null = null
 let lastProgressReport = 0
 
 function storedSourceMode(): PlaybackSourceMode {
   const preferred = localStorage.getItem('player.preferredSource')
   const legacy = localStorage.getItem('player.sourceMode')
   const stored = preferred || legacy
-  const result = stored === 'direct' || stored === 'netbird' ? stored : 'proxy'
+  const result: PlaybackSourceMode = stored === 'direct' ? 'direct' : 'proxy'
   if (preferred === null && legacy) localStorage.setItem('player.preferredSource', result)
+  if (preferred === 'netbird' || legacy === 'netbird') {
+    localStorage.setItem('player.preferredSource', 'proxy')
+    localStorage.setItem('player.sourceMode', 'proxy')
+  }
   return result
-}
-
-function clearStallTimer() {
-  if (stallTimer) clearTimeout(stallTimer)
-  stallTimer = null
 }
 
 function selectionKey(selection?: PlaybackSelection | null) {
@@ -91,7 +89,6 @@ export const usePlaybackStore = defineStore('playback', {
     active: state => Boolean(state.current && state.source),
     sourceMode: state => state.activeSource,
     usingDirect: state => Boolean(state.playInfo?.direct_stream_url) && state.activeSource === 'direct' && state.source === state.playInfo?.direct_stream_url,
-    usingNetBird: state => Boolean(state.playInfo?.netbird_stream_url) && state.activeSource === 'netbird' && state.source === state.playInfo?.netbird_stream_url,
     currentIndex: state => state.queue.findIndex(item => selectionKey(item) === selectionKey(state.current)),
     previousSelection(): PlaybackSelection | null {
       return this.currentIndex > 0 ? this.queue[this.currentIndex - 1] : null
@@ -174,13 +171,17 @@ export const usePlaybackStore = defineStore('playback', {
         this.pendingResumeSeconds = Math.max(0, resumeTicks / 10_000_000)
         this.position = this.pendingResumeSeconds
         this.duration = Math.max(0, info.runtime_ticks / 10_000_000)
-        const preferred = this.preferredSource === 'direct' && info.direct_stream_url
-          ? info.direct_stream_url
-          : this.preferredSource === 'netbird' && info.netbird_stream_url
-            ? info.netbird_stream_url
-            : info.stream_url
-        this.activeSource = preferred === info.direct_stream_url ? 'direct' : preferred === info.netbird_stream_url ? 'netbird' : 'proxy'
-        if (!this.source || this.source !== preferred) this.source = preferred
+        const preferred = this.preferredSource === 'direct' ? info.direct_stream_url : (options.streamURL || info.stream_url)
+        this.activeSource = this.preferredSource
+        if (!preferred) {
+          this.error = this.preferredSource === 'direct'
+            ? '当前剧集没有可用的 Jellyfin 直连地址，请在视频下方选择 AnimateTool 代理。'
+            : '当前剧集没有可用的 AnimateTool 代理地址。'
+          this.pendingAutoplay = false
+          this.source = ''
+        } else if (!this.source || this.source !== preferred) {
+          this.source = preferred
+        }
       } catch (error) {
         if (request === prepareRequest) {
           this.error = error instanceof Error ? error.message : '无法准备播放'
@@ -208,19 +209,28 @@ export const usePlaybackStore = defineStore('playback', {
     async switchSource(mode: PlaybackSourceMode, remember = true) {
       const next = mode === 'direct'
         ? this.playInfo?.direct_stream_url
-        : mode === 'netbird'
-          ? this.playInfo?.netbird_stream_url
-          : this.playInfo?.stream_url
-      if (!next || next === this.source) return
+        : this.playInfo?.stream_url
+      if (remember) this.setPreferredSource(mode)
+      this.activeSource = mode
+      if (!next) {
+        this.source = ''
+        this.pendingAutoplay = false
+        this.playing = false
+        this.stalled = false
+        this.error = mode === 'direct'
+          ? '当前剧集没有可用的 Jellyfin 直连地址。'
+          : '当前剧集没有可用的 AnimateTool 代理地址。'
+        return false
+      }
+      if (next === this.source) return true
       this.captureVideoSettings()
       this.pendingResumeSeconds = this.video?.currentTime || this.position
       this.pendingAutoplay = Boolean(this.video && !this.video.paused && !this.video.ended)
       this.switchingSource = true
-      this.activeSource = mode
       this.source = next
       this.error = ''
       this.stalled = false
-      if (remember) this.setPreferredSource(mode)
+      return true
     },
     async report(event: PlaybackProgressInput['event'], beacon = false) {
       if (!this.current) return
@@ -270,7 +280,6 @@ export const usePlaybackStore = defineStore('playback', {
       }
     },
     onPlaying() {
-      clearStallTimer()
       this.playing = true
       this.switchingSource = false
       this.stalled = false
@@ -278,40 +287,23 @@ export const usePlaybackStore = defineStore('playback', {
       void this.report('playing')
     },
     onPause() {
-      clearStallTimer()
       this.playing = false
       if (this.video && !this.video.ended && !this.switchingSource) void this.report('pause')
     },
     onWaiting() {
       this.stalled = true
-      if ((!this.usingDirect && !this.usingNetBird) || this.seeking || this.video?.paused || stallTimer) return
-      stallTimer = setTimeout(() => {
-        stallTimer = null
-        if ((!this.usingDirect && !this.usingNetBird) || !this.stalled || this.seeking || this.video?.paused) return
-        const sourceLabel = this.usingNetBird ? 'NetBird 代理' : 'Jellyfin 直连'
-        void this.switchSource('proxy', false).then(() => {
-          useUIStore().toast(`${sourceLabel}持续卡顿，已从当前位置切换到 AnimateTool 代理`, 'info')
-        })
-      }, 8_000)
     },
     onCanPlay() {
-      clearStallTimer()
       this.stalled = false
       this.preparing = false
     },
     onSeeking(value: boolean) {
       this.seeking = value
-      if (value) clearStallTimer()
-      else void this.report('seeked')
+      if (!value) void this.report('seeked')
     },
     onError() {
-      clearStallTimer()
-      if ((this.usingDirect || this.usingNetBird) && this.playInfo?.stream_url) {
-        const sourceLabel = this.usingNetBird ? 'NetBird 代理' : 'Jellyfin 直连'
-        void this.switchSource('proxy', false).then(() => useUIStore().toast(`${sourceLabel}不可用，已切换到 AnimateTool 代理`, 'info'))
-        return
-      }
-      this.error = '视频流加载失败，请检查 Jellyfin 连接和浏览器编码支持。'
+      const sourceLabel = this.activeSource === 'direct' ? 'Jellyfin 直连' : 'AnimateTool 代理'
+      this.error = `${sourceLabel}视频流加载失败，请检查对应线路和 Jellyfin 连接。`
       this.playing = false
     },
     onEnded() {
@@ -332,7 +324,6 @@ export const usePlaybackStore = defineStore('playback', {
       try { await this.video?.play() } catch { /* native control remains */ }
     },
     async stop() {
-      clearStallTimer()
       await this.report('stop')
       this.switchingSource = true
       this.video?.pause()
@@ -351,7 +342,6 @@ export const usePlaybackStore = defineStore('playback', {
     },
     destroyForUnload() {
       if (this.current) void this.report('destroy', true)
-      clearStallTimer()
     },
   },
 })

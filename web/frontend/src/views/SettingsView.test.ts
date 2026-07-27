@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query'
 import { createPinia } from 'pinia'
+import { createMemoryHistory, createRouter } from 'vue-router'
 import SettingsView from './SettingsView.vue'
 
 function response(data: unknown) {
@@ -18,6 +19,7 @@ describe('SettingsView proxy settings', () => {
     localStorage.clear()
     let proxyTestBody: Record<string, string> | undefined
     let settingsSaveBody: { values: Record<string, string> } | undefined
+    let jellyfinTestURL = ''
     const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input)
       if (path.endsWith('/api/v1/settings') && init?.method === 'PUT') {
@@ -33,15 +35,22 @@ describe('SettingsView proxy settings', () => {
         proxyTestBody = JSON.parse(String(init?.body)) as Record<string, string>
         return response({ connected: true, detail: '代理连接成功', protocol: 'http' })
       }
+      if (path.includes('/api/v1/settings/connections/jellyfin')) {
+        jellyfinTestURL = path
+        return response({ connected: true, detail: '', source: 'proxy', source_label: 'AnimateTool 代理', checked_at: new Date().toISOString() })
+      }
       throw new Error(`unexpected request: ${path}`)
     })
     vi.stubGlobal('fetch', fetchMock)
 
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
+    const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/settings', component: SettingsView }] })
+    await router.push('/settings')
+    await router.isReady()
     const wrapper = mount(SettingsView, {
       attachTo: document.body,
       global: {
-        plugins: [createPinia(), [VueQueryPlugin, { queryClient }]],
+        plugins: [createPinia(), router, [VueQueryPlugin, { queryClient }]],
         stubs: { RouterLink: { template: '<a><slot /></a>' } },
       },
     })
@@ -86,22 +95,19 @@ describe('SettingsView proxy settings', () => {
     expect(alistPanel.text()).not.toContain('Jellyfin')
     expect(wrapper.text()).toContain('浏览器直连地址（可选）')
     expect(wrapper.find('input[placeholder*="example-tailnet.ts.net"]').exists()).toBe(true)
-    expect(wrapper.text()).toContain('AnimateTool NetBird 地址（可选）')
-    expect(wrapper.find('input[placeholder*="100.90.80.70:8306"]').exists()).toBe(true)
     expect(wrapper.find('input[placeholder*="127.0.0.1:8096"]').exists()).toBe(true)
     const playbackHelp = wrapper.get('[data-testid="jellyfin-playback-help"]')
     expect(playbackHelp.text()).toContain('Jellyfin 直连')
-    expect(playbackHelp.text()).toContain('NetBird 代理')
     expect(playbackHelp.text()).toContain('AnimateTool 代理')
-    expect(playbackHelp.text()).toContain('HTTPS')
-    expect(jellyfinPanel.text()).toContain('不向浏览器暴露 Jellyfin API Key')
-    const sourceSettings = wrapper.get('[data-testid="playback-source-settings"]')
-    expect(sourceSettings.text()).toContain('本设备播放线路')
-    expect(sourceSettings.findAll('button')).toHaveLength(3)
-    await sourceSettings.findAll('button')[2].trigger('click')
-    expect(localStorage.getItem('player.preferredSource')).toBe('netbird')
+    expect(wrapper.text()).not.toContain('NetBird')
+    expect(wrapper.find('[data-testid="playback-source-settings"]').exists()).toBe(false)
     expect(wrapper.get('[data-testid="jellyfin-library-selection"]').text()).toContain('媒体模式显示的 Jellyfin 媒体库')
     expect(wrapper.text()).toContain('添加其他媒体提供商')
+    const jellyfinTest = wrapper.findAll('button').find(button => button.text().includes('测试当前线路'))
+    expect(jellyfinTest).toBeDefined()
+    await jellyfinTest!.trigger('click')
+    await flushPromises()
+    expect(jellyfinTestURL).toContain('/settings/connections/jellyfin?source=proxy')
 
     const appearanceTab = wrapper.findAll('button').find(button => button.text() === '外观')
     expect(appearanceTab).toBeDefined()

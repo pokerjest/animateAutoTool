@@ -309,7 +309,8 @@ paths:
   /netbird/jellyfin/stream/{id}:
     get:
       operationId: streamJellyfinEpisodeThroughNetBird
-      description: Proxies a Jellyfin static stream through the configured AnimateTool NetBird address using a short-lived signed token.
+      deprecated: true
+      description: Deprecated compatibility endpoint. The current frontend no longer generates or selects the NetBird playback route.
       security: []
       parameters:
         - { $ref: "#/components/parameters/Id" }
@@ -333,7 +334,8 @@ paths:
   /netbird/media/{provider}/stream/{item_id}:
     get:
       operationId: streamMediaItemThroughNetBird
-      description: Proxies a provider media stream through the configured AnimateTool NetBird address using a short-lived token scoped to the provider, item, user, and expiry.
+      deprecated: true
+      description: Deprecated compatibility endpoint. The current frontend no longer generates or selects the NetBird playback route.
       security: []
       parameters:
         - { $ref: "#/components/parameters/MediaProvider" }
@@ -679,7 +681,18 @@ paths:
   /settings/proxy/test:
     post: { operationId: testProxy, requestBody: { $ref: "#/components/requestBodies/JsonObject" }, responses: { "200": { $ref: "#/components/responses/Success" }, "400": { $ref: "#/components/responses/Error" }, "502": { $ref: "#/components/responses/Error" } } }
   /settings/connections/{provider}:
-    get: { operationId: getConnectionStatus, parameters: [{ name: provider, in: path, required: true, schema: { type: string, enum: [qb, tmdb, anilist, jellyfin, bangumi, mikan] } }], responses: { "200": { $ref: "#/components/responses/Success" } } }
+    get:
+      operationId: getConnectionStatus
+      parameters:
+        - { name: provider, in: path, required: true, schema: { type: string, enum: [qb, tmdb, anilist, jellyfin, bangumi, mikan] } }
+        - name: source
+          in: query
+          required: false
+          description: Jellyfin connection route to test. Only proxy and direct are accepted when provider is jellyfin.
+          schema: { type: string, enum: [proxy, direct] }
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+        "400": { $ref: "#/components/responses/Error" }
   /settings/maintenance:
     get: { operationId: getMaintenance, responses: { "200": { $ref: "#/components/responses/Success" } } }
   /settings/updater/{action}:
@@ -970,7 +983,8 @@ components:
           description: Browser-reachable Jellyfin stream URL; empty when direct playback is not configured.
         netbird_stream_url:
           type: string
-          description: Short-lived signed AnimateTool proxy URL reachable through NetBird; empty when the NetBird proxy address is not configured.
+          deprecated: true
+          description: Deprecated compatibility field for older clients; the current frontend only offers AnimateTool proxy and Jellyfin direct playback.
         resume_ticks: { type: integer, format: int64, minimum: 0 }
         runtime_ticks: { type: integer, format: int64, minimum: 0 }
         played: { type: boolean }
@@ -1091,7 +1105,7 @@ components:
         item_id: { type: string }
         stream_url: { type: string }
         direct_stream_url: { type: string }
-        netbird_stream_url: { type: string }
+        netbird_stream_url: { type: string, deprecated: true, description: Deprecated compatibility field; not selected by the current frontend. }
         resume_ticks: { type: integer, format: int64, minimum: 0 }
         runtime_ticks: { type: integer, format: int64, minimum: 0 }
         played: { type: boolean }

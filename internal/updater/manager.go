@@ -31,7 +31,7 @@ const (
 	httpTimeout      = 60 * time.Second
 	downloadTimeout  = 20 * time.Minute
 	restartDelay     = 1200 * time.Millisecond
-	maxVersionParts  = 3
+	maxVersionParts  = 4
 	maxBackoffDelay  = 30 * time.Minute
 	defaultUserAgent = "AnimateAutoTool-Updater/1.0"
 	resultError      = "error"

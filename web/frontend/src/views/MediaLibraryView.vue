@@ -73,19 +73,19 @@ async function loadMore() {
     <PageHeader eyebrow="LIBRARY" title="媒体库" description="浏览 Jellyfin 中已选择的媒体库，支持标题搜索和基础筛选。">
       <RouterLink class="btn btn-secondary" to="/media">媒体首页</RouterLink>
     </PageHeader>
-    <section class="panel grid gap-3 p-4 lg:grid-cols-[220px_1fr_220px_auto]">
+    <section class="panel grid items-end gap-3 p-4 sm:grid-cols-2 lg:grid-cols-[220px_minmax(0,1fr)_220px_auto]">
       <select class="field" :value="libraryID" aria-label="选择媒体库" @change="selectLibrary(($event.target as HTMLSelectElement).value)">
         <option value="all">全部媒体库</option>
         <option v-for="library in libraries.data.value?.items.filter(item => item.selected)" :key="library.id" :value="library.id">{{ library.name }}</option>
       </select>
-      <form class="search-field" @submit.prevent="submitSearch"><Search :size="18" /><input v-model="search" class="field field-leading-icon" placeholder="搜索标题" aria-label="搜索媒体标题" /></form>
+      <form class="search-field min-w-0" @submit.prevent="submitSearch"><Search :size="18" /><input v-model="search" class="field field-leading-icon min-w-0" placeholder="搜索标题" aria-label="搜索媒体标题" /></form>
       <select class="field" :value="sort" aria-label="媒体排序" @change="selectSort(($event.target as HTMLSelectElement).value)">
         <option value="name">按标题</option>
         <option value="recent">最近加入</option>
         <option value="year">发行年份</option>
         <option value="rating">社区评分</option>
       </select>
-      <button class="btn btn-primary" type="button" @click="submitSearch"><SlidersHorizontal :size="16" />筛选</button>
+      <button class="btn btn-primary w-full justify-center lg:w-auto" type="button" @click="submitSearch"><SlidersHorizontal :size="16" />筛选</button>
     </section>
     <StateBlock v-if="query.isLoading.value" state="loading" title="正在读取媒体库" />
     <StateBlock v-else-if="query.isError.value" state="error" title="媒体库读取失败" :retrying="query.isFetching.value" @retry="query.refetch()" />

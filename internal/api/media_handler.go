@@ -134,17 +134,24 @@ func configuredLibrarySet() map[string]bool {
 }
 
 func V1MediaProvidersHandler(c *gin.Context) {
-	client, err := resolveMediaProvider("jellyfin")
-	connected := err == nil && client != nil
+	configured := jellyfinConfigured()
+	var client mediaprovider.MediaProvider
+	var err error
+	if configured {
+		client, err = resolveMediaProvider("jellyfin")
+	}
+	connected := configured && err == nil && client != nil
 	detail := ""
 	capabilities := mediaprovider.ProviderCapabilities{Libraries: true, Search: true, Episodes: true, Progress: true, Favorites: true, Images: true}
-	if err != nil {
+	if !configured {
+		detail = "Jellyfin 地址或 API Key 尚未配置"
+	} else if err != nil {
 		detail = err.Error()
 	} else {
 		capabilities = client.Capabilities()
 	}
 	v1Data(c, http.StatusOK, gin.H{"providers": []gin.H{{
-		"id": "jellyfin", "name": "Jellyfin", "configured": connected || configValue(model.ConfigKeyJellyfinUrl) != "",
+		"id": "jellyfin", "name": "Jellyfin", "configured": configured,
 		"connected": connected, "detail": detail,
 		"capabilities": capabilities,
 	}}})
