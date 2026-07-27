@@ -6,8 +6,8 @@ import (
 )
 
 const (
-	sqliteBusyMaxAttempts = 4
-	sqliteBusyBaseDelay   = 50 * time.Millisecond
+	sqliteBusyMaxAttempts = 8
+	sqliteBusyBaseDelay   = 100 * time.Millisecond
 )
 
 func retrySQLiteBusy(operation func() error) error {

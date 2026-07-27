@@ -220,7 +220,7 @@ func RefreshLocalAnimeMetadataHandler(c *gin.Context) {
 			DirectoryPath: anime.Path,
 			LocalAnimeID:  &anime.ID,
 			Message:       err.Error(),
-			Hint:          "检查元数据源配置，或在详情里使用修正匹配手动关联番剧。",
+			Hint:          service.MetadataIssueHint(err),
 		})
 	} else {
 		_ = service.ResolveLibraryIssue("scrape:" + strconv.FormatUint(uint64(anime.ID), 10))

@@ -16,6 +16,7 @@ type HealthReport struct {
 	AutoDisabledOnDone       int64           `json:"auto_disabled_on_done"`
 	DownloadCompleted        int64           `json:"download_completed"`
 	DownloadDownloading      int64           `json:"download_downloading"`
+	DownloadStale            int64           `json:"download_stale"`
 	DownloadFailed           int64           `json:"download_failed"`
 	DownloadArchived         int64           `json:"download_archived"`
 	LocalAnimeCount          int64           `json:"local_anime_count"`
@@ -60,6 +61,9 @@ func buildHealthReport() HealthReport {
 	report.AutoDisabledOnDone, _ = subStore.CountAutoDisabledOnDone()
 	report.DownloadCompleted, _ = logStore.CountByStatus("completed")
 	report.DownloadDownloading, _ = logStore.CountByStatus("downloading")
+	db.DB.Model(&model.DownloadLog{}).
+		Where("status = ? AND updated_at < ?", "downloading", time.Now().Add(-24*time.Hour)).
+		Count(&report.DownloadStale)
 	report.DownloadFailed, _ = logStore.CountByStatus("failed")
 	report.DownloadArchived, _ = logStore.CountByStatus("archived")
 	report.LocalAnimeCount, _ = laStore.CountAnimes()
@@ -89,7 +93,7 @@ func buildHealthReport() HealthReport {
 
 func buildRecommendations(report HealthReport) []string {
 	recommendations := make([]string, 0, 5)
-	if report.DownloadDownloading > 0 || report.DownloadFailed > 0 {
+	if report.DownloadFailed > 0 || report.DownloadStale > 0 {
 		recommendations = append(recommendations, "打开首页任务总览，执行一次下载状态修复。")
 	}
 	if report.StaleSubscriptions72H > 0 {
@@ -109,8 +113,10 @@ func buildRecommendations(report HealthReport) []string {
 
 func buildHealthSummary(report HealthReport) string {
 	switch {
-	case report.DownloadDownloading > 0 || report.DownloadFailed > 0:
+	case report.DownloadFailed > 0 || report.DownloadStale > 0:
 		return "下载链路仍有阻塞或失败记录，建议先做一次修复。"
+	case report.DownloadDownloading > 0:
+		return "当前有下载任务进行中，下载链路正在正常工作。"
 	case report.StaleSubscriptions72H > 0:
 		return "存在长时间无进展的订阅，系统需要补一次检查。"
 	case report.SubscriptionsPendingSync > 0:
@@ -122,7 +128,7 @@ func buildHealthSummary(report HealthReport) string {
 
 func determineHealthTone(report HealthReport) string {
 	switch {
-	case report.DownloadDownloading > 0 || report.DownloadFailed > 0:
+	case report.DownloadFailed > 0 || report.DownloadStale > 0:
 		return "rose"
 	case report.StaleSubscriptions72H > 0 || report.SubscriptionsPendingSync > 0 || report.OpenLibraryIssues > 0:
 		return "amber"

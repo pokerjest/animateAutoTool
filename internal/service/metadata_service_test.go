@@ -1,12 +1,50 @@
 package service
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/pokerjest/animateAutoTool/internal/bangumi"
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 )
+
+func TestMetadataIssueHintMatchesFailureCause(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{
+			name: "sqlite busy",
+			err:  errors.New("save enriched anime: database is locked (5) (SQLITE_BUSY)"),
+			want: "数据库正在处理其他任务，系统会自动重试；若仍失败，请等待扫描或整理结束后再次刷新元数据。",
+		},
+		{
+			name: "network timeout",
+			err:  errors.New("context deadline exceeded while awaiting headers"),
+			want: "元数据服务连接不稳定，请检查网络或代理设置后再次刷新。",
+		},
+		{
+			name: "network eof",
+			err:  errors.New("RSS parse failed: EOF"),
+			want: "元数据服务连接不稳定，请检查网络或代理设置后再次刷新。",
+		},
+		{
+			name: "metadata mismatch",
+			err:  errors.New("no matching metadata result"),
+			want: "检查元数据源配置，或在详情里使用修正匹配手动关联番剧。",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := MetadataIssueHint(test.err); got != test.want {
+				t.Fatalf("MetadataIssueHint() = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
 
 func TestSetActiveFieldsPrefersMatchingTMDBOverMismatchedBangumi(t *testing.T) {
 	svc := &MetadataService{}

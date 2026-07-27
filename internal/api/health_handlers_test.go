@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -113,4 +114,20 @@ func TestHealthPageAndReportHandlers(t *testing.T) {
 	assert.Equal(t, int64(1), report.DownloadFailed)
 	assert.Equal(t, "rose", report.HealthTone)
 	assert.NotEmpty(t, report.Recommendations)
+}
+
+func TestHealthReportDoesNotTreatFreshDownloadsAsBlocked(t *testing.T) {
+	report := HealthReport{DownloadDownloading: 3}
+
+	if got := buildHealthSummary(report); got != "当前有下载任务进行中，下载链路正在正常工作。" {
+		t.Fatalf("buildHealthSummary = %q", got)
+	}
+	if got := determineHealthTone(report); got != "emerald" {
+		t.Fatalf("determineHealthTone = %q, want emerald", got)
+	}
+	for _, recommendation := range buildRecommendations(report) {
+		if strings.Contains(recommendation, "下载状态修复") {
+			t.Fatalf("fresh downloads should not request repair: %#v", recommendation)
+		}
+	}
 }

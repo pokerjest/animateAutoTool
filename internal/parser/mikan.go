@@ -54,7 +54,19 @@ var mikanBangumiMappings = struct {
 var mikanBangumiSubjectLinkRegex = regexp.MustCompile(`(?i)https?://(?:bgm\.tv|bangumi\.tv|chii\.in)/subject/(\d+)`)
 
 func NewMikanParser() *MikanParser {
-	client := httpx.NewRestyClient(10*time.Second, "", nil)
+	client := httpx.NewRestyClient(10*time.Second, "", nil).
+		SetRetryCount(2).
+		SetRetryWaitTime(250 * time.Millisecond).
+		SetRetryMaxWaitTime(time.Second).
+		AddRetryCondition(func(response *resty.Response, err error) bool {
+			if err != nil {
+				return true
+			}
+			if response == nil {
+				return false
+			}
+			return response.StatusCode() == http.StatusTooManyRequests || response.StatusCode() >= http.StatusInternalServerError
+		})
 
 	return &MikanParser{
 		client: client,

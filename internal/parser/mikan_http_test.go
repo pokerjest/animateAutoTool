@@ -75,6 +75,37 @@ func TestMikanParseRSS(t *testing.T) {
 	}
 }
 
+func TestMikanParseRSSRetriesTransientServerErrors(t *testing.T) {
+	t.Parallel()
+
+	var attempts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if attempts.Add(1) < 3 {
+			http.Error(w, "temporary failure", http.StatusBadGateway)
+			return
+		}
+		w.Header().Set("Content-Type", "application/xml")
+		_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+			<rss xmlns="https://mikanani.me/0.1/">
+				<channel>
+					<item>
+						<title>[ANi] 重试成功 - 01 [1080P]</title>
+						<enclosure url="https://example.com/retry.torrent"></enclosure>
+					</item>
+				</channel>
+			</rss>`))
+	}))
+	defer server.Close()
+
+	episodes, err := NewMikanParser().Parse(server.URL)
+	if err != nil {
+		t.Fatalf("parse rss after transient failures: %v", err)
+	}
+	if len(episodes) != 1 || attempts.Load() != 3 {
+		t.Fatalf("expected one episode after three attempts, episodes=%d attempts=%d", len(episodes), attempts.Load())
+	}
+}
+
 func TestMikanSearchAndSubgroups(t *testing.T) {
 	t.Parallel()
 

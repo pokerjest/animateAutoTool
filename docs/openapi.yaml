@@ -425,7 +425,7 @@ paths:
   /backup/r2/test:
     post: { operationId: testR2, requestBody: { $ref: "#/components/requestBodies/JsonObject" }, responses: { "200": { $ref: "#/components/responses/Success" } } }
   /health:
-    get: { operationId: getHealth, responses: { "200": { $ref: "#/components/responses/Success" } } }
+    get: { operationId: getHealth, responses: { "200": { $ref: "#/components/responses/HealthReport" } } }
   /runtime:
     get: { operationId: getRuntime, responses: { "200": { $ref: "#/components/responses/Success" } } }
   /audit-logs:
@@ -460,6 +460,16 @@ components:
     JsonArray: { required: true, content: { application/json: { schema: { type: array, items: { type: object, additionalProperties: true } } } } }
   responses:
     Success: { description: Successful response, content: { application/json: { schema: { $ref: "#/components/schemas/Envelope" } } } }
+    HealthReport:
+      description: Current health counters and actionable summary
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/Envelope"
+              - type: object
+                properties:
+                  data: { $ref: "#/components/schemas/HealthReport" }
     Session:
       description: Current browser session and local-only capability state
       content:
@@ -486,6 +496,52 @@ components:
                     items: { $ref: "#/components/schemas/MetadataSearchResult" }
     Error: { description: Error response, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
   schemas:
+    HealthReport:
+      type: object
+      required:
+        - generated_at
+        - configs
+        - subscription_total
+        - subscription_active
+        - auto_disabled_on_done
+        - download_completed
+        - download_downloading
+        - download_stale
+        - download_failed
+        - download_archived
+        - local_anime_count
+        - local_episode_count
+        - open_library_issues
+        - jellyfin_series_count
+        - jellyfin_episode_count
+        - subscriptions_playable
+        - subscriptions_pending_sync
+        - stale_subscriptions_72h
+        - health_tone
+        - summary
+        - recommendations
+      properties:
+        generated_at: { type: string, format: date-time }
+        configs: { type: object, additionalProperties: { type: boolean } }
+        subscription_total: { type: integer, format: int64, minimum: 0 }
+        subscription_active: { type: integer, format: int64, minimum: 0 }
+        auto_disabled_on_done: { type: integer, format: int64, minimum: 0 }
+        download_completed: { type: integer, format: int64, minimum: 0 }
+        download_downloading: { type: integer, format: int64, minimum: 0 }
+        download_stale: { type: integer, format: int64, minimum: 0 }
+        download_failed: { type: integer, format: int64, minimum: 0 }
+        download_archived: { type: integer, format: int64, minimum: 0 }
+        local_anime_count: { type: integer, format: int64, minimum: 0 }
+        local_episode_count: { type: integer, format: int64, minimum: 0 }
+        open_library_issues: { type: integer, format: int64, minimum: 0 }
+        jellyfin_series_count: { type: integer, format: int64, minimum: 0 }
+        jellyfin_episode_count: { type: integer, format: int64, minimum: 0 }
+        subscriptions_playable: { type: integer, format: int64, minimum: 0 }
+        subscriptions_pending_sync: { type: integer, format: int64, minimum: 0 }
+        stale_subscriptions_72h: { type: integer, format: int64, minimum: 0 }
+        health_tone: { type: string, enum: [emerald, amber, rose] }
+        summary: { type: string }
+        recommendations: { type: array, items: { type: string } }
     SessionState:
       type: object
       required: [authenticated, setup_pending, local_setup_available, local_recovery_available, version, recovery_local_only]

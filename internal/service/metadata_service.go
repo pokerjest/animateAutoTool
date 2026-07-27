@@ -24,6 +24,26 @@ func NewMetadataService() *MetadataService {
 	return &MetadataService{}
 }
 
+func MetadataIssueHint(err error) string {
+	if err == nil {
+		return ""
+	}
+	message := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(message, "sqlite_busy"),
+		strings.Contains(message, "database is locked"),
+		strings.Contains(message, "database table is locked"):
+		return "数据库正在处理其他任务，系统会自动重试；若仍失败，请等待扫描或整理结束后再次刷新元数据。"
+	case strings.Contains(message, "timeout"),
+		strings.Contains(message, "deadline exceeded"),
+		strings.Contains(message, "connection reset"),
+		strings.Contains(message, "eof"):
+		return "元数据服务连接不稳定，请检查网络或代理设置后再次刷新。"
+	default:
+		return "检查元数据源配置，或在详情里使用修正匹配手动关联番剧。"
+	}
+}
+
 // FetchMetadata performs parallel search across all sources and returns consolidated metadata
 func (s *MetadataService) FetchMetadata(query string) (*model.AnimeMetadata, error) {
 	m := &model.AnimeMetadata{}

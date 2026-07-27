@@ -491,7 +491,7 @@ func updateLocalMetadataIssue(anime *model.LocalAnime, refreshErr error) {
 		DirectoryPath: anime.Path,
 		LocalAnimeID:  &anime.ID,
 		Message:       refreshErr.Error(),
-		Hint:          "元数据刷新会自动重试临时数据库锁；若仍失败，请等待扫描结束后再次刷新。",
+		Hint:          service.MetadataIssueHint(refreshErr),
 	})
 }
 

@@ -203,10 +203,59 @@ func buildHealthDiagnosticAttachments(now time.Time) ([]applogging.ArchiveAttach
 		if marshalErr != nil {
 			return nil, fmt.Errorf("marshal %s: %w", item.name, marshalErr)
 		}
-		data = []byte(applogging.RedactHealthLogLine(string(data)))
-		attachments = append(attachments, applogging.ArchiveAttachment{Name: item.name, Data: append(data, '\n')})
+		redacted, redactErr := redactHealthJSON(data)
+		if redactErr != nil {
+			return nil, fmt.Errorf("redact %s: %w", item.name, redactErr)
+		}
+		attachments = append(attachments, applogging.ArchiveAttachment{Name: item.name, Data: append(redacted, '\n')})
 	}
 	return attachments, nil
+}
+
+// redactHealthJSON redacts string values after decoding the snapshot. Applying
+// the line-oriented log redactor to JSON can replace a boolean or number with
+// the bare token "[REDACTED]", which makes the exported file invalid JSON.
+func redactHealthJSON(data []byte) ([]byte, error) {
+	var value any
+	if err := json.Unmarshal(data, &value); err != nil {
+		return nil, err
+	}
+	redactHealthJSONValue(&value, "")
+	return json.MarshalIndent(value, "", "  ")
+}
+
+func redactHealthJSONValue(value *any, key string) {
+	if value == nil || *value == nil {
+		return
+	}
+	switch current := (*value).(type) {
+	case string:
+		if isHealthJSONSecretKey(key) {
+			*value = "[REDACTED]"
+		} else {
+			*value = applogging.RedactHealthLogLine(current)
+		}
+	case []any:
+		for index := range current {
+			redactHealthJSONValue(&current[index], key)
+		}
+	case map[string]any:
+		for childKey := range current {
+			child := current[childKey]
+			redactHealthJSONValue(&child, childKey)
+			current[childKey] = child
+		}
+	}
+}
+
+func isHealthJSONSecretKey(key string) bool {
+	normalized := strings.NewReplacer("_", "", "-", "", " ", "").Replace(strings.ToLower(strings.TrimSpace(key)))
+	for _, suffix := range []string{"apikey", "accesstoken", "refreshtoken", "token", "password", "passwd", "secret", "authorization"} {
+		if normalized == suffix || strings.HasSuffix(normalized, suffix) {
+			return true
+		}
+	}
+	return false
 }
 
 func buildCurrentProblemsText(report HealthReport, issues []healthLibraryIssue, tasks []taskstate.Task, subscriptionFailures []healthSubscriptionFailure, downloadFailures []healthDownloadFailure) string {
@@ -263,6 +312,12 @@ func healthSubscriptionFailures() ([]healthSubscriptionFailure, error) {
 	err := db.DB.Table("subscription_run_logs").
 		Select("subscription_run_logs.id, subscription_run_logs.subscription_id, COALESCE(subscriptions.title, '') AS subscription_title, subscription_run_logs.checked_at, subscription_run_logs.trigger_source, subscription_run_logs.status, subscription_run_logs.summary, subscription_run_logs.error, subscription_run_logs.total_episodes, subscription_run_logs.filtered_count, subscription_run_logs.duplicate_count, subscription_run_logs.new_downloads, subscription_run_logs.failed_downloads, subscription_run_logs.last_downloaded_title").
 		Joins("LEFT JOIN subscriptions ON subscriptions.id = subscription_run_logs.subscription_id").
+		Where(`NOT EXISTS (
+			SELECT 1 FROM subscription_run_logs AS newer
+			WHERE newer.subscription_id = subscription_run_logs.subscription_id
+			  AND (newer.checked_at > subscription_run_logs.checked_at
+			       OR (newer.checked_at = subscription_run_logs.checked_at AND newer.id > subscription_run_logs.id))
+		)`).
 		Where("subscription_run_logs.error <> '' OR subscription_run_logs.failed_downloads > 0 OR subscription_run_logs.status = ?", service.SubscriptionRunStatusError).
 		Order("subscription_run_logs.checked_at DESC").Limit(100).Scan(&result).Error
 	return result, err

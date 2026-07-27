@@ -8,6 +8,21 @@
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-07-27
+
+### Added
+- 健康诊断包新增结构化快照脱敏，保证 JSON 合法并保留当前异常、运行时和数据库状态。
+- Mikan RSS 临时网络错误自动重试，降低 EOF、超时、429 和 5xx 导致的订阅误报。
+
+### Changed
+- 健康报告只将失败或超过 24 小时未更新的下载标记为异常，正常下载中的任务不再显示为阻塞。
+- 订阅失败诊断只保留每个订阅最新一次失败状态，避免历史错误重复堆积。
+- SQLite 写入冲突扩大退避重试，并根据数据库锁、网络错误和元数据匹配错误显示对应处理建议。
+- 同步 OpenAPI 健康报告契约和前端生成类型。
+
+### Fixed
+- 修复健康诊断导出中 Token 状态被替换为裸 `[REDACTED]` 导致压缩包内 JSON 无法解析的问题。
+
 ## [0.8.9] - 2026-07-27
 
 ### Added
@@ -257,7 +272,8 @@
 
 ---
 
-[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v0.8.9...HEAD
+[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/pokerjest/animateAutoTool/compare/v0.8.9...v0.9.0
 [0.8.9]: https://github.com/pokerjest/animateAutoTool/compare/v0.8.8...v0.8.9
 [0.8.8]: https://github.com/pokerjest/animateAutoTool/compare/v0.8.7...v0.8.8
 [0.8.7]: https://github.com/pokerjest/animateAutoTool/compare/v0.8.6...v0.8.7

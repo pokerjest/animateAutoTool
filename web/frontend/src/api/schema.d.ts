@@ -1376,6 +1376,49 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        HealthReport: {
+            /** Format: date-time */
+            generated_at: string;
+            configs: {
+                [key: string]: boolean;
+            };
+            /** Format: int64 */
+            subscription_total: number;
+            /** Format: int64 */
+            subscription_active: number;
+            /** Format: int64 */
+            auto_disabled_on_done: number;
+            /** Format: int64 */
+            download_completed: number;
+            /** Format: int64 */
+            download_downloading: number;
+            /** Format: int64 */
+            download_stale: number;
+            /** Format: int64 */
+            download_failed: number;
+            /** Format: int64 */
+            download_archived: number;
+            /** Format: int64 */
+            local_anime_count: number;
+            /** Format: int64 */
+            local_episode_count: number;
+            /** Format: int64 */
+            open_library_issues: number;
+            /** Format: int64 */
+            jellyfin_series_count: number;
+            /** Format: int64 */
+            jellyfin_episode_count: number;
+            /** Format: int64 */
+            subscriptions_playable: number;
+            /** Format: int64 */
+            subscriptions_pending_sync: number;
+            /** Format: int64 */
+            stale_subscriptions_72h: number;
+            /** @enum {string} */
+            health_tone: "emerald" | "amber" | "rose";
+            summary: string;
+            recommendations: string[];
+        };
         SessionState: {
             authenticated: boolean;
             setup_pending: boolean;
@@ -1655,6 +1698,17 @@ export interface components {
             };
             content: {
                 "application/json": components["schemas"]["Envelope"];
+            };
+        };
+        /** @description Current health counters and actionable summary */
+        HealthReport: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Envelope"] & {
+                    data?: components["schemas"]["HealthReport"];
+                };
             };
         };
         /** @description Current browser session and local-only capability state */
@@ -3010,7 +3064,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            200: components["responses"]["Success"];
+            200: components["responses"]["HealthReport"];
         };
     };
     getRuntime: {

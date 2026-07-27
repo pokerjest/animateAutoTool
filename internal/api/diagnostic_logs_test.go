@@ -3,6 +3,7 @@ package api
 import (
 	"archive/zip"
 	"bytes"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/pokerjest/animateAutoTool/internal/config"
 	"github.com/pokerjest/animateAutoTool/internal/db"
@@ -132,9 +134,11 @@ func TestExportHealthDiagnosticsIncludesIssueLogsAndSnapshots(t *testing.T) {
 	}
 	assert.Contains(t, zipFileContent(t, reader, "current-problems.txt"), "测试番剧")
 	issueSnapshot := zipFileContent(t, reader, "open-library-issues.json")
+	assert.True(t, json.Valid([]byte(issueSnapshot)), "issue snapshot must remain valid JSON")
 	assert.Contains(t, issueSnapshot, "测试番剧")
 	assert.NotContains(t, issueSnapshot, "super-secret")
 	assert.Contains(t, issueSnapshot, "[REDACTED]")
+	assert.True(t, json.Valid([]byte(zipFileContent(t, reader, "health-report.json"))), "health report must remain valid JSON")
 	_, statErr := os.Stat(filepath.Join(logDir, "health-20260727-12.log"))
 	assert.True(t, os.IsNotExist(statErr), "exported health log should be consumed: %v", statErr)
 
@@ -150,6 +154,26 @@ func TestExportHealthDiagnosticsIncludesIssueLogsAndSnapshots(t *testing.T) {
 	secondReader, err := zip.NewReader(bytes.NewReader(second.Body.Bytes()), int64(second.Body.Len()))
 	require.NoError(t, err)
 	assert.Contains(t, zipFileContent(t, secondReader, "current-problems.txt"), "测试番剧")
+}
+
+func TestHealthSubscriptionFailuresOnlyIncludesLatestFailedRun(t *testing.T) {
+	resetAuthFixtures(t)
+	sub := model.Subscription{Title: "诊断订阅", RSSUrl: "https://example.test/rss", IsActive: true}
+	require.NoError(t, db.DB.Create(&sub).Error)
+	now := time.Now()
+	require.NoError(t, db.DB.Create(&model.SubscriptionRunLog{
+		SubscriptionID: sub.ID, CheckedAt: now.Add(-time.Minute), Status: service.SubscriptionRunStatusError,
+		Summary: "RSS 解析失败", Error: "old failure",
+	}).Error)
+	require.NoError(t, db.DB.Create(&model.SubscriptionRunLog{
+		SubscriptionID: sub.ID, CheckedAt: now, Status: service.SubscriptionRunStatusIdle,
+		Summary: "RSS 当前没有可用剧集",
+	}).Error)
+	t.Cleanup(func() { _ = db.DB.Unscoped().Delete(&sub).Error })
+
+	failures, err := healthSubscriptionFailures()
+	require.NoError(t, err)
+	assert.Empty(t, failures, "a recovered subscription should not be exported as a current failure")
 }
 
 func TestExportHealthDiagnosticsSucceedsWithoutIssueLogFiles(t *testing.T) {
@@ -169,6 +193,31 @@ func TestExportHealthDiagnosticsSucceedsWithoutIssueLogFiles(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	assert.Equal(t, "0", w.Header().Get("X-Health-Event-File-Count"))
 	assert.NotEqual(t, "0", w.Header().Get("X-Diagnostic-Snapshot-Count"))
+}
+
+func TestRedactHealthJSONPreservesJSONTypes(t *testing.T) {
+	input := []byte(`{
+		"configs": {
+			"AniList Token": "secret-token",
+			"Jellyfin URL": true,
+			"retry_count": 3
+		},
+		"items": ["password=top-secret", false]
+	}`)
+
+	redacted, err := redactHealthJSON(input)
+	require.NoError(t, err)
+	require.True(t, json.Valid(redacted))
+
+	var snapshot map[string]any
+	require.NoError(t, json.Unmarshal(redacted, &snapshot))
+	configs, ok := snapshot["configs"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "[REDACTED]", configs["AniList Token"])
+	assert.Equal(t, true, configs["Jellyfin URL"])
+	assert.Equal(t, float64(3), configs["retry_count"])
+	assert.Equal(t, "password=[REDACTED]", snapshot["items"].([]any)[0])
+	assert.Equal(t, false, snapshot["items"].([]any)[1])
 }
 
 func removeTestHourlyLogs(t *testing.T, dir string) {
