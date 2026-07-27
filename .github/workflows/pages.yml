@@ -8,6 +8,7 @@ on:
       - "docs-link-definitions.md"
       - "mkdocs.yml"
       - "requirements-docs.txt"
+      - ".lychee.toml"
       - ".github/workflows/pages.yml"
       - "README.md"
   pull_request:
@@ -17,6 +18,7 @@ on:
       - "docs-link-definitions.md"
       - "mkdocs.yml"
       - "requirements-docs.txt"
+      - ".lychee.toml"
       - ".github/workflows/pages.yml"
       - "README.md"
   workflow_dispatch:
