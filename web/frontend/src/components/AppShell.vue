@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Activity, CalendarDays, ChevronRight, Clapperboard, Download, Film, Home, Library, LogOut, Menu, MoonStar, Settings, ShieldCheck, Sparkles, Sun, Tv, X } from '@lucide/vue'
+import { Activity, ArchiveRestore, Bot, CalendarDays, ChevronRight, Clapperboard, Download, Film, HeartPulse, Home, Library, LogOut, Menu, MoonStar, Settings, ShieldCheck, Sparkles, Sun, Tv, X } from '@lucide/vue'
 import { useUIStore } from '../stores/ui'
 import { useTaskStore } from '../stores/tasks'
 import { useSessionStore } from '../stores/session'
@@ -16,16 +16,18 @@ import PlaybackHost from './PlaybackHost.vue'
 const route = useRoute(); const router = useRouter(); const ui = useUIStore(); const tasks = useTaskStore(); const session = useSessionStore(); const playback = usePlaybackStore(); const workspace = useWorkspaceStore(); const actions = useAsyncActions()
 const manageGroups = [
   { label: '概览', links: [{ to: '/', label: '今日概览', icon: Home }, { to: '/calendar', label: '追番日历', icon: CalendarDays }] },
-  { label: '追番', links: [{ to: '/subscriptions', label: '订阅管理', icon: Tv }] },
+  { label: '追番', links: [{ to: '/subscriptions', label: '订阅管理', icon: Tv }, { to: '/assistant', label: 'AI 助手', icon: Bot }] },
   { label: '媒体', links: [{ to: '/library', label: '番剧图鉴', icon: Library }, { to: '/local-anime', label: '本地番剧', icon: Clapperboard }] },
-  { label: '系统', links: [{ to: '/settings', label: '系统设置', icon: Settings }] },
+  { label: '系统', links: [{ to: '/health', label: '系统健康', icon: HeartPulse }, { to: '/backup', label: '备份恢复', icon: ArchiveRestore }, { to: '/settings', label: '系统设置', icon: Settings }] },
 ]
 const mediaGroups = [
   { label: '观看', links: [{ to: '/media', label: '媒体首页', icon: Home }, { to: '/media/library/all', label: '媒体库', icon: Film }] },
   { label: '收藏', links: [{ to: '/media?section=continue', label: '继续观看', icon: Download }, { to: '/media?section=favorites', label: '收藏', icon: Library }] },
 ]
 const groups = computed(() => workspace.isMedia ? mediaGroups : manageGroups)
-const bottom = computed(() => groups.value.flatMap(g => g.links).slice(0, 4))
+const bottom = computed(() => workspace.isMedia
+  ? mediaGroups.flatMap(g => g.links)
+  : manageGroups.flatMap(g => g.links).filter(link => ['/', '/calendar', '/subscriptions', '/library'].includes(link.to)))
 const isActive = (to: string) => {
   const [path] = to.split('?')
   if (to.includes('?')) return route.fullPath.startsWith(to)
