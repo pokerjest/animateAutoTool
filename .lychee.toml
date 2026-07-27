@@ -7,6 +7,7 @@ accept = [200, 206, 301, 302, 303, 307, 308, 401, 403, 429]
 exclude = [
   "^http://127\\.0\\.0\\.1",
   "^http://localhost",
+  "^https://pokerjest\\.github\\.io/animateAutoTool/",
   "^https://anime\\.example\\.com",
   "^https://api\\.example\\.com",
   "^https://files\\.example\\.com",
