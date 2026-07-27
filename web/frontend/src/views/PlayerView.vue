@@ -42,12 +42,12 @@ const watchedOverrides = ref<Record<number, boolean>>({})
 const continueQuery = useQuery({ queryKey: ['continue-watching'], queryFn: () => api<ContinueWatchingResponse>('/playback/continue?limit=10'), staleTime: 20_000 })
 const latest = computed(() => continueQuery.data.value?.items[0])
 const routeAnimeID = computed(() => Number(route.query.anime || 0))
-const animeId = computed(() => routeAnimeID.value || playback.current?.animeId || latest.value?.anime_id || 0)
+const animeId = computed(() => routeAnimeID.value || playback.current?.localAnimeId || latest.value?.anime_id || 0)
 
 watch([latest, () => playback.current], ([item, current]) => {
   if (routeAnimeID.value) return
-  const animeID = current?.animeId || item?.anime_id
-  const episodeID = current?.episodeId || item?.episode_id
+  const animeID = current?.localAnimeId || item?.anime_id
+  const episodeID = current?.localEpisodeId || item?.episode_id
   if (animeID && episodeID) void router.replace(`/player?anime=${animeID}&episode=${episodeID}`)
 }, { immediate: true })
 
@@ -62,9 +62,11 @@ const animeImage = computed(() => query.data.value?.anime.metadata?.image || que
 
 function selectionFor(episode: Episode): PlaybackSelection {
   return {
-    animeId: animeId.value,
-    episodeId: episode.id,
-    animeTitle: animeTitle.value,
+    provider: 'local',
+    itemId: String(episode.id),
+    localAnimeId: animeId.value,
+    localEpisodeId: episode.id,
+    title: animeTitle.value,
     episodeTitle: episode.name,
     image: animeImage.value,
     season: episode.season,
@@ -80,7 +82,7 @@ watch(() => query.data.value?.episodes, episodes => {
   const queue = playable.map(selectionFor)
   playback.setQueue(queue)
   const requestedID = Number(route.query.episode || 0)
-  const currentID = playback.current?.animeId === animeId.value ? playback.current.episodeId : 0
+  const currentID = playback.current?.localAnimeId === animeId.value ? playback.current.localEpisodeId : 0
   const target = playable.find(item => item.id === requestedID)
     || playable.find(item => item.id === currentID)
     || playable.find(item => (item.resume_ticks || 0) > 0 && !item.watched)
@@ -95,13 +97,13 @@ watch(() => query.data.value?.episodes, episodes => {
   })
 }, { immediate: true })
 
-watch(() => playback.current?.episodeId, episodeID => {
-  if (!episodeID || route.path !== '/player' || playback.current?.animeId !== animeId.value) return
+watch(() => playback.current?.localEpisodeId, episodeID => {
+  if (!episodeID || route.path !== '/player' || playback.current?.localAnimeId !== animeId.value) return
   if (Number(route.query.episode || 0) === episodeID && Number(route.query.anime || 0) === animeId.value) return
   void router.replace({ path: '/player', query: { anime: animeId.value, episode: episodeID } })
 })
 
-const selected = computed(() => query.data.value?.episodes.find(item => item.id === playback.current?.episodeId) || null)
+const selected = computed(() => query.data.value?.episodes.find(item => item.id === playback.current?.localEpisodeId) || null)
 const playInfo = computed(() => playback.playInfo)
 const hasMediaInfo = computed(() => {
   const media = playInfo.value?.media

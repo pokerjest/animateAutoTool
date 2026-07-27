@@ -96,6 +96,7 @@ nav:
   - 日常使用:
       - 订阅与筛选: usage/subscriptions.md
       - 本地媒体库与整理: usage/library.md
+      - 管理模式与媒体模式: usage/media-workspaces.md
       - 播放器与继续观看: usage/player.md
       - 备份、恢复与诊断: usage/backup-diagnostics.md
   - 公网访问:
@@ -105,6 +106,7 @@ nav:
       - Cloudflare Tunnel: remote-access/cloudflare-tunnel.md
       - Windows Cloudflare 排障实录: remote-access/cloudflare-troubleshooting.md
       - Tailscale: remote-access/tailscale.md
+      - NetBird: remote-access/netbird.md
       - FRP: remote-access/frp.md
       - IPv6: remote-access/ipv6.md
   - 故障排查:

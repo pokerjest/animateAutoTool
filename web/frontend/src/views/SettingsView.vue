@@ -3,13 +3,14 @@ import { computed, reactive, ref, watchEffect } from 'vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { Bot, Cloud, Database, Download, Film, KeyRound, Network, Palette, RefreshCw, Save, Settings2, ShieldCheck, Wrench } from '@lucide/vue'
 import { api } from '../api/client'
-import type { TaskAccepted } from '../api/types'
+import type { MediaLibrary, TaskAccepted } from '../api/types'
 import AsyncButton from '../components/AsyncButton.vue'
 import LocalRecoveryLink from '../components/LocalRecoveryLink.vue'
 import PageHeader from '../components/PageHeader.vue'
 import StateBlock from '../components/StateBlock.vue'
 import { useAsyncActions } from '../composables/useAsyncActions'
 import { useUIStore, type BackgroundMode, type ThemeMode } from '../stores/ui'
+import { usePlaybackStore, type PlaybackSourceMode } from '../stores/playback'
 
 interface SettingsData{values:Record<string,string>;configured:Record<string,boolean>;stats:Record<string,unknown>;request_ip?:string}
 interface Field { key:string; label:string; type?:'text'|'password'|'select'|'boolean'; options?:Array<{value:string;label:string}>; placeholder?:string; description?:string }
@@ -18,14 +19,15 @@ interface MediaApp { id:string;title:string;eyebrow:string;description:string;ic
 interface AuditEntry { id:number;created_at:string;username:string;action:string;outcome:string;ip:string;target_type:string;target_id:string }
 const jellyfinFields:Field[]=[
   {key:'jellyfin_url',label:'AnimateTool 连接地址',placeholder:'例如 http://127.0.0.1:8096',description:'由 AnimateTool 后端访问 Jellyfin，建议填写本机地址、局域网地址或服务器可达的 Tailscale 地址。'},
-  {key:'jellyfin_direct_url',label:'浏览器直连地址（可选）',placeholder:'例如 https://jellyfin.example-tailnet.ts.net',description:'由观看设备直接访问 Jellyfin，适合已连接 Tailscale 或处于同一局域网的设备；留空后播放器只显示 AnimateTool 代理。'},
+  {key:'jellyfin_direct_url',label:'浏览器直连地址（可选）',placeholder:'例如 https://jellyfin.example-tailnet.ts.net',description:'由观看设备直接访问 Jellyfin，适合已连接 Tailscale 或处于同一局域网的设备；留空时隐藏 Jellyfin 直连线路。'},
+  {key:'netbird_proxy_url',label:'AnimateTool NetBird 地址（可选）',placeholder:'例如 http://100.90.80.70:8306',description:'观看设备连接 NetBird 后，通过该地址调用带短时签名的 AnimateTool 视频代理；不向浏览器暴露 Jellyfin API Key。'},
   {key:'jellyfin_username',label:'用户名'},
   {key:'jellyfin_password',label:'密码',type:'password'},
   {key:'jellyfin_api_key',label:'API Key',type:'password'},
 ]
 const alistFields:Field[]=[{key:'alist_url',label:'服务地址'},{key:'alist_token',label:'Token',type:'password'}]
 const mediaApps:MediaApp[]=[
-  {id:'jellyfin',title:'Jellyfin',eyebrow:'媒体服务器',description:'在这里完成服务器连接和播放线路配置；播放器页面只负责选择线路。',icon:Film,fields:jellyfinFields,provider:'jellyfin'},
+  {id:'jellyfin',title:'Jellyfin',eyebrow:'媒体服务器',description:'在这里完成服务器连接、媒体库范围和当前设备的播放线路配置。',icon:Film,fields:jellyfinFields,provider:'jellyfin'},
   {id:'alist',title:'AList',eyebrow:'文件聚合',description:'连接独立的 AList 服务，用于访问聚合后的文件资源。',icon:Cloud,fields:alistFields},
 ]
 const groups:Group[]=[
@@ -39,8 +41,9 @@ const groups:Group[]=[
   {id:'security',label:'安全',icon:ShieldCheck,fields:[]},
   {id:'maintenance',label:'应用维护',icon:Wrench,fields:[]},
 ]
-const ui=useUIStore(),qc=useQueryClient(),actions=useAsyncActions(),active=ref('downloader'),form=reactive<Record<string,string>>({}),connection=reactive<Record<string,{connected:boolean;detail:string;account?:string}|null>>({}),oldPassword=ref(''),newPassword=ref(''),confirmPassword=ref(''),models=ref<string[]>([])
+const ui=useUIStore(),playback=usePlaybackStore(),qc=useQueryClient(),actions=useAsyncActions(),active=ref('downloader'),form=reactive<Record<string,string>>({}),connection=reactive<Record<string,{connected:boolean;detail:string;account?:string}|null>>({}),oldPassword=ref(''),newPassword=ref(''),confirmPassword=ref(''),models=ref<string[]>([])
 const query=useQuery({queryKey:['settings'],queryFn:()=>api<SettingsData>('/settings')})
+const mediaLibraries=useQuery({queryKey:['settings-media-libraries'],queryFn:()=>api<{items:MediaLibrary[]}>('/media/providers/jellyfin/libraries'),enabled:computed(()=>Boolean(query.data.value?.values.jellyfin_url)),retry:false})
 const audits=useQuery({queryKey:['audit-logs'],queryFn:()=>api<{items:AuditEntry[]}>('/audit-logs?page_size=25')})
 const maintenance=useQuery({queryKey:['maintenance'],queryFn:()=>api<Record<string,unknown>>('/settings/maintenance'),refetchInterval:15000})
 watchEffect(()=>{if(query.data.value)Object.assign(form,query.data.value.values)})
@@ -57,6 +60,25 @@ function addCurrentIPToAllowlist(){const ip=query.data.value?.request_ip?.trim()
 async function updateAction(action:'check'|'apply'){try{await actions.runTask(`update-${action}`,()=>api<TaskAccepted>(`/settings/updater/${action}`,{method:'POST'}),action==='check'?'检查应用更新':'下载并应用更新','updater');ui.toast(action==='check'?'更新检查已经启动':'更新下载与应用已经启动')}catch(e){ui.toast(e instanceof Error?e.message:'更新操作失败','error')}}
 const deploymentItems=computed(()=>{const d=maintenance.data.value?.deployment as Record<string,unknown>|undefined;return (d?.Items||d?.items||[]) as Array<Record<string,unknown>>})
 const updater=computed(()=>(maintenance.data.value?.updater||{}) as Record<string,unknown>)
+const playbackSources:Array<{id:PlaybackSourceMode;label:string;description:string}>=[
+  {id:'proxy',label:'AnimateTool 代理',description:'视频跟随当前 AnimateTool 页面入口，适合 Cloudflare 和公网访问。'},
+  {id:'direct',label:'Jellyfin 直连',description:'观看设备直接连接 Jellyfin，适合局域网或 Tailscale。'},
+  {id:'netbird',label:'NetBird 代理',description:'观看设备通过 NetBird 地址访问 AnimateTool 视频代理。'},
+]
+function selectedLibraryIDs(){
+  try{const parsed=JSON.parse(form.jellyfin_library_ids||'[]');return Array.isArray(parsed)?parsed.map(String):[]}catch{return []}
+}
+function librarySelected(id:string){
+  const selected=selectedLibraryIDs()
+  return selected.length===0||selected.includes(id)
+}
+function toggleLibrary(id:string,checked:boolean){
+  const all=(mediaLibraries.data.value?.items||[]).map(item=>item.id)
+  const current=selectedLibraryIDs()
+  const next=new Set(current.length?current:all)
+  if(checked)next.add(id);else next.delete(id)
+  form.jellyfin_library_ids=next.size===all.length?'[]':JSON.stringify([...next])
+}
 </script>
 
 <template><div class="page-grid"><PageHeader eyebrow="PREFERENCES" title="系统设置" description="按任务分组配置下载、元数据、媒体服务、AI、外观、安全和应用维护。"><AsyncButton v-if="group.fields.length" class="btn btn-primary" :loading="actions.isBusy('save')" loading-label="正在保存…" @click="save"><Save :size="17"/>保存更改</AsyncButton></PageHeader><StateBlock v-if="query.isLoading.value" state="loading"/><StateBlock v-else-if="query.isError.value" state="error" title="设置加载失败" :retrying="query.isFetching.value" @retry="query.refetch()"/><section v-else class="grid gap-5 lg:grid-cols-[250px_1fr]"><nav class="panel h-fit p-3" aria-label="设置分组"><button v-for="item in groups" :key="item.id" class="mb-1 flex min-h-12 w-full items-center gap-3 rounded-xl px-3 text-left font-bold" :class="active===item.id?'bg-[var(--brand-soft)] text-[var(--brand-strong)]':'muted hover:bg-[var(--surface-muted)]'" @click="active=item.id"><component :is="item.icon" :size="18"/>{{ item.label }}</button></nav><article class="panel min-w-0 p-5 sm:p-7"><div class="mb-6 flex items-center gap-3"><span class="grid h-11 w-11 place-items-center rounded-xl bg-[var(--brand-soft)] text-[var(--brand)]"><component :is="group.icon"/></span><div><p class="eyebrow">CONFIGURATION</p><h3 class="text-2xl font-black">{{ group.label }}</h3></div></div>
@@ -69,9 +91,28 @@ const updater=computed(()=>(maintenance.data.value?.updater||{}) as Record<strin
         </header>
         <div class="mt-5 grid gap-5 md:grid-cols-2"><label v-for="field in app.fields" :key="field.key" class="label">{{ field.label }}<input v-model="form[field.key]" class="field" :type="isSecret(field)?'password':'text'" :autocomplete="isSecret(field)?'new-password':'off'" :data-1p-ignore="isSecret(field)?'true':undefined" :placeholder="fieldPlaceholder(field)"/><span v-if="field.description" class="text-xs font-normal leading-5 muted">{{ field.description }}</span><span v-if="isSecret(field)&&query.data.value?.configured[field.key]" class="flex items-center gap-1 text-xs font-normal text-[var(--success)]"><KeyRound :size="12"/>凭据已安全保存</span></label></div>
         <div v-if="app.id==='jellyfin'" class="mt-5 rounded-xl border border-[var(--line)] bg-[var(--surface-solid)] p-4 text-sm leading-6" data-testid="jellyfin-playback-help">
-          <div class="flex items-start gap-3"><Network class="mt-1 shrink-0 text-[var(--sky)]" :size="18"/><div><strong>播放线路说明</strong><p class="muted mt-1">Jellyfin 直连由观看设备直接拉取视频，需要连接 Tailscale 或处于可访问 Jellyfin 的局域网；AnimateTool 代理由服务器转发视频，适合 Cloudflare 和其他公网入口。使用 HTTPS 页面时，浏览器直连地址也应使用 HTTPS。</p></div></div>
+          <div class="flex items-start gap-3"><Network class="mt-1 shrink-0 text-[var(--sky)]" :size="18"/><div><strong>播放线路说明</strong><p class="muted mt-1">NetBird 代理让视频走私人网络，Jellyfin 直连由观看设备直接拉流，AnimateTool 代理则跟随当前页面入口。使用 HTTPS 页面时，NetBird 和直连地址也必须使用 HTTPS；否则请直接从 NetBird 的 HTTP 地址打开 AnimateTool。</p></div></div>
         </div>
+        <section v-if="app.id==='jellyfin'" class="mt-5 rounded-xl border border-[var(--line)] bg-[var(--surface-solid)] p-4" data-testid="playback-source-settings">
+          <div><strong>本设备播放线路</strong><p class="muted mt-1 text-xs leading-5">只影响当前浏览器。首选直连或 NetBird 不可用时，会临时回退到 AnimateTool 代理，不会改掉这里的选择。</p></div>
+          <div class="mt-3 grid gap-2 lg:grid-cols-3">
+            <button v-for="source in playbackSources" :key="source.id" type="button" class="rounded-xl border p-3 text-left transition" :class="playback.preferredSource===source.id?'border-[var(--brand)] bg-[var(--brand-soft)] text-[var(--brand-strong)]':'border-[var(--line)] hover:bg-[var(--surface-muted)]'" :aria-pressed="playback.preferredSource===source.id" @click="playback.setPreferredSource(source.id)">
+              <strong class="text-sm">{{ source.label }}</strong><span class="muted mt-1 block text-xs leading-5">{{ source.description }}</span>
+            </button>
+          </div>
+        </section>
+        <section v-if="app.id==='jellyfin'" class="mt-5 rounded-xl border border-[var(--line)] bg-[var(--surface-solid)] p-4" data-testid="jellyfin-library-selection">
+          <div class="flex flex-wrap items-start justify-between gap-3"><div><strong>媒体模式显示的 Jellyfin 媒体库</strong><p class="muted mt-1 text-xs leading-5">没有单独选择时默认展示全部影视库。取消勾选可以从 AnimateTool 媒体模式中隐藏某个库，不会修改 Jellyfin 本身。</p></div><AsyncButton class="btn btn-secondary" :loading="mediaLibraries.isFetching.value" loading-label="刷新中…" @click="mediaLibraries.refetch()"><RefreshCw :size="15"/>刷新媒体库</AsyncButton></div>
+          <StateBlock v-if="mediaLibraries.isLoading.value" class="mt-3" state="loading" title="正在读取 Jellyfin 媒体库"/>
+          <div v-else-if="mediaLibraries.data.value?.items.length" class="mt-3 grid gap-2 sm:grid-cols-2">
+            <label v-for="library in mediaLibraries.data.value.items" :key="library.id" class="panel-muted flex min-h-14 items-center gap-3 px-3 text-sm font-bold"><input type="checkbox" class="h-5 w-5 accent-[var(--brand)]" :checked="librarySelected(library.id)" @change="toggleLibrary(library.id,($event.target as HTMLInputElement).checked)"/><span class="min-w-0"><span class="block truncate">{{ library.name }}</span><small class="muted">{{ library.collection_type||'媒体库' }}</small></span></label>
+          </div>
+          <p v-else class="muted mt-3 text-xs">保存 Jellyfin 配置并确认连接成功后，即可刷新媒体库列表。</p>
+        </section>
         <AsyncButton v-if="app.provider" class="mt-4 min-h-16 w-full rounded-xl border border-[var(--line)] bg-[var(--surface-solid)] p-3 text-left" :loading="actions.isBusy(`provider-${app.provider}`)" loading-label="连接测试中…" @click="testProvider(app.provider)"><div class="flex items-center justify-between"><strong>测试 {{ app.title }} 连接</strong><RefreshCw :size="15" class="text-[var(--sky)]"/></div><p class="mt-1 text-xs" :class="connection[app.provider]?.connected?'text-[var(--success)]':'muted'">{{ connection[app.provider]?(connection[app.provider]?.connected?`已连接 ${connection[app.provider]?.account||''}`:connection[app.provider]?.detail):'点击测试当前已保存配置' }}</p></AsyncButton>
+      </section>
+      <section class="panel-muted border border-dashed border-[var(--line)] p-5">
+        <div class="flex items-center gap-3"><span class="grid h-11 w-11 place-items-center rounded-xl bg-[var(--surface-solid)] text-[var(--ink-muted)]"><Film :size="20"/></span><div><p class="eyebrow">MEDIA PROVIDERS</p><h4 class="font-black">添加其他媒体提供商</h4><p class="muted mt-1 text-sm">提供商接口已经预留；Plex、Emby 等适配器将在后续版本加入。</p></div></div>
       </section>
     </div>
     <div v-else class="grid gap-5 md:grid-cols-2"><label v-for="field in group.fields" :key="field.key" class="label" :class="field.type==='boolean'?'panel-muted flex min-h-14 grid-cols-[1fr_auto] items-center px-4':''">{{ field.label }}<select v-if="field.type==='select'" v-model="form[field.key]" class="field"><option v-for="option in field.options" :key="option.value" :value="option.value">{{ option.label }}</option></select><input v-else-if="field.type==='boolean'" :checked="form[field.key]==='true'" type="checkbox" class="h-5 w-5 accent-[var(--brand)]" @change="form[field.key]=($event.target as HTMLInputElement).checked?'true':'false'"/><input v-else v-model="form[field.key]" class="field" :type="isSecret(field)?'password':'text'" :autocomplete="isSecret(field)?'new-password':'off'" :data-1p-ignore="isSecret(field)?'true':undefined" :placeholder="fieldPlaceholder(field)"/><span v-if="isSecret(field)&&query.data.value?.configured[field.key]" class="flex items-center gap-1 text-xs font-normal text-[var(--success)]"><KeyRound :size="12"/>凭据已安全保存</span></label></div>

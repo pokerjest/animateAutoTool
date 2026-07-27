@@ -17,6 +17,7 @@ Animate Auto Tool 是个人维护的开源项目,**仅最新一个发布版本**
 
 - 首次初始化只允许 `localhost` 直连。
 - 公网部署必须经 HTTPS 反向代理、Cloudflare Access 或 VPN,并正确配置 `server.public_url` 与 `server.trusted_proxies`。
+- NetBird 播放线路使用 12 小时短时签名 URL；不要分享播放器媒体地址，NetBird 入口也只应加入受控私人网络。
 - 不要把 `0.0.0.0/0` 或整段内网写进 `trusted_proxies`。
 - 忘记密码恢复 `/recover` 仅接受本机直连,不通过反向代理。
 - 应用登录密码以 bcrypt 哈希保存；外部服务 Token / 密码保存在本机数据库，并镜像到 `config.yaml`（Unix 权限为 `0600`，Windows 依赖所在目录 ACL）；Web 界面不会回显明文。

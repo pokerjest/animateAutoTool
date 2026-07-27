@@ -92,6 +92,8 @@ func initV1Routes(r *gin.Engine) {
 		v1.GET("/session", V1SessionHandler)
 		v1.POST("/session/login", SameOriginMiddleware(), V1LoginHandler)
 		v1.POST("/session/bootstrap", DirectLocalOnlyMiddleware(), SameOriginMiddleware(), V1BootstrapSessionHandler)
+		v1.GET("/netbird/jellyfin/stream/:id", NetBirdProxyVideoHandler)
+		v1.GET("/netbird/media/:provider/stream/:id", NetBirdProxyMediaHandler)
 	}
 
 	recovery := v1.Group("/recovery")
@@ -143,6 +145,16 @@ func initV1Routes(r *gin.Engine) {
 		protected.POST("/library/metadata/:id/refresh", V1RefreshMetadataItemHandler)
 		protected.POST("/library/fix-match", V1FixMatchHandler)
 		protected.GET("/metadata/search", V1MetadataSearchHandler)
+		protected.GET("/media/providers", V1MediaProvidersHandler)
+		protected.GET("/media/providers/:provider/libraries", V1MediaLibrariesHandler)
+		protected.GET("/media/providers/:provider/items", V1MediaItemsHandler)
+		protected.GET("/media/providers/:provider/continue", V1MediaContinueHandler)
+		protected.GET("/media/providers/:provider/items/:id", V1MediaItemHandler)
+		protected.GET("/media/providers/:provider/items/:id/children", V1MediaChildrenHandler)
+		protected.GET("/media/providers/:provider/items/:id/play", V1MediaPlayHandler)
+		protected.GET("/media/providers/:provider/items/:id/image", V1MediaImageHandler)
+		protected.POST("/media/providers/:provider/items/:id/progress", V1MediaProgressHandler)
+		protected.PUT("/media/providers/:provider/items/:id/user-state", V1MediaStateHandler)
 		protected.GET("/ui/background/random", V1RandomBackgroundHandler)
 		protected.GET("/posters/:id", GetPosterHandler)
 
@@ -159,6 +171,7 @@ func initV1Routes(r *gin.Engine) {
 		protected.POST("/local-directories/:id/rename-preview", V1RenamePreviewHandler)
 		protected.POST("/local-directories/:id/rename", V1RenameApplyHandler)
 		protected.GET("/jellyfin/stream/:id", ProxyVideoHandler)
+		protected.GET("/media/providers/:provider/items/:id/stream", MediaStreamHandler)
 		protected.GET("/jellyfin/play/:id", GetPlayInfoHandler)
 		protected.GET("/playback/continue", ContinueWatchingHandler)
 		protected.POST("/playback/progress", ReportProgressHandler)
@@ -808,6 +821,22 @@ var v1SecretConfigKeys = map[string]bool{
 	model.ConfigKeyR2AccessKey: true, model.ConfigKeyR2SecretKey: true, model.ConfigKeyPikPakPassword: true, model.ConfigKeyPikPakRefreshToken: true,
 }
 
+type v1URLSettingNormalizer struct {
+	errorCode string
+	normalize func(string) (string, error)
+}
+
+var v1URLSettingNormalizers = map[string]v1URLSettingNormalizer{
+	model.ConfigKeyJellyfinDirectUrl: {
+		errorCode: "invalid_jellyfin_direct_url",
+		normalize: normalizeJellyfinBaseURL,
+	},
+	model.ConfigKeyNetBirdProxyURL: {
+		errorCode: "invalid_netbird_proxy_url",
+		normalize: normalizeNetBirdProxyBaseURL,
+	},
+}
+
 func V1SettingsHandler(c *gin.Context) {
 	values, _, stats := loadSettingsViewData()
 	configured := map[string]bool{}
@@ -832,7 +861,7 @@ func V1UpdateSettingsHandler(c *gin.Context) {
 		return
 	}
 	allowed := map[string]bool{}
-	for _, key := range []string{model.ConfigKeyQBMode, model.ConfigKeyQBUrl, model.ConfigKeyQBUsername, model.ConfigKeyQBPassword, model.ConfigKeyBaseDir, model.ConfigKeyAutoRenameEnabled, model.ConfigKeyAutoRenameSeriesTemplate, model.ConfigKeyAutoRenameEpisodeTemplate, model.ConfigKeyBangumiAppID, model.ConfigKeyBangumiAppSecret, model.ConfigKeyBangumiAccessToken, model.ConfigKeyBangumiRefreshToken, model.ConfigKeyTMDBToken, model.ConfigKeyAniListToken, model.ConfigKeyProxyURL, model.ConfigKeyProxyBangumi, model.ConfigKeyProxyMikan, model.ConfigKeyProxyTMDB, model.ConfigKeyProxyAniList, model.ConfigKeyProxyJellyfin, model.ConfigKeyProxyAI, model.ConfigKeyProxyUpdater, model.ConfigKeyAuthIPAllowlistEnabled, model.ConfigKeyAuthIPAllowlist, model.ConfigKeyJellyfinUrl, model.ConfigKeyJellyfinDirectUrl, model.ConfigKeyJellyfinUsername, model.ConfigKeyJellyfinPassword, model.ConfigKeyJellyfinApiKey, model.ConfigKeyAListUrl, model.ConfigKeyAListToken, model.ConfigKeyPikPakUsername, model.ConfigKeyPikPakPassword, model.ConfigKeyPikPakRefreshToken, model.ConfigKeyAIBaseURL, model.ConfigKeyAIModel, model.ConfigKeyAIApiKey, model.ConfigKeyR2Endpoint, model.ConfigKeyR2Bucket, model.ConfigKeyR2AccessKey, model.ConfigKeyR2SecretKey, model.ConfigKeyRepoUpdateEnabled, model.ConfigKeyRepoAutoPullEnabled, model.ConfigKeyRepoUpdateIntervalMinutes, model.ConfigKeyRepoUpdateOwner, model.ConfigKeyRepoUpdateName, model.ConfigKeyRepoRequireChecksum} {
+	for _, key := range []string{model.ConfigKeyQBMode, model.ConfigKeyQBUrl, model.ConfigKeyQBUsername, model.ConfigKeyQBPassword, model.ConfigKeyBaseDir, model.ConfigKeyAutoRenameEnabled, model.ConfigKeyAutoRenameSeriesTemplate, model.ConfigKeyAutoRenameEpisodeTemplate, model.ConfigKeyBangumiAppID, model.ConfigKeyBangumiAppSecret, model.ConfigKeyBangumiAccessToken, model.ConfigKeyBangumiRefreshToken, model.ConfigKeyTMDBToken, model.ConfigKeyAniListToken, model.ConfigKeyProxyURL, model.ConfigKeyProxyBangumi, model.ConfigKeyProxyMikan, model.ConfigKeyProxyTMDB, model.ConfigKeyProxyAniList, model.ConfigKeyProxyJellyfin, model.ConfigKeyProxyAI, model.ConfigKeyProxyUpdater, model.ConfigKeyAuthIPAllowlistEnabled, model.ConfigKeyAuthIPAllowlist, model.ConfigKeyJellyfinUrl, model.ConfigKeyJellyfinDirectUrl, model.ConfigKeyNetBirdProxyURL, model.ConfigKeyJellyfinLibraryIDs, model.ConfigKeyJellyfinUsername, model.ConfigKeyJellyfinPassword, model.ConfigKeyJellyfinApiKey, model.ConfigKeyAListUrl, model.ConfigKeyAListToken, model.ConfigKeyPikPakUsername, model.ConfigKeyPikPakPassword, model.ConfigKeyPikPakRefreshToken, model.ConfigKeyAIBaseURL, model.ConfigKeyAIModel, model.ConfigKeyAIApiKey, model.ConfigKeyR2Endpoint, model.ConfigKeyR2Bucket, model.ConfigKeyR2AccessKey, model.ConfigKeyR2SecretKey, model.ConfigKeyRepoUpdateEnabled, model.ConfigKeyRepoAutoPullEnabled, model.ConfigKeyRepoUpdateIntervalMinutes, model.ConfigKeyRepoUpdateOwner, model.ConfigKeyRepoUpdateName, model.ConfigKeyRepoRequireChecksum} {
 		allowed[key] = true
 	}
 	updates := map[string]string{}
@@ -852,10 +881,10 @@ func V1UpdateSettingsHandler(c *gin.Context) {
 			}
 			value = normalized
 		}
-		if key == model.ConfigKeyJellyfinDirectUrl {
-			normalized, err := normalizeJellyfinBaseURL(value)
+		if spec, ok := v1URLSettingNormalizers[key]; ok {
+			normalized, err := spec.normalize(value)
 			if err != nil {
-				v1Error(c, http.StatusBadRequest, "invalid_jellyfin_direct_url", err.Error())
+				v1Error(c, http.StatusBadRequest, spec.errorCode, err.Error())
 				return
 			}
 			value = normalized

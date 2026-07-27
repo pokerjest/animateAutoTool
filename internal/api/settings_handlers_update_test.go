@@ -52,6 +52,7 @@ func TestUpdateSettingsMediaScopeNormalizesJellyfinURLs(t *testing.T) {
 		"settings_scope":                 {"media"},
 		model.ConfigKeyJellyfinUrl:       {" https://jellyfin.example.com/base/ "},
 		model.ConfigKeyJellyfinDirectUrl: {" https://media.example.com/jellyfin/ "},
+		model.ConfigKeyNetBirdProxyURL:   {" http://100.90.80.70:8306/ "},
 		model.ConfigKeyJellyfinUsername:  {""},
 		model.ConfigKeyJellyfinPassword:  {""},
 	}
@@ -76,6 +77,12 @@ func TestUpdateSettingsMediaScopeNormalizesJellyfinURLs(t *testing.T) {
 		t.Fatalf("expected Jellyfin direct URL to be persisted: %v", err)
 	}
 	assert.Equal(t, "https://media.example.com/jellyfin", directURL.Value)
+
+	var netBirdURL model.GlobalConfig
+	if err := db.DB.First(&netBirdURL, "key = ?", model.ConfigKeyNetBirdProxyURL).Error; err != nil {
+		t.Fatalf("expected NetBird proxy URL to be persisted: %v", err)
+	}
+	assert.Equal(t, "http://100.90.80.70:8306", netBirdURL.Value)
 }
 
 func TestRenderSettingsTemplateIncludesJellyfinAPIKeyInputID(t *testing.T) {

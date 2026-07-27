@@ -45,3 +45,9 @@ export interface LibraryItem extends Metadata { is_subscribed: boolean; is_local
 export interface TaskCard { title: string; status_label: string; status_tone: string; summary: string; detail?: string; progress_text?: string; display_error?: string }
 export interface Dashboard { active_subscriptions: number; downloads: number; library_items: number; local_series: number; open_issues: number; services: Record<string, boolean>; tasks: TaskCard[]; recent_downloads: Array<{ ID: number; Title: string; Status: string; Episode: string }> }
 export interface CalendarDay { weekday: { id: number; cn: string; en: string }; items: Array<{ id: number; name: string; name_cn: string; images?: { large?: string; common?: string }; air_date?: string; summary?: string }> }
+
+export type MediaProvider = components['schemas']['MediaProvider']
+export type MediaLibrary = components['schemas']['MediaLibrary']
+export type MediaItem = components['schemas']['MediaItem']
+export type MediaPlaybackInfo = components['schemas']['MediaPlaybackInfo']
+export type MediaPage = components['schemas']['MediaPage']

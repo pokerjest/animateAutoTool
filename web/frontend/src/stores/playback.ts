@@ -3,16 +3,33 @@ import { api } from '../api/client'
 import type { ContinueWatchingItem, JellyfinPlayInfo, PlaybackProgressInput } from '../api/types'
 import { useUIStore } from './ui'
 
-export type PlaybackSourceMode = 'proxy' | 'direct'
+export type PlaybackSourceMode = 'proxy' | 'direct' | 'netbird'
+
+export type ActivePlaybackInfo = {
+  provider?: string
+  item_id?: string
+  stream_url: string
+  direct_stream_url?: string
+  netbird_stream_url?: string
+  resume_ticks: number
+  runtime_ticks: number
+  played: boolean
+  favorite?: boolean
+  episode_favorite?: boolean
+  series_favorite?: boolean
+  media: JellyfinPlayInfo['media']
+}
 
 export interface PlaybackSelection {
-  animeId: number
-  episodeId: number
-  animeTitle: string
-  episodeTitle: string
-  image: string
-  season: number
-  episode: number
+  provider: string
+  itemId?: string
+  localAnimeId?: number
+  localEpisodeId?: number
+  title: string
+  episodeTitle?: string
+  image?: string
+  season?: number
+  episode?: number
 }
 
 interface StartOptions {
@@ -27,7 +44,12 @@ let stallTimer: ReturnType<typeof setTimeout> | null = null
 let lastProgressReport = 0
 
 function storedSourceMode(): PlaybackSourceMode {
-  return localStorage.getItem('player.sourceMode') === 'direct' ? 'direct' : 'proxy'
+  const preferred = localStorage.getItem('player.preferredSource')
+  const legacy = localStorage.getItem('player.sourceMode')
+  const stored = preferred || legacy
+  const result = stored === 'direct' || stored === 'netbird' ? stored : 'proxy'
+  if (preferred === null && legacy) localStorage.setItem('player.preferredSource', result)
+  return result
 }
 
 function clearStallTimer() {
@@ -35,13 +57,20 @@ function clearStallTimer() {
   stallTimer = null
 }
 
+function selectionKey(selection?: PlaybackSelection | null) {
+  if (!selection) return ''
+  if (selection.provider !== 'local' && selection.itemId) return `${selection.provider}:${selection.itemId}`
+  return selection.localEpisodeId ? `local:${selection.localEpisodeId}` : ''
+}
+
 export const usePlaybackStore = defineStore('playback', {
   state: () => ({
     current: null as PlaybackSelection | null,
     queue: [] as PlaybackSelection[],
-    playInfo: null as JellyfinPlayInfo | null,
+    playInfo: null as ActivePlaybackInfo | null,
     source: '',
-    sourceMode: storedSourceMode() as PlaybackSourceMode,
+    activeSource: storedSourceMode() as PlaybackSourceMode,
+    preferredSource: storedSourceMode() as PlaybackSourceMode,
     video: null as HTMLVideoElement | null,
     preparing: false,
     stalled: false,
@@ -60,8 +89,10 @@ export const usePlaybackStore = defineStore('playback', {
   }),
   getters: {
     active: state => Boolean(state.current && state.source),
-    usingDirect: state => Boolean(state.playInfo?.direct_stream_url) && state.sourceMode === 'direct' && state.source === state.playInfo?.direct_stream_url,
-    currentIndex: state => state.queue.findIndex(item => item.episodeId === state.current?.episodeId),
+    sourceMode: state => state.activeSource,
+    usingDirect: state => Boolean(state.playInfo?.direct_stream_url) && state.activeSource === 'direct' && state.source === state.playInfo?.direct_stream_url,
+    usingNetBird: state => Boolean(state.playInfo?.netbird_stream_url) && state.activeSource === 'netbird' && state.source === state.playInfo?.netbird_stream_url,
+    currentIndex: state => state.queue.findIndex(item => selectionKey(item) === selectionKey(state.current)),
     previousSelection(): PlaybackSelection | null {
       return this.currentIndex > 0 ? this.queue[this.currentIndex - 1] : null
     },
@@ -82,9 +113,11 @@ export const usePlaybackStore = defineStore('playback', {
     },
     selectionFromContinue(item: ContinueWatchingItem): PlaybackSelection {
       return {
-        animeId: item.anime_id,
-        episodeId: item.episode_id,
-        animeTitle: item.title,
+        provider: 'local',
+        itemId: String(item.episode_id),
+        localAnimeId: item.anime_id,
+        localEpisodeId: item.episode_id,
+        title: item.title,
         episodeTitle: item.episode_title,
         image: item.image,
         season: item.season,
@@ -97,8 +130,15 @@ export const usePlaybackStore = defineStore('playback', {
       this.restoreMuted = this.video.muted
       this.restorePlaybackRate = this.video.playbackRate
     },
+    pauseForWorkspaceSwitch() {
+      if (!this.current) return
+      this.captureVideoSettings()
+      this.video?.pause()
+      this.playing = false
+      void this.report('pause')
+    },
     async start(selection: PlaybackSelection, options: StartOptions = {}) {
-      if (this.current?.episodeId === selection.episodeId && this.source) {
+      if (selectionKey(this.current) === selectionKey(selection) && this.source) {
         if (options.autoplay) {
           try { await this.video?.play() } catch { /* browser controls remain available */ }
         }
@@ -117,19 +157,29 @@ export const usePlaybackStore = defineStore('playback', {
       this.duration = 0
       this.pendingResumeSeconds = this.position
       this.pendingAutoplay = Boolean(options.autoplay)
-      this.sourceMode = storedSourceMode()
+      this.preferredSource = storedSourceMode()
+      this.activeSource = this.preferredSource
       this.source = ''
-      if (options.streamURL && this.sourceMode === 'proxy') this.source = options.streamURL
+      if (options.streamURL && this.activeSource === 'proxy') this.source = options.streamURL
 
       try {
-        const info = await api<JellyfinPlayInfo>(`/jellyfin/play/${selection.episodeId}`)
-        if (request !== prepareRequest || this.current?.episodeId !== selection.episodeId) return
+        const external = selection.provider !== 'local' && selection.itemId
+        if (!external && !selection.localEpisodeId) throw new Error('本地剧集缺少可播放的剧集 ID')
+        const info = await api<ActivePlaybackInfo>(external
+          ? `/media/providers/${encodeURIComponent(selection.provider)}/items/${encodeURIComponent(selection.itemId!)}/play`
+          : `/jellyfin/play/${selection.localEpisodeId}`)
+        if (request !== prepareRequest || selectionKey(this.current) !== selectionKey(selection)) return
         this.playInfo = info
         const resumeTicks = options.resumeTicks ?? info.resume_ticks
         this.pendingResumeSeconds = Math.max(0, resumeTicks / 10_000_000)
         this.position = this.pendingResumeSeconds
         this.duration = Math.max(0, info.runtime_ticks / 10_000_000)
-        const preferred = this.sourceMode === 'direct' && info.direct_stream_url ? info.direct_stream_url : info.stream_url
+        const preferred = this.preferredSource === 'direct' && info.direct_stream_url
+          ? info.direct_stream_url
+          : this.preferredSource === 'netbird' && info.netbird_stream_url
+            ? info.netbird_stream_url
+            : info.stream_url
+        this.activeSource = preferred === info.direct_stream_url ? 'direct' : preferred === info.netbird_stream_url ? 'netbird' : 'proxy'
         if (!this.source || this.source !== preferred) this.source = preferred
       } catch (error) {
         if (request === prepareRequest) {
@@ -150,35 +200,45 @@ export const usePlaybackStore = defineStore('playback', {
         streamURL: item.stream_url,
       })
     },
+    setPreferredSource(mode: PlaybackSourceMode) {
+      this.preferredSource = mode
+      localStorage.setItem('player.preferredSource', mode)
+      localStorage.setItem('player.sourceMode', mode)
+    },
     async switchSource(mode: PlaybackSourceMode, remember = true) {
-      const next = mode === 'direct' ? this.playInfo?.direct_stream_url : this.playInfo?.stream_url
+      const next = mode === 'direct'
+        ? this.playInfo?.direct_stream_url
+        : mode === 'netbird'
+          ? this.playInfo?.netbird_stream_url
+          : this.playInfo?.stream_url
       if (!next || next === this.source) return
       this.captureVideoSettings()
       this.pendingResumeSeconds = this.video?.currentTime || this.position
       this.pendingAutoplay = Boolean(this.video && !this.video.paused && !this.video.ended)
       this.switchingSource = true
-      this.sourceMode = mode
+      this.activeSource = mode
       this.source = next
       this.error = ''
       this.stalled = false
-      if (remember) localStorage.setItem('player.sourceMode', mode)
+      if (remember) this.setPreferredSource(mode)
     },
     async report(event: PlaybackProgressInput['event'], beacon = false) {
       if (!this.current) return
       const position = this.video?.currentTime ?? this.position
       const duration = Number.isFinite(this.video?.duration) ? this.video?.duration || this.duration : this.duration
-      const body: PlaybackProgressInput = {
-        episode_id: this.current.episodeId,
-        event,
-        ticks: Math.max(0, Math.round(position * 10_000_000)),
-        duration_ticks: Math.max(0, Math.round(duration * 10_000_000)),
-      }
+      const body = { event, ticks: Math.max(0, Math.round(position * 10_000_000)), duration_ticks: Math.max(0, Math.round(duration * 10_000_000)) }
+      const external = this.current.provider !== 'local' && this.current.itemId
+      const path = external
+        ? `/media/providers/${encodeURIComponent(this.current.provider)}/items/${encodeURIComponent(this.current.itemId!)}/progress`
+        : '/playback/progress'
+      if (!external && !this.current.localEpisodeId) return
+      const payload = external ? body : { episode_id: this.current.localEpisodeId!, ...body } satisfies PlaybackProgressInput
       if (beacon && navigator.sendBeacon) {
-        navigator.sendBeacon('/api/v1/playback/progress', new Blob([JSON.stringify(body)], { type: 'application/json' }))
+        navigator.sendBeacon(`/api/v1${path}`, new Blob([JSON.stringify(payload)], { type: 'application/json' }))
         return
       }
       try {
-        await api('/playback/progress', { method: 'POST', body: JSON.stringify(body) })
+        await api(path, { method: 'POST', body: JSON.stringify(payload) })
       } catch {
         // Playback remains usable; the next periodic update retries persistence.
       }
@@ -224,12 +284,13 @@ export const usePlaybackStore = defineStore('playback', {
     },
     onWaiting() {
       this.stalled = true
-      if (!this.usingDirect || this.seeking || this.video?.paused || stallTimer) return
+      if ((!this.usingDirect && !this.usingNetBird) || this.seeking || this.video?.paused || stallTimer) return
       stallTimer = setTimeout(() => {
         stallTimer = null
-        if (!this.usingDirect || !this.stalled || this.seeking || this.video?.paused) return
-        void this.switchSource('proxy').then(() => {
-          useUIStore().toast('Jellyfin 直连持续卡顿，已从当前位置切换到 AnimateTool 代理', 'info')
+        if ((!this.usingDirect && !this.usingNetBird) || !this.stalled || this.seeking || this.video?.paused) return
+        const sourceLabel = this.usingNetBird ? 'NetBird 代理' : 'Jellyfin 直连'
+        void this.switchSource('proxy', false).then(() => {
+          useUIStore().toast(`${sourceLabel}持续卡顿，已从当前位置切换到 AnimateTool 代理`, 'info')
         })
       }, 8_000)
     },
@@ -245,8 +306,9 @@ export const usePlaybackStore = defineStore('playback', {
     },
     onError() {
       clearStallTimer()
-      if (this.usingDirect && this.playInfo?.stream_url) {
-        void this.switchSource('proxy').then(() => useUIStore().toast('Jellyfin 直连不可用，已切换到 AnimateTool 代理', 'info'))
+      if ((this.usingDirect || this.usingNetBird) && this.playInfo?.stream_url) {
+        const sourceLabel = this.usingNetBird ? 'NetBird 代理' : 'Jellyfin 直连'
+        void this.switchSource('proxy', false).then(() => useUIStore().toast(`${sourceLabel}不可用，已切换到 AnimateTool 代理`, 'info'))
         return
       }
       this.error = '视频流加载失败，请检查 Jellyfin 连接和浏览器编码支持。'

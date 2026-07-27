@@ -42,6 +42,8 @@
 [tailscale-install]: https://tailscale.com/kb/1017/install
 [tailscale-funnel]: https://tailscale.com/kb/1223/funnel
 [tailscale-serve]: https://tailscale.com/kb/1242/tailscale-serve
+[netbird-docs]: https://docs.netbird.io/
+[netbird-install]: https://docs.netbird.io/how-to/installation
 [frp-docs]: https://gofrp.org/en/docs/
 [frp-config]: https://gofrp.org/en/docs/features/common/network/
 

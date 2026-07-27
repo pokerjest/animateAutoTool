@@ -223,6 +223,8 @@ const (
 	ConfigKeyRepoRequireChecksum       = "repo_update_require_checksum"
 	ConfigKeyJellyfinUrl               = "jellyfin_url"
 	ConfigKeyJellyfinDirectUrl         = "jellyfin_direct_url"
+	ConfigKeyNetBirdProxyURL           = "netbird_proxy_url"
+	ConfigKeyJellyfinLibraryIDs        = "jellyfin_library_ids"
 	ConfigKeyJellyfinUsername          = "jellyfin_username"
 	ConfigKeyJellyfinPassword          = "jellyfin_password"
 	ConfigKeyJellyfinApiKey            = "jellyfin_api_key" //nolint:gosec

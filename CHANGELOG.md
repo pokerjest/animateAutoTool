@@ -8,7 +8,14 @@
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-07-27
+
+### Added
+- 播放器新增 NetBird 代理线路，可通过带 12 小时短时签名的 AnimateTool 私网地址传输 Jellyfin 视频，保留 Range 请求且不暴露 Jellyfin API Key。
+- 新增管理模式与媒体模式双工作区，以及提供商无关的媒体 API；首版支持 Jellyfin 媒体库、搜索、分页、详情、剧集、继续观看、收藏和播放进度同步。
+
 ### Changed
+- 播放线路选择移到系统设置并按浏览器保存；播放器只显示实际线路，直连或 NetBird 失败时临时回退 AnimateTool 代理。
 - 将项目说明收敛为精简 README，并新增基于 MkDocs Material 的多页中文文档站。
 - 补充 TMDB、AniList、Bangumi、Jellyfin、R2、AI 和 Dynu 的官方凭据获取与验证入口。
 - 新增 DDNS、双重 NAT、CGNAT、反向代理、Cloudflare Tunnel、Tailscale、FRP 和 IPv6 的公网访问指南。
@@ -287,7 +294,8 @@
 
 ---
 
-[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v0.9.1...HEAD
+[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v0.9.2...HEAD
+[0.9.2]: https://github.com/pokerjest/animateAutoTool/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/pokerjest/animateAutoTool/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/pokerjest/animateAutoTool/compare/v0.8.9...v0.9.0
 [0.8.9]: https://github.com/pokerjest/animateAutoTool/compare/v0.8.8...v0.8.9

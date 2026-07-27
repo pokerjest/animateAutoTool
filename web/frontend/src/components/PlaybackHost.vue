@@ -7,14 +7,16 @@ import { api, normalizePosterURL } from '../api/client'
 import type { ContinueWatchingResponse } from '../api/types'
 import { usePlaybackStore } from '../stores/playback'
 import { useSessionStore } from '../stores/session'
+import { useWorkspaceStore } from '../stores/workspace'
 
 const route = useRoute()
 const router = useRouter()
 const queryClient = useQueryClient()
 const playback = usePlaybackStore()
 const session = useSessionStore()
+const workspace = useWorkspaceStore()
 const video = ref<HTMLVideoElement | null>(null)
-const full = computed(() => route.path === '/player')
+const full = computed(() => route.path === '/player' || route.path.startsWith('/media/play'))
 const continueQuery = useQuery({
   queryKey: ['continue-watching'],
   queryFn: () => api<ContinueWatchingResponse>('/playback/continue?limit=10'),
@@ -23,6 +25,7 @@ const continueQuery = useQuery({
 })
 const latest = computed(() => continueQuery.data.value?.items[0])
 const progress = computed(() => playback.duration > 0 ? Math.min(100, playback.position / playback.duration * 100) : 0)
+const sourceLabel = computed(() => playback.usingNetBird ? 'NetBird 代理' : playback.usingDirect ? 'Jellyfin 直连' : 'AnimateTool 代理')
 
 watch(video, element => playback.attachVideo(element), { immediate: true })
 
@@ -40,7 +43,11 @@ onBeforeUnmount(() => {
 async function openFullPlayer() {
   const current = playback.current
   if (!current) return
-  await router.push(`/player?anime=${current.animeId}&episode=${current.episodeId}`)
+  if (current.provider !== 'local' && current.itemId) {
+    await router.push(`/media/play/${encodeURIComponent(current.provider)}/${encodeURIComponent(current.itemId)}`)
+    return
+  }
+  await router.push(`/player?anime=${current.localAnimeId}&episode=${current.localEpisodeId}`)
 }
 
 async function resumeLatest() {
@@ -76,7 +83,7 @@ function ended() {
 
 <template>
   <section
-    v-if="playback.current"
+    v-if="playback.current && workspace.isMedia"
     aria-label="全局播放器"
     :class="full
       ? 'panel mb-6 overflow-hidden bg-black'
@@ -85,32 +92,11 @@ function ended() {
     <div v-if="full" class="flex flex-wrap items-center justify-between gap-3 bg-[var(--surface-solid)] p-4">
       <div class="min-w-0">
         <p class="eyebrow">NOW PLAYING</p>
-        <h2 class="truncate text-xl font-black">{{ playback.current.animeTitle }}</h2>
+        <h2 class="truncate text-xl font-black">{{ playback.current.title }}</h2>
         <p class="muted mt-1 text-sm">第 {{ playback.current.episode || '?' }} 集 · {{ playback.current.episodeTitle }}</p>
       </div>
       <div class="flex flex-wrap items-center gap-2">
-        <span class="badge" :class="playback.usingDirect ? 'badge-success' : ''"><Network v-if="playback.usingDirect" :size="13" /><Server v-else :size="13" />{{ playback.usingDirect ? 'Jellyfin 直连' : 'AnimateTool 代理' }}</span>
-        <div class="flex flex-wrap gap-2" role="group" aria-label="播放线路">
-          <button
-            v-if="playback.playInfo?.direct_stream_url"
-            class="btn btn-quiet h-auto min-h-11 flex-col items-start gap-0.5 px-3 py-2"
-            :class="playback.usingDirect ? 'bg-[var(--brand-soft)] text-[var(--brand-strong)]' : ''"
-            :aria-pressed="playback.usingDirect"
-            @click="playback.switchSource('direct')"
-          >
-            <span>Jellyfin 直连</span>
-            <small class="text-[11px] font-medium opacity-70">需要 Tailscale 或局域网</small>
-          </button>
-          <button
-            class="btn btn-quiet h-auto min-h-11 flex-col items-start gap-0.5 px-3 py-2"
-            :class="!playback.usingDirect ? 'bg-[var(--brand-soft)] text-[var(--brand-strong)]' : ''"
-            :aria-pressed="!playback.usingDirect"
-            @click="playback.switchSource('proxy')"
-          >
-            <span>AnimateTool 代理</span>
-            <small class="text-[11px] font-medium opacity-70">适合 Cloudflare 或公网</small>
-          </button>
-        </div>
+        <span class="badge" :class="playback.usingDirect || playback.usingNetBird ? 'badge-success' : ''"><Network v-if="playback.usingDirect || playback.usingNetBird" :size="13" /><Server v-else :size="13" />{{ sourceLabel }}</span>
         <button class="btn btn-secondary" @click="playback.restart"><RotateCcw :size="16" />从头播放</button>
       </div>
     </div>
@@ -139,7 +125,7 @@ function ended() {
         @click="!full && openFullPlayer()"
       ></video>
       <div v-if="!full" class="min-w-0 bg-[var(--surface-solid)] p-3">
-        <p class="truncate text-sm font-black">{{ playback.current.animeTitle }}</p>
+        <p class="truncate text-sm font-black">{{ playback.current.title }}</p>
         <p class="muted mt-1 truncate text-xs">第 {{ playback.current.episode || '?' }} 集 · {{ playback.current.episodeTitle }}</p>
         <input class="mt-2 h-6 w-full accent-[var(--brand)]" type="range" min="0" max="100" :value="progress" aria-label="播放进度" @input="seek" />
         <div class="mt-1 flex items-center gap-1">
@@ -164,7 +150,7 @@ function ended() {
   </section>
 
   <button
-    v-else-if="latest && !full"
+    v-else-if="workspace.isMedia && latest && !full"
     type="button"
     class="glass fixed bottom-[5.8rem] left-3 right-3 z-[45] flex min-h-20 items-center gap-3 rounded-2xl p-3 text-left shadow-xl sm:left-auto sm:w-[390px] lg:bottom-6 lg:right-6"
     @click="resumeLatest"

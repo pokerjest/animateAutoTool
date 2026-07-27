@@ -7,6 +7,7 @@ import { createMemoryHistory, createRouter, RouterView } from 'vue-router'
 import PlaybackHost from '../components/PlaybackHost.vue'
 import { usePlaybackStore } from '../stores/playback'
 import { useSessionStore } from '../stores/session'
+import { useWorkspaceStore } from '../stores/workspace'
 import PlayerView from './PlayerView.vue'
 
 function envelope(data: unknown) {
@@ -17,7 +18,7 @@ function raw(data: unknown) {
   return Promise.resolve(new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } }))
 }
 
-function playerFetch(direct = false) {
+function playerFetch(direct = false, netbird = false) {
   return vi.fn((input: RequestInfo | URL) => {
     const path = String(input)
     if (path.includes('/api/v1/playback/continue')) return envelope({ items: [] })
@@ -36,6 +37,7 @@ function playerFetch(direct = false) {
       return raw({
         stream_url: `/api/v1/jellyfin/stream/${episodeID}`,
         direct_stream_url: direct ? `https://media.example-tailnet.ts.net/Videos/${episodeID}/stream` : '',
+        netbird_stream_url: netbird ? `https://media.netbird.example/api/v1/netbird/jellyfin/stream/${episodeID}?token=signed` : '',
         resume_ticks: episodeID === 11 ? 500_000_000 : 0,
         runtime_ticks: 14_400_000_000,
         played: false,
@@ -66,13 +68,15 @@ async function mountPlayer(fetchMock: ReturnType<typeof vi.fn>) {
   await router.isReady()
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
   const pinia = createPinia()
+  const workspace = useWorkspaceStore(pinia)
+  workspace.setMode('media')
   const Root = defineComponent({ components: { PlaybackHost, RouterView }, template: '<PlaybackHost/><RouterView/>' })
   const wrapper = mount(Root, {
     attachTo: document.body,
     global: { plugins: [pinia, router, [VueQueryPlugin, { queryClient }]] },
   })
   await vi.waitFor(() => expect(wrapper.find('video').exists()).toBe(true))
-  return { wrapper, router, queryClient, playback: usePlaybackStore(pinia), sendBeacon }
+  return { wrapper, router, queryClient, playback: usePlaybackStore(pinia), workspace, sendBeacon }
 }
 
 afterEach(() => {
@@ -80,6 +84,8 @@ afterEach(() => {
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
   localStorage.removeItem('player.sourceMode')
+  localStorage.removeItem('player.preferredSource')
+  localStorage.removeItem('animate.workspace.mode')
   document.body.innerHTML = ''
 })
 
@@ -134,6 +140,30 @@ describe('Plex-style global playback', () => {
     mounted.queryClient.clear()
   })
 
+  it('pauses and hides playback in management mode without discarding the current media', async () => {
+    const mounted = await mountPlayer(playerFetch())
+    await vi.waitFor(() => expect(mounted.playback.current?.localEpisodeId).toBe(11))
+    const originalSource = mounted.playback.source
+
+    mounted.playback.position = 50
+    mounted.playback.pauseForWorkspaceSwitch()
+    mounted.workspace.setMode('manage')
+    await nextTick()
+
+    expect(mounted.wrapper.find('video').exists()).toBe(false)
+    expect(mounted.playback.current?.localEpisodeId).toBe(11)
+    expect(mounted.playback.source).toBe(originalSource)
+    expect(mounted.playback.position).toBe(50)
+
+    mounted.workspace.setMode('media')
+    await nextTick()
+    expect(mounted.wrapper.find('video').exists()).toBe(true)
+    expect(mounted.playback.playing).toBe(false)
+
+    mounted.wrapper.unmount()
+    mounted.queryClient.clear()
+  })
+
   it('uses proxy by default and falls back from a stalled remembered direct stream', async () => {
     vi.useFakeTimers()
     localStorage.setItem('player.sourceMode', 'direct')
@@ -149,30 +179,39 @@ describe('Plex-style global playback', () => {
 
     expect(mounted.wrapper.get('video').attributes('src')).toBe('/api/v1/jellyfin/stream/11')
     expect(mounted.playback.sourceMode).toBe('proxy')
-    expect(localStorage.getItem('player.sourceMode')).toBe('proxy')
+    expect(localStorage.getItem('player.preferredSource')).toBe('direct')
     mounted.wrapper.unmount()
     mounted.queryClient.clear()
   })
 
-  it('keeps playback configuration in settings and only selects the source in the player', async () => {
-    const mounted = await mountPlayer(playerFetch(true))
-    await vi.waitFor(() => expect(mounted.wrapper.get('video').attributes('src')).toBe('/api/v1/jellyfin/stream/11'))
+  it('falls back from a stalled remembered NetBird proxy stream', async () => {
+    vi.useFakeTimers()
+    localStorage.setItem('player.sourceMode', 'netbird')
+    const mounted = await mountPlayer(playerFetch(false, true))
+    await vi.waitFor(() => expect(mounted.wrapper.get('video').attributes('src')).toContain('media.netbird.example'))
+    const video = mounted.wrapper.get('video')
+    Object.defineProperty(video.element, 'paused', { value: false, configurable: true })
 
-    const sourceButtons = mounted.wrapper.findAll('[role="group"][aria-label="播放线路"] button')
-    expect(sourceButtons).toHaveLength(2)
-    expect(sourceButtons[0].text()).toContain('Jellyfin 直连')
-    expect(sourceButtons[0].text()).toContain('需要 Tailscale 或局域网')
-    expect(sourceButtons[1].text()).toContain('AnimateTool 代理')
-    expect(sourceButtons[1].text()).toContain('适合 Cloudflare 或公网')
-    expect(sourceButtons[1].attributes('aria-pressed')).toBe('true')
+    await video.trigger('waiting')
+    vi.advanceTimersByTime(8_000)
+    await flushPromises()
+    await nextTick()
 
-    await sourceButtons[0].trigger('click')
-    expect(mounted.wrapper.get('video').attributes('src')).toContain('example-tailnet.ts.net')
-    expect(localStorage.getItem('player.sourceMode')).toBe('direct')
-
-    await sourceButtons[1].trigger('click')
     expect(mounted.wrapper.get('video').attributes('src')).toBe('/api/v1/jellyfin/stream/11')
-    expect(localStorage.getItem('player.sourceMode')).toBe('proxy')
+    expect(mounted.playback.sourceMode).toBe('proxy')
+    expect(localStorage.getItem('player.preferredSource')).toBe('netbird')
+    mounted.wrapper.unmount()
+    mounted.queryClient.clear()
+  })
+
+  it('uses the source preference from settings without exposing source buttons in the player', async () => {
+    localStorage.setItem('player.preferredSource', 'netbird')
+    const mounted = await mountPlayer(playerFetch(true, true))
+    await vi.waitFor(() => expect(mounted.wrapper.get('video').attributes('src')).toContain('media.netbird.example'))
+    expect(mounted.wrapper.find('[role="group"][aria-label="播放线路"]').exists()).toBe(false)
+    expect(mounted.wrapper.text()).toContain('NetBird 代理')
+    expect(mounted.wrapper.get('video').attributes('src')).toContain('media.netbird.example')
+    expect(localStorage.getItem('player.preferredSource')).toBe('netbird')
 
     mounted.wrapper.unmount()
     mounted.queryClient.clear()
@@ -180,15 +219,15 @@ describe('Plex-style global playback', () => {
 
   it('advances to the next episode only after the ended event', async () => {
     const mounted = await mountPlayer(playerFetch())
-    await vi.waitFor(() => expect(mounted.playback.current?.episodeId).toBe(11))
+    await vi.waitFor(() => expect(mounted.playback.current?.localEpisodeId).toBe(11))
     const video = mounted.wrapper.get('video')
     Object.defineProperty(video.element, 'currentTime', { value: 1_300, writable: true, configurable: true })
     Object.defineProperty(video.element, 'duration', { value: 1_440, configurable: true })
 
     await video.trigger('timeupdate')
-    expect(mounted.playback.current?.episodeId).toBe(11)
+    expect(mounted.playback.current?.localEpisodeId).toBe(11)
     await video.trigger('ended')
-    await vi.waitFor(() => expect(mounted.playback.current?.episodeId).toBe(12))
+    await vi.waitFor(() => expect(mounted.playback.current?.localEpisodeId).toBe(12))
     await vi.waitFor(() => expect(mounted.wrapper.get('video').attributes('src')).toBe('/api/v1/jellyfin/stream/12'))
 
     mounted.wrapper.unmount()

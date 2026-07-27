@@ -21,18 +21,19 @@ import (
 )
 
 type PlayInfoResponse struct {
-	StreamURL       string              `json:"stream_url"`
-	DirectStreamURL string              `json:"direct_stream_url"`
-	ResumeTicks     int64               `json:"resume_ticks"`
-	RuntimeTicks    int64               `json:"runtime_ticks"`
-	Played          bool                `json:"played"`
-	EpisodeFavorite bool                `json:"episode_favorite"`
-	SeriesFavorite  bool                `json:"series_favorite"`
-	Media           JellyfinMediaInfo   `json:"media"`
-	PosterURL       string              `json:"poster_url"`
-	Title           string              `json:"title"`
-	EpisodeTitle    string              `json:"episode_title"`
-	Diagnostic      *PlaybackDiagnostic `json:"diagnostic,omitempty"`
+	StreamURL        string              `json:"stream_url"`
+	DirectStreamURL  string              `json:"direct_stream_url"`
+	NetBirdStreamURL string              `json:"netbird_stream_url"`
+	ResumeTicks      int64               `json:"resume_ticks"`
+	RuntimeTicks     int64               `json:"runtime_ticks"`
+	Played           bool                `json:"played"`
+	EpisodeFavorite  bool                `json:"episode_favorite"`
+	SeriesFavorite   bool                `json:"series_favorite"`
+	Media            JellyfinMediaInfo   `json:"media"`
+	PosterURL        string              `json:"poster_url"`
+	Title            string              `json:"title"`
+	EpisodeTitle     string              `json:"episode_title"`
+	Diagnostic       *PlaybackDiagnostic `json:"diagnostic,omitempty"`
 }
 
 type JellyfinMediaInfo struct {
@@ -156,20 +157,48 @@ func proxyPlaybackDiagnostic(detail string, canUseDirectLink bool) *PlaybackDiag
 }
 
 func normalizeJellyfinBaseURL(value string) (string, error) {
+	return normalizePlaybackBaseURL(value, "jellyfin 浏览器直连地址")
+}
+
+func normalizeNetBirdProxyBaseURL(value string) (string, error) {
+	return normalizePlaybackBaseURL(value, "netbird 代理地址")
+}
+
+func normalizePlaybackBaseURL(value, fieldName string) (string, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return "", nil
 	}
 	parsed, err := url.Parse(value)
 	if err != nil || parsed.Hostname() == "" || (!strings.EqualFold(parsed.Scheme, "http") && !strings.EqualFold(parsed.Scheme, "https")) {
-		return "", errors.New("jellyfin 浏览器直连地址必须是完整的 http:// 或 https:// 地址")
+		return "", fmt.Errorf("%s必须是完整的 http:// 或 https:// 地址", fieldName)
 	}
 	if parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
-		return "", errors.New("jellyfin 浏览器直连地址不能包含账号、查询参数或片段")
+		return "", fmt.Errorf("%s不能包含账号、查询参数或片段", fieldName)
 	}
 	parsed.Scheme = strings.ToLower(parsed.Scheme)
 	parsed.Path = strings.TrimRight(parsed.Path, "/")
 	return strings.TrimRight(parsed.String(), "/"), nil
+}
+
+func netBirdStreamURL(c *gin.Context, episodeID uint) string {
+	baseURL, err := normalizeNetBirdProxyBaseURL(configValue(model.ConfigKeyNetBirdProxyURL))
+	if err != nil || baseURL == "" {
+		if err != nil {
+			log.Printf("[WARN] ignoring invalid NetBird proxy URL: %v", err)
+		}
+		return ""
+	}
+	userID, err := currentSessionUserID(c)
+	if err != nil {
+		return ""
+	}
+	token, err := signNetBirdStreamToken(episodeID, userID, time.Now().Add(netBirdStreamTokenTTL))
+	if err != nil {
+		log.Printf("[WARN] unable to create NetBird stream token: %v", err)
+		return ""
+	}
+	return fmt.Sprintf("%s/api/v1/netbird/jellyfin/stream/%d?token=%s", baseURL, episodeID, url.QueryEscape(token))
 }
 
 func missingMetadataDiagnostic(anime model.LocalAnime) *PlaybackDiagnostic {
@@ -417,6 +446,7 @@ func GetPlayInfoHandler(c *gin.Context) {
 	} else if directErr != nil {
 		log.Printf("[WARN] ignoring invalid Jellyfin direct URL: %v", directErr)
 	}
+	netBirdURL := netBirdStreamURL(c, ep.ID)
 
 	if _, err := os.Stat(ep.Path); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -450,18 +480,19 @@ func GetPlayInfoHandler(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, PlayInfoResponse{
-		StreamURL:       proxyUrl,
-		DirectStreamURL: directUrl,
-		ResumeTicks:     resume,
-		RuntimeTicks:    runtimeTicks,
-		Played:          played,
-		EpisodeFavorite: episodeFavorite,
-		SeriesFavorite:  seriesFavorite,
-		Media:           jellyfinMediaInfo(details),
-		PosterURL:       anime.Metadata.Image, // Use local image
-		Title:           anime.Metadata.Title,
-		EpisodeTitle:    fmt.Sprintf("S%dE%d - %s", ep.SeasonNum, ep.EpisodeNum, ep.Title),
-		Diagnostic:      proxyPlaybackDiagnostic("浏览器直连失败时播放器会自动切换到 AnimateTool 代理流。", directUrl != ""),
+		StreamURL:        proxyUrl,
+		DirectStreamURL:  directUrl,
+		NetBirdStreamURL: netBirdURL,
+		ResumeTicks:      resume,
+		RuntimeTicks:     runtimeTicks,
+		Played:           played,
+		EpisodeFavorite:  episodeFavorite,
+		SeriesFavorite:   seriesFavorite,
+		Media:            jellyfinMediaInfo(details),
+		PosterURL:        anime.Metadata.Image, // Use local image
+		Title:            anime.Metadata.Title,
+		EpisodeTitle:     fmt.Sprintf("S%dE%d - %s", ep.SeasonNum, ep.EpisodeNum, ep.Title),
+		Diagnostic:       proxyPlaybackDiagnostic("NetBird 或 Jellyfin 直连失败时，播放器会自动切换到 AnimateTool 代理流。", directUrl != "" || netBirdURL != ""),
 	})
 }
 
@@ -558,16 +589,28 @@ func ProxyVideoHandler(c *gin.Context) {
 		c.Status(http.StatusBadRequest)
 		return
 	}
+	proxyVideoForEpisode(c, uint(epID))
+}
 
+func proxyVideoForEpisode(c *gin.Context, episodeID uint) {
 	// 1. Fetch Episode
 	var ep model.LocalEpisode
-	if err := db.DB.First(&ep, epID).Error; err != nil {
+	if err := db.DB.First(&ep, episodeID).Error; err != nil {
 		c.Status(http.StatusNotFound)
 		return
 	}
 
 	if ep.JellyfinItemID == "" {
 		c.Status(http.StatusNotFound) // Should have been resolved by PlayInfo
+		return
+	}
+	proxyVideoForJellyfinItem(c, ep.JellyfinItemID)
+}
+
+func proxyVideoForJellyfinItem(c *gin.Context, itemID string) {
+	itemID = strings.TrimSpace(itemID)
+	if itemID == "" {
+		c.Status(http.StatusNotFound)
 		return
 	}
 
@@ -597,10 +640,11 @@ func ProxyVideoHandler(c *gin.Context) {
 		originalDirector(req)
 
 		// Rewrite Path: /Videos/{ItemId}/stream
-		req.URL.Path = fmt.Sprintf("/Videos/%s/stream", ep.JellyfinItemID)
+		req.URL.Path = fmt.Sprintf("/Videos/%s/stream", itemID)
 
 		// Set Query Params
 		q := req.URL.Query()
+		q.Del("token")
 		q.Set("static", "true")
 		q.Set("api_key", apiKey)
 		req.URL.RawQuery = q.Encode()

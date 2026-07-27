@@ -306,6 +306,249 @@ paths:
             video/*:
               schema: { type: string, format: binary }
         "404": { description: Episode or Jellyfin item not found }
+  /netbird/jellyfin/stream/{id}:
+    get:
+      operationId: streamJellyfinEpisodeThroughNetBird
+      description: Proxies a Jellyfin static stream through the configured AnimateTool NetBird address using a short-lived signed token.
+      security: []
+      parameters:
+        - { $ref: "#/components/parameters/Id" }
+        - name: token
+          in: query
+          required: true
+          schema: { type: string, minLength: 1 }
+      responses:
+        "200":
+          description: Proxied video stream
+          content:
+            video/*:
+              schema: { type: string, format: binary }
+        "206":
+          description: Partial proxied video stream
+          content:
+            video/*:
+              schema: { type: string, format: binary }
+        "401": { description: "Missing, invalid, mismatched, or expired stream token" }
+        "404": { description: Episode or Jellyfin item not found }
+  /netbird/media/{provider}/stream/{item_id}:
+    get:
+      operationId: streamMediaItemThroughNetBird
+      description: Proxies a provider media stream through the configured AnimateTool NetBird address using a short-lived token scoped to the provider, item, user, and expiry.
+      security: []
+      parameters:
+        - { $ref: "#/components/parameters/MediaProvider" }
+        - { $ref: "#/components/parameters/MediaItemId" }
+        - name: token
+          in: query
+          required: true
+          schema: { type: string, minLength: 1 }
+      responses:
+        "200":
+          description: Proxied video stream
+          content:
+            video/*:
+              schema: { type: string, format: binary }
+        "206":
+          description: Partial proxied video stream
+          content:
+            video/*:
+              schema: { type: string, format: binary }
+        "401": { description: "Missing, invalid, mismatched, or expired stream token" }
+        "404": { description: Provider or media item not found }
+  /media/providers:
+    get:
+      operationId: listMediaProviders
+      responses:
+        "200":
+          description: Configured and available media providers
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Envelope" }
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/MediaProviderList" }
+  /media/providers/{provider}/libraries:
+    get:
+      operationId: listMediaLibraries
+      parameters:
+        - { $ref: "#/components/parameters/MediaProvider" }
+      responses:
+        "200":
+          description: Provider libraries with the current AnimateTool selection state
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Envelope" }
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/MediaLibraryList" }
+        "503": { $ref: "#/components/responses/Error" }
+  /media/providers/{provider}/items:
+    get:
+      operationId: listMediaItems
+      parameters:
+        - { $ref: "#/components/parameters/MediaProvider" }
+        - { $ref: "#/components/parameters/Page" }
+        - { $ref: "#/components/parameters/PageSize" }
+        - { name: library_id, in: query, schema: { type: string, default: all } }
+        - { name: parent_id, in: query, schema: { type: string } }
+        - { name: q, in: query, schema: { type: string, maxLength: 200 } }
+        - { name: section, in: query, schema: { type: string, enum: [continue, favorites] } }
+        - { name: sort_by, in: query, schema: { type: string, default: SortName } }
+        - { name: sort_order, in: query, schema: { type: string, enum: [Ascending, Descending], default: Ascending } }
+      responses:
+        "200":
+          description: Paginated provider-neutral media items
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MediaPageEnvelope" }
+        "503": { $ref: "#/components/responses/Error" }
+  /media/providers/{provider}/continue:
+    get:
+      operationId: listContinueWatchingMedia
+      parameters:
+        - { $ref: "#/components/parameters/MediaProvider" }
+        - { $ref: "#/components/parameters/PageSize" }
+      responses:
+        "200":
+          description: Continue-watching items
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MediaPageEnvelope" }
+        "503": { $ref: "#/components/responses/Error" }
+  /media/providers/{provider}/items/{item_id}:
+    get:
+      operationId: getMediaItem
+      parameters:
+        - { $ref: "#/components/parameters/MediaProvider" }
+        - { $ref: "#/components/parameters/MediaItemId" }
+      responses:
+        "200":
+          description: Provider-neutral media item detail
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Envelope" }
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/MediaItem" }
+        "404": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /media/providers/{provider}/items/{item_id}/children:
+    get:
+      operationId: listMediaItemChildren
+      parameters:
+        - { $ref: "#/components/parameters/MediaProvider" }
+        - { $ref: "#/components/parameters/MediaItemId" }
+        - { name: type, in: query, schema: { type: string, enum: [season, episode], default: season } }
+      responses:
+        "200":
+          description: Seasons or episodes belonging to the media item
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MediaPageEnvelope" }
+        "503": { $ref: "#/components/responses/Error" }
+  /media/providers/{provider}/items/{item_id}/play:
+    get:
+      operationId: getMediaPlayback
+      parameters:
+        - { $ref: "#/components/parameters/MediaProvider" }
+        - { $ref: "#/components/parameters/MediaItemId" }
+      responses:
+        "200":
+          description: Available playback routes and current user state
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Envelope" }
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/MediaPlaybackInfo" }
+        "404": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /media/providers/{provider}/items/{item_id}/image:
+    get:
+      operationId: getMediaItemImage
+      description: Proxies the provider image without exposing provider credentials.
+      parameters:
+        - { $ref: "#/components/parameters/MediaProvider" }
+        - { $ref: "#/components/parameters/MediaItemId" }
+      responses:
+        "200":
+          description: Provider image
+          content:
+            image/*:
+              schema: { type: string, format: binary }
+        "404": { description: Image not found }
+        "503": { description: Provider unavailable }
+  /media/providers/{provider}/items/{item_id}/stream:
+    get:
+      operationId: streamMediaItem
+      description: Proxies the provider stream while preserving Range requests.
+      parameters:
+        - { $ref: "#/components/parameters/MediaProvider" }
+        - { $ref: "#/components/parameters/MediaItemId" }
+      responses:
+        "200":
+          description: Proxied video stream
+          content:
+            video/*:
+              schema: { type: string, format: binary }
+        "206":
+          description: Partial proxied video stream
+          content:
+            video/*:
+              schema: { type: string, format: binary }
+        "404": { description: Provider or media item not found }
+  /media/providers/{provider}/items/{item_id}/progress:
+    post:
+      operationId: updateMediaProgress
+      parameters:
+        - { $ref: "#/components/parameters/MediaProvider" }
+        - { $ref: "#/components/parameters/MediaItemId" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MediaProgressInput" }
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+        "400": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /media/providers/{provider}/items/{item_id}/user-state:
+    put:
+      operationId: updateMediaUserState
+      parameters:
+        - { $ref: "#/components/parameters/MediaProvider" }
+        - { $ref: "#/components/parameters/MediaItemId" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MediaUserStateInput" }
+      responses:
+        "200":
+          description: Updated played and favorite state
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Envelope" }
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [played, favorite]
+                        properties:
+                          played: { type: boolean }
+                          favorite: { type: boolean }
+        "400": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
   /playback/continue:
     get:
       operationId: getContinueWatching
@@ -453,6 +696,8 @@ components:
     cookieSession: { type: apiKey, in: cookie, name: animate_session }
   parameters:
     Id: { name: id, in: path, required: true, schema: { type: integer, minimum: 1 } }
+    MediaProvider: { name: provider, in: path, required: true, schema: { type: string, minLength: 1 } }
+    MediaItemId: { name: item_id, in: path, required: true, schema: { type: string, minLength: 1 } }
     Page: { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
     PageSize: { name: page_size, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 100 } }
   requestBodies:
@@ -717,12 +962,15 @@ components:
         primary_target: { type: string }
     JellyfinPlayInfo:
       type: object
-      required: [stream_url, direct_stream_url, resume_ticks, runtime_ticks, played, episode_favorite, series_favorite, media, poster_url, title, episode_title]
+      required: [stream_url, direct_stream_url, netbird_stream_url, resume_ticks, runtime_ticks, played, episode_favorite, series_favorite, media, poster_url, title, episode_title]
       properties:
         stream_url: { type: string }
         direct_stream_url:
           type: string
           description: Browser-reachable Jellyfin stream URL; empty when direct playback is not configured.
+        netbird_stream_url:
+          type: string
+          description: Short-lived signed AnimateTool proxy URL reachable through NetBird; empty when the NetBird proxy address is not configured.
         resume_ticks: { type: integer, format: int64, minimum: 0 }
         runtime_ticks: { type: integer, format: int64, minimum: 0 }
         played: { type: boolean }
@@ -747,6 +995,117 @@ components:
         audio_channels: { type: integer, minimum: 0 }
         subtitle_count: { type: integer, minimum: 0 }
     JellyfinUserStateInput:
+      type: object
+      properties:
+        played: { type: boolean }
+        favorite: { type: boolean }
+    MediaProviderCapabilities:
+      type: object
+      required: [libraries, search, episodes, progress, favorites, images]
+      properties:
+        libraries: { type: boolean }
+        search: { type: boolean }
+        episodes: { type: boolean }
+        progress: { type: boolean }
+        favorites: { type: boolean }
+        images: { type: boolean }
+    MediaProvider:
+      type: object
+      required: [id, name, configured, connected, detail, capabilities]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        configured: { type: boolean }
+        connected: { type: boolean }
+        detail: { type: string }
+        capabilities: { $ref: "#/components/schemas/MediaProviderCapabilities" }
+    MediaProviderList:
+      type: object
+      required: [providers]
+      properties:
+        providers:
+          type: array
+          items: { $ref: "#/components/schemas/MediaProvider" }
+    MediaLibrary:
+      type: object
+      required: [id, name, collection_type, item_count, selected]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        collection_type: { type: string }
+        item_count: { type: integer, minimum: 0 }
+        selected: { type: boolean }
+    MediaLibraryList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/MediaLibrary" }
+    MediaItem:
+      type: object
+      required: [id, provider, name, type, overview, production_year, premiere_date, community_rating, runtime_ticks, episode, season, parent_id, series_id, series_name, child_count, poster_url, thumbnail_url, played, favorite, resume_ticks, progress_percent]
+      properties:
+        id: { type: string }
+        provider: { type: string }
+        name: { type: string }
+        type: { type: string }
+        overview: { type: string }
+        production_year: { type: integer }
+        premiere_date: { type: string }
+        community_rating: { type: number }
+        runtime_ticks: { type: integer, format: int64, minimum: 0 }
+        episode: { type: integer, minimum: 0 }
+        season: { type: integer, minimum: 0 }
+        parent_id: { type: string }
+        series_id: { type: string }
+        series_name: { type: string }
+        child_count: { type: integer, minimum: 0 }
+        genres:
+          type: array
+          items: { type: string }
+        poster_url: { type: string }
+        thumbnail_url: { type: string }
+        played: { type: boolean }
+        favorite: { type: boolean }
+        resume_ticks: { type: integer, format: int64, minimum: 0 }
+        progress_percent: { type: number, minimum: 0, maximum: 100 }
+    MediaPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/MediaItem" }
+    MediaPageEnvelope:
+      allOf:
+        - { $ref: "#/components/schemas/PaginatedEnvelope" }
+        - type: object
+          properties:
+            data: { $ref: "#/components/schemas/MediaPage" }
+    MediaPlaybackInfo:
+      type: object
+      required: [provider, item_id, stream_url, direct_stream_url, netbird_stream_url, resume_ticks, runtime_ticks, played, favorite, media]
+      properties:
+        provider: { type: string }
+        item_id: { type: string }
+        stream_url: { type: string }
+        direct_stream_url: { type: string }
+        netbird_stream_url: { type: string }
+        resume_ticks: { type: integer, format: int64, minimum: 0 }
+        runtime_ticks: { type: integer, format: int64, minimum: 0 }
+        played: { type: boolean }
+        favorite: { type: boolean }
+        media: { $ref: "#/components/schemas/JellyfinMediaInfo" }
+        diagnostic: { $ref: "#/components/schemas/PlaybackDiagnostic" }
+    MediaProgressInput:
+      type: object
+      required: [event, ticks, duration_ticks]
+      properties:
+        event: { type: string, enum: [playing, timeupdate, seeked, pause, ended, stop, destroy, restart] }
+        ticks: { type: integer, format: int64, minimum: 0 }
+        duration_ticks: { type: integer, format: int64, minimum: 0 }
+    MediaUserStateInput:
       type: object
       properties:
         played: { type: boolean }

@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/model"
@@ -362,7 +364,7 @@ func TestGetPlayInfoReturnsDiagnosticWhenLocalMediaMissing(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "重新扫描本地库")
 }
 
-func TestGetPlayInfoUsesConfiguredDirectJellyfinURL(t *testing.T) {
+func TestGetPlayInfoUsesConfiguredPrivatePlaybackURLs(t *testing.T) {
 	resetAuthFixtures(t)
 	r := setupRouter()
 
@@ -392,6 +394,7 @@ func TestGetPlayInfoUsesConfiguredDirectJellyfinURL(t *testing.T) {
 	for _, cfg := range []model.GlobalConfig{
 		{Key: model.ConfigKeyJellyfinUrl, Value: jf.URL},
 		{Key: model.ConfigKeyJellyfinDirectUrl, Value: "https://media.example-tailnet.ts.net/jellyfin/"},
+		{Key: model.ConfigKeyNetBirdProxyURL, Value: "http://100.90.80.70:8306/"},
 		{Key: model.ConfigKeyJellyfinApiKey, Value: "test-key"},
 	} {
 		require.NoError(t, db.DB.Save(&cfg).Error)
@@ -418,6 +421,12 @@ func TestGetPlayInfoUsesConfiguredDirectJellyfinURL(t *testing.T) {
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &payload))
 	assert.Equal(t, fmt.Sprintf("/api/v1/jellyfin/stream/%d", ep.ID), payload.StreamURL)
 	assert.Equal(t, "https://media.example-tailnet.ts.net/jellyfin/Videos/episode-1/stream?api_key=test-key&static=true", payload.DirectStreamURL)
+	netBirdURL, err := url.Parse(payload.NetBirdStreamURL)
+	require.NoError(t, err)
+	assert.Equal(t, "http", netBirdURL.Scheme)
+	assert.Equal(t, "100.90.80.70:8306", netBirdURL.Host)
+	assert.Equal(t, fmt.Sprintf("/api/v1/netbird/jellyfin/stream/%d", ep.ID), netBirdURL.Path)
+	assert.NoError(t, verifyNetBirdStreamToken(netBirdURL.Query().Get("token"), ep.ID, time.Now()))
 	assert.Equal(t, int64(900000000), payload.ResumeTicks)
 }
 

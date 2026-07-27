@@ -890,6 +890,218 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/netbird/jellyfin/stream/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Proxies a Jellyfin static stream through the configured AnimateTool NetBird address using a short-lived signed token. */
+        get: operations["streamJellyfinEpisodeThroughNetBird"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/netbird/media/{provider}/stream/{item_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Proxies a provider media stream through the configured AnimateTool NetBird address using a short-lived token scoped to the provider, item, user, and expiry. */
+        get: operations["streamMediaItemThroughNetBird"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/media/providers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listMediaProviders"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/media/providers/{provider}/libraries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listMediaLibraries"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/media/providers/{provider}/items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listMediaItems"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/media/providers/{provider}/continue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listContinueWatchingMedia"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/media/providers/{provider}/items/{item_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getMediaItem"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/media/providers/{provider}/items/{item_id}/children": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listMediaItemChildren"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/media/providers/{provider}/items/{item_id}/play": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getMediaPlayback"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/media/providers/{provider}/items/{item_id}/image": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Proxies the provider image without exposing provider credentials. */
+        get: operations["getMediaItemImage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/media/providers/{provider}/items/{item_id}/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Proxies the provider stream while preserving Range requests. */
+        get: operations["streamMediaItem"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/media/providers/{provider}/items/{item_id}/progress": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["updateMediaProgress"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/media/providers/{provider}/items/{item_id}/user-state": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["updateMediaUserState"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/playback/continue": {
         parameters: {
             query?: never;
@@ -1586,6 +1798,8 @@ export interface components {
             stream_url: string;
             /** @description Browser-reachable Jellyfin stream URL; empty when direct playback is not configured. */
             direct_stream_url: string;
+            /** @description Short-lived signed AnimateTool proxy URL reachable through NetBird; empty when the NetBird proxy address is not configured. */
+            netbird_stream_url: string;
             /** Format: int64 */
             resume_ticks: number;
             /** Format: int64 */
@@ -1613,6 +1827,94 @@ export interface components {
             subtitle_count: number;
         };
         JellyfinUserStateInput: {
+            played?: boolean;
+            favorite?: boolean;
+        };
+        MediaProviderCapabilities: {
+            libraries: boolean;
+            search: boolean;
+            episodes: boolean;
+            progress: boolean;
+            favorites: boolean;
+            images: boolean;
+        };
+        MediaProvider: {
+            id: string;
+            name: string;
+            configured: boolean;
+            connected: boolean;
+            detail: string;
+            capabilities: components["schemas"]["MediaProviderCapabilities"];
+        };
+        MediaProviderList: {
+            providers: components["schemas"]["MediaProvider"][];
+        };
+        MediaLibrary: {
+            id: string;
+            name: string;
+            collection_type: string;
+            item_count: number;
+            selected: boolean;
+        };
+        MediaLibraryList: {
+            items: components["schemas"]["MediaLibrary"][];
+        };
+        MediaItem: {
+            id: string;
+            provider: string;
+            name: string;
+            type: string;
+            overview: string;
+            production_year: number;
+            premiere_date: string;
+            community_rating: number;
+            /** Format: int64 */
+            runtime_ticks: number;
+            episode: number;
+            season: number;
+            parent_id: string;
+            series_id: string;
+            series_name: string;
+            child_count: number;
+            genres?: string[];
+            poster_url: string;
+            thumbnail_url: string;
+            played: boolean;
+            favorite: boolean;
+            /** Format: int64 */
+            resume_ticks: number;
+            progress_percent: number;
+        };
+        MediaPage: {
+            items: components["schemas"]["MediaItem"][];
+        };
+        MediaPageEnvelope: components["schemas"]["PaginatedEnvelope"] & {
+            data?: components["schemas"]["MediaPage"];
+        };
+        MediaPlaybackInfo: {
+            provider: string;
+            item_id: string;
+            stream_url: string;
+            direct_stream_url: string;
+            netbird_stream_url: string;
+            /** Format: int64 */
+            resume_ticks: number;
+            /** Format: int64 */
+            runtime_ticks: number;
+            played: boolean;
+            favorite: boolean;
+            media: components["schemas"]["JellyfinMediaInfo"];
+            diagnostic?: components["schemas"]["PlaybackDiagnostic"];
+        };
+        MediaProgressInput: {
+            /** @enum {string} */
+            event: "playing" | "timeupdate" | "seeked" | "pause" | "ended" | "stop" | "destroy" | "restart";
+            /** Format: int64 */
+            ticks: number;
+            /** Format: int64 */
+            duration_ticks: number;
+        };
+        MediaUserStateInput: {
             played?: boolean;
             favorite?: boolean;
         };
@@ -1763,6 +2065,8 @@ export interface components {
     };
     parameters: {
         Id: number;
+        MediaProvider: string;
+        MediaItemId: string;
         Page: number;
         PageSize: number;
     };
@@ -2739,6 +3043,416 @@ export interface operations {
                 };
                 content?: never;
             };
+        };
+    };
+    streamJellyfinEpisodeThroughNetBird: {
+        parameters: {
+            query: {
+                token: string;
+            };
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Proxied video stream */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "video/*": string;
+                };
+            };
+            /** @description Partial proxied video stream */
+            206: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "video/*": string;
+                };
+            };
+            /** @description Missing, invalid, mismatched, or expired stream token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Episode or Jellyfin item not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    streamMediaItemThroughNetBird: {
+        parameters: {
+            query: {
+                token: string;
+            };
+            header?: never;
+            path: {
+                provider: components["parameters"]["MediaProvider"];
+                item_id: components["parameters"]["MediaItemId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Proxied video stream */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "video/*": string;
+                };
+            };
+            /** @description Partial proxied video stream */
+            206: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "video/*": string;
+                };
+            };
+            /** @description Missing, invalid, mismatched, or expired stream token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Provider or media item not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    listMediaProviders: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Configured and available media providers */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["MediaProviderList"];
+                    };
+                };
+            };
+        };
+    };
+    listMediaLibraries: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: components["parameters"]["MediaProvider"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Provider libraries with the current AnimateTool selection state */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["MediaLibraryList"];
+                    };
+                };
+            };
+            503: components["responses"]["Error"];
+        };
+    };
+    listMediaItems: {
+        parameters: {
+            query?: {
+                page?: components["parameters"]["Page"];
+                page_size?: components["parameters"]["PageSize"];
+                library_id?: string;
+                parent_id?: string;
+                q?: string;
+                section?: "continue" | "favorites";
+                sort_by?: string;
+                sort_order?: "Ascending" | "Descending";
+            };
+            header?: never;
+            path: {
+                provider: components["parameters"]["MediaProvider"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Paginated provider-neutral media items */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MediaPageEnvelope"];
+                };
+            };
+            503: components["responses"]["Error"];
+        };
+    };
+    listContinueWatchingMedia: {
+        parameters: {
+            query?: {
+                page_size?: components["parameters"]["PageSize"];
+            };
+            header?: never;
+            path: {
+                provider: components["parameters"]["MediaProvider"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Continue-watching items */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MediaPageEnvelope"];
+                };
+            };
+            503: components["responses"]["Error"];
+        };
+    };
+    getMediaItem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: components["parameters"]["MediaProvider"];
+                item_id: components["parameters"]["MediaItemId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Provider-neutral media item detail */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["MediaItem"];
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    listMediaItemChildren: {
+        parameters: {
+            query?: {
+                type?: "season" | "episode";
+            };
+            header?: never;
+            path: {
+                provider: components["parameters"]["MediaProvider"];
+                item_id: components["parameters"]["MediaItemId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Seasons or episodes belonging to the media item */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MediaPageEnvelope"];
+                };
+            };
+            503: components["responses"]["Error"];
+        };
+    };
+    getMediaPlayback: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: components["parameters"]["MediaProvider"];
+                item_id: components["parameters"]["MediaItemId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Available playback routes and current user state */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["MediaPlaybackInfo"];
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    getMediaItemImage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: components["parameters"]["MediaProvider"];
+                item_id: components["parameters"]["MediaItemId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Provider image */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/*": string;
+                };
+            };
+            /** @description Image not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Provider unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    streamMediaItem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: components["parameters"]["MediaProvider"];
+                item_id: components["parameters"]["MediaItemId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Proxied video stream */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "video/*": string;
+                };
+            };
+            /** @description Partial proxied video stream */
+            206: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "video/*": string;
+                };
+            };
+            /** @description Provider or media item not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    updateMediaProgress: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: components["parameters"]["MediaProvider"];
+                item_id: components["parameters"]["MediaItemId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MediaProgressInput"];
+            };
+        };
+        responses: {
+            200: components["responses"]["Success"];
+            400: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    updateMediaUserState: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: components["parameters"]["MediaProvider"];
+                item_id: components["parameters"]["MediaItemId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MediaUserStateInput"];
+            };
+        };
+        responses: {
+            /** @description Updated played and favorite state */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: {
+                            played: boolean;
+                            favorite: boolean;
+                        };
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            503: components["responses"]["Error"];
         };
     };
     getContinueWatching: {

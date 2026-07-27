@@ -73,6 +73,8 @@ func resolveSettingsScopeSpec(scope string) settingsScopeSpec {
 			keys: []string{
 				model.ConfigKeyJellyfinUrl,
 				model.ConfigKeyJellyfinDirectUrl,
+				model.ConfigKeyNetBirdProxyURL,
+				model.ConfigKeyJellyfinLibraryIDs,
 				model.ConfigKeyJellyfinApiKey,
 				model.ConfigKeyJellyfinUsername,
 				model.ConfigKeyJellyfinPassword,
@@ -116,6 +118,8 @@ func resolveSettingsScopeSpec(scope string) settingsScopeSpec {
 				model.ConfigKeyRepoRequireChecksum,
 				model.ConfigKeyJellyfinUrl,
 				model.ConfigKeyJellyfinDirectUrl,
+				model.ConfigKeyNetBirdProxyURL,
+				model.ConfigKeyJellyfinLibraryIDs,
 				model.ConfigKeyJellyfinApiKey,
 				model.ConfigKeyJellyfinUsername,
 				model.ConfigKeyJellyfinPassword,
@@ -157,8 +161,12 @@ func persistSettingsScope(c *gin.Context, scope string) error {
 			continue
 		}
 		if val, exists := c.GetPostForm(key); exists {
-			if key == model.ConfigKeyJellyfinUrl || key == model.ConfigKeyJellyfinDirectUrl {
-				normalized, err := normalizeJellyfinBaseURL(val)
+			if key == model.ConfigKeyJellyfinUrl || key == model.ConfigKeyJellyfinDirectUrl || key == model.ConfigKeyNetBirdProxyURL {
+				normalize := normalizeJellyfinBaseURL
+				if key == model.ConfigKeyNetBirdProxyURL {
+					normalize = normalizeNetBirdProxyBaseURL
+				}
+				normalized, err := normalize(val)
 				if err != nil {
 					return err
 				}

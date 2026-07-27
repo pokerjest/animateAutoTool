@@ -7,7 +7,9 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -230,4 +232,85 @@ func TestProxyVideoPreservesRangeResponse(t *testing.T) {
 	assert.Equal(t, "bytes 0-3/8", response.Header.Get("Content-Range"))
 	assert.Equal(t, "4", response.Header.Get("Content-Length"))
 	assert.Equal(t, "test", string(body))
+}
+
+func TestNetBirdProxyVideoUsesSignedTokenAndPreservesRangeResponse(t *testing.T) {
+	resetAuthFixtures(t)
+	_, first, _ := seedPlaybackAnime(t, 74)
+	first.JellyfinItemID = "netbird-range-episode-1"
+	require.NoError(t, db.DB.Save(&first).Error)
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		assert.Equal(t, "bytes=4-7", req.Header.Get("Range"))
+		assert.Equal(t, "/Videos/netbird-range-episode-1/stream", req.URL.Path)
+		assert.Empty(t, req.URL.Query().Get("token"))
+		assert.Equal(t, "true", req.URL.Query().Get("static"))
+		assert.Equal(t, "test-key", req.URL.Query().Get("api_key"))
+		w.Header().Set("Accept-Ranges", "bytes")
+		w.Header().Set("Content-Range", "bytes 4-7/8")
+		w.Header().Set("Content-Length", "4")
+		w.WriteHeader(http.StatusPartialContent)
+		_, _ = w.Write([]byte("bird"))
+	}))
+	t.Cleanup(upstream.Close)
+	require.NoError(t, db.DB.Save(&model.GlobalConfig{Key: model.ConfigKeyJellyfinUrl, Value: upstream.URL}).Error)
+	require.NoError(t, db.DB.Save(&model.GlobalConfig{Key: model.ConfigKeyJellyfinApiKey, Value: "test-key"}).Error)
+
+	router := setupRouter()
+	appServer := httptest.NewServer(router)
+	t.Cleanup(appServer.Close)
+
+	unsignedResponse, err := http.Get(appServer.URL + "/api/v1/netbird/jellyfin/stream/" + strconv.FormatUint(uint64(first.ID), 10))
+	require.NoError(t, err)
+	_ = unsignedResponse.Body.Close()
+	assert.Equal(t, http.StatusUnauthorized, unsignedResponse.StatusCode)
+
+	token, err := signNetBirdStreamToken(first.ID, 1, time.Now().Add(time.Hour))
+	require.NoError(t, err)
+	req, err := http.NewRequest(
+		http.MethodGet,
+		appServer.URL+"/api/v1/netbird/jellyfin/stream/"+strconv.FormatUint(uint64(first.ID), 10)+"?token="+url.QueryEscape(token),
+		nil,
+	)
+	require.NoError(t, err)
+	req.Header.Set("Range", "bytes=4-7")
+	response, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = response.Body.Close() })
+	body, err := io.ReadAll(response.Body)
+	require.NoError(t, err)
+
+	assert.Equal(t, http.StatusPartialContent, response.StatusCode)
+	assert.Equal(t, "bytes", response.Header.Get("Accept-Ranges"))
+	assert.Equal(t, "bytes 4-7/8", response.Header.Get("Content-Range"))
+	assert.Equal(t, "bird", string(body))
+}
+
+func TestNetBirdStreamTokenRejectsExpiredMismatchedAndTamperedTokens(t *testing.T) {
+	now := time.Now()
+	expired, err := signNetBirdStreamToken(41, 7, now.Add(-time.Second))
+	require.NoError(t, err)
+	assert.Error(t, verifyNetBirdStreamToken(expired, 41, now))
+
+	valid, err := signNetBirdStreamToken(41, 7, now.Add(time.Hour))
+	require.NoError(t, err)
+	assert.Error(t, verifyNetBirdStreamToken(valid, 42, now))
+
+	parts := strings.Split(valid, ".")
+	require.Len(t, parts, 2)
+	tampered := parts[0] + "." + parts[1][:len(parts[1])-1] + "A"
+	assert.Error(t, verifyNetBirdStreamToken(tampered, 41, now))
+}
+
+func TestMediaNetBirdStreamTokenScopesProviderAndItem(t *testing.T) {
+	now := time.Now()
+	token, err := signMediaNetBirdStreamToken("jellyfin", "episode-guid-1", 7, now.Add(time.Hour))
+	require.NoError(t, err)
+	assert.NoError(t, verifyMediaNetBirdStreamToken(token, "jellyfin", "episode-guid-1", now))
+	assert.Error(t, verifyMediaNetBirdStreamToken(token, "jellyfin", "episode-guid-2", now))
+	assert.Error(t, verifyMediaNetBirdStreamToken(token, "emby", "episode-guid-1", now))
+
+	expired, err := signMediaNetBirdStreamToken("jellyfin", "episode-guid-1", 7, now.Add(-time.Second))
+	require.NoError(t, err)
+	assert.Error(t, verifyMediaNetBirdStreamToken(expired, "jellyfin", "episode-guid-1", now))
 }

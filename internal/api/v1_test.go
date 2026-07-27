@@ -443,6 +443,40 @@ func TestV1SettingsRejectsInvalidJellyfinDirectURL(t *testing.T) {
 	assert.Empty(t, store.NewConfigStore(db.DB).GetDefault(model.ConfigKeyJellyfinDirectUrl, ""))
 }
 
+func TestV1SettingsNormalizesNetBirdProxyURL(t *testing.T) {
+	resetAuthFixtures(t)
+	r := setupRouter()
+	cookie, _ := loginCookie(t, r, "admin")
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/settings", bytes.NewBufferString(`{"values":{"netbird_proxy_url":" http://100.90.80.70:8306/ "}}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Cookie", cookie)
+	markLocalRequest(req)
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	value := store.NewConfigStore(db.DB).GetDefault(model.ConfigKeyNetBirdProxyURL, "")
+	assert.Equal(t, "http://100.90.80.70:8306", value)
+	data, err := os.ReadFile(config.ConfigFilePath())
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "netbird_proxy_url: http://100.90.80.70:8306")
+}
+
+func TestV1SettingsRejectsInvalidNetBirdProxyURL(t *testing.T) {
+	resetAuthFixtures(t)
+	r := setupRouter()
+	cookie, _ := loginCookie(t, r, "admin")
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/settings", bytes.NewBufferString(`{"values":{"netbird_proxy_url":"ftp://100.90.80.70:8306"}}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Cookie", cookie)
+	markLocalRequest(req)
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), `"code":"invalid_netbird_proxy_url"`)
+	assert.Empty(t, store.NewConfigStore(db.DB).GetDefault(model.ConfigKeyNetBirdProxyURL, ""))
+}
+
 func TestV1ProxyTestUsesSubmittedProxy(t *testing.T) {
 	resetAuthFixtures(t)
 	var proxyHit atomic.Bool

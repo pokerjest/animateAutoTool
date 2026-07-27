@@ -1,28 +1,48 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Activity, ArchiveRestore, Bot, CalendarDays, ChevronRight, Clapperboard, Download, HeartPulse, Home, Library, LogOut, Menu, MoonStar, Settings, ShieldCheck, Sparkles, Sun, Tv, X } from '@lucide/vue'
+import { Activity, CalendarDays, ChevronRight, Clapperboard, Download, Film, Home, Library, LogOut, Menu, MoonStar, Settings, ShieldCheck, Sparkles, Sun, Tv, X } from '@lucide/vue'
 import { useUIStore } from '../stores/ui'
 import { useTaskStore } from '../stores/tasks'
 import { useSessionStore } from '../stores/session'
 import { usePlaybackStore } from '../stores/playback'
+import { useWorkspaceStore, type WorkspaceMode } from '../stores/workspace'
 import { useAsyncActions } from '../composables/useAsyncActions'
 import AsyncButton from './AsyncButton.vue'
 import AppBackground from './AppBackground.vue'
 import TaskCenter from './TaskCenter.vue'
 import PlaybackHost from './PlaybackHost.vue'
 
-const route = useRoute(); const router = useRouter(); const ui = useUIStore(); const tasks = useTaskStore(); const session = useSessionStore(); const playback = usePlaybackStore(); const actions = useAsyncActions()
-const groups = [
+const route = useRoute(); const router = useRouter(); const ui = useUIStore(); const tasks = useTaskStore(); const session = useSessionStore(); const playback = usePlaybackStore(); const workspace = useWorkspaceStore(); const actions = useAsyncActions()
+const manageGroups = [
   { label: '概览', links: [{ to: '/', label: '今日概览', icon: Home }, { to: '/calendar', label: '追番日历', icon: CalendarDays }] },
-  { label: '追番', links: [{ to: '/subscriptions', label: '订阅管理', icon: Tv }, { to: '/assistant', label: 'AI 助手', icon: Bot }] },
-  { label: '媒体', links: [{ to: '/library', label: '番剧图鉴', icon: Library }, { to: '/local-anime', label: '本地番剧', icon: Clapperboard }, { to: '/player', label: '播放器', icon: Download }] },
-  { label: '系统', links: [{ to: '/health', label: '系统健康', icon: HeartPulse }, { to: '/backup', label: '备份恢复', icon: ArchiveRestore }, { to: '/settings', label: '系统设置', icon: Settings }] },
+  { label: '追番', links: [{ to: '/subscriptions', label: '订阅管理', icon: Tv }] },
+  { label: '媒体', links: [{ to: '/library', label: '番剧图鉴', icon: Library }, { to: '/local-anime', label: '本地番剧', icon: Clapperboard }] },
+  { label: '系统', links: [{ to: '/settings', label: '系统设置', icon: Settings }] },
 ]
-const bottom = groups.flatMap(g => g.links).filter(l => ['/', '/calendar', '/subscriptions', '/library'].includes(l.to))
-const isActive = (to: string) => to === '/' ? route.path === '/' : route.path.startsWith(to)
+const mediaGroups = [
+  { label: '观看', links: [{ to: '/media', label: '媒体首页', icon: Home }, { to: '/media/library/all', label: '媒体库', icon: Film }] },
+  { label: '收藏', links: [{ to: '/media?section=continue', label: '继续观看', icon: Download }, { to: '/media?section=favorites', label: '收藏', icon: Library }] },
+  { label: '系统', links: [{ to: '/settings', label: '系统设置', icon: Settings }] },
+]
+const groups = computed(() => workspace.isMedia ? mediaGroups : manageGroups)
+const bottom = computed(() => groups.value.flatMap(g => g.links).slice(0, 4))
+const isActive = (to: string) => {
+  const [path] = to.split('?')
+  if (to.includes('?')) return route.fullPath.startsWith(to)
+  if (path === '/') return route.path === path
+  if (path === '/media') return route.path === path && !route.query.section
+  return route.path.startsWith(path)
+}
 const themeIcon = computed(() => ui.theme === 'dark' ? Sun : MoonStar)
 const toggleTheme = () => ui.setTheme(document.documentElement.classList.contains('dark') ? 'light' : 'dark')
+async function switchWorkspace(mode: WorkspaceMode) {
+  if (mode === workspace.mode) return
+  if (mode === 'manage') playback.pauseForWorkspaceSwitch()
+  workspace.setMode(mode)
+  const target = workspace.routeFor(mode)
+  await router.push(target)
+}
 const logout = async () => { try { await actions.run('logout', async () => { if (playback.current) await playback.stop(); await session.logout(); await router.push('/login') }) } catch (error) { ui.toast(error instanceof Error ? error.message : '退出登录失败', 'error') } }
 </script>
 
@@ -55,9 +75,15 @@ const logout = async () => { try { await actions.run('logout', async () => { if 
         <button class="btn btn-quiet h-11 min-h-11 w-11 p-0 lg:hidden" type="button" @click="ui.mobileMore = true" aria-label="打开更多导航"><Menu :size="21" /></button>
         <div class="min-w-0"><p class="eyebrow">Animate Auto Tool</p><h1 class="truncate text-lg font-extrabold">{{ route.meta.title }}</h1></div>
       </div>
-      <button class="btn btn-secondary relative" type="button" @click="ui.taskOpen = true" aria-label="打开任务中心">
-        <Activity :size="18" /><span class="hidden sm:inline">任务中心</span><span v-if="tasks.runningCount" class="badge badge-warning">{{ tasks.runningCount }}</span>
-      </button>
+      <div class="flex items-center gap-2">
+        <div class="hidden items-center rounded-xl border border-[var(--line)] bg-[var(--surface-solid)] p-1 sm:flex" role="group" aria-label="工作区模式">
+          <button type="button" class="min-h-9 rounded-lg px-3 text-xs font-black transition" :class="workspace.isManage ? 'bg-[var(--brand-soft)] text-[var(--brand-strong)]' : 'muted'" :aria-pressed="workspace.isManage" @click="switchWorkspace('manage')">管理模式</button>
+          <button type="button" class="min-h-9 rounded-lg px-3 text-xs font-black transition" :class="workspace.isMedia ? 'bg-[var(--brand-soft)] text-[var(--brand-strong)]' : 'muted'" :aria-pressed="workspace.isMedia" @click="switchWorkspace('media')">媒体模式</button>
+        </div>
+        <button class="btn btn-secondary relative" type="button" @click="ui.taskOpen = true" aria-label="打开任务中心">
+          <Activity :size="18" /><span class="hidden sm:inline">任务中心</span><span v-if="tasks.runningCount" class="badge badge-warning">{{ tasks.runningCount }}</span>
+        </button>
+      </div>
     </header>
 
     <main id="main-content" class="min-w-0 px-3 pb-28 pt-24 lg:ml-[280px] lg:px-6 lg:pb-8"><div class="mx-auto max-w-[1440px]"><PlaybackHost /><slot /></div></main>
@@ -71,6 +97,7 @@ const logout = async () => { try { await actions.run('logout', async () => { if 
       <button class="absolute inset-0 bg-black/45" type="button" aria-label="关闭导航" @click="ui.mobileMore=false"></button>
       <aside class="glass absolute inset-y-0 right-0 w-[min(88vw,360px)] overflow-y-auto rounded-l-[2rem] p-5">
         <div class="mb-5 flex items-center justify-between"><div><p class="eyebrow">导航</p><h2 class="text-xl font-black">所有功能</h2></div><button class="btn btn-quiet h-11 w-11 p-0" @click="ui.mobileMore=false" aria-label="关闭"><X /></button></div>
+        <div class="mb-4 flex items-center gap-2 rounded-xl border border-[var(--line)] bg-[var(--surface-solid)] p-1"><button class="min-h-10 flex-1 rounded-lg text-xs font-black" :class="workspace.isManage?'bg-[var(--brand-soft)] text-[var(--brand-strong)]':'muted'" @click="switchWorkspace('manage');ui.mobileMore=false">管理模式</button><button class="min-h-10 flex-1 rounded-lg text-xs font-black" :class="workspace.isMedia?'bg-[var(--brand-soft)] text-[var(--brand-strong)]':'muted'" @click="switchWorkspace('media');ui.mobileMore=false">媒体模式</button></div>
         <div v-for="group in groups" :key="group.label" class="mb-5"><h3 class="mb-2 px-2 text-xs font-extrabold muted">{{ group.label }}</h3><RouterLink v-for="link in group.links" :key="link.to" :to="link.to" class="mb-1 flex min-h-12 items-center gap-3 rounded-xl px-3 font-bold" :class="isActive(link.to) ? 'bg-[var(--brand-soft)] text-[var(--brand-strong)]' : ''" @click="ui.mobileMore=false"><component :is="link.icon" :size="19" />{{ link.label }}</RouterLink></div>
         <div class="panel-muted mt-6 grid gap-2 p-3">
           <button class="btn btn-secondary w-full justify-start" type="button" @click="toggleTheme" aria-label="切换明暗主题"><component :is="themeIcon" :size="18" />切换明暗主题</button>
