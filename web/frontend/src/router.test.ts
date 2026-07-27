@@ -27,7 +27,13 @@ describe('route guards', () => {
   })
 
   it('switches workspace automatically for direct media and management URLs', async () => {
-    vi.stubGlobal('fetch', vi.fn(() => response({ authenticated: true, setup_pending: false, username: 'admin', version: 'test', recovery_local_only: true })))
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
+      const path = String(input)
+      if (path.includes('/api/v1/media/providers')) {
+        return response({ providers: [{ id: 'jellyfin', configured: true, connected: true }] })
+      }
+      return response({ authenticated: true, setup_pending: false, username: 'admin', version: 'test', recovery_local_only: true })
+    }))
     await router.replace('/login')
 
     await router.push('/media/item/jellyfin/episode-guid')
@@ -38,5 +44,21 @@ describe('route guards', () => {
     await router.push('/subscriptions')
     expect(workspace.mode).toBe('manage')
     expect(workspace.lastManageRoute).toBe('/subscriptions')
+  })
+
+  it('keeps the legacy local player available without Jellyfin configuration', async () => {
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
+      const path = String(input)
+      if (path.includes('/api/v1/media/providers')) {
+        return response({ providers: [{ id: 'jellyfin', configured: false, connected: false }] })
+      }
+      return response({ authenticated: true, setup_pending: false, username: 'admin', version: 'test', recovery_local_only: true })
+    }))
+    await router.replace('/login')
+
+    await router.push('/player')
+    const workspace = useWorkspaceStore()
+    expect(router.currentRoute.value.path).toBe('/player')
+    expect(workspace.mode).toBe('manage')
   })
 })

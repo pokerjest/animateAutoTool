@@ -164,7 +164,7 @@ describe('Plex-style global playback', () => {
     mounted.queryClient.clear()
   })
 
-  it('uses proxy by default and falls back from a stalled remembered direct stream', async () => {
+  it('keeps a stalled remembered direct stream on the selected route', async () => {
     vi.useFakeTimers()
     localStorage.setItem('player.sourceMode', 'direct')
     const mounted = await mountPlayer(playerFetch(true))
@@ -177,41 +177,41 @@ describe('Plex-style global playback', () => {
     await flushPromises()
     await nextTick()
 
-    expect(mounted.wrapper.get('video').attributes('src')).toBe('/api/v1/jellyfin/stream/11')
-    expect(mounted.playback.sourceMode).toBe('proxy')
+    expect(mounted.wrapper.get('video').attributes('src')).toContain('example-tailnet.ts.net')
+    expect(mounted.playback.sourceMode).toBe('direct')
     expect(localStorage.getItem('player.preferredSource')).toBe('direct')
+    await video.trigger('error')
+    expect(mounted.wrapper.get('video').attributes('src')).toContain('example-tailnet.ts.net')
+    expect(mounted.wrapper.text()).toContain('Jellyfin 直连视频流加载失败')
     mounted.wrapper.unmount()
     mounted.queryClient.clear()
   })
 
-  it('falls back from a stalled remembered NetBird proxy stream', async () => {
-    vi.useFakeTimers()
+  it('migrates a remembered NetBird preference to the AnimateTool proxy', async () => {
     localStorage.setItem('player.sourceMode', 'netbird')
     const mounted = await mountPlayer(playerFetch(false, true))
-    await vi.waitFor(() => expect(mounted.wrapper.get('video').attributes('src')).toContain('media.netbird.example'))
-    const video = mounted.wrapper.get('video')
-    Object.defineProperty(video.element, 'paused', { value: false, configurable: true })
-
-    await video.trigger('waiting')
-    vi.advanceTimersByTime(8_000)
-    await flushPromises()
-    await nextTick()
-
     expect(mounted.wrapper.get('video').attributes('src')).toBe('/api/v1/jellyfin/stream/11')
     expect(mounted.playback.sourceMode).toBe('proxy')
-    expect(localStorage.getItem('player.preferredSource')).toBe('netbird')
+    expect(localStorage.getItem('player.preferredSource')).toBe('proxy')
+    expect(localStorage.getItem('player.sourceMode')).toBe('proxy')
     mounted.wrapper.unmount()
     mounted.queryClient.clear()
   })
 
-  it('uses the source preference from settings without exposing source buttons in the player', async () => {
+  it('shows only the two current source choices in the full player', async () => {
     localStorage.setItem('player.preferredSource', 'netbird')
     const mounted = await mountPlayer(playerFetch(true, true))
-    await vi.waitFor(() => expect(mounted.wrapper.get('video').attributes('src')).toContain('media.netbird.example'))
-    expect(mounted.wrapper.find('[role="group"][aria-label="播放线路"]').exists()).toBe(false)
-    expect(mounted.wrapper.text()).toContain('NetBird 代理')
-    expect(mounted.wrapper.get('video').attributes('src')).toContain('media.netbird.example')
-    expect(localStorage.getItem('player.preferredSource')).toBe('netbird')
+    await vi.waitFor(() => expect(mounted.wrapper.get('video').attributes('src')).toBe('/api/v1/jellyfin/stream/11'))
+    const sourceGroup = mounted.wrapper.find('[role="group"][aria-label="播放线路"]')
+    expect(sourceGroup.exists()).toBe(true)
+    expect(sourceGroup.text()).toContain('AnimateTool 代理')
+    expect(sourceGroup.text()).toContain('Jellyfin 直连')
+    expect(mounted.wrapper.text()).not.toContain('NetBird')
+    expect(localStorage.getItem('player.preferredSource')).toBe('proxy')
+    mounted.playback.onLoadedMetadata()
+    await mounted.playback.switchSource('direct')
+    await vi.waitFor(() => expect(mounted.wrapper.get('video').attributes('src')).toContain('media.example-tailnet.ts.net'))
+    expect(localStorage.getItem('player.preferredSource')).toBe('direct')
 
     mounted.wrapper.unmount()
     mounted.queryClient.clear()

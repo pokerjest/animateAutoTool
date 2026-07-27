@@ -95,12 +95,11 @@ func decodeNetBirdStreamToken(token string, now time.Time) (netBirdStreamClaims,
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
 		return netBirdStreamClaims{}, errors.New("invalid netbird stream token")
 	}
-	expected, err := base64.RawURLEncoding.DecodeString(netBirdStreamSignature(parts[0]))
-	if err != nil {
-		return netBirdStreamClaims{}, errors.New("invalid netbird stream signature")
-	}
-	actual, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil || !hmac.Equal(actual, expected) {
+	// Compare the canonical encoded signatures directly. Raw base64 decoding
+	// ignores non-zero padding bits, which could otherwise let a tampered final
+	// character decode to the same signature bytes.
+	expected := netBirdStreamSignature(parts[0])
+	if !hmac.Equal([]byte(parts[1]), []byte(expected)) {
 		return netBirdStreamClaims{}, errors.New("invalid netbird stream signature")
 	}
 	payload, err := base64.RawURLEncoding.DecodeString(parts[0])

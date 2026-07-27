@@ -41,7 +41,6 @@ DDNS 只能让域名跟随地址变化，不能把私网地址变成公网地址
 | 双重 NAT | 光猫桥接；或 DMZ/逐层转发 | 能控制上级设备 |
 | CGNAT / 没有公网 IPv4 | Cloudflare Tunnel | Cloudflare 账号；Named Tunnel 需要域名 |
 | 只允许自己访问 | Tailscale VPN | 访问设备加入 Tailnet |
-| 只允许自己访问并希望视频走私人网络 | NetBird | 访问设备安装 NetBird；播放器配置 NetBird 地址 |
 | 公开网页但不想开入站端口 | Tailscale Funnel | Tailnet 设备运行 Funnel |
 | 有 VPS，想完全自控链路 | FRP | 一台有公网入口的 VPS |
 | IPv6 真正可达 | AAAA + IPv6 防火墙 + HTTPS | 默认路由、PD、外部连通 |
@@ -59,4 +58,3 @@ DDNS 只能让域名跟随地址变化，不能把私网地址变成公网地址
 - [DDNS 与动态公网地址](ddns.md)
 - [反向代理与 HTTPS](reverse-proxy.md)
 - [Cloudflare Tunnel](cloudflare-tunnel.md)
-- [NetBird 私人网络播放](netbird.md)

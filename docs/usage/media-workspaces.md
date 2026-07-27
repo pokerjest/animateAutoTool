@@ -46,4 +46,4 @@ animate.workspace.last.media
 
 首版只实现 Jellyfin，但前后端使用提供商无关的媒体模型和 URL。后续可以增加 Plex、Emby 等适配器，而不需要重新改造媒体页面和播放器状态。
 
-浏览、详情、剧集、图片、进度和收藏请求都先经过 AnimateTool 后端。Jellyfin API Key 保存在服务器设置中，不用于媒体图片代理或 NetBird 签名地址。
+浏览、详情、剧集、图片、进度和收藏请求都先经过 AnimateTool 后端。Jellyfin API Key 保存在服务器设置中，不会暴露给浏览器。

@@ -11,7 +11,6 @@
 | --- | --- |
 | `jellyfin_url` | AnimateTool 后端访问 Jellyfin 的地址 |
 | `jellyfin_direct_url` | 浏览器或手机可以直接访问的地址，可选 |
-| `netbird_proxy_url` | 观看设备通过 NetBird 访问 AnimateTool 的地址，可选 |
 | `jellyfin_library_ids` | 媒体模式中展示的 Jellyfin 媒体库 ID；空数组表示全部 |
 | `jellyfin_username` | Jellyfin 用户名 |
 | `jellyfin_password` | Jellyfin 密码，用于连接测试和状态同步 |
@@ -19,15 +18,14 @@
 
 在 Jellyfin 管理后台的 **Dashboard → API Keys** 创建一个只供 AnimateTool 使用的 Key。Jellyfin API Key 不应被视为细粒度只读凭据；请把它当作高敏感服务密钥保存，泄露后立即在 Jellyfin 后台撤销。
 
-### 三条播放线路
+### 两条播放线路
 
 - **Jellyfin 直连**：观看设备直接访问 `jellyfin_direct_url`，适合局域网或 Tailnet。
-- **NetBird 代理**：观看设备通过 `netbird_proxy_url` 请求 AnimateTool 的视频代理；链接使用短时签名，不依赖跨域登录 Cookie，也不会暴露 Jellyfin API Key。
 - **AnimateTool 代理**：观看设备只访问 AnimateTool，视频流经过应用主机，适合 Cloudflare Tunnel 或反向代理。
 
-浏览器页面使用 HTTPS 时，Jellyfin 直连地址和 NetBird 代理地址也应使用 HTTPS，否则会触发混合内容限制。没有在 NetBird 内配置 HTTPS 时，可以直接用 `http://<NetBird-IP>:8306` 打开整个 AnimateTool，此时页面和视频都走 NetBird。
+浏览器页面使用 HTTPS 时，Jellyfin 直连地址也应使用 HTTPS，否则会触发混合内容限制。
 
-播放线路在 **系统设置 → 媒体服务 → Jellyfin → 本设备播放线路** 中选择。这个偏好只保存在当前浏览器，不会覆盖其他手机或电脑的选择。旧版本的 `player.sourceMode` 会自动迁移到 `player.preferredSource`。
+播放线路在完整播放器的视频下方选择。选择会立即作用于当前浏览器，不会自动回退到另一条线路；旧版本的 `player.sourceMode=netbird` 会自动迁移为 AnimateTool 代理。
 
 媒体库范围也在 Jellyfin 设置卡片中选择。默认展示全部影视媒体库；保存为 `[]` 时同样代表全部，避免升级后因为没有显式选择而显示空库。
 

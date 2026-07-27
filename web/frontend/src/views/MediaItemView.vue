@@ -55,15 +55,15 @@ async function updateState(kind: 'played' | 'favorite') {
       <section class="panel overflow-hidden">
         <div class="grid gap-6 p-5 lg:grid-cols-[240px_1fr]">
           <img :src="item.poster_url" :alt="item.name" class="aspect-[2/3] w-full max-w-60 rounded-2xl object-cover" />
-          <div>
-            <div class="flex flex-wrap items-start justify-between gap-3"><div><p class="eyebrow">{{ item.type }}</p><h1 class="mt-2 text-3xl font-black">{{ item.name }}</h1><p v-if="item.series_name" class="muted mt-1">{{ item.series_name }}</p></div><span v-if="item.community_rating" class="badge badge-success">★ {{ item.community_rating.toFixed(1) }}</span></div>
+          <div class="min-w-0">
+            <div class="flex flex-wrap items-start justify-between gap-3"><div class="min-w-0"><p class="eyebrow">{{ item.type }}</p><h1 class="mt-2 break-words text-3xl font-black">{{ item.name }}</h1><p v-if="item.series_name" class="muted mt-1 break-words">{{ item.series_name }}</p></div><span v-if="item.community_rating" class="badge badge-success shrink-0">★ {{ item.community_rating.toFixed(1) }}</span></div>
             <p class="muted mt-4 max-w-3xl whitespace-pre-line text-sm leading-7">{{ item.overview || '暂无简介' }}</p>
             <div class="mt-5 flex flex-wrap gap-2"><span v-if="item.production_year" class="badge">{{ item.production_year }}</span><span v-for="genre in item.genres" :key="genre" class="badge">{{ genre }}</span></div>
             <div class="mt-6 flex flex-wrap gap-2">
-              <RouterLink v-if="playTarget" class="btn btn-primary" :to="`/media/play/${provider}/${encodeURIComponent(playTarget.id)}?autoplay=1`"><PlayCircle :size="17" />{{ playTarget.resume_ticks ? '继续播放' : '播放' }}</RouterLink>
-              <button v-else class="btn btn-primary" type="button" disabled><PlayCircle :size="17" />正在读取剧集</button>
-              <AsyncButton class="btn btn-secondary" :loading="actions.isBusy('media-state-played')" @click="updateState('played')"><CheckCircle2 :size="16" />{{ item.played ? '标为未看' : '标记已看' }}</AsyncButton>
-              <AsyncButton class="btn btn-secondary" :loading="actions.isBusy('media-state-favorite')" @click="updateState('favorite')"><Heart :size="16" :fill="item.favorite ? 'currentColor' : 'none'" />{{ item.favorite ? '取消收藏' : '收藏' }}</AsyncButton>
+              <RouterLink v-if="playTarget" class="btn btn-primary w-full justify-center sm:w-auto" :to="`/media/play/${provider}/${encodeURIComponent(playTarget.id)}?autoplay=1`"><PlayCircle :size="17" />{{ playTarget.resume_ticks ? '继续播放' : '播放' }}</RouterLink>
+              <button v-else class="btn btn-primary w-full justify-center sm:w-auto" type="button" disabled><PlayCircle :size="17" />正在读取剧集</button>
+              <AsyncButton class="btn btn-secondary w-full justify-center sm:w-auto" :loading="actions.isBusy('media-state-played')" @click="updateState('played')"><CheckCircle2 :size="16" />{{ item.played ? '标为未看' : '标记已看' }}</AsyncButton>
+              <AsyncButton class="btn btn-secondary w-full justify-center sm:w-auto" :loading="actions.isBusy('media-state-favorite')" @click="updateState('favorite')"><Heart :size="16" :fill="item.favorite ? 'currentColor' : 'none'" />{{ item.favorite ? '取消收藏' : '收藏' }}</AsyncButton>
             </div>
           </div>
         </div>
@@ -75,7 +75,7 @@ async function updateState(kind: 'played' | 'favorite') {
         <div v-else class="mt-5 space-y-3">
           <article v-for="episode in episodes" :key="episode.id" class="panel-muted grid gap-4 p-4 sm:grid-cols-[1fr_auto] sm:items-center">
             <div><div class="flex flex-wrap items-center gap-2"><h3 class="font-black">第 {{ episode.episode || '?' }} 集 · {{ episode.name }}</h3><span v-if="episode.played" class="badge badge-success">已看</span></div><p class="muted mt-1 line-clamp-2 text-sm">{{ episode.overview || '暂无简介' }}</p><p v-if="episode.runtime_ticks" class="muted mt-2 flex items-center gap-1 text-xs"><Clock3 :size="13" />{{ Math.round(episode.runtime_ticks / 600000000) }} 分钟</p><div v-if="episode.progress_percent && !episode.played" class="mt-2 h-1.5 max-w-80 overflow-hidden rounded-full bg-[var(--surface-muted)]"><div class="h-full rounded-full bg-[var(--brand)]" :style="{ width: `${episode.progress_percent}%` }"></div></div></div>
-            <RouterLink class="btn btn-primary" :to="`/media/play/${provider}/${encodeURIComponent(episode.id)}?autoplay=1`"><PlayCircle :size="16" />{{ episode.resume_ticks ? '继续' : '播放' }}</RouterLink>
+            <RouterLink class="btn btn-primary w-full justify-center sm:w-auto" :to="`/media/play/${provider}/${encodeURIComponent(episode.id)}?autoplay=1`"><PlayCircle :size="16" />{{ episode.resume_ticks ? '继续' : '播放' }}</RouterLink>
           </article>
         </div>
       </section>

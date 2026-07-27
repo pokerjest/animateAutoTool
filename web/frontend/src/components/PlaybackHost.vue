@@ -25,7 +25,11 @@ const continueQuery = useQuery({
 })
 const latest = computed(() => continueQuery.data.value?.items[0])
 const progress = computed(() => playback.duration > 0 ? Math.min(100, playback.position / playback.duration * 100) : 0)
-const sourceLabel = computed(() => playback.usingNetBird ? 'NetBird 代理' : playback.usingDirect ? 'Jellyfin 直连' : 'AnimateTool 代理')
+const sourceLabel = computed(() => playback.usingDirect ? 'Jellyfin 直连' : 'AnimateTool 代理')
+const sourceOptions = computed(() => [
+  { value: 'proxy' as const, label: 'AnimateTool 代理', available: Boolean(playback.playInfo?.stream_url) },
+  { value: 'direct' as const, label: 'Jellyfin 直连', available: Boolean(playback.playInfo?.direct_stream_url) },
+])
 
 watch(video, element => playback.attachVideo(element), { immediate: true })
 
@@ -79,6 +83,11 @@ function ended() {
   playback.onEnded()
   setTimeout(() => void queryClient.invalidateQueries({ queryKey: ['continue-watching'] }), 400)
 }
+
+async function chooseSource(value: 'proxy' | 'direct') {
+  if (value === playback.activeSource) return
+  await playback.switchSource(value)
+}
 </script>
 
 <template>
@@ -96,7 +105,7 @@ function ended() {
         <p class="muted mt-1 text-sm">第 {{ playback.current.episode || '?' }} 集 · {{ playback.current.episodeTitle }}</p>
       </div>
       <div class="flex flex-wrap items-center gap-2">
-        <span class="badge" :class="playback.usingDirect || playback.usingNetBird ? 'badge-success' : ''"><Network v-if="playback.usingDirect || playback.usingNetBird" :size="13" /><Server v-else :size="13" />{{ sourceLabel }}</span>
+        <span class="badge" :class="playback.usingDirect ? 'badge-success' : ''"><Network v-if="playback.usingDirect" :size="13" /><Server v-else :size="13" />{{ sourceLabel }}</span>
         <button class="btn btn-secondary" @click="playback.restart"><RotateCcw :size="16" />从头播放</button>
       </div>
     </div>
@@ -127,6 +136,7 @@ function ended() {
       <div v-if="!full" class="min-w-0 bg-[var(--surface-solid)] p-3">
         <p class="truncate text-sm font-black">{{ playback.current.title }}</p>
         <p class="muted mt-1 truncate text-xs">第 {{ playback.current.episode || '?' }} 集 · {{ playback.current.episodeTitle }}</p>
+        <span class="badge mt-2 inline-flex max-w-full truncate text-[.68rem]" :class="playback.usingDirect ? 'badge-success' : ''">{{ sourceLabel }}</span>
         <input class="mt-2 h-6 w-full accent-[var(--brand)]" type="range" min="0" max="100" :value="progress" aria-label="播放进度" @input="seek" />
         <div class="mt-1 flex items-center gap-1">
           <button class="btn btn-quiet h-11 min-h-11 w-11 p-0" :aria-label="playback.playing ? '暂停' : '播放'" @click="togglePlayback"><Pause v-if="playback.playing" :size="18" /><Play v-else :size="18" /></button>
@@ -139,12 +149,32 @@ function ended() {
       </div>
     </div>
 
-    <div v-if="full" class="flex flex-wrap items-center justify-between gap-3 bg-[var(--surface-solid)] p-4">
-      <div class="flex flex-wrap gap-2">
+    <div v-if="full" class="grid gap-4 bg-[var(--surface-solid)] p-4">
+      <div class="grid gap-2 sm:flex sm:flex-wrap sm:items-center" role="group" aria-label="播放线路">
+        <span class="muted text-sm font-bold sm:mr-1">播放线路</span>
+        <button
+          v-for="option in sourceOptions"
+          :key="option.value"
+          type="button"
+          class="btn min-h-11 w-full justify-center sm:w-auto"
+          :class="playback.activeSource === option.value ? 'btn-primary' : 'btn-secondary'"
+          :disabled="!option.available || playback.switchingSource"
+          :aria-pressed="playback.activeSource === option.value"
+          @click="chooseSource(option.value)"
+        >
+          <Network v-if="option.value === 'direct'" :size="16" />
+          <Server v-else :size="16" />
+          {{ option.label }}
+          <span v-if="!option.available" class="text-xs opacity-70">不可用</span>
+        </button>
+      </div>
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div class="flex flex-wrap gap-2">
         <button class="btn btn-secondary" :disabled="!playback.previousSelection" @click="playback.previousSelection && playback.start(playback.previousSelection, { autoplay: true })"><SkipBack :size="16" />上一集</button>
         <button class="btn btn-primary" :disabled="!playback.nextSelection" @click="playback.nextSelection && playback.start(playback.nextSelection, { autoplay: true })">下一集<SkipForward :size="16" /></button>
+        </div>
+        <label class="flex min-h-11 items-center gap-2 text-sm font-bold"><input :checked="playback.autoNext" type="checkbox" class="h-4 w-4 accent-[var(--brand)]" @change="playback.setAutoNext(($event.currentTarget as HTMLInputElement).checked)" />播完自动下一集</label>
       </div>
-      <label class="flex min-h-11 items-center gap-2 text-sm font-bold"><input :checked="playback.autoNext" type="checkbox" class="h-4 w-4 accent-[var(--brand)]" @change="playback.setAutoNext(($event.currentTarget as HTMLInputElement).checked)" />播完自动下一集</label>
     </div>
     <div v-if="playback.error" class="bg-[var(--danger-soft)] p-3 text-sm font-bold text-[var(--danger)]" role="alert">{{ playback.error }}</div>
   </section>

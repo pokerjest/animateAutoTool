@@ -13,6 +13,11 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/safeio"
 )
 
+const (
+	playbackSourceProxy  = "proxy"
+	playbackSourceDirect = "direct"
+)
+
 func GetJellyfinStatusHandler(c *gin.Context) {
 	style := c.Query("style")
 	serveConnectionStatusFragment(c, jellyfinConnectionStatusView(""), RenderJellyfinStatus(style))
@@ -38,7 +43,36 @@ func CheckJellyfinConnection() (bool, string) {
 	}
 
 	proxyEnabled, proxyURL := loadProxySettings(model.ConfigKeyProxyJellyfin)
-	probe := newConnectionProbe("jellyfin", urlValue, apiKey, proxyEnabled, proxyURL)
+	return checkJellyfinConnectionURL("jellyfin", urlValue, apiKey, proxyEnabled, proxyURL)
+}
+
+func CheckJellyfinConnectionForSource(source string) (bool, string) {
+	switch strings.ToLower(strings.TrimSpace(source)) {
+	case "", playbackSourceProxy:
+		return CheckJellyfinConnection()
+	case playbackSourceDirect:
+		directURL := strings.TrimSpace(configValue(model.ConfigKeyJellyfinDirectUrl))
+		if directURL == "" {
+			return false, "Jellyfin 直连地址未配置"
+		}
+		return checkJellyfinConnectionURL("jellyfin-direct", directURL, configValue(model.ConfigKeyJellyfinApiKey), "", "")
+	default:
+		return false, "不支持的播放线路"
+	}
+}
+
+func jellyfinConfigured() bool {
+	return strings.TrimSpace(configValue(model.ConfigKeyJellyfinUrl)) != "" &&
+		strings.TrimSpace(configValue(model.ConfigKeyJellyfinApiKey)) != ""
+}
+
+func checkJellyfinConnectionURL(cacheKey, urlValue, apiKey, proxyEnabled, proxyURL string) (bool, string) {
+	if strings.TrimSpace(urlValue) == "" || strings.TrimSpace(apiKey) == "" {
+		log.Printf("DEBUG: Jellyfin connection check failed: Config missing (hasURL=%t, hasKey=%t)", strings.TrimSpace(urlValue) != "", strings.TrimSpace(apiKey) != "")
+		return false, "配置缺失"
+	}
+
+	probe := newConnectionProbe(cacheKey, urlValue, apiKey, proxyEnabled, proxyURL)
 	if stat, ok := probe.load(); ok {
 		return stat.Success, stat.Msg
 	}

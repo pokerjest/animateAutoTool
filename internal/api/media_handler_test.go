@@ -29,6 +29,73 @@ func TestConfiguredJellyfinLibraryIDsDefaultsToAllAndParsesJSON(t *testing.T) {
 	assert.Equal(t, []string{"anime", "movies"}, configuredJellyfinLibraryIDs())
 }
 
+func TestJellyfinConfiguredRequiresURLAndAPIKey(t *testing.T) {
+	configStore := store.NewConfigStore(db.DB)
+	previousURL := configStore.GetDefault(model.ConfigKeyJellyfinUrl, "")
+	previousKey := configStore.GetDefault(model.ConfigKeyJellyfinApiKey, "")
+	t.Cleanup(func() {
+		_ = configStore.Set(model.ConfigKeyJellyfinUrl, previousURL)
+		_ = configStore.Set(model.ConfigKeyJellyfinApiKey, previousKey)
+	})
+
+	require.NoError(t, configStore.Set(model.ConfigKeyJellyfinUrl, "http://jellyfin.test"))
+	require.NoError(t, configStore.Set(model.ConfigKeyJellyfinApiKey, ""))
+	assert.False(t, jellyfinConfigured())
+
+	require.NoError(t, configStore.Set(model.ConfigKeyJellyfinApiKey, "test-key"))
+	assert.True(t, jellyfinConfigured())
+}
+
+func TestJellyfinConnectionStatusUsesSelectedPlaybackSource(t *testing.T) {
+	resetAuthFixtures(t)
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		assert.Equal(t, "test-key", req.Header.Get("X-Emby-Token"))
+		assert.Equal(t, "/System/Info", req.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ProductName":"Jellyfin"}`))
+	}))
+	t.Cleanup(upstream.Close)
+
+	configStore := store.NewConfigStore(db.DB)
+	require.NoError(t, configStore.Set(model.ConfigKeyJellyfinUrl, upstream.URL))
+	require.NoError(t, configStore.Set(model.ConfigKeyJellyfinDirectUrl, upstream.URL))
+	require.NoError(t, configStore.Set(model.ConfigKeyJellyfinApiKey, "test-key"))
+
+	router := setupRouter()
+	cookie, _ := loginCookie(t, router, "admin")
+	request := func(target string) *httptest.ResponseRecorder {
+		t.Helper()
+		recorder := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, target, nil)
+		req.Header.Set("Cookie", cookie)
+		markLocalRequest(req)
+		router.ServeHTTP(recorder, req)
+		return recorder
+	}
+
+	proxy := request("/api/v1/settings/connections/jellyfin?source=proxy")
+	require.Equal(t, http.StatusOK, proxy.Code, proxy.Body.String())
+	assert.Contains(t, proxy.Body.String(), `"source":"proxy"`)
+	assert.Contains(t, proxy.Body.String(), `"source_label":"AnimateTool 代理"`)
+	assert.Contains(t, proxy.Body.String(), `"connected":true`)
+
+	direct := request("/api/v1/settings/connections/jellyfin?source=direct")
+	require.Equal(t, http.StatusOK, direct.Code, direct.Body.String())
+	assert.Contains(t, direct.Body.String(), `"source":"direct"`)
+	assert.Contains(t, direct.Body.String(), `"source_label":"Jellyfin 直连"`)
+	assert.Contains(t, direct.Body.String(), `"connected":true`)
+
+	invalid := request("/api/v1/settings/connections/jellyfin?source=netbird")
+	assert.Equal(t, http.StatusBadRequest, invalid.Code)
+	assert.Contains(t, invalid.Body.String(), "invalid_playback_source")
+
+	require.NoError(t, db.DB.Model(&model.GlobalConfig{}).Where("key = ?", model.ConfigKeyJellyfinDirectUrl).UpdateColumn("value", "").Error)
+	missingDirect := request("/api/v1/settings/connections/jellyfin?source=direct")
+	require.Equal(t, http.StatusOK, missingDirect.Code, missingDirect.Body.String())
+	assert.Contains(t, missingDirect.Body.String(), "Jellyfin 直连地址未配置")
+}
+
 func TestMediaHandlersExposeProviderNeutralJellyfinCatalog(t *testing.T) {
 	resetAuthFixtures(t)
 

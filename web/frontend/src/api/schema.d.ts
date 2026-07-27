@@ -897,7 +897,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description Proxies a Jellyfin static stream through the configured AnimateTool NetBird address using a short-lived signed token. */
+        /**
+         * @deprecated
+         * @description Deprecated compatibility endpoint. The current frontend no longer generates or selects the NetBird playback route.
+         */
         get: operations["streamJellyfinEpisodeThroughNetBird"];
         put?: never;
         post?: never;
@@ -914,7 +917,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description Proxies a provider media stream through the configured AnimateTool NetBird address using a short-lived token scoped to the provider, item, user, and expiry. */
+        /**
+         * @deprecated
+         * @description Deprecated compatibility endpoint. The current frontend no longer generates or selects the NetBird playback route.
+         */
         get: operations["streamMediaItemThroughNetBird"];
         put?: never;
         post?: never;
@@ -1798,7 +1804,10 @@ export interface components {
             stream_url: string;
             /** @description Browser-reachable Jellyfin stream URL; empty when direct playback is not configured. */
             direct_stream_url: string;
-            /** @description Short-lived signed AnimateTool proxy URL reachable through NetBird; empty when the NetBird proxy address is not configured. */
+            /**
+             * @deprecated
+             * @description Deprecated compatibility field for older clients; the current frontend only offers AnimateTool proxy and Jellyfin direct playback.
+             */
             netbird_stream_url: string;
             /** Format: int64 */
             resume_ticks: number;
@@ -1896,6 +1905,10 @@ export interface components {
             item_id: string;
             stream_url: string;
             direct_stream_url: string;
+            /**
+             * @deprecated
+             * @description Deprecated compatibility field; not selected by the current frontend.
+             */
             netbird_stream_url: string;
             /** Format: int64 */
             resume_ticks: number;
@@ -3848,7 +3861,10 @@ export interface operations {
     };
     getConnectionStatus: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Jellyfin connection route to test. Only proxy and direct are accepted when provider is jellyfin. */
+                source?: "proxy" | "direct";
+            };
             header?: never;
             path: {
                 provider: "qb" | "tmdb" | "anilist" | "jellyfin" | "bangumi" | "mikan";
@@ -3858,6 +3874,7 @@ export interface operations {
         requestBody?: never;
         responses: {
             200: components["responses"]["Success"];
+            400: components["responses"]["Error"];
         };
     };
     getMaintenance: {
