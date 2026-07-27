@@ -8,6 +8,7 @@ import type { ContinueWatchingResponse } from '../api/types'
 import { usePlaybackStore } from '../stores/playback'
 import { useSessionStore } from '../stores/session'
 import { useWorkspaceStore } from '../stores/workspace'
+import { localPlayerLocation, localPlayerPath } from '../utils/playerRoutes'
 
 const route = useRoute()
 const router = useRouter()
@@ -16,7 +17,7 @@ const playback = usePlaybackStore()
 const session = useSessionStore()
 const workspace = useWorkspaceStore()
 const video = ref<HTMLVideoElement | null>(null)
-const full = computed(() => route.path === '/player' || route.path.startsWith('/media/play'))
+const full = computed(() => route.path === '/player' || route.path === localPlayerPath || route.path.startsWith('/media/play'))
 const continueQuery = useQuery({
   queryKey: ['continue-watching'],
   queryFn: () => api<ContinueWatchingResponse>('/playback/continue?limit=10'),
@@ -51,14 +52,14 @@ async function openFullPlayer() {
     await router.push(`/media/play/${encodeURIComponent(current.provider)}/${encodeURIComponent(current.itemId)}`)
     return
   }
-  await router.push(`/player?anime=${current.localAnimeId}&episode=${current.localEpisodeId}`)
+  await router.push(localPlayerLocation(current.localAnimeId!, current.localEpisodeId, true))
 }
 
 async function resumeLatest() {
   if (!latest.value) return
   const item = latest.value
   const started = playback.resume(item, true)
-  await router.push(`/player?anime=${item.anime_id}&episode=${item.episode_id}`)
+  await router.push(localPlayerLocation(item.anime_id, item.episode_id, true))
   await started
 }
 

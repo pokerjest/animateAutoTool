@@ -52,7 +52,7 @@ function playerFetch(direct = false, netbird = false) {
   })
 }
 
-async function mountPlayer(fetchMock: ReturnType<typeof vi.fn>) {
+async function mountPlayer(fetchMock: ReturnType<typeof vi.fn>, path = '/player') {
   vi.stubGlobal('fetch', fetchMock)
   const sendBeacon = vi.fn(() => true)
   Object.defineProperty(navigator, 'sendBeacon', { value: sendBeacon, configurable: true })
@@ -62,9 +62,9 @@ async function mountPlayer(fetchMock: ReturnType<typeof vi.fn>) {
   const Other = defineComponent({ template: '<div>其他页面</div>' })
   const router = createRouter({
     history: createMemoryHistory(),
-    routes: [{ path: '/player', component: PlayerView }, { path: '/other', component: Other }],
+    routes: [{ path: '/player', component: PlayerView }, { path: '/media/local-player', component: PlayerView }, { path: '/other', component: Other }],
   })
-  await router.push('/player?anime=1&episode=11')
+  await router.push(`${path}?anime=1&episode=11`)
   await router.isReady()
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
   const pinia = createPinia()
@@ -90,6 +90,18 @@ afterEach(() => {
 })
 
 describe('Plex-style global playback', () => {
+  it('renders local playback as a full media-workspace player', async () => {
+    const mounted = await mountPlayer(playerFetch(), '/media/local-player')
+    await vi.waitFor(() => expect(mounted.wrapper.get('video').attributes('src')).toBe('/api/v1/jellyfin/stream/11'))
+
+    expect(mounted.router.currentRoute.value.path).toBe('/media/local-player')
+    expect(mounted.wrapper.find('[aria-label="全局播放器"]').classes()).toContain('panel')
+    expect(mounted.playback.current?.localEpisodeId).toBe(11)
+
+    mounted.wrapper.unmount()
+    mounted.queryClient.clear()
+  })
+
   it('waits for first-run setup before loading continue watching', async () => {
     const fetchMock = vi.fn(() => envelope({ items: [] }))
     vi.stubGlobal('fetch', fetchMock)

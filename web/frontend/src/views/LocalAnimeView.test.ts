@@ -43,7 +43,10 @@ function mountView() {
     global: {
       plugins: [pinia, [VueQueryPlugin, { queryClient }]],
       stubs: {
-        RouterLink: { template: '<a><slot /></a>' },
+        RouterLink: {
+          props: ['to'],
+          template: '<a :data-to="JSON.stringify(to)"><slot /></a>',
+        },
         AutoLoadSentinel: { template: '<button data-testid="load-more" @click="$emit(\'load\')">load</button>' },
         LocalOrganizeDialog: {
           props: ['open', 'selection'],
@@ -115,5 +118,16 @@ describe('LocalAnimeView pagination', () => {
     const selection = wrapper.get('[data-testid="organize-selection"]').text()
     expect(selection).toContain('"mode":"query"')
     expect(selection).toContain('"exclude_ids":[1]')
+  })
+
+  it('routes local playback into the media workspace player', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => response([anime(7, '媒体番剧')], 1, 48, 1)))
+    const wrapper = mountView()
+    await vi.waitFor(() => expect(wrapper.text()).toContain('媒体番剧'))
+
+    const link = wrapper.find('a[data-to*="media/local-player"]')
+    expect(link.exists()).toBe(true)
+    expect(link.attributes('data-to')).toContain('"anime":"7"')
+    expect(link.attributes('data-to')).toContain('"autoplay":"1"')
   })
 })

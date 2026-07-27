@@ -61,4 +61,21 @@ describe('route guards', () => {
     expect(router.currentRoute.value.path).toBe('/player')
     expect(workspace.mode).toBe('manage')
   })
+
+  it('allows local playback to enter the media workspace without Jellyfin configuration', async () => {
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
+      const path = String(input)
+      if (path.includes('/api/v1/media/providers')) {
+        return response({ providers: [{ id: 'jellyfin', configured: false, connected: false }] })
+      }
+      return response({ authenticated: true, setup_pending: false, username: 'admin', version: 'test', recovery_local_only: true })
+    }))
+    await router.replace('/login')
+
+    await router.push('/media/local-player?anime=7&autoplay=1')
+    const workspace = useWorkspaceStore()
+    expect(router.currentRoute.value.path).toBe('/media/local-player')
+    expect(router.currentRoute.value.query).toMatchObject({ anime: '7', autoplay: '1' })
+    expect(workspace.mode).toBe('media')
+  })
 })

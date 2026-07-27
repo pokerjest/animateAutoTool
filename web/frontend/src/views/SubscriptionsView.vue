@@ -23,6 +23,7 @@ import SubscriptionHistoryDialog from '../components/subscriptions/SubscriptionH
 import SubscriptionOverview from '../components/subscriptions/SubscriptionOverview.vue'
 import { useAsyncActions } from '../composables/useAsyncActions'
 import { useUIStore } from '../stores/ui'
+import { localPlayerLocation } from '../utils/playerRoutes'
 import { regexRuleError, switchToMikanAggregate } from '../utils/mikanSubscription'
 
 interface SubscriptionPayload {
@@ -161,7 +162,7 @@ function openHistory(item: Subscription) {
 function playSubscription(item: Subscription) {
   if (!item.playable || !item.local_anime_id) return
   detailTarget.value = null
-  void router.push({ path: '/player', query: { anime: String(item.local_anime_id) } })
+  void router.push(localPlayerLocation(item.local_anime_id, undefined, true))
 }
 
 function confirmDelete(item: Subscription) {

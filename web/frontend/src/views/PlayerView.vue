@@ -10,6 +10,7 @@ import { useAsyncActions } from '../composables/useAsyncActions'
 import { usePlaybackStore, type PlaybackSelection } from '../stores/playback'
 import { useUIStore } from '../stores/ui'
 import type { ContinueWatchingResponse } from '../api/types'
+import { localPlayerPath } from '../utils/playerRoutes'
 
 interface Episode {
   id: number
@@ -43,12 +44,14 @@ const continueQuery = useQuery({ queryKey: ['continue-watching'], queryFn: () =>
 const latest = computed(() => continueQuery.data.value?.items[0])
 const routeAnimeID = computed(() => Number(route.query.anime || 0))
 const animeId = computed(() => routeAnimeID.value || playback.current?.localAnimeId || latest.value?.anime_id || 0)
+const isMediaLocalPlayer = computed(() => route.path === localPlayerPath)
+const currentPlayerPath = computed(() => isMediaLocalPlayer.value ? localPlayerPath : '/player')
 
 watch([latest, () => playback.current], ([item, current]) => {
   if (routeAnimeID.value) return
   const animeID = current?.localAnimeId || item?.anime_id
   const episodeID = current?.localEpisodeId || item?.episode_id
-  if (animeID && episodeID) void router.replace(`/player?anime=${animeID}&episode=${episodeID}`)
+  if (animeID && episodeID) void router.replace({ path: currentPlayerPath.value, query: { anime: String(animeID), episode: String(episodeID) } })
 }, { immediate: true })
 
 const query = useQuery({
@@ -98,9 +101,9 @@ watch(() => query.data.value?.episodes, episodes => {
 }, { immediate: true })
 
 watch(() => playback.current?.localEpisodeId, episodeID => {
-  if (!episodeID || route.path !== '/player' || playback.current?.localAnimeId !== animeId.value) return
+  if (!episodeID || !['/player', localPlayerPath].includes(route.path) || playback.current?.localAnimeId !== animeId.value) return
   if (Number(route.query.episode || 0) === episodeID && Number(route.query.anime || 0) === animeId.value) return
-  void router.replace({ path: '/player', query: { anime: animeId.value, episode: episodeID } })
+  void router.replace({ path: currentPlayerPath.value, query: { anime: String(animeId.value), episode: String(episodeID) } })
 })
 
 const selected = computed(() => query.data.value?.episodes.find(item => item.id === playback.current?.localEpisodeId) || null)

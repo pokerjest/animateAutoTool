@@ -12,7 +12,10 @@ const routes = [
   { path: '/calendar', component: () => import('./views/CalendarView.vue'), meta: { title: '追番日历', workspace: 'manage' } },
   { path: '/library', component: () => import('./views/LibraryView.vue'), meta: { title: '番剧图鉴', workspace: 'manage' } },
   { path: '/local-anime', component: () => import('./views/LocalAnimeView.vue'), meta: { title: '本地番剧', workspace: 'manage' } },
+  // Keep the legacy route available for old bookmarks and clients. New local
+  // playback enters the media workspace so the global player is visible.
   { path: '/player', component: () => import('./views/PlayerView.vue'), meta: { title: '播放器', workspace: 'manage' } },
+  { path: '/media/local-player', component: () => import('./views/PlayerView.vue'), meta: { title: '本地播放', workspace: 'media', allowUnconfiguredMedia: true } },
   { path: '/media', component: () => import('./views/MediaHomeView.vue'), meta: { title: '媒体首页', workspace: 'media' } },
   { path: '/media/library/:libraryId', component: () => import('./views/MediaLibraryView.vue'), meta: { title: '媒体库', workspace: 'media' } },
   { path: '/media/item/:provider/:itemId', component: () => import('./views/MediaItemView.vue'), meta: { title: '媒体详情', workspace: 'media' } },
@@ -34,7 +37,7 @@ router.beforeEach(async to => {
   if (!session.authenticated) return `/login?redirect=${encodeURIComponent(to.fullPath)}`
   if (session.setupPending && to.path !== '/setup') return '/setup'
   if (!session.setupPending && to.path === '/setup') return '/'
-  if (to.meta.workspace === 'media') {
+  if (to.meta.workspace === 'media' && !to.meta.allowUnconfiguredMedia) {
     const configured = await workspace.ensureMediaConfigured()
     if (configured === false) {
       workspace.setMode('manage')
