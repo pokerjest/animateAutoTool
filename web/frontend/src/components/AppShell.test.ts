@@ -13,7 +13,7 @@ afterEach(() => {
 })
 
 describe('management workspace navigation', () => {
-  it('keeps the existing assistant, health, backup, and settings entries', async () => {
+  it('keeps management tools while the floating pet replaces the assistant navigation entry', async () => {
     const router = createRouter({
       history: createMemoryHistory(),
       routes: [
@@ -37,6 +37,7 @@ describe('management workspace navigation', () => {
         stubs: {
           AppBackground: true,
           PlaybackHost: true,
+          AssistantWidget: true,
           TaskCenter: true,
         },
       },
@@ -48,11 +49,14 @@ describe('management workspace navigation', () => {
     }))
 
     expect(links).toEqual(expect.arrayContaining([
-      expect.objectContaining({ href: '/assistant', label: 'AI 助手' }),
       expect.objectContaining({ href: '/health', label: '系统健康' }),
       expect.objectContaining({ href: '/backup', label: '备份恢复' }),
       expect.objectContaining({ href: '/settings', label: '系统设置' }),
     ]))
+    expect(links).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ href: '/assistant' }),
+    ]))
+    expect(wrapper.find('assistant-widget-stub').exists()).toBe(false)
 
     const mobilePrimaryLinks = wrapper
       .get('nav[aria-label="移动端主导航"]')

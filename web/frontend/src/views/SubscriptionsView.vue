@@ -5,12 +5,14 @@ import { useRouter } from 'vue-router'
 import { Plus, Sparkles, Upload } from '@lucide/vue'
 import { api } from '../api/client'
 import type {
+  AIAnalysisAccepted,
   MikanSubscriptionSelection,
   ResolutionFilter,
   Subscription,
   SubtitleLanguage,
   TaskAccepted,
 } from '../api/types'
+import AIProposalPanel from '../components/AIProposalPanel.vue'
 import AppDialog from '../components/AppDialog.vue'
 import AsyncButton from '../components/AsyncButton.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
@@ -95,6 +97,7 @@ const form = reactive(createEmptyForm())
 const validation = ref<ValidationResult | null>(null)
 const batchText = ref('')
 const batchPreview = ref<Array<Record<string, unknown>>>([])
+const aiProposalID = ref('')
 
 const query = useQuery({
   queryKey: ['subscriptions'],
@@ -338,6 +341,21 @@ async function repair(item: Subscription, name: string) {
   }
 }
 
+async function analyzeSubscriptionRules(item: Subscription) {
+  try {
+    const accepted = await actions.runTask(
+      `ai-rules-${item.ID}`,
+      () => api<AIAnalysisAccepted>(`/ai/subscriptions/${item.ID}/rules/suggest`, { method: 'POST' }),
+      'AI 订阅规则分析',
+      'ai-analysis',
+      `正在分析 ${item.title} 的 RSS 过滤结果`,
+    )
+    aiProposalID.value = accepted.proposal_id
+  } catch (error) {
+    ui.toast(error instanceof Error ? error.message : '启动 AI 订阅规则分析失败', 'error')
+  }
+}
+
 async function remove() {
   if (!deleteTarget.value) return
   const id = deleteTarget.value.ID
@@ -417,6 +435,7 @@ async function importBatch() {
       v-model:filter="filter"
       :trend="query.data.value?.trend"
     />
+    <AIProposalPanel v-if="aiProposalID" :proposal-id="aiProposalID" @applied="queryClient.invalidateQueries({ queryKey: ['subscriptions'] })" @dismissed="aiProposalID = ''" />
 
     <StateBlock v-if="query.isLoading.value" state="loading" />
     <StateBlock
@@ -443,6 +462,7 @@ async function importBatch() {
         @toggle="operate(item, 'toggle')"
         @check="operate(item, 'run')"
         @repair="repair(item, $event)"
+        @ai-rules="analyzeSubscriptionRules(item)"
         @edit="openEdit(item)"
         @remove="confirmDelete(item)"
       />

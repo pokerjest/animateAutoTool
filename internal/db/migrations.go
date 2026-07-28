@@ -80,6 +80,71 @@ var migrations = []migration{
 		Description: "Remove generated subgroup filters and aggregate fallbacks from subgroup-specific Mikan feeds",
 		Apply:       removeRedundantMikanSubgroupRules,
 	},
+	{
+		ID:          "009_partial_bangumi_id_unique_index",
+		Description: "Allow multiple unmatched metadata rows while keeping real Bangumi identifiers unique",
+		Apply:       createPartialBangumiIDUniqueIndex,
+	},
+	{
+		ID:          "010_ai_tool_operations",
+		Description: "Create AI proposals and append-only tool execution logs",
+		Apply: func(tx *gorm.DB) error {
+			return tx.AutoMigrate(&model.AIProposal{}, &model.AIToolRun{})
+		},
+	},
+}
+
+func createPartialBangumiIDUniqueIndex(tx *gorm.DB) error {
+	type duplicateBangumiID struct {
+		BangumiID int
+	}
+	var duplicateIDs []duplicateBangumiID
+	if err := tx.Unscoped().
+		Model(&model.AnimeMetadata{}).
+		Select("bangumi_id").
+		Where("bangumi_id != 0").
+		Group("bangumi_id").
+		Having("COUNT(*) > 1").
+		Scan(&duplicateIDs).Error; err != nil {
+		return err
+	}
+
+	for _, duplicate := range duplicateIDs {
+		var rows []model.AnimeMetadata
+		if err := tx.Unscoped().
+			Where("bangumi_id = ?", duplicate.BangumiID).
+			Order("CASE WHEN deleted_at IS NULL THEN 0 ELSE 1 END").
+			Order("id ASC").
+			Find(&rows).Error; err != nil {
+			return err
+		}
+		for i := 1; i < len(rows); i++ {
+			updates := map[string]any{
+				"bangumi_id":        0,
+				"bangumi_title":     "",
+				"bangumi_image":     "",
+				"bangumi_summary":   "",
+				"bangumi_rating":    0,
+				"bangumi_image_raw": nil,
+			}
+			if rows[i].DataSource == "bangumi" {
+				updates["data_source"] = ""
+			}
+			if err := tx.Unscoped().
+				Model(&model.AnimeMetadata{}).
+				Where("id = ?", rows[i].ID).
+				Updates(updates).Error; err != nil {
+				return err
+			}
+		}
+	}
+
+	if err := tx.Exec("DROP INDEX IF EXISTS idx_anime_metadata_bangumi_id").Error; err != nil {
+		return err
+	}
+	return tx.Exec(
+		"CREATE UNIQUE INDEX idx_anime_metadata_bangumi_id ON anime_metadata(bangumi_id) WHERE bangumi_id != 0",
+	).Error
 }
 
 func removeRedundantMikanSubgroupRules(tx *gorm.DB) error {
@@ -149,6 +214,8 @@ func autoMigrateCoreSchema(tx *gorm.DB) error {
 		&model.AnimeMetadata{},
 		&model.User{},
 		&model.PlaybackHistory{},
+		&model.AIProposal{},
+		&model.AIToolRun{},
 	)
 }
 

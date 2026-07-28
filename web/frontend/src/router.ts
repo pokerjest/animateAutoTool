@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import { useSessionStore } from './stores/session'
 import { usePlaybackStore } from './stores/playback'
 import { useWorkspaceStore } from './stores/workspace'
+import { useAssistantStore } from './stores/assistant'
 
 const routes = [
   { path: '/login', component: () => import('./views/LoginView.vue'), meta: { public: true, title: '登录' } },
@@ -23,7 +24,7 @@ const routes = [
   { path: '/backup', component: () => import('./views/BackupView.vue'), meta: { title: '备份与恢复', workspace: 'manage' } },
   { path: '/health', component: () => import('./views/HealthView.vue'), meta: { title: '系统健康', workspace: 'manage' } },
   { path: '/settings', component: () => import('./views/SettingsView.vue'), meta: { title: '系统设置', workspace: 'manage' } },
-  { path: '/assistant', component: () => import('./views/AssistantView.vue'), meta: { title: 'AI 助手', workspace: 'manage' } },
+  { path: '/assistant', component: () => import('./views/AssistantRedirectView.vue'), meta: { title: 'AI 助手' } },
   { path: '/:pathMatch(.*)*', component: () => import('./views/NotFoundView.vue'), meta: { title: '页面不存在' } },
 ]
 
@@ -37,6 +38,13 @@ router.beforeEach(async to => {
   if (!session.authenticated) return `/login?redirect=${encodeURIComponent(to.fullPath)}`
   if (session.setupPending && to.path !== '/setup') return '/setup'
   if (!session.setupPending && to.path === '/setup') return '/'
+  if (to.path === '/assistant') {
+    useAssistantStore().expand()
+    const fallback = workspace.isMedia ? '/media' : '/'
+    const target = workspace.routeFor(workspace.mode)
+    if (!target || target === '/assistant' || target.startsWith('/login') || target.startsWith('/recover') || target.startsWith('/setup')) return fallback
+    return target
+  }
   if (to.meta.workspace === 'media' && !to.meta.allowUnconfiguredMedia) {
     const configured = await workspace.ensureMediaConfigured()
     if (configured === false) {

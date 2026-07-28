@@ -2,6 +2,7 @@ package db
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/glebarez/sqlite"
@@ -223,5 +224,61 @@ func TestMikanSubgroupRuleMigrationRemovesOnlyGeneratedRedundancy(t *testing.T) 
 	}
 	if got[3].FilterRule != "ANi" {
 		t.Fatalf("expected aggregate feed rule to remain, got %q", got[3].FilterRule)
+	}
+}
+
+func TestBangumiIDMigrationUsesPartialUniqueIndex(t *testing.T) {
+	target, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "bangumi-index.db")), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite db: %v", err)
+	}
+	t.Cleanup(func() { closeTestDB(t, target) })
+	if err := autoMigrateCoreSchema(target); err != nil {
+		t.Fatalf("migrate core schema: %v", err)
+	}
+	if err := target.AutoMigrate(&SchemaMigration{}); err != nil {
+		t.Fatalf("migrate schema history: %v", err)
+	}
+	for _, item := range migrations {
+		if item.ID == "009_partial_bangumi_id_unique_index" {
+			break
+		}
+		if err := target.Create(&SchemaMigration{ID: item.ID, Description: item.Description}).Error; err != nil {
+			t.Fatalf("seed migration %s: %v", item.ID, err)
+		}
+	}
+
+	if err := target.Exec("DROP INDEX IF EXISTS idx_anime_metadata_bangumi_id").Error; err != nil {
+		t.Fatalf("drop current index: %v", err)
+	}
+	if err := target.Exec("CREATE UNIQUE INDEX idx_anime_metadata_bangumi_id ON anime_metadata(bangumi_id)").Error; err != nil {
+		t.Fatalf("create legacy index: %v", err)
+	}
+	if err := target.Create(&model.AnimeMetadata{Title: "First unmatched"}).Error; err != nil {
+		t.Fatalf("seed unmatched metadata: %v", err)
+	}
+
+	if err := RunMigrations(target); err != nil {
+		t.Fatalf("run partial index migration: %v", err)
+	}
+	if err := target.Create(&model.AnimeMetadata{Title: "Second unmatched"}).Error; err != nil {
+		t.Fatalf("partial index should allow another unmatched row: %v", err)
+	}
+	if err := target.Create(&model.AnimeMetadata{Title: "Matched", BangumiID: 4242}).Error; err != nil {
+		t.Fatalf("create matched metadata: %v", err)
+	}
+	if err := target.Create(&model.AnimeMetadata{Title: "Duplicate match", BangumiID: 4242}).Error; err == nil {
+		t.Fatal("partial index should still reject duplicate real Bangumi IDs")
+	}
+
+	var indexSQL string
+	if err := target.Raw(
+		"SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?",
+		"idx_anime_metadata_bangumi_id",
+	).Scan(&indexSQL).Error; err != nil {
+		t.Fatalf("read partial index definition: %v", err)
+	}
+	if !strings.Contains(strings.ToLower(indexSQL), "where bangumi_id != 0") {
+		t.Fatalf("expected partial Bangumi index, got %q", indexSQL)
 	}
 }

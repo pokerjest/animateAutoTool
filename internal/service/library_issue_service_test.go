@@ -6,6 +6,7 @@ import (
 
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/event"
+	"github.com/pokerjest/animateAutoTool/internal/model"
 )
 
 func TestReportAndResolveLibraryIssue(t *testing.T) {
@@ -87,5 +88,33 @@ func TestReportAndResolveLibraryIssue(t *testing.T) {
 		case <-timeout:
 			t.Fatal("timed out waiting for resolved library issue event")
 		}
+	}
+}
+
+func TestListOpenLibraryIssuesRefreshesLegacyMetadataHint(t *testing.T) {
+	withServiceTestDB(t)
+
+	issue := model.LibraryIssue{
+		IssueKey:  "scrape:88",
+		IssueType: LibraryIssueTypeScrape,
+		Status:    LibraryIssueStatusOpen,
+		Title:     "Locked Show",
+		Message:   "save enriched anime: database is locked (5) (SQLITE_BUSY)",
+		Hint:      "检查元数据源配置，或在详情里使用修正匹配手动关联番剧。",
+	}
+	if err := db.DB.Create(&issue).Error; err != nil {
+		t.Fatalf("create legacy issue: %v", err)
+	}
+
+	issues, err := ListOpenLibraryIssues(10)
+	if err != nil {
+		t.Fatalf("list issues: %v", err)
+	}
+	if len(issues) != 1 {
+		t.Fatalf("expected one issue, got %d", len(issues))
+	}
+	want := "数据库正在处理其他任务，系统会自动重试；若仍失败，请等待扫描或整理结束后再次刷新元数据。"
+	if issues[0].Hint != want {
+		t.Fatalf("expected refreshed hint %q, got %q", want, issues[0].Hint)
 	}
 }

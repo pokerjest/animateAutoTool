@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { AlertTriangle, FolderTree, RefreshCw, ShieldCheck, WandSparkles } from '@lucide/vue'
+import { AlertTriangle, FolderTree, RefreshCw, ShieldCheck, Sparkles, WandSparkles } from '@lucide/vue'
 import { api } from '../../api/client'
-import type { LocalOrganizePreview, LocalOrganizeSelection, TaskAccepted } from '../../api/types'
+import type { AIAnalysisAccepted, LocalOrganizePreview, LocalOrganizeSelection, TaskAccepted } from '../../api/types'
 import { useAsyncActions } from '../../composables/useAsyncActions'
 import { useUIStore } from '../../stores/ui'
+import AIProposalPanel from '../AIProposalPanel.vue'
 import AppDialog from '../AppDialog.vue'
 import AsyncButton from '../AsyncButton.vue'
 import StateBlock from '../StateBlock.vue'
@@ -18,6 +19,8 @@ const seriesTemplate = ref('')
 const episodeTemplate = ref('')
 const includedIDs = ref(new Set<number>())
 const error = ref('')
+const aiProposalID = ref('')
+const aiTargetPath = ref('')
 
 const includedCount = computed(() => includedIDs.value.size)
 const executableCount = computed(() => preview.value?.items
@@ -35,6 +38,27 @@ function reset() {
   episodeTemplate.value = ''
   includedIDs.value = new Set()
   error.value = ''
+  aiProposalID.value = ''
+  aiTargetPath.value = ''
+}
+
+async function analyzeFilename(animeID: number, path: string) {
+  try {
+    const accepted = await actions.runTask(
+      `ai-filename-${path}`,
+      () => api<AIAnalysisAccepted>('/ai/filename-resolutions', {
+        method: 'POST',
+        body: JSON.stringify({ local_anime_id: animeID, path }),
+      }),
+      'AI 文件名识别',
+      'ai-analysis',
+      `正在识别 ${path.split(/[\\/]/).pop() || path}`,
+    )
+    aiProposalID.value = accepted.proposal_id
+    aiTargetPath.value = path
+  } catch (cause) {
+    ui.toast(cause instanceof Error ? cause.message : '启动 AI 文件名识别失败', 'error')
+  }
 }
 
 async function generatePreview(initial = false) {
@@ -108,6 +132,14 @@ function statusLabel(status: string) {
       </section>
 
       <p v-if="error" class="mt-4 rounded-xl bg-red-50 p-3 text-sm font-bold text-red-700 dark:bg-red-950/40 dark:text-red-300" role="alert">{{ error }}</p>
+      <AIProposalPanel
+        v-if="aiProposalID"
+        class="mt-4"
+        :proposal-id="aiProposalID"
+        compact
+        @applied="emit('update:open', false)"
+        @dismissed="aiProposalID = ''; aiTargetPath = ''"
+      />
       <div class="mt-5 max-h-[46vh] space-y-3 overflow-y-auto pr-1">
         <article v-for="item in preview.items" :key="item.anime_id" class="panel-muted p-4" :class="includedIDs.has(item.anime_id)?'':'opacity-60'">
           <div class="flex items-start gap-3">
@@ -125,6 +157,15 @@ function statusLabel(status: string) {
               <p class="muted mt-2 break-all line-through">{{ change.original }}</p>
               <p v-if="change.target!==change.original" class="mt-1 break-all font-bold">{{ change.target }}</p>
               <p v-if="change.reason" class="mt-1 font-bold text-amber-700 dark:text-amber-300">{{ change.reason }}</p>
+              <AsyncButton
+                v-if="change.status === 'skipped' && change.reason?.includes('无法识别剧集编号')"
+                class="btn btn-secondary mt-3"
+                :loading="actions.isBusy(`ai-filename-${change.original}`)"
+                loading-label="AI 识别中…"
+                @click="analyzeFilename(item.anime_id, change.original)"
+              >
+                <Sparkles :size="15"/>{{ aiTargetPath === change.original ? '重新分析' : 'AI 协助识别' }}
+              </AsyncButton>
             </div>
           </div>
         </article>

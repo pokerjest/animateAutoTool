@@ -18,7 +18,7 @@ AnimateTool 的设置页会把业务配置保存到数据库，并同步镜像�
 | 下载器 | `qb_url`、`qb_username`、`qb_password` | [qBittorrent 与自动整理](downloader.md) |
 | 媒体服务 | `jellyfin_url`、`jellyfin_api_key`、`alist_token` | [媒体服务](media-services.md) |
 | 元数据 | `tmdb_token`、`anilist_token`、`bangumi_access_token` | [元数据 API](metadata-apis.md) |
-| AI | `ai_base_url`、`ai_model`、`ai_api_key` | [AI](ai.md) |
+| AI | `ai_provider`、供应商 API Key、模型、Base URL 与 API 格式 | [AI](ai.md) |
 | 备份 | `r2_endpoint`、`r2_bucket`、`r2_access_key`、`r2_secret_key` | [R2](r2-backup.md) |
 | 网络 | `proxy_url` 和各服务开关 | [网络代理](proxy.md) |
 

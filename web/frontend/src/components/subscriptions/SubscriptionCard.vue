@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { CircleAlert, FilePenLine, Pause, Play, PlayCircle, RefreshCw, Trash2 } from '@lucide/vue'
+import { CircleAlert, FilePenLine, Pause, Play, PlayCircle, RefreshCw, Sparkles, Trash2 } from '@lucide/vue'
 import { handlePosterError, posterURL } from '../../api/client'
 import type { Subscription } from '../../api/types'
 import AsyncButton from '../AsyncButton.vue'
@@ -22,6 +22,7 @@ const emit = defineEmits<{
   toggle: []
   check: []
   repair: [name: string]
+  aiRules: []
   edit: []
   remove: []
 }>()
@@ -143,6 +144,10 @@ function isRepairBusy(name: string) {
       >
         <RefreshCw :size="16" />
         检查
+      </AsyncButton>
+      <AsyncButton class="btn btn-secondary" :loading="isBusy(`ai-rules-${item.ID}`)" loading-label="分析中…" @click="emit('aiRules')">
+        <Sparkles :size="16" />
+        AI 规则
       </AsyncButton>
       <button class="btn btn-quiet h-11 w-11 p-0" aria-label="编辑订阅" @click="emit('edit')">
         <FilePenLine :size="17" />

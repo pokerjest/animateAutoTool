@@ -133,7 +133,7 @@ func (s *MetadataService) EnrichMetadata(m *model.AnimeMetadata, query string) {
 	// 1. Bangumi Task
 	go func() {
 		defer wg.Done()
-		s.enrichBangumi(m, bgmClient, queryTitle)
+		s.enrichBangumi(m, bgmClient, queryTitle, &mu)
 	}()
 
 	// 2. AniList Task
@@ -157,7 +157,7 @@ func (s *MetadataService) EnrichMetadata(m *model.AnimeMetadata, query string) {
 	// 4. Cross-reference the now-populated TMDB/AniList titles. The first
 	// Bangumi request runs in parallel and only knows the original query.
 	if m.BangumiID == 0 && (m.TMDBID != 0 || m.AniListID != 0) {
-		s.enrichBangumi(m, bgmClient, queryTitle)
+		s.enrichBangumi(m, bgmClient, queryTitle, &mu)
 	}
 
 	// 5. Save and Consolidate
@@ -198,13 +198,16 @@ func (s *MetadataService) initClients() (*bangumi.Client, *tmdb.Client, *anilist
 	return bgmClient, tmdbClient, anilistClient
 }
 
-func (s *MetadataService) enrichBangumi(m *model.AnimeMetadata, bgmClient *bangumi.Client, queryTitle string) {
+func (s *MetadataService) enrichBangumi(m *model.AnimeMetadata, bgmClient *bangumi.Client, queryTitle string, mu *sync.Mutex) {
 	var bgmSubject *bangumi.Subject
+	mu.Lock()
 	references := bangumiMatchReferences(m, queryTitle)
+	currentID := m.BangumiID
+	mu.Unlock()
 
-	if m.BangumiID != 0 {
+	if currentID != 0 {
 		bgmSubject, _ = performWithRetry(func() (*bangumi.Subject, error) {
-			return bgmClient.GetSubject(m.BangumiID)
+			return bgmClient.GetSubject(currentID)
 		})
 	}
 
@@ -231,7 +234,6 @@ func (s *MetadataService) enrichBangumi(m *model.AnimeMetadata, bgmClient *bangu
 			}
 		}
 		if bestResult != nil {
-			m.BangumiID = bestResult.ID
 			bgmSubject, _ = performWithRetry(func() (*bangumi.Subject, error) {
 				return bgmClient.GetSubject(bestResult.ID)
 			})
@@ -239,6 +241,8 @@ func (s *MetadataService) enrichBangumi(m *model.AnimeMetadata, bgmClient *bangu
 	}
 
 	if bgmSubject != nil {
+		mu.Lock()
+		defer mu.Unlock()
 		if !shouldApplyBangumiSubject(m, bgmSubject, queryTitle) {
 			log.Printf("MetadataService: skipping mismatched Bangumi subject %d for query=%q (subject=%q/%q)", bgmSubject.ID, queryTitle, bgmSubject.NameCN, bgmSubject.Name)
 			s.clearMismatchedBangumiSubject(m, bgmSubject)

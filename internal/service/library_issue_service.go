@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"log"
 	"strings"
 	"time"
@@ -139,5 +140,18 @@ func ListOpenLibraryIssues(limit int) ([]model.LibraryIssue, error) {
 		Order("last_seen_at DESC").
 		Limit(limit).
 		Find(&issues).Error
+	if err != nil {
+		return nil, err
+	}
+	for i := range issues {
+		if issues[i].IssueType != LibraryIssueTypeScrape || strings.TrimSpace(issues[i].Message) == "" {
+			continue
+		}
+		hint := MetadataIssueHint(errors.New(issues[i].Message))
+		if hint == "" || hint == issues[i].Hint {
+			continue
+		}
+		issues[i].Hint = hint
+	}
 	return issues, err
 }

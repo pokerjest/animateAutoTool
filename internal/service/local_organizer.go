@@ -47,9 +47,16 @@ type LocalOrganizeSelection struct {
 }
 
 type LocalOrganizePreviewRequest struct {
-	Selection       LocalOrganizeSelection `json:"selection"`
-	SeriesTemplate  string                 `json:"series_template,omitempty"`
-	EpisodeTemplate string                 `json:"episode_template,omitempty"`
+	Selection        LocalOrganizeSelection         `json:"selection"`
+	SeriesTemplate   string                         `json:"series_template,omitempty"`
+	EpisodeTemplate  string                         `json:"episode_template,omitempty"`
+	EpisodeOverrides []LocalOrganizeEpisodeOverride `json:"episode_overrides,omitempty"`
+}
+
+type LocalOrganizeEpisodeOverride struct {
+	Path    string `json:"path"`
+	Season  int    `json:"season"`
+	Episode int    `json:"episode"`
 }
 
 type LocalOrganizeChange struct {
@@ -185,12 +192,19 @@ func (o *LocalOrganizer) Preview(owner string, request LocalOrganizePreviewReque
 		SeriesTemplate: seriesTemplate, EpisodeTemplate: episodeTemplate, SelectedCount: len(items),
 		Items: make([]LocalOrganizeAnimePreview, 0, len(items)),
 	}
+	overrides := make(map[string]LocalOrganizeEpisodeOverride, len(request.EpisodeOverrides))
+	for _, override := range request.EpisodeOverrides {
+		if strings.TrimSpace(override.Path) == "" || override.Episode <= 0 {
+			continue
+		}
+		overrides[filepath.Clean(override.Path)] = override
+	}
 	for i := range items {
 		directory, ok := directories[items[i].DirectoryID]
 		if !ok {
 			return nil, fmt.Errorf("番剧 %s 的扫描根目录不存在", items[i].Title)
 		}
-		item, itemErr := o.previewAnime(items[i], directory, seriesTemplate, episodeTemplate)
+		item, itemErr := o.previewAnime(items[i], directory, seriesTemplate, episodeTemplate, overrides)
 		if itemErr != nil {
 			return nil, itemErr
 		}
@@ -250,7 +264,7 @@ func (o *LocalOrganizer) directoryMap(items []model.LocalAnime) (map[uint]model.
 	return result, nil
 }
 
-func (o *LocalOrganizer) previewAnime(anime model.LocalAnime, directory model.LocalAnimeDirectory, seriesTemplate, episodeTemplate string) (LocalOrganizeAnimePreview, error) {
+func (o *LocalOrganizer) previewAnime(anime model.LocalAnime, directory model.LocalAnimeDirectory, seriesTemplate, episodeTemplate string, overrides map[string]LocalOrganizeEpisodeOverride) (LocalOrganizeAnimePreview, error) {
 	title, year, matched := organizerAnimeIdentity(anime)
 	seriesName, err := renamer.FormatTemplate(seriesTemplate, renamer.TemplateData{Title: title, Year: year})
 	if err != nil {
@@ -289,6 +303,10 @@ func (o *LocalOrganizer) previewAnime(anime model.LocalAnime, directory model.Lo
 		if found {
 			season = episode.SeasonNum
 			episodeNumber = episode.EpisodeNum
+		}
+		if override, ok := overrides[filepath.Clean(source)]; ok {
+			season = override.Season
+			episodeNumber = override.Episode
 		}
 		if season <= 0 {
 			season = max(1, anime.Season)

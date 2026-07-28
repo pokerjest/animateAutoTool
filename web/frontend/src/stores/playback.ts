@@ -217,16 +217,22 @@ export const usePlaybackStore = defineStore('playback', {
         this.pendingAutoplay = false
         this.playing = false
         this.stalled = false
+        this.preparing = false
+        this.switchingSource = false
         this.error = mode === 'direct'
           ? '当前剧集没有可用的 Jellyfin 直连地址。'
           : '当前剧集没有可用的 AnimateTool 代理地址。'
         return false
       }
       if (next === this.source) return true
+      const shouldResume = this.pendingAutoplay
+        || this.playing
+        || Boolean(this.video && !this.video.paused && !this.video.ended)
       this.captureVideoSettings()
       this.pendingResumeSeconds = this.video?.currentTime || this.position
-      this.pendingAutoplay = Boolean(this.video && !this.video.paused && !this.video.ended)
+      this.pendingAutoplay = shouldResume
       this.switchingSource = true
+      this.preparing = true
       this.source = next
       this.error = ''
       this.stalled = false
@@ -303,8 +309,12 @@ export const usePlaybackStore = defineStore('playback', {
     },
     onError() {
       const sourceLabel = this.activeSource === 'direct' ? 'Jellyfin 直连' : 'AnimateTool 代理'
+      this.pendingAutoplay = this.pendingAutoplay || this.playing || this.stalled || this.preparing
       this.error = `${sourceLabel}视频流加载失败，请检查对应线路和 Jellyfin 连接。`
       this.playing = false
+      this.stalled = false
+      this.preparing = false
+      this.switchingSource = false
     },
     onEnded() {
       this.playing = false

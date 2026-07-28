@@ -298,7 +298,11 @@ func TestNetBirdStreamTokenRejectsExpiredMismatchedAndTamperedTokens(t *testing.
 
 	parts := strings.Split(valid, ".")
 	require.Len(t, parts, 2)
-	tampered := parts[0] + "." + parts[1][:len(parts[1])-1] + "A"
+	replacement := "A"
+	if strings.HasPrefix(parts[1], replacement) {
+		replacement = "B"
+	}
+	tampered := parts[0] + "." + replacement + parts[1][1:]
 	assert.Error(t, verifyNetBirdStreamToken(tampered, 41, now))
 }
 

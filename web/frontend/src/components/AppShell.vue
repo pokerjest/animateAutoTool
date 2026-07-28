@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Activity, ArchiveRestore, Bot, CalendarDays, ChevronRight, Clapperboard, Download, Film, HeartPulse, Home, Library, LogOut, Menu, MoonStar, Settings, ShieldCheck, Sparkles, Sun, Tv, X } from '@lucide/vue'
+import { Activity, ArchiveRestore, CalendarDays, ChevronRight, Clapperboard, Download, Film, HeartPulse, Home, Library, LogOut, Menu, MoonStar, Settings, ShieldCheck, Sparkles, Sun, Tv, X } from '@lucide/vue'
 import { useUIStore } from '../stores/ui'
 import { useTaskStore } from '../stores/tasks'
 import { useSessionStore } from '../stores/session'
@@ -12,11 +12,12 @@ import AsyncButton from './AsyncButton.vue'
 import AppBackground from './AppBackground.vue'
 import TaskCenter from './TaskCenter.vue'
 import PlaybackHost from './PlaybackHost.vue'
+import AssistantWidget from './AssistantWidget.vue'
 
 const route = useRoute(); const router = useRouter(); const ui = useUIStore(); const tasks = useTaskStore(); const session = useSessionStore(); const playback = usePlaybackStore(); const workspace = useWorkspaceStore(); const actions = useAsyncActions()
 const manageGroups = [
   { label: '概览', links: [{ to: '/', label: '今日概览', icon: Home }, { to: '/calendar', label: '追番日历', icon: CalendarDays }] },
-  { label: '追番', links: [{ to: '/subscriptions', label: '订阅管理', icon: Tv }, { to: '/assistant', label: 'AI 助手', icon: Bot }] },
+  { label: '追番', links: [{ to: '/subscriptions', label: '订阅管理', icon: Tv }] },
   { label: '媒体', links: [{ to: '/library', label: '番剧图鉴', icon: Library }, { to: '/local-anime', label: '本地番剧', icon: Clapperboard }] },
   { label: '系统', links: [{ to: '/health', label: '系统健康', icon: HeartPulse }, { to: '/backup', label: '备份恢复', icon: ArchiveRestore }, { to: '/settings', label: '系统设置', icon: Settings }] },
 ]
@@ -119,6 +120,7 @@ onMounted(() => {
         </div>
       </aside>
     </div>
+    <AssistantWidget v-if="session.authenticated" />
     <TaskCenter />
   </div>
 </template>

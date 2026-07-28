@@ -159,7 +159,7 @@ async function chooseSource(value: 'proxy' | 'direct') {
           type="button"
           class="btn min-h-11 w-full justify-center sm:w-auto"
           :class="playback.activeSource === option.value ? 'btn-primary' : 'btn-secondary'"
-          :disabled="!option.available || playback.switchingSource"
+          :disabled="!option.available || (playback.switchingSource && playback.activeSource === option.value)"
           :aria-pressed="playback.activeSource === option.value"
           @click="chooseSource(option.value)"
         >

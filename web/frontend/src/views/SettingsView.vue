@@ -4,8 +4,9 @@ import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { Bot, Cloud, Database, Download, Film, KeyRound, Network, Palette, RefreshCw, Save, Settings2, ShieldCheck, Wrench } from '@lucide/vue'
 import { useRoute } from 'vue-router'
 import { api } from '../api/client'
-import type { MediaLibrary, TaskAccepted } from '../api/types'
+import type { AIToolRun, MediaLibrary, TaskAccepted } from '../api/types'
 import AsyncButton from '../components/AsyncButton.vue'
+import AISettingsPanel from '../components/AISettingsPanel.vue'
 import LocalRecoveryLink from '../components/LocalRecoveryLink.vue'
 import PageHeader from '../components/PageHeader.vue'
 import StateBlock from '../components/StateBlock.vue'
@@ -36,16 +37,22 @@ const groups:Group[]=[
   {id:'metadata',label:'元数据',icon:Database,providers:['bangumi','tmdb','anilist'],fields:[{key:'tmdb_token',label:'TMDB Token',type:'password'},{key:'anilist_token',label:'AniList Token',type:'password'},{key:'bangumi_app_id',label:'Bangumi App ID'},{key:'bangumi_app_secret',label:'Bangumi App Secret',type:'password'},{key:'bangumi_access_token',label:'Bangumi Access Token',type:'password'}]},
   {id:'network',label:'网络代理',icon:Network,providers:['mikan'],fields:[{key:'proxy_url',label:'代理地址'},{key:'proxy_bangumi_enabled',label:'Bangumi 使用代理',type:'boolean'},{key:'proxy_mikan_enabled',label:'Mikan 使用代理',type:'boolean'},{key:'proxy_tmdb_enabled',label:'TMDB 使用代理',type:'boolean'},{key:'proxy_anilist_enabled',label:'AniList 使用代理',type:'boolean'},{key:'proxy_jellyfin_enabled',label:'Jellyfin 使用代理',type:'boolean'},{key:'proxy_ai_enabled',label:'AI 服务使用代理',type:'boolean'},{key:'proxy_updater_enabled',label:'应用更新使用代理',type:'boolean'}]},
   {id:'media',label:'媒体服务',icon:Film,providers:['jellyfin'],fields:[...jellyfinFields,...alistFields]},
-  {id:'ai',label:'AI 助手',icon:Bot,fields:[{key:'ai_base_url',label:'Base URL'},{key:'ai_model',label:'模型'},{key:'ai_api_key',label:'API Key',type:'password'}]},
+  {id:'ai',label:'AI 助手',icon:Bot,fields:[
+    {key:'ai_provider',label:'当前服务商'},
+    {key:'ai_openai_base_url',label:'OpenAI Base URL'},{key:'ai_openai_model',label:'OpenAI 模型'},{key:'ai_openai_api_key',label:'OpenAI API Key',type:'password'},
+    {key:'ai_gemini_api_format',label:'Gemini API 格式'},{key:'ai_gemini_base_url',label:'Gemini Base URL'},{key:'ai_gemini_model',label:'Gemini 模型'},{key:'ai_gemini_api_key',label:'Gemini API Key',type:'password'},
+    {key:'ai_claude_api_format',label:'Claude API 格式'},{key:'ai_claude_base_url',label:'Claude Base URL'},{key:'ai_claude_model',label:'Claude 模型'},{key:'ai_claude_api_key',label:'Claude API Key',type:'password'},
+  ]},
   {id:'cloud',label:'云备份',icon:Cloud,fields:[{key:'r2_endpoint',label:'R2 Endpoint'},{key:'r2_bucket',label:'Bucket'},{key:'r2_access_key',label:'Access Key',type:'password'},{key:'r2_secret_key',label:'Secret Key',type:'password'}]},
   {id:'appearance',label:'外观',icon:Palette,fields:[]},
   {id:'security',label:'安全',icon:ShieldCheck,fields:[]},
   {id:'maintenance',label:'应用维护',icon:Wrench,fields:[]},
 ]
-const route=useRoute(),ui=useUIStore(),playback=usePlaybackStore(),workspace=useWorkspaceStore(),qc=useQueryClient(),actions=useAsyncActions(),active=ref(String(route.query.focus||'downloader')),form=reactive<Record<string,string>>({}),connection=reactive<Record<string,{connected:boolean;detail:string;account?:string;source?:string;source_label?:string}|null>>({}),oldPassword=ref(''),newPassword=ref(''),confirmPassword=ref(''),models=ref<string[]>([])
+const route=useRoute(),ui=useUIStore(),playback=usePlaybackStore(),workspace=useWorkspaceStore(),qc=useQueryClient(),actions=useAsyncActions(),active=ref(String(route.query.focus||'downloader')),form=reactive<Record<string,string>>({}),connection=reactive<Record<string,{connected:boolean;detail:string;account?:string;source?:string;source_label?:string}|null>>({}),oldPassword=ref(''),newPassword=ref(''),confirmPassword=ref('')
 const query=useQuery({queryKey:['settings'],queryFn:()=>api<SettingsData>('/settings')})
 const mediaLibraries=useQuery({queryKey:['settings-media-libraries'],queryFn:()=>api<{items:MediaLibrary[]}>('/media/providers/jellyfin/libraries'),enabled:computed(()=>Boolean(query.data.value?.values.jellyfin_url&&query.data.value?.values.jellyfin_api_key)),retry:false})
 const audits=useQuery({queryKey:['audit-logs'],queryFn:()=>api<{items:AuditEntry[]}>('/audit-logs?page_size=25')})
+const aiToolRuns=useQuery({queryKey:['ai-tool-runs'],queryFn:()=>api<{items:AIToolRun[]}>('/ai/tool-runs?limit=30'),enabled:computed(()=>active.value==='ai')})
 const maintenance=useQuery({queryKey:['maintenance'],queryFn:()=>api<Record<string,unknown>>('/settings/maintenance'),refetchInterval:15000})
 watchEffect(()=>{if(query.data.value)Object.assign(form,query.data.value.values)})
 watchEffect(()=>{const focus=String(route.query.focus||'');if(focus==='media'&&groups.some(item=>item.id==='media'))active.value='media'})
@@ -57,7 +64,6 @@ async function save(){try{await actions.run('save',async()=>{await api('/setting
 async function testProvider(provider:string){connection[provider]=null;try{await actions.run(`provider-${provider}`,async()=>{const query=provider==='jellyfin'?`?source=${encodeURIComponent(playback.preferredSource)}`:'';connection[provider]=await api(`/settings/connections/${provider}${query}`)})}catch(e){connection[provider]={connected:false,detail:e instanceof Error?e.message:'连接失败'}}}
 async function testProxy(){connection.proxy=null;try{await actions.run('test-proxy',async()=>{connection.proxy=await api('/settings/proxy/test',{method:'POST',body:JSON.stringify({proxy_url:form.proxy_url||''}),headers:{'Content-Type':'application/json'}})})}catch(e){connection.proxy={connected:false,detail:e instanceof Error?e.message:'代理连接失败'}}}
 async function testR2(){connection.r2=null;try{await actions.run('test-r2',async()=>{const result=await api<{message?:string}>('/backup/r2/test',{method:'POST',body:JSON.stringify({endpoint:form.r2_endpoint||'',bucket:form.r2_bucket||'',access_key:form.r2_access_key||'',secret_key:form.r2_secret_key||''}),headers:{'Content-Type':'application/json'}});connection.r2={connected:true,detail:result.message||'读写校验通过'}})}catch(e){connection.r2={connected:false,detail:e instanceof Error?e.message:'连接失败'}}}
-async function loadModels(){try{await actions.run('load-models',async()=>{const result=await api<{models:string[]}>(`/settings/ai/models?base_url=${encodeURIComponent(form.ai_base_url||'')}`);models.value=result.models||[];ui.toast(models.value.length?`找到 ${models.value.length} 个模型`:'没有返回可用模型','info')})}catch(e){ui.toast(e instanceof Error?e.message:'模型列表加载失败','error')}}
 async function changePassword(){if(newPassword.value.length<8||newPassword.value!==confirmPassword.value){ui.toast('新密码至少 8 位，且两次输入必须一致','error');return}try{await actions.run('change-password',async()=>{await api('/session/change-password',{method:'POST',body:JSON.stringify({old_password:oldPassword.value,new_password:newPassword.value}),headers:{'Content-Type':'application/json'}});oldPassword.value='';newPassword.value='';confirmPassword.value='';ui.toast('密码修改成功');qc.invalidateQueries({queryKey:['audit-logs']})})}catch(e){ui.toast(e instanceof Error?e.message:'密码修改失败','error')}}
 function addCurrentIPToAllowlist(){const ip=query.data.value?.request_ip?.trim();if(!ip)return;const entries=(form.auth_ip_allowlist||'').split(/[\s,;]+/).filter(Boolean);if(!entries.includes(ip))entries.push(ip);form.auth_ip_allowlist=entries.join('\n')}
 async function updateAction(action:'check'|'apply'){try{await actions.runTask(`update-${action}`,()=>api<TaskAccepted>(`/settings/updater/${action}`,{method:'POST'}),action==='check'?'检查应用更新':'下载并应用更新','updater');ui.toast(action==='check'?'更新检查已经启动':'更新下载与应用已经启动')}catch(e){ui.toast(e instanceof Error?e.message:'更新操作失败','error')}}
@@ -79,8 +85,41 @@ function toggleLibrary(id:string,checked:boolean){
 }
 </script>
 
-<template><div class="page-grid"><PageHeader eyebrow="PREFERENCES" title="系统设置" description="按任务分组配置下载、元数据、媒体服务、AI、外观、安全和应用维护。"><AsyncButton v-if="group.fields.length" class="btn btn-primary" :loading="actions.isBusy('save')" loading-label="正在保存…" @click="save"><Save :size="17"/>保存更改</AsyncButton></PageHeader><StateBlock v-if="query.isLoading.value" state="loading"/><StateBlock v-else-if="query.isError.value" state="error" title="设置加载失败" :retrying="query.isFetching.value" @retry="query.refetch()"/><section v-else class="grid gap-5 lg:grid-cols-[250px_1fr]"><nav class="panel h-fit p-3" aria-label="设置分组"><button v-for="item in groups" :key="item.id" class="mb-1 flex min-h-12 w-full items-center gap-3 rounded-xl px-3 text-left font-bold" :class="active===item.id?'bg-[var(--brand-soft)] text-[var(--brand-strong)]':'muted hover:bg-[var(--surface-muted)]'" @click="active=item.id"><component :is="item.icon" :size="18"/>{{ item.label }}</button></nav><article class="panel min-w-0 p-5 sm:p-7"><div class="mb-6 flex items-center gap-3"><span class="grid h-11 w-11 place-items-center rounded-xl bg-[var(--brand-soft)] text-[var(--brand)]"><component :is="group.icon"/></span><div><p class="eyebrow">CONFIGURATION</p><h3 class="text-2xl font-black">{{ group.label }}</h3></div></div>
-  <template v-if="group.fields.length">
+<template><div class="page-grid"><PageHeader eyebrow="PREFERENCES" title="系统设置" description="按任务分组配置下载、元数据、媒体服务、AI、外观、安全和应用维护。"><AsyncButton v-if="group.fields.length" class="btn btn-primary" :loading="actions.isBusy('save')" loading-label="正在保存…" @click="save"><Save :size="17"/>保存更改</AsyncButton></PageHeader><StateBlock v-if="query.isLoading.value" state="loading"/><StateBlock v-else-if="query.isError.value" state="error" title="设置加载失败" :retrying="query.isFetching.value" @retry="query.refetch()"/><section v-else class="grid min-w-0 gap-5 lg:grid-cols-[240px_minmax(0,1fr)] xl:grid-cols-[260px_minmax(0,1fr)]"><nav class="panel flex h-fit gap-2 overflow-x-auto p-2 lg:sticky lg:top-4 lg:block lg:overflow-visible lg:p-3" aria-label="设置分组"><button v-for="item in groups" :key="item.id" class="flex min-h-11 shrink-0 items-center gap-2.5 rounded-xl px-3 text-left text-sm font-bold lg:mb-1 lg:min-h-12 lg:w-full lg:gap-3" :class="active===item.id?'bg-[var(--brand-soft)] text-[var(--brand-strong)]':'muted hover:bg-[var(--surface-muted)]'" @click="active=item.id"><component :is="item.icon" class="shrink-0" :size="18"/>{{ item.label }}</button></nav><article class="panel min-w-0 overflow-hidden p-4 sm:p-6 xl:p-7"><div class="mb-6 flex items-center gap-3 border-b border-[var(--line)] pb-5"><span class="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-[var(--brand-soft)] text-[var(--brand)]"><component :is="group.icon" :size="21"/></span><div class="min-w-0"><p class="eyebrow">CONFIGURATION</p><h3 class="text-2xl font-black">{{ group.label }}</h3></div></div>
+  <template v-if="group.id==='ai'">
+    <AISettingsPanel :form="form" :configured="query.data.value?.configured||{}"/>
+    <div class="panel-muted mt-6 flex items-start gap-3 p-4 text-sm leading-6 muted"><Settings2 class="mt-1 shrink-0 text-[var(--sky)]" :size="18"/>三家的 API Key 分别保存且不会回传浏览器。密码框留空会保留原值；切换当前服务商后，请点击页面顶部“保存更改”才会影响 AI 助手。</div>
+    <section class="mt-8" data-testid="ai-tool-runs">
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h4 class="font-black">最近 AI 工具调用</h4>
+          <p class="muted mt-1 text-sm leading-6">这里记录 AI 读取、生成提案和确认执行的内部工具。参数与结果已经脱敏，不展示 API Key、密码、Cookie 或认证头。</p>
+        </div>
+        <AsyncButton class="btn btn-quiet" :loading="aiToolRuns.isFetching.value" loading-label="刷新中…" @click="aiToolRuns.refetch()"><RefreshCw :size="15"/>刷新</AsyncButton>
+      </div>
+      <StateBlock v-if="aiToolRuns.isLoading.value" class="mt-4" state="loading" title="正在读取 AI 工具日志"/>
+      <StateBlock v-else-if="aiToolRuns.isError.value" class="mt-4" state="error" title="AI 工具日志加载失败" :retrying="aiToolRuns.isFetching.value" @retry="aiToolRuns.refetch()"/>
+      <div v-else-if="aiToolRuns.data.value?.items.length" class="mt-4 grid gap-3">
+        <details v-for="run in aiToolRuns.data.value.items" :key="run.id" class="panel-muted overflow-hidden p-4">
+          <summary class="flex cursor-pointer list-none flex-wrap items-center gap-2">
+            <strong class="mr-auto break-all">{{ run.tool_name }}</strong>
+            <span class="badge" :class="run.risk==='write'?'badge-danger':run.risk==='propose'?'badge-warning':''">{{ run.risk }}</span>
+            <span class="badge" :class="run.outcome==='success'?'badge-success':'badge-danger'">{{ run.outcome }}</span>
+            <span class="muted text-xs">{{ run.duration_ms }} ms · {{ new Date(run.created_at).toLocaleString() }}</span>
+          </summary>
+          <div class="mt-4 grid gap-3 border-t border-[var(--line)] pt-4 text-xs leading-5">
+            <p><strong>模型：</strong><span class="muted">{{ [run.provider,run.model].filter(Boolean).join(' / ') || '内部工具' }}</span></p>
+            <p v-if="run.proposal_id"><strong>提案：</strong><code>{{ run.proposal_id }}</code></p>
+            <p v-if="run.confirmation_required"><strong>确认：</strong><span :class="run.confirmation_validated?'text-[var(--success)]':'text-[var(--warning)]'">{{ run.confirmation_validated ? '已通过一次性令牌' : '未通过确认' }}</span></p>
+            <div><strong>脱敏参数摘要</strong><pre class="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-xl bg-[var(--surface-solid)] p-3">{{ run.arguments_summary || '{}' }}</pre></div>
+            <div v-if="run.result_summary"><strong>脱敏结果摘要</strong><pre class="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-xl bg-[var(--surface-solid)] p-3">{{ run.result_summary }}</pre></div>
+          </div>
+        </details>
+      </div>
+      <p v-else class="panel-muted mt-4 p-4 text-sm muted">还没有 AI 工具调用记录。只有用户主动发起 AI 分析或助手调用工具时才会产生记录。</p>
+    </section>
+  </template>
+  <template v-else-if="group.fields.length">
     <div v-if="group.id==='media'" class="grid gap-5">
       <section v-for="app in mediaApps" :key="app.id" class="panel-muted overflow-hidden p-4 sm:p-5" :data-testid="`media-app-${app.id}`">
         <header class="flex items-start gap-3 border-b border-[var(--line)] pb-4">
@@ -112,7 +151,6 @@ function toggleLibrary(id:string,checked:boolean){
     <AsyncButton v-if="group.id==='network'" class="panel-muted mt-6 min-h-20 w-full p-3 text-left" :loading="actions.isBusy('test-proxy')" loading-label="代理测试中…" @click="testProxy"><div class="flex items-center justify-between"><strong>测试当前代理地址</strong><RefreshCw :size="15" class="text-[var(--sky)]"/></div><p class="mt-2 text-xs" :class="connection.proxy?.connected?'text-[var(--success)]':'muted'">{{ connection.proxy?(connection.proxy.connected?'代理连接成功':connection.proxy.detail):'使用当前输入值访问 Bangumi 测试目标，无需先保存' }}</p></AsyncButton>
     <div v-if="group.providers?.length&&group.id!=='media'" class="mt-6"><h4 class="font-black">连接状态</h4><div class="mt-3 grid gap-3 sm:grid-cols-2"><AsyncButton v-for="provider in group.providers" :key="provider" class="panel-muted min-h-20 p-3 text-left" :loading="actions.isBusy(`provider-${provider}`)" loading-label="连接测试中…" @click="testProvider(provider)"><div class="flex items-center justify-between"><strong class="uppercase">{{ provider }}</strong><RefreshCw :size="15" class="text-[var(--sky)]"/></div><p class="mt-2 text-xs" :class="connection[provider]?.connected?'text-[var(--success)]':'muted'">{{ connection[provider]?(connection[provider]?.connected?`已连接 ${connection[provider]?.account||''}`:connection[provider]?.detail):'点击测试当前已保存配置' }}</p></AsyncButton></div></div>
     <AsyncButton v-if="group.id==='cloud'" class="panel-muted mt-6 min-h-20 w-full p-3 text-left" :loading="actions.isBusy('test-r2')" loading-label="R2 测试中…" @click="testR2"><div class="flex items-center justify-between"><strong>R2 读写连通性</strong><RefreshCw :size="15" class="text-[var(--sky)]"/></div><p class="mt-2 text-xs" :class="connection.r2?.connected?'text-[var(--success)]':'muted'">{{ connection.r2?.detail||'点击测试表单中的配置；空白凭据沿用已保存值' }}</p></AsyncButton>
-    <AsyncButton v-if="group.id==='ai'" class="btn btn-secondary mt-5" :loading="actions.isBusy('load-models')" loading-label="读取中…" @click="loadModels"><RefreshCw :size="16"/>读取模型列表</AsyncButton><div v-if="models.length" class="mt-3 flex flex-wrap gap-2"><button v-for="model in models" :key="model" class="badge" @click="form.ai_model=model">{{ model }}</button></div>
   </template>
   <template v-else-if="group.id==='appearance'"><section class="max-w-2xl"><h4 class="font-black">外观与辅助功能</h4><p class="muted mt-1 text-sm leading-6">调整当前浏览器的主题与页面背景，不影响其他设备。</p><div class="mt-5 grid gap-4"><label class="label">主题模式<select class="field" :value="ui.theme" @change="ui.setTheme(($event.target as HTMLSelectElement).value as ThemeMode)"><option value="system">跟随系统</option><option value="light">亮色</option><option value="dark">深色</option></select></label><label class="label">页面背景<select class="field" data-testid="background-mode" :value="ui.backgroundMode" @change="ui.setBackgroundMode(($event.target as HTMLSelectElement).value as BackgroundMode)"><option value="default">默认渐变背景</option><option value="anime">随机动漫海报</option></select></label><div v-if="ui.backgroundMode==='anime'" class="rounded-xl border border-[var(--line)] bg-[var(--brand-soft)] p-4 text-sm leading-6 text-[var(--brand-strong)]"><strong class="block">已启用动漫海报背景</strong><span>从番剧图鉴随机选择，并自动为手机、平板和电脑加载 640、960、1280px 的合适尺寸；页面切换不会重复下载。</span></div></div></section></template>
   <template v-else-if="group.id==='security'">

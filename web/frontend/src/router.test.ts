@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import router from './router'
 import { useWorkspaceStore } from './stores/workspace'
+import { useAssistantStore } from './stores/assistant'
 
 const response = (data: unknown) => Promise.resolve(new Response(JSON.stringify({ data }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
 
@@ -77,5 +78,18 @@ describe('route guards', () => {
     expect(router.currentRoute.value.path).toBe('/media/local-player')
     expect(router.currentRoute.value.query).toMatchObject({ anime: '7', autoplay: '1' })
     expect(workspace.mode).toBe('media')
+  })
+
+  it('opens the floating assistant and replaces the legacy route with the last workspace page', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => response({ authenticated: true, setup_pending: false, username: 'admin', version: 'test', recovery_local_only: true })))
+    await router.replace('/login')
+    const workspace = useWorkspaceStore()
+    workspace.rememberRoute('/health', 'manage')
+
+    await router.push('/assistant')
+
+    expect(router.currentRoute.value.path).toBe('/health')
+    expect(useAssistantStore().open).toBe(true)
+    expect(workspace.lastManageRoute).toBe('/health')
   })
 })

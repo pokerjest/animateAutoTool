@@ -195,6 +195,14 @@ describe('Plex-style global playback', () => {
     await video.trigger('error')
     expect(mounted.wrapper.get('video').attributes('src')).toContain('example-tailnet.ts.net')
     expect(mounted.wrapper.text()).toContain('Jellyfin 直连视频流加载失败')
+    expect(mounted.playback.switchingSource).toBe(false)
+    expect(mounted.playback.stalled).toBe(false)
+
+    const proxyButton = mounted.wrapper.findAll('button').find(button => button.text().includes('AnimateTool 代理'))
+    expect(proxyButton?.attributes('disabled')).toBeUndefined()
+    await proxyButton!.trigger('click')
+    expect(mounted.playback.activeSource).toBe('proxy')
+    expect(mounted.wrapper.get('video').attributes('src')).toBe('/api/v1/jellyfin/stream/11')
     mounted.wrapper.unmount()
     mounted.queryClient.clear()
   })
@@ -223,6 +231,8 @@ describe('Plex-style global playback', () => {
     mounted.playback.onLoadedMetadata()
     await mounted.playback.switchSource('direct')
     await vi.waitFor(() => expect(mounted.wrapper.get('video').attributes('src')).toContain('media.example-tailnet.ts.net'))
+    const proxyButton = mounted.wrapper.findAll('button').find(button => button.text().includes('AnimateTool 代理'))
+    expect(proxyButton?.attributes('disabled')).toBeUndefined()
     expect(localStorage.getItem('player.preferredSource')).toBe('direct')
 
     mounted.wrapper.unmount()
