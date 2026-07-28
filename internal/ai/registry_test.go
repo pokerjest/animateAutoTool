@@ -7,6 +7,8 @@ import (
 	"testing"
 )
 
+const writeToolAppliedResult = "applied"
+
 func TestRegistryRegisterAndExecute(t *testing.T) {
 	r := NewRegistry()
 	r.Register("echo", "Echoes the input string.",
@@ -67,7 +69,7 @@ func TestRegistryHidesWriteToolsFromModelDefinitions(t *testing.T) {
 		return "preview", nil
 	})
 	registry.RegisterWrite("apply_change", "write", JSONSchemaObject(map[string]any{}, nil), func(context.Context, string) (string, error) {
-		return "applied", nil
+		return writeToolAppliedResult, nil
 	})
 
 	definitions := registry.GetToolDefinitions()
@@ -87,7 +89,7 @@ func TestRegistryWriteToolRequiresConfirmedExecution(t *testing.T) {
 		"id": JSONSchemaProperty("integer", "resource ID"),
 	}, []string{"id"}), func(context.Context, string) (string, error) {
 		called = true
-		return "applied", nil
+		return writeToolAppliedResult, nil
 	})
 
 	if _, err := registry.ExecuteTool(context.Background(), "apply_change", `{"id":1}`); !errors.Is(err, ErrToolConfirmationRequired) {
@@ -100,7 +102,7 @@ func TestRegistryWriteToolRequiresConfirmedExecution(t *testing.T) {
 	if err != nil {
 		t.Fatalf("confirmed execution failed: %v", err)
 	}
-	if result != "applied" || !called {
+	if result != writeToolAppliedResult || !called {
 		t.Fatalf("unexpected confirmed result %q called=%v", result, called)
 	}
 }
