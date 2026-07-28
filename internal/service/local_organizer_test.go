@@ -88,6 +88,47 @@ func TestLocalOrganizerQuerySelectionExcludesItemsAndWarnsWithoutMetadata(t *tes
 	assert.NotEmpty(t, preview.Items[0].Warnings)
 }
 
+func TestLocalOrganizerRepairsStaleEpisodeNumbersFromExplicitFilenames(t *testing.T) {
+	withServiceTestDB(t)
+	root := t.TempDir()
+	sourceDir := filepath.Join(root, "Explicit Number Show")
+	require.NoError(t, os.MkdirAll(sourceDir, 0o755))
+	first := filepath.Join(sourceDir, "[Group] Explicit Number Show [01][AVC-8bit 1080P].mp4")
+	second := filepath.Join(sourceDir, "[Group] Explicit Number Show [02][AVC-8bit 1080P].mp4")
+	for _, path := range []string{first, second} {
+		require.NoError(t, os.WriteFile(path, []byte(filepath.Base(path)), 0o600))
+	}
+	directory := model.LocalAnimeDirectory{Path: root}
+	require.NoError(t, db.DB.Create(&directory).Error)
+	metadata := model.AnimeMetadata{TitleCN: "明确编号番剧"}
+	require.NoError(t, db.DB.Create(&metadata).Error)
+	anime := model.LocalAnime{DirectoryID: directory.ID, Title: "Explicit Number Show", Path: sourceDir, Season: 1, MetadataID: &metadata.ID}
+	require.NoError(t, db.DB.Create(&anime).Error)
+	require.NoError(t, db.DB.Create(&model.LocalEpisode{LocalAnimeID: anime.ID, EpisodeNum: 8, SeasonNum: 1, Path: first}).Error)
+	require.NoError(t, db.DB.Create(&model.LocalEpisode{LocalAnimeID: anime.ID, EpisodeNum: 8, SeasonNum: 1, Path: second}).Error)
+
+	organizer := NewLocalOrganizer(db.DB, nil)
+	preview, err := organizer.Preview("user", LocalOrganizePreviewRequest{
+		Selection: LocalOrganizeSelection{Mode: OrganizeSelectionIDs, AnimeIDs: []uint{anime.ID}},
+	})
+	require.NoError(t, err)
+	require.Len(t, preview.Items, 1)
+	require.Equal(t, 0, preview.ConflictCount)
+	require.Equal(t, 2, preview.ChangeCount)
+	require.Len(t, preview.Items[0].Warnings, 2)
+	assert.Contains(t, preview.Items[0].Changes[0].Target, "S01E01.mp4")
+	assert.Contains(t, preview.Items[0].Changes[1].Target, "S01E02.mp4")
+
+	result, err := organizer.Execute(t.Context(), preview, nil, nil)
+	require.NoError(t, err)
+	require.Equal(t, 2, result.Moved)
+	var episodes []model.LocalEpisode
+	require.NoError(t, db.DB.Where("local_anime_id = ?", anime.ID).Order("episode_num").Find(&episodes).Error)
+	require.Len(t, episodes, 2)
+	require.Equal(t, 1, episodes[0].EpisodeNum)
+	require.Equal(t, 2, episodes[1].EpisodeNum)
+}
+
 func TestLocalOrganizerProtectsConflictsAndMultiFileTorrents(t *testing.T) {
 	withServiceTestDB(t)
 	root := t.TempDir()

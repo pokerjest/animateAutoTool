@@ -130,4 +130,70 @@ describe('AISettingsPanel', () => {
     expect(form.ai_claude_api_format).toBe('openai')
     expect(form.ai_claude_base_url).toBe('https://claude-gateway.example.test/api')
   })
+
+  it('keeps fallback Gemini models selectable when the live list is rate limited', async () => {
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input)
+      const body = JSON.parse(String(init?.body || '{}')) as Record<string, string>
+      if (path.endsWith('/api/v1/settings/ai/models')) {
+        return response({
+          provider: 'gemini',
+          provider_label: 'Google Gemini',
+          format: 'native',
+          models: ['gemini-3.6-flash', 'gemini-2.5-flash'],
+          source: 'fallback',
+          upstream_status: 429,
+          retry_after_seconds: 20,
+          warning: 'Google Gemini 当前项目额度已达到限制；请等待至少 20 秒后重试。',
+        })
+      }
+      if (path.endsWith('/api/v1/settings/ai/test')) {
+        return response({
+          provider: 'gemini',
+          provider_label: 'Google Gemini',
+          format: 'native',
+          model: body.model,
+          connected: body.model === 'gemini-2.5-flash',
+          detail: body.model === 'gemini-2.5-flash' ? '已真实发送 hi 并收到模型回复' : '当前模型配额受限',
+          upstream_status: body.model === 'gemini-2.5-flash' ? 0 : 429,
+          latency_ms: 80,
+          checked_at: new Date().toISOString(),
+        })
+      }
+      throw new Error(`unexpected request: ${path}`)
+    }))
+
+    const form: Record<string, string> = {
+      ai_provider: 'gemini',
+      ai_openai_base_url: 'https://api.openai.com/v1',
+      ai_openai_api_key: '',
+      ai_openai_model: '',
+      ai_gemini_base_url: 'https://generativelanguage.googleapis.com',
+      ai_gemini_api_key: '',
+      ai_gemini_model: 'gemini-3.6-flash',
+      ai_gemini_api_format: 'native',
+      ai_claude_base_url: 'https://api.anthropic.com',
+      ai_claude_api_key: '',
+      ai_claude_model: '',
+      ai_claude_api_format: 'native',
+    }
+    const wrapper = mount(AISettingsPanel, {
+      props: { form, configured: { ai_gemini_api_key: true } },
+      global: { plugins: [createPinia()] },
+    })
+    const gemini = wrapper.get('[data-testid="ai-provider-gemini"]')
+
+    await gemini.findAll('button').find(button => button.text().includes('读取模型列表'))!.trigger('click')
+    await flushPromises()
+
+    expect(gemini.text()).toContain('实时模型列表读取失败，切换功能仍然可用')
+    expect(gemini.text()).toContain('内置备用列表')
+    await gemini.findAll('button').find(button => button.text().includes('gemini-2.5-flash'))!.trigger('click')
+    expect(form.ai_gemini_model).toBe('gemini-2.5-flash')
+
+    await gemini.findAll('button').find(button => button.text().includes('用 hi 测试连接'))!.trigger('click')
+    await flushPromises()
+    expect(gemini.text()).toContain('本次可用')
+    expect(gemini.text()).toContain('Gemini Models API 不返回各模型剩余 RPM、TPM 或每日额度')
+  })
 })

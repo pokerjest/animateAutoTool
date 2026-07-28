@@ -128,3 +128,21 @@ func TestParseFilenameStandaloneEpisodeNumber(t *testing.T) {
 		t.Errorf("expected %s, got %q", parserResolution1080p, info.Resolution)
 	}
 }
+
+func TestParseFilenameUsesBracketEpisodeBeforeTechnicalTags(t *testing.T) {
+	info := ParseFilename(`[Sakurato] Onaji Zemi no Someya-san ga Sexy Joyuu Datta Hanashi. [01][AVC-8bit 1080P AAC][CHS].mp4`)
+	if info.Episode != 1 {
+		t.Fatalf("expected bracket episode 1, got %d", info.Episode)
+	}
+	if !info.HasExplicitEpisode() {
+		t.Fatal("expected bracket episode to be marked explicit")
+	}
+	if info.BitDepth != "8bit" {
+		t.Fatalf("expected 8bit technical tag, got %q", info.BitDepth)
+	}
+
+	technicalOnly := ParseFilename(`[Sakurato] Show [AVC-8bit 1080P AAC][CHS].mp4`)
+	if technicalOnly.Episode != 0 {
+		t.Fatalf("technical tag must not become an episode, got %d", technicalOnly.Episode)
+	}
+}

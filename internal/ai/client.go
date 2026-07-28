@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -71,8 +70,7 @@ func (c *Client) CreateChatCompletion(ctx context.Context, req ChatCompletionReq
 	}()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		errorBody, _ := io.ReadAll(resp.Body)
-		return nil, &ProviderError{StatusCode: resp.StatusCode, Body: string(errorBody)}
+		return nil, NewProviderErrorFromResponse(resp)
 	}
 
 	var chatResp ChatCompletionResponse
@@ -108,8 +106,7 @@ func (c *Client) ListModels(ctx context.Context) ([]string, error) {
 	}()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		errorBody, _ := io.ReadAll(resp.Body)
-		return nil, &ProviderError{StatusCode: resp.StatusCode, Body: string(errorBody)}
+		return nil, NewProviderErrorFromResponse(resp)
 	}
 
 	var listResp ModelListResponse

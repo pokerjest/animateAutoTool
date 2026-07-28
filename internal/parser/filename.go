@@ -30,6 +30,22 @@ type ParsedInfo struct {
 	AudioCodec string
 	BitDepth   string // "10bit" or empty
 	Source     string // "WebRip", "BDRip", etc.
+
+	episodeExplicit bool
+	seasonExplicit  bool
+}
+
+// HasExplicitEpisode reports whether the episode came from an unambiguous
+// filename marker such as S01E02, " - 02", or [02], rather than a fallback
+// standalone-number heuristic.
+func (info ParsedInfo) HasExplicitEpisode() bool {
+	return info.episodeExplicit
+}
+
+// HasExplicitSeason reports whether the season was encoded alongside the
+// episode or in an explicit Season/S token in the filename.
+func (info ParsedInfo) HasExplicitSeason() bool {
+	return info.seasonExplicit
 }
 
 // ParseFilename 解析文件名
@@ -101,6 +117,8 @@ func ParseFilename(path string) ParsedInfo {
 		e, _ := strconv.Atoi(match[2])
 		info.Season = s
 		info.Episode = e
+		info.seasonExplicit = true
+		info.episodeExplicit = true
 		// Title is everything before the match
 		idx := strings.Index(normalized, match[0])
 		if idx > 0 {
@@ -116,6 +134,7 @@ func ParseFilename(path string) ParsedInfo {
 	if len(seasonMatch) > 0 {
 		sNum, _ := strconv.Atoi(seasonMatch[2])
 		info.Season = sNum
+		info.seasonExplicit = true
 		// Remove this season part to help finding episode number locally
 		// e.g. "Title Season 2 05" -> "Title  05"
 		tempName := strings.Replace(normalized, seasonMatch[0], "", 1)
@@ -144,6 +163,7 @@ func ParseFilename(path string) ParsedInfo {
 				info.Episode = e
 			}
 		}
+		info.episodeExplicit = info.Episode > 0
 
 		// Title is strictly before Season text
 		idx := strings.Index(normalized, seasonMatch[0])
@@ -159,6 +179,7 @@ func ParseFilename(path string) ParsedInfo {
 	if match := dashEpRegex.FindStringSubmatch(cleanName); len(match) > 1 {
 		e, _ := strconv.Atoi(match[1])
 		info.Episode = e
+		info.episodeExplicit = true
 		idx := strings.Index(cleanName, match[0])
 		if idx > 0 {
 			info.Title = cleanTitle(cleanName[:idx])
@@ -178,6 +199,7 @@ func ParseFilename(path string) ParsedInfo {
 		num, _ := strconv.Atoi(m[1])
 		if isLikelyEpisodeNumber(num) {
 			info.Episode = num
+			info.episodeExplicit = true
 			info.Title = cleanTitle(cleanName) // Cannot easily strip for brackets inside title
 			return info
 		}

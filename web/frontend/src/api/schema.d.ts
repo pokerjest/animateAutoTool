@@ -1571,6 +1571,7 @@ export interface paths {
          */
         get: operations["getAiModels"];
         put?: never;
+        /** @description Lists models using the unsaved provider form. If the provider is rate limited, the response can remain 200 with source=cache/fallback/configured, a warning, and a selectable cached or official fallback catalog. */
         post: operations["listAiModels"];
         delete?: never;
         options?: never;
@@ -4268,6 +4269,10 @@ export interface operations {
         responses: {
             200: components["responses"]["Success"];
             400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            429: components["responses"]["Error"];
             502: components["responses"]["Error"];
         };
     };
@@ -4306,6 +4311,10 @@ export interface operations {
         requestBody: components["requestBodies"]["JsonObject"];
         responses: {
             200: components["responses"]["Success"];
+            400: components["responses"]["Error"];
+            412: components["responses"]["Error"];
+            429: components["responses"]["Error"];
+            502: components["responses"]["Error"];
         };
     };
     clearAssistantMessages: {

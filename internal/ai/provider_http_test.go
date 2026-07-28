@@ -3,6 +3,7 @@ package ai
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -214,6 +215,46 @@ func TestGeminiClientListsGenerateContentModels(t *testing.T) {
 	}
 	if len(models) != 1 || models[0] != "gemini-a" {
 		t.Fatalf("unexpected models: %v", models)
+	}
+}
+
+func TestGeminiClientParsesRateLimitWithoutLeakingRawResponse(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", "60")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{
+			"error": {
+				"code": 429,
+				"message": "quota exhausted; api_key=must-not-leak",
+				"status": "RESOURCE_EXHAUSTED",
+				"details": [{
+					"@type": "type.googleapis.com/google.rpc.RetryInfo",
+					"retryDelay": "34.5s"
+				}]
+			}
+		}`))
+	}))
+	defer srv.Close()
+
+	_, err := NewGeminiClientWithProxy(srv.URL, "secret-key", "gemini-3.6-flash", "").CreateChatCompletion(
+		context.Background(),
+		ChatCompletionRequest{Messages: []ChatMessage{{Role: "user", Content: "hi"}}},
+	)
+	if err == nil {
+		t.Fatal("expected rate-limit error")
+	}
+	var providerErr *ProviderError
+	if !errors.As(err, &providerErr) {
+		t.Fatalf("expected ProviderError, got %T", err)
+	}
+	if providerErr.StatusCode != http.StatusTooManyRequests || providerErr.Code != "RESOURCE_EXHAUSTED" {
+		t.Fatalf("unexpected provider error: %+v", providerErr)
+	}
+	if providerErr.RetryAfter != 34_500_000_000 {
+		t.Fatalf("retry after = %s, want 34.5s", providerErr.RetryAfter)
+	}
+	if strings.Contains(err.Error(), "must-not-leak") || strings.Contains(err.Error(), "secret-key") {
+		t.Fatalf("provider error leaked raw credentials: %s", err)
 	}
 }
 
