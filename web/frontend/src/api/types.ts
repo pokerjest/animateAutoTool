@@ -51,3 +51,31 @@ export type MediaLibrary = components['schemas']['MediaLibrary']
 export type MediaItem = components['schemas']['MediaItem']
 export type MediaPlaybackInfo = components['schemas']['MediaPlaybackInfo']
 export type MediaPage = components['schemas']['MediaPage']
+
+export interface AIProposal {
+  id: string
+  type: string
+  status: 'analyzing' | 'ready' | 'applied' | 'dismissed' | 'failed' | 'expired' | 'stale'
+  target_type: string
+  target_id: string
+  summary: string
+  confidence: number
+  evidence: string[]
+  warnings: string[]
+  actionable: boolean
+  payload: Record<string, unknown>
+  provider: string
+  model: string
+  error?: string
+  expires_at?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface AIAnalysisAccepted {
+  task_id: string
+  proposal_id: string
+  status: 'running' | 'queued'
+}
+
+export type AIToolRun = components['schemas']['AIToolRun']

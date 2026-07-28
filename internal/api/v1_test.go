@@ -311,6 +311,8 @@ func TestV1TaskSnapshotEndpointsRequireAuthAndReturnTypedState(t *testing.T) {
 func TestV1SettingsNeverReturnSecretValues(t *testing.T) {
 	resetAuthFixtures(t)
 	require.NoError(t, db.DB.Create(&model.GlobalConfig{Key: model.ConfigKeyAIApiKey, Value: "top-secret"}).Error)
+	require.NoError(t, db.DB.Create(&model.GlobalConfig{Key: model.ConfigKeyAIGeminiAPIKey, Value: "gemini-secret"}).Error)
+	require.NoError(t, db.DB.Create(&model.GlobalConfig{Key: model.ConfigKeyAIClaudeAPIKey, Value: "claude-secret"}).Error)
 	r := setupRouter()
 	cookie, _ := loginCookie(t, r, "admin")
 	w := httptest.NewRecorder()
@@ -320,7 +322,78 @@ func TestV1SettingsNeverReturnSecretValues(t *testing.T) {
 	r.ServeHTTP(w, req)
 	require.Equal(t, http.StatusOK, w.Code)
 	assert.NotContains(t, w.Body.String(), "top-secret")
+	assert.NotContains(t, w.Body.String(), "gemini-secret")
+	assert.NotContains(t, w.Body.String(), "claude-secret")
 	assert.Contains(t, w.Body.String(), `"ai_api_key":true`)
+	assert.Contains(t, w.Body.String(), `"ai_openai_api_key":true`)
+	assert.Contains(t, w.Body.String(), `"ai_gemini_api_key":true`)
+	assert.Contains(t, w.Body.String(), `"ai_claude_api_key":true`)
+}
+
+func TestV1AIStatusMigratesLegacyOpenAISettings(t *testing.T) {
+	resetAuthFixtures(t)
+	require.NoError(t, db.DB.Create(&model.GlobalConfig{Key: model.ConfigKeyAIBaseURL, Value: "https://legacy.example/v1"}).Error)
+	require.NoError(t, db.DB.Create(&model.GlobalConfig{Key: model.ConfigKeyAIApiKey, Value: "legacy-secret"}).Error)
+	require.NoError(t, db.DB.Create(&model.GlobalConfig{Key: model.ConfigKeyAIModel, Value: "legacy-model"}).Error)
+	r := setupRouter()
+	cookie, _ := loginCookie(t, r, "admin")
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/settings/ai", nil)
+	req.Header.Set("Cookie", cookie)
+	markLocalRequest(req)
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), `"provider":"openai"`)
+	assert.Contains(t, w.Body.String(), `"configured":true`)
+	assert.Contains(t, w.Body.String(), `"base_url":"https://legacy.example/v1"`)
+	assert.Contains(t, w.Body.String(), `"model":"legacy-model"`)
+	assert.NotContains(t, w.Body.String(), "legacy-secret")
+}
+
+func TestV1SettingsRejectInvalidAIProvider(t *testing.T) {
+	resetAuthFixtures(t)
+	r := setupRouter()
+	cookie, _ := loginCookie(t, r, "admin")
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/settings", bytes.NewBufferString(`{"values":{"ai_provider":"automatic"}}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Cookie", cookie)
+	markLocalRequest(req)
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), `"code":"invalid_ai_provider"`)
+}
+
+func TestV1SettingsExposeNativeAIFormatDefaults(t *testing.T) {
+	resetAuthFixtures(t)
+	r := setupRouter()
+	cookie, _ := loginCookie(t, r, "admin")
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/settings", nil)
+	req.Header.Set("Cookie", cookie)
+	markLocalRequest(req)
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), `"ai_gemini_api_format":"native"`)
+	assert.Contains(t, w.Body.String(), `"ai_claude_api_format":"native"`)
+}
+
+func TestV1SettingsRejectInvalidAIFormat(t *testing.T) {
+	resetAuthFixtures(t)
+	r := setupRouter()
+	cookie, _ := loginCookie(t, r, "admin")
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/settings", bytes.NewBufferString(`{"values":{"ai_gemini_api_format":"oauth"}}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Cookie", cookie)
+	markLocalRequest(req)
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), `"code":"invalid_ai_format"`)
 }
 
 func TestV1SettingsExposeAutomaticRenameDefaults(t *testing.T) {

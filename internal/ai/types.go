@@ -11,9 +11,10 @@ type ChatMessage struct {
 
 // ToolCall represents a tool invocation requested by the model.
 type ToolCall struct {
-	ID       string       `json:"id"`
-	Type     string       `json:"type"` // always "function"
-	Function ToolFunction `json:"function"`
+	ID               string       `json:"id"`
+	Type             string       `json:"type"` // always "function"
+	Function         ToolFunction `json:"function"`
+	ThoughtSignature string       `json:"-"`
 }
 
 // ToolFunction contains the name and arguments of the function to call.
@@ -37,10 +38,12 @@ type FunctionSchema struct {
 
 // ChatCompletionRequest is the payload sent to the chat/completions endpoint.
 type ChatCompletionRequest struct {
-	Model       string        `json:"model"`
-	Messages    []ChatMessage `json:"messages"`
-	Tools       []Tool        `json:"tools,omitempty"`
-	Temperature float32       `json:"temperature,omitempty"`
+	Model         string        `json:"model"`
+	Messages      []ChatMessage `json:"messages"`
+	Tools         []Tool        `json:"tools,omitempty"`
+	Temperature   float32       `json:"temperature,omitempty"`
+	MaxTokens     int           `json:"max_tokens,omitempty"`
+	ThinkingLevel string        `json:"-"`
 }
 
 // ChatCompletionResponse is the payload received from the chat/completions endpoint.
@@ -57,9 +60,10 @@ type Choice struct {
 
 // JSONSchemaHelper is a basic structure to build JSON schemas for parameters.
 type JSONSchemaHelper struct {
-	Type       string         `json:"type"` // "object"
-	Properties map[string]any `json:"properties"`
-	Required   []string       `json:"required,omitempty"`
+	Type                 string         `json:"type"` // "object"
+	Properties           map[string]any `json:"properties"`
+	Required             []string       `json:"required,omitempty"`
+	AdditionalProperties bool           `json:"additionalProperties"`
 }
 
 // ModelListResponse represents the list of models returned by the /models endpoint.

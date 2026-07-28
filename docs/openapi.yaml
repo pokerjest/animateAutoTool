@@ -700,10 +700,90 @@ paths:
   /settings/ai:
     get: { operationId: getAiSettings, responses: { "200": { $ref: "#/components/responses/Success" } } }
   /settings/ai/models:
-    get: { operationId: getAiModels, responses: { "200": { $ref: "#/components/responses/Success" } } }
+    get:
+      deprecated: true
+      description: Compatibility endpoint. New clients should send provider settings in the POST request body.
+      operationId: getAiModels
+      parameters:
+        - { name: provider, in: query, required: false, schema: { type: string, enum: [openai, gemini, claude] } }
+        - { name: format, in: query, required: false, description: API format. OpenAI uses openai; Gemini and Claude default to native., schema: { type: string, enum: [native, openai] } }
+        - { name: base_url, in: query, required: false, schema: { type: string } }
+        - { name: model, in: query, required: false, schema: { type: string } }
+      responses: { "200": { $ref: "#/components/responses/Success" } }
+    post:
+      operationId: listAiModels
+      requestBody: { $ref: "#/components/requestBodies/AIProviderInput" }
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+        "400": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+  /settings/ai/test:
+    post:
+      operationId: testAiConnection
+      description: Sends a real minimal user message containing "hi" to the selected provider without loading AnimateTool tools.
+      requestBody: { $ref: "#/components/requestBodies/AIProviderInput" }
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+        "400": { $ref: "#/components/responses/Error" }
   /assistant/messages:
+    get:
+      operationId: getAssistantMessages
+      description: Returns only the current user's displayable user messages and final assistant replies. System prompts, tool calls and tool results are excluded.
+      responses:
+        "200": { $ref: "#/components/responses/AssistantMessages" }
     post: { operationId: sendAssistantMessage, requestBody: { $ref: "#/components/requestBodies/JsonObject" }, responses: { "200": { $ref: "#/components/responses/Success" } } }
     delete: { operationId: clearAssistantMessages, responses: { "200": { $ref: "#/components/responses/Success" } } }
+  /ai/filename-resolutions:
+    post:
+      operationId: requestAiFilenameResolution
+      requestBody: { $ref: "#/components/requestBodies/JsonObject" }
+      responses: { "202": { $ref: "#/components/responses/AIAnalysisAccepted" }, "400": { $ref: "#/components/responses/Error" }, "412": { $ref: "#/components/responses/Error" } }
+  /ai/health/analyze:
+    post:
+      operationId: requestAiHealthAnalysis
+      responses: { "202": { $ref: "#/components/responses/AIAnalysisAccepted" }, "412": { $ref: "#/components/responses/Error" } }
+  /ai/library-issues/{id}/analyze:
+    post:
+      operationId: requestAiLibraryIssueAnalysis
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses: { "202": { $ref: "#/components/responses/AIAnalysisAccepted" }, "400": { $ref: "#/components/responses/Error" }, "412": { $ref: "#/components/responses/Error" } }
+  /ai/metadata/local-anime/{id}/suggest:
+    post:
+      operationId: requestAiMetadataSuggestion
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      requestBody: { $ref: "#/components/requestBodies/JsonObject" }
+      responses: { "202": { $ref: "#/components/responses/AIAnalysisAccepted" }, "400": { $ref: "#/components/responses/Error" }, "412": { $ref: "#/components/responses/Error" } }
+  /ai/subscriptions/{id}/rules/suggest:
+    post:
+      operationId: requestAiSubscriptionRuleSuggestion
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses: { "202": { $ref: "#/components/responses/AIAnalysisAccepted" }, "400": { $ref: "#/components/responses/Error" }, "412": { $ref: "#/components/responses/Error" } }
+  /ai/proposals/{id}:
+    get:
+      operationId: getAiProposal
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, minLength: 1 } }]
+      responses: { "200": { $ref: "#/components/responses/AIProposalResponse" }, "404": { $ref: "#/components/responses/Error" } }
+  /ai/proposals/{id}/confirm:
+    post:
+      operationId: confirmAiProposal
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, minLength: 1 } }]
+      responses: { "200": { $ref: "#/components/responses/Success" }, "409": { $ref: "#/components/responses/Error" } }
+  /ai/proposals/{id}/apply:
+    post:
+      operationId: applyAiProposal
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, minLength: 1 } }]
+      requestBody: { $ref: "#/components/requestBodies/AIProposalApplyInput" }
+      responses: { "202": { $ref: "#/components/responses/Success" }, "400": { $ref: "#/components/responses/Error" }, "409": { $ref: "#/components/responses/Error" }, "502": { $ref: "#/components/responses/Error" } }
+  /ai/proposals/{id}/dismiss:
+    post:
+      operationId: dismissAiProposal
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, minLength: 1 } }]
+      responses: { "200": { $ref: "#/components/responses/Success" }, "404": { $ref: "#/components/responses/Error" } }
+  /ai/tool-runs:
+    get:
+      operationId: listAiToolRuns
+      parameters: [{ name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }]
+      responses: { "200": { $ref: "#/components/responses/AIToolRuns" } }
 components:
   securitySchemes:
     cookieSession: { type: apiKey, in: cookie, name: animate_session }
@@ -716,6 +796,29 @@ components:
   requestBodies:
     JsonObject: { required: true, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
     JsonArray: { required: true, content: { application/json: { schema: { type: array, items: { type: object, additionalProperties: true } } } } }
+    AIProviderInput:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [provider]
+            properties:
+              provider: { type: string, enum: [openai, gemini, claude] }
+              format: { type: string, enum: [native, openai], description: Blank uses the saved format. OpenAI only accepts openai; Gemini and Claude default to native. }
+              base_url: { type: string, description: Unsaved form value; blank uses the saved provider value. }
+              api_key: { type: string, format: password, description: Unsaved form value; blank uses the saved provider key. }
+              model: { type: string, description: Unsaved form value; blank uses the saved provider value. }
+    AIProposalApplyInput:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [confirmation_token]
+            properties:
+              confirmation_token: { type: string, minLength: 1, description: One-time token returned by the confirm endpoint. }
   responses:
     Success: { description: Successful response, content: { application/json: { schema: { $ref: "#/components/schemas/Envelope" } } } }
     HealthReport:
@@ -740,6 +843,41 @@ components:
                   data: { $ref: "#/components/schemas/SessionState" }
     Paginated: { description: Paginated successful response, content: { application/json: { schema: { $ref: "#/components/schemas/PaginatedEnvelope" } } } }
     TaskAccepted: { description: Background task accepted, content: { application/json: { schema: { $ref: "#/components/schemas/TaskEnvelope" } } } }
+    AIAnalysisAccepted:
+      description: AI analysis task accepted
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/Envelope"
+              - type: object
+                properties:
+                  data: { $ref: "#/components/schemas/AIAnalysisAccepted" }
+    AIProposalResponse:
+      description: AI proposal
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/Envelope"
+              - type: object
+                properties:
+                  data: { $ref: "#/components/schemas/AIProposal" }
+    AssistantMessages:
+      description: Displayable assistant conversation history
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/AssistantMessagesEnvelope" }
+    AIToolRuns:
+      description: Recent AI internal tool execution logs
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/Envelope"
+              - type: object
+                properties:
+                  data: { $ref: "#/components/schemas/AIToolRunList" }
     MetadataSearch:
       description: Metadata search results from the selected provider
       content:
@@ -1182,6 +1320,84 @@ components:
       properties:
         task_id: { type: string, minLength: 1 }
         status: { type: string, enum: [queued, running] }
+    AIAnalysisAccepted:
+      type: object
+      required: [task_id, proposal_id, status]
+      properties:
+        task_id: { type: string }
+        proposal_id: { type: string }
+        status: { type: string }
+    AssistantMessage:
+      type: object
+      additionalProperties: false
+      required: [role, content]
+      properties:
+        role: { type: string, enum: [user, assistant] }
+        content: { type: string }
+    AssistantMessageList:
+      type: object
+      additionalProperties: false
+      required: [messages]
+      properties:
+        messages:
+          type: array
+          items: { $ref: "#/components/schemas/AssistantMessage" }
+    AssistantMessagesEnvelope:
+      allOf:
+        - { $ref: "#/components/schemas/Envelope" }
+        - type: object
+          properties:
+            data: { $ref: "#/components/schemas/AssistantMessageList" }
+    AIProposal:
+      type: object
+      required: [id, type, status, target_type, target_id, summary, confidence, evidence, warnings, actionable, payload, provider, model, created_at, updated_at]
+      properties:
+        id: { type: string }
+        type: { type: string }
+        status: { type: string, enum: [analyzing, ready, applied, dismissed, failed, expired, stale] }
+        target_type: { type: string }
+        target_id: { type: string }
+        summary: { type: string }
+        confidence: { type: number, minimum: 0, maximum: 1 }
+        evidence: { type: array, items: { type: string } }
+        warnings: { type: array, items: { type: string } }
+        actionable: { type: boolean }
+        payload: { type: object, additionalProperties: true }
+        provider: { type: string }
+        model: { type: string }
+        error: { type: string }
+        expires_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    AIToolRunList:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/AIToolRun" } }
+    AIToolRun:
+      type: object
+      required: [id, created_at, tool_name, risk, arguments_summary, result_summary, outcome, duration_ms, provider, model, confirmation_required, confirmation_validated]
+      properties:
+        id: { type: string }
+        created_at: { type: string, format: date-time }
+        request_id: { type: string }
+        task_id: { type: string }
+        session_id: { type: string }
+        proposal_id: { type: string }
+        user_id: { type: integer }
+        username: { type: string }
+        tool_name: { type: string }
+        risk: { type: string, enum: [read, propose, write] }
+        arguments_summary: { type: string }
+        arguments_hash: { type: string }
+        result_summary: { type: string }
+        outcome: { type: string, enum: [success, failure] }
+        error_type: { type: string }
+        duration_ms: { type: integer, format: int64, minimum: 0 }
+        provider: { type: string }
+        model: { type: string }
+        confirmation_required: { type: boolean }
+        confirmation_validated: { type: boolean }
     TaskUpdate:
       type: object
       required: [task_id, kind, title, status, message, updated_at]

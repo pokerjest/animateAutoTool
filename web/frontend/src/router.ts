@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import { useSessionStore } from './stores/session'
 import { usePlaybackStore } from './stores/playback'
 import { useWorkspaceStore } from './stores/workspace'
+import { useAssistantStore } from './stores/assistant'
 
 const routes = [
   { path: '/login', component: () => import('./views/LoginView.vue'), meta: { public: true, title: '登录' } },
@@ -12,7 +13,10 @@ const routes = [
   { path: '/calendar', component: () => import('./views/CalendarView.vue'), meta: { title: '追番日历', workspace: 'manage' } },
   { path: '/library', component: () => import('./views/LibraryView.vue'), meta: { title: '番剧图鉴', workspace: 'manage' } },
   { path: '/local-anime', component: () => import('./views/LocalAnimeView.vue'), meta: { title: '本地番剧', workspace: 'manage' } },
+  // Keep the legacy route available for old bookmarks and clients. New local
+  // playback enters the media workspace so the global player is visible.
   { path: '/player', component: () => import('./views/PlayerView.vue'), meta: { title: '播放器', workspace: 'manage' } },
+  { path: '/media/local-player', component: () => import('./views/PlayerView.vue'), meta: { title: '本地播放', workspace: 'media', allowUnconfiguredMedia: true } },
   { path: '/media', component: () => import('./views/MediaHomeView.vue'), meta: { title: '媒体首页', workspace: 'media' } },
   { path: '/media/library/:libraryId', component: () => import('./views/MediaLibraryView.vue'), meta: { title: '媒体库', workspace: 'media' } },
   { path: '/media/item/:provider/:itemId', component: () => import('./views/MediaItemView.vue'), meta: { title: '媒体详情', workspace: 'media' } },
@@ -20,7 +24,7 @@ const routes = [
   { path: '/backup', component: () => import('./views/BackupView.vue'), meta: { title: '备份与恢复', workspace: 'manage' } },
   { path: '/health', component: () => import('./views/HealthView.vue'), meta: { title: '系统健康', workspace: 'manage' } },
   { path: '/settings', component: () => import('./views/SettingsView.vue'), meta: { title: '系统设置', workspace: 'manage' } },
-  { path: '/assistant', component: () => import('./views/AssistantView.vue'), meta: { title: 'AI 助手', workspace: 'manage' } },
+  { path: '/assistant', component: () => import('./views/AssistantRedirectView.vue'), meta: { title: 'AI 助手' } },
   { path: '/:pathMatch(.*)*', component: () => import('./views/NotFoundView.vue'), meta: { title: '页面不存在' } },
 ]
 
@@ -34,7 +38,14 @@ router.beforeEach(async to => {
   if (!session.authenticated) return `/login?redirect=${encodeURIComponent(to.fullPath)}`
   if (session.setupPending && to.path !== '/setup') return '/setup'
   if (!session.setupPending && to.path === '/setup') return '/'
-  if (to.meta.workspace === 'media') {
+  if (to.path === '/assistant') {
+    useAssistantStore().expand()
+    const fallback = workspace.isMedia ? '/media' : '/'
+    const target = workspace.routeFor(workspace.mode)
+    if (!target || target === '/assistant' || target.startsWith('/login') || target.startsWith('/recover') || target.startsWith('/setup')) return fallback
+    return target
+  }
+  if (to.meta.workspace === 'media' && !to.meta.allowUnconfiguredMedia) {
     const configured = await workspace.ensureMediaConfigured()
     if (configured === false) {
       workspace.setMode('manage')

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query'
+import { createPinia } from 'pinia'
 import HealthView from './HealthView.vue'
 
 function response(data: unknown) {
@@ -29,7 +30,7 @@ describe('health diagnostics export', () => {
       throw new Error(`unexpected request: ${path}`)
     }))
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
-    const wrapper = mount(HealthView, { global: { plugins: [[VueQueryPlugin, { queryClient }]] } })
+    const wrapper = mount(HealthView, { global: { plugins: [[VueQueryPlugin, { queryClient }], createPinia()] } })
 
     await vi.waitFor(() => expect(wrapper.text()).toContain('存在需要处理的问题'))
     const links = wrapper.findAll('a')

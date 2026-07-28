@@ -33,6 +33,12 @@ type patternMatcher struct {
 	disabled bool
 }
 
+type SubscriptionRuleEvaluation struct {
+	Title   string `json:"title"`
+	Allowed bool   `json:"allowed"`
+	Reason  string `json:"reason"`
+}
+
 // ValidateSubscriptionPattern validates a user-authored include or exclude
 // rule. Runtime matching retains the legacy literal fallback so an old invalid
 // rule cannot break scheduling, while new and edited rules must be valid regex.
@@ -64,6 +70,30 @@ func BuildSubscriptionRuleSetForValidation(sub *model.Subscription) subscription
 
 func (r subscriptionRuleSet) Allows(ep parser.Episode) bool {
 	return r.allows(ep)
+}
+
+func EvaluateSubscriptionRules(sub *model.Subscription, episodes []parser.Episode) []SubscriptionRuleEvaluation {
+	rules := buildSubscriptionRuleSet(sub)
+	result := make([]SubscriptionRuleEvaluation, 0, len(episodes))
+	for _, episode := range episodes {
+		item := SubscriptionRuleEvaluation{Title: episode.Title, Allowed: true, Reason: "accepted"}
+		switch {
+		case rules.exclude.matches(episode):
+			item.Allowed = false
+			item.Reason = "exclude_rule"
+		case !rules.filter.disabled && !rules.filter.matches(episode):
+			item.Allowed = false
+			item.Reason = "include_rule_not_matched"
+		case rules.resolutionFilter != "" && episodeResolution(episode) != rules.resolutionFilter:
+			item.Allowed = false
+			item.Reason = "resolution_mismatch"
+		case !matchesSubtitleLanguage(episode.Title, rules.subtitleLanguage):
+			item.Allowed = false
+			item.Reason = "subtitle_language_mismatch"
+		}
+		result = append(result, item)
+	}
+	return result
 }
 
 func newPatternMatcher(raw, kind, subTitle string) patternMatcher {

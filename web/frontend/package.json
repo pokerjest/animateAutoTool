@@ -1,7 +1,7 @@
 {
   "name": "animate-auto-tool-web",
   "private": true,
-  "version": "0.9.3",
+  "version": "0.9.5",
   "type": "module",
   "engines": {
     "node": ">=22"
@@ -16,6 +16,8 @@
   "dependencies": {
     "@lucide/vue": "^1.25.0",
     "@tanstack/vue-query": "^5.66.0",
+    "dompurify": "^3.4.12",
+    "marked": "^18.0.7",
     "pinia": "^2.3.0",
     "reka-ui": "^2.2.0",
     "vue": "^3.5.13",

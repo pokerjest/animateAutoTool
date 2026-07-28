@@ -15,6 +15,7 @@ import (
 
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/pokerjest/animateAutoTool/internal/ai"
 	"github.com/pokerjest/animateAutoTool/internal/bangumi"
 	"github.com/pokerjest/animateAutoTool/internal/bootstrap"
@@ -205,8 +206,21 @@ func initV1Routes(r *gin.Engine) {
 		protected.POST("/settings/updater/:action", V1UpdaterActionHandler)
 		protected.GET("/settings/ai", V1AIStatusHandler)
 		protected.GET("/settings/ai/models", V1AIModelsHandler)
+		protected.POST("/settings/ai/models", V1AIModelsPostHandler)
+		protected.POST("/settings/ai/test", V1AITestHandler)
+		protected.GET("/assistant/messages", V1AssistantMessagesHandler)
 		protected.POST("/assistant/messages", V1AssistantMessageHandler)
 		protected.DELETE("/assistant/messages", V1AssistantClearHandler)
+		protected.POST("/ai/filename-resolutions", V1AIFilenameResolutionHandler)
+		protected.POST("/ai/health/analyze", V1AIHealthAnalyzeHandler)
+		protected.POST("/ai/library-issues/:id/analyze", V1AILibraryIssueAnalyzeHandler)
+		protected.POST("/ai/metadata/local-anime/:id/suggest", V1AIMetadataSuggestHandler)
+		protected.POST("/ai/subscriptions/:id/rules/suggest", V1AISubscriptionRulesSuggestHandler)
+		protected.GET("/ai/proposals/:id", V1AIProposalHandler)
+		protected.POST("/ai/proposals/:id/confirm", V1AIProposalConfirmHandler)
+		protected.POST("/ai/proposals/:id/apply", V1AIProposalApplyHandler)
+		protected.POST("/ai/proposals/:id/dismiss", V1AIProposalDismissHandler)
+		protected.GET("/ai/tool-runs", V1AIToolRunsHandler)
 	}
 }
 
@@ -818,6 +832,7 @@ var v1SecretConfigKeys = map[string]bool{
 	model.ConfigKeyQBPassword: true, model.ConfigKeyTMDBToken: true, model.ConfigKeyAniListToken: true, model.ConfigKeyBangumiAppSecret: true,
 	model.ConfigKeyBangumiAccessToken: true, model.ConfigKeyBangumiRefreshToken: true,
 	model.ConfigKeyJellyfinPassword: true, model.ConfigKeyJellyfinApiKey: true, model.ConfigKeyAListToken: true, model.ConfigKeyAIApiKey: true,
+	model.ConfigKeyAIOpenAIAPIKey: true, model.ConfigKeyAIGeminiAPIKey: true, model.ConfigKeyAIClaudeAPIKey: true,
 	model.ConfigKeyR2AccessKey: true, model.ConfigKeyR2SecretKey: true, model.ConfigKeyPikPakPassword: true, model.ConfigKeyPikPakRefreshToken: true,
 }
 
@@ -826,7 +841,7 @@ type v1URLSettingNormalizer struct {
 	normalize func(string) (string, error)
 }
 
-var v1URLSettingNormalizers = map[string]v1URLSettingNormalizer{
+var v1SettingNormalizers = map[string]v1URLSettingNormalizer{
 	model.ConfigKeyJellyfinDirectUrl: {
 		errorCode: "invalid_jellyfin_direct_url",
 		normalize: normalizeJellyfinBaseURL,
@@ -834,6 +849,36 @@ var v1URLSettingNormalizers = map[string]v1URLSettingNormalizer{
 	model.ConfigKeyNetBirdProxyURL: {
 		errorCode: "invalid_netbird_proxy_url",
 		normalize: normalizeNetBirdProxyBaseURL,
+	},
+	model.ConfigKeyAIProvider: {
+		errorCode: "invalid_ai_provider",
+		normalize: func(value string) (string, error) {
+			normalized, err := ai.NormalizeProvider(value)
+			if err != nil {
+				return "", errors.New("AI 服务商只支持 openai、gemini 或 claude")
+			}
+			return normalized, nil
+		},
+	},
+	model.ConfigKeyAIGeminiFormat: {
+		errorCode: "invalid_ai_format",
+		normalize: func(value string) (string, error) {
+			normalized, err := ai.NormalizeProviderFormat(ai.ProviderGemini, value)
+			if err != nil {
+				return "", errors.New("所选 Gemini API 格式只支持 native 或 openai")
+			}
+			return normalized, nil
+		},
+	},
+	model.ConfigKeyAIClaudeFormat: {
+		errorCode: "invalid_ai_format",
+		normalize: func(value string) (string, error) {
+			normalized, err := ai.NormalizeProviderFormat(ai.ProviderClaude, value)
+			if err != nil {
+				return "", errors.New("所选 Claude API 格式只支持 native 或 openai")
+			}
+			return normalized, nil
+		},
 	},
 }
 
@@ -861,7 +906,7 @@ func V1UpdateSettingsHandler(c *gin.Context) {
 		return
 	}
 	allowed := map[string]bool{}
-	for _, key := range []string{model.ConfigKeyQBMode, model.ConfigKeyQBUrl, model.ConfigKeyQBUsername, model.ConfigKeyQBPassword, model.ConfigKeyBaseDir, model.ConfigKeyAutoRenameEnabled, model.ConfigKeyAutoRenameSeriesTemplate, model.ConfigKeyAutoRenameEpisodeTemplate, model.ConfigKeyBangumiAppID, model.ConfigKeyBangumiAppSecret, model.ConfigKeyBangumiAccessToken, model.ConfigKeyBangumiRefreshToken, model.ConfigKeyTMDBToken, model.ConfigKeyAniListToken, model.ConfigKeyProxyURL, model.ConfigKeyProxyBangumi, model.ConfigKeyProxyMikan, model.ConfigKeyProxyTMDB, model.ConfigKeyProxyAniList, model.ConfigKeyProxyJellyfin, model.ConfigKeyProxyAI, model.ConfigKeyProxyUpdater, model.ConfigKeyAuthIPAllowlistEnabled, model.ConfigKeyAuthIPAllowlist, model.ConfigKeyJellyfinUrl, model.ConfigKeyJellyfinDirectUrl, model.ConfigKeyNetBirdProxyURL, model.ConfigKeyJellyfinLibraryIDs, model.ConfigKeyJellyfinUsername, model.ConfigKeyJellyfinPassword, model.ConfigKeyJellyfinApiKey, model.ConfigKeyAListUrl, model.ConfigKeyAListToken, model.ConfigKeyPikPakUsername, model.ConfigKeyPikPakPassword, model.ConfigKeyPikPakRefreshToken, model.ConfigKeyAIBaseURL, model.ConfigKeyAIModel, model.ConfigKeyAIApiKey, model.ConfigKeyR2Endpoint, model.ConfigKeyR2Bucket, model.ConfigKeyR2AccessKey, model.ConfigKeyR2SecretKey, model.ConfigKeyRepoUpdateEnabled, model.ConfigKeyRepoAutoPullEnabled, model.ConfigKeyRepoUpdateIntervalMinutes, model.ConfigKeyRepoUpdateOwner, model.ConfigKeyRepoUpdateName, model.ConfigKeyRepoRequireChecksum} {
+	for _, key := range []string{model.ConfigKeyQBMode, model.ConfigKeyQBUrl, model.ConfigKeyQBUsername, model.ConfigKeyQBPassword, model.ConfigKeyBaseDir, model.ConfigKeyAutoRenameEnabled, model.ConfigKeyAutoRenameSeriesTemplate, model.ConfigKeyAutoRenameEpisodeTemplate, model.ConfigKeyBangumiAppID, model.ConfigKeyBangumiAppSecret, model.ConfigKeyBangumiAccessToken, model.ConfigKeyBangumiRefreshToken, model.ConfigKeyTMDBToken, model.ConfigKeyAniListToken, model.ConfigKeyProxyURL, model.ConfigKeyProxyBangumi, model.ConfigKeyProxyMikan, model.ConfigKeyProxyTMDB, model.ConfigKeyProxyAniList, model.ConfigKeyProxyJellyfin, model.ConfigKeyProxyAI, model.ConfigKeyProxyUpdater, model.ConfigKeyAuthIPAllowlistEnabled, model.ConfigKeyAuthIPAllowlist, model.ConfigKeyJellyfinUrl, model.ConfigKeyJellyfinDirectUrl, model.ConfigKeyNetBirdProxyURL, model.ConfigKeyJellyfinLibraryIDs, model.ConfigKeyJellyfinUsername, model.ConfigKeyJellyfinPassword, model.ConfigKeyJellyfinApiKey, model.ConfigKeyAListUrl, model.ConfigKeyAListToken, model.ConfigKeyPikPakUsername, model.ConfigKeyPikPakPassword, model.ConfigKeyPikPakRefreshToken, model.ConfigKeyAIProvider, model.ConfigKeyAIBaseURL, model.ConfigKeyAIModel, model.ConfigKeyAIApiKey, model.ConfigKeyAIOpenAIBaseURL, model.ConfigKeyAIOpenAIModel, model.ConfigKeyAIOpenAIAPIKey, model.ConfigKeyAIGeminiBaseURL, model.ConfigKeyAIGeminiModel, model.ConfigKeyAIGeminiAPIKey, model.ConfigKeyAIGeminiFormat, model.ConfigKeyAIClaudeBaseURL, model.ConfigKeyAIClaudeModel, model.ConfigKeyAIClaudeAPIKey, model.ConfigKeyAIClaudeFormat, model.ConfigKeyR2Endpoint, model.ConfigKeyR2Bucket, model.ConfigKeyR2AccessKey, model.ConfigKeyR2SecretKey, model.ConfigKeyRepoUpdateEnabled, model.ConfigKeyRepoAutoPullEnabled, model.ConfigKeyRepoUpdateIntervalMinutes, model.ConfigKeyRepoUpdateOwner, model.ConfigKeyRepoUpdateName, model.ConfigKeyRepoRequireChecksum} {
 		allowed[key] = true
 	}
 	updates := map[string]string{}
@@ -881,7 +926,7 @@ func V1UpdateSettingsHandler(c *gin.Context) {
 			}
 			value = normalized
 		}
-		if spec, ok := v1URLSettingNormalizers[key]; ok {
+		if spec, ok := v1SettingNormalizers[key]; ok {
 			normalized, err := spec.normalize(value)
 			if err != nil {
 				v1Error(c, http.StatusBadRequest, spec.errorCode, err.Error())
@@ -960,15 +1005,25 @@ func V1AssistantMessageHandler(c *gin.Context) {
 		v1Error(c, http.StatusBadRequest, "message_required", "请输入消息")
 		return
 	}
-	apiKey, baseURL, modelName := configValue(model.ConfigKeyAIApiKey), configValue(model.ConfigKeyAIBaseURL), configValue(model.ConfigKeyAIModel)
-	if apiKey == "" {
-		v1Error(c, http.StatusPreconditionFailed, "ai_not_configured", "请先在设置页配置 AI API Key")
+	settings := activeAIProviderSettings()
+	if !settings.HasKey {
+		v1Error(c, http.StatusPreconditionFailed, "ai_not_configured", "请先在设置页配置并启用一个 AI 服务")
 		return
 	}
-	if modelName == "" {
-		modelName = defaultAIModel
+	if settings.Model == "" {
+		v1Error(c, http.StatusPreconditionFailed, "ai_model_missing", "请先为当前 AI 服务选择模型")
+		return
 	}
 	historyKey := aiChatHistoryKey(c)
+	userID, _ := currentSessionUserID(c)
+	username := ""
+	if user, userErr := currentSessionUser(c); userErr == nil && user != nil {
+		username = user.Username
+	}
+	toolMeta := ai.ToolExecutionMeta{
+		RequestID: uuid.NewString(), SessionID: historyKey, UserID: userID, Username: username,
+		Provider: settings.Provider, Model: settings.Model,
+	}
 	chatMutex.Lock()
 	defer chatMutex.Unlock()
 	history := truncateChatHistory(globalChatHistories[historyKey])
@@ -976,12 +1031,17 @@ func V1AssistantMessageHandler(c *gin.Context) {
 		history = append(history, ai.ChatMessage{Role: "system", Content: aiSystemPrompt})
 	}
 	history = append(history, ai.ChatMessage{Role: "user", Content: strings.TrimSpace(req.Message)})
-	client := ai.NewClientWithProxy(baseURL, apiKey, modelName, configuredProxyURL(model.ConfigKeyProxyAI))
+	client, err := buildAIClient(settings)
+	if err != nil {
+		v1Error(c, http.StatusBadRequest, "invalid_ai_provider", err.Error())
+		return
+	}
 	answer := ""
 	for attempts := 0; attempts < 6; attempts++ {
-		resp, err := client.CreateChatCompletion(c.Request.Context(), ai.ChatCompletionRequest{Model: modelName, Messages: history, Tools: GlobalAIRegistry.GetToolDefinitions()})
+		resp, err := client.CreateChatCompletion(c.Request.Context(), ai.ChatCompletionRequest{Model: settings.Model, Messages: history, Tools: GlobalAIRegistry.GetToolDefinitions()})
 		if err != nil {
-			v1Error(c, http.StatusBadGateway, "ai_request_failed", "调用大模型失败，请检查连接设置")
+			log.Printf("AI assistant (%s): %s", settings.Provider, service.SanitizeAIText(err.Error()))
+			v1Error(c, http.StatusBadGateway, "ai_request_failed", "调用大模型失败："+aiConnectionFailureDetail(err))
 			return
 		}
 		if len(resp.Choices) == 0 {
@@ -995,7 +1055,8 @@ func V1AssistantMessageHandler(c *gin.Context) {
 			break
 		}
 		for _, call := range choice.ToolCalls {
-			result, err := GlobalAIRegistry.ExecuteTool(c.Request.Context(), call.Function.Name, call.Function.Arguments)
+			toolCtx := ai.WithToolExecutionMeta(c.Request.Context(), toolMeta)
+			result, err := GlobalAIRegistry.ExecuteTool(toolCtx, call.Function.Name, call.Function.Arguments)
 			if err != nil {
 				result = err.Error()
 			}
@@ -1007,6 +1068,33 @@ func V1AssistantMessageHandler(c *gin.Context) {
 	}
 	globalChatHistories[historyKey] = history
 	v1Data(c, http.StatusOK, gin.H{"message": answer})
+}
+
+type v1AssistantMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+func visibleAssistantMessages(history []ai.ChatMessage) []v1AssistantMessage {
+	messages := make([]v1AssistantMessage, 0, len(history))
+	for _, message := range history {
+		content := strings.TrimSpace(service.SanitizeAIText(message.Content))
+		switch {
+		case message.Role == "user" && content != "":
+			messages = append(messages, v1AssistantMessage{Role: "user", Content: content})
+		case message.Role == "assistant" && len(message.ToolCalls) == 0 && content != "":
+			messages = append(messages, v1AssistantMessage{Role: "assistant", Content: content})
+		}
+	}
+	return messages
+}
+
+func V1AssistantMessagesHandler(c *gin.Context) {
+	key := aiChatHistoryKey(c)
+	chatMutex.Lock()
+	history := append([]ai.ChatMessage(nil), globalChatHistories[key]...)
+	chatMutex.Unlock()
+	v1Data(c, http.StatusOK, gin.H{"messages": visibleAssistantMessages(history)})
 }
 
 func V1AssistantClearHandler(c *gin.Context) {

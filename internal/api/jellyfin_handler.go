@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -661,11 +662,12 @@ func proxyVideoForJellyfinItem(c *gin.Context, itemID string) {
 
 	// Error Handler to suppress client disconnect noise
 	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
-		if err != nil && err != http.ErrAbortHandler {
-			log.Printf("[Proxy] Error proxying video: %v", err)
-			// Only write status if headers haven't been written
-			w.WriteHeader(http.StatusBadGateway)
+		if err == nil || isExpectedVideoProxyCancellation(r, err) {
+			return
 		}
+		log.Printf("[Proxy] Error proxying video: %v", err)
+		// Only write status if headers haven't been written
+		w.WriteHeader(http.StatusBadGateway)
 	}
 
 	// Safe ServeHTTP to catch http.ErrAbortHandler if propagated as panic
@@ -680,4 +682,11 @@ func proxyVideoForJellyfinItem(c *gin.Context, itemID string) {
 	}()
 
 	proxy.ServeHTTP(c.Writer, c.Request)
+}
+
+func isExpectedVideoProxyCancellation(r *http.Request, err error) bool {
+	if errors.Is(err, http.ErrAbortHandler) || errors.Is(err, context.Canceled) {
+		return true
+	}
+	return r != nil && errors.Is(r.Context().Err(), context.Canceled)
 }

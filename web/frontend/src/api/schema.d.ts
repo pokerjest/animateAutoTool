@@ -1565,9 +1565,30 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /**
+         * @deprecated
+         * @description Compatibility endpoint. New clients should send provider settings in the POST request body.
+         */
         get: operations["getAiModels"];
         put?: never;
-        post?: never;
+        post: operations["listAiModels"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/settings/ai/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Sends a real minimal user message containing "hi" to the selected provider without loading AnimateTool tools. */
+        post: operations["testAiConnection"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1581,10 +1602,171 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** @description Returns only the current user's displayable user messages and final assistant replies. System prompts, tool calls and tool results are excluded. */
+        get: operations["getAssistantMessages"];
         put?: never;
         post: operations["sendAssistantMessage"];
         delete: operations["clearAssistantMessages"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ai/filename-resolutions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["requestAiFilenameResolution"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ai/health/analyze": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["requestAiHealthAnalysis"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ai/library-issues/{id}/analyze": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["requestAiLibraryIssueAnalysis"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ai/metadata/local-anime/{id}/suggest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["requestAiMetadataSuggestion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ai/subscriptions/{id}/rules/suggest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["requestAiSubscriptionRuleSuggestion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ai/proposals/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getAiProposal"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ai/proposals/{id}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["confirmAiProposal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ai/proposals/{id}/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["applyAiProposal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ai/proposals/{id}/dismiss": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["dismissAiProposal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ai/tool-runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listAiToolRuns"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -1984,6 +2166,76 @@ export interface components {
             /** @enum {string} */
             status: "queued" | "running";
         };
+        AIAnalysisAccepted: {
+            task_id: string;
+            proposal_id: string;
+            status: string;
+        };
+        AssistantMessage: {
+            /** @enum {string} */
+            role: "user" | "assistant";
+            content: string;
+        };
+        AssistantMessageList: {
+            messages: components["schemas"]["AssistantMessage"][];
+        };
+        AssistantMessagesEnvelope: components["schemas"]["Envelope"] & {
+            data?: components["schemas"]["AssistantMessageList"];
+        };
+        AIProposal: {
+            id: string;
+            type: string;
+            /** @enum {string} */
+            status: "analyzing" | "ready" | "applied" | "dismissed" | "failed" | "expired" | "stale";
+            target_type: string;
+            target_id: string;
+            summary: string;
+            confidence: number;
+            evidence: string[];
+            warnings: string[];
+            actionable: boolean;
+            payload: {
+                [key: string]: unknown;
+            };
+            provider: string;
+            model: string;
+            error?: string;
+            /** Format: date-time */
+            expires_at?: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        AIToolRunList: {
+            items: components["schemas"]["AIToolRun"][];
+        };
+        AIToolRun: {
+            id: string;
+            /** Format: date-time */
+            created_at: string;
+            request_id?: string;
+            task_id?: string;
+            session_id?: string;
+            proposal_id?: string;
+            user_id?: number;
+            username?: string;
+            tool_name: string;
+            /** @enum {string} */
+            risk: "read" | "propose" | "write";
+            arguments_summary: string;
+            arguments_hash?: string;
+            result_summary: string;
+            /** @enum {string} */
+            outcome: "success" | "failure";
+            error_type?: string;
+            /** Format: int64 */
+            duration_ms: number;
+            provider: string;
+            model: string;
+            confirmation_required: boolean;
+            confirmation_validated: boolean;
+        };
         TaskUpdate: {
             task_id: string;
             kind: string;
@@ -2055,6 +2307,48 @@ export interface components {
                 "application/json": components["schemas"]["TaskEnvelope"];
             };
         };
+        /** @description AI analysis task accepted */
+        AIAnalysisAccepted: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Envelope"] & {
+                    data?: components["schemas"]["AIAnalysisAccepted"];
+                };
+            };
+        };
+        /** @description AI proposal */
+        AIProposalResponse: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Envelope"] & {
+                    data?: components["schemas"]["AIProposal"];
+                };
+            };
+        };
+        /** @description Displayable assistant conversation history */
+        AssistantMessages: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["AssistantMessagesEnvelope"];
+            };
+        };
+        /** @description Recent AI internal tool execution logs */
+        AIToolRuns: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Envelope"] & {
+                    data?: components["schemas"]["AIToolRunList"];
+                };
+            };
+        };
         /** @description Metadata search results from the selected provider */
         MetadataSearch: {
             headers: {
@@ -2096,6 +2390,36 @@ export interface components {
                 "application/json": {
                     [key: string]: unknown;
                 }[];
+            };
+        };
+        AIProviderInput: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    provider: "openai" | "gemini" | "claude";
+                    /**
+                     * @description Blank uses the saved format. OpenAI only accepts openai; Gemini and Claude default to native.
+                     * @enum {string}
+                     */
+                    format?: "native" | "openai";
+                    /** @description Unsaved form value; blank uses the saved provider value. */
+                    base_url?: string;
+                    /**
+                     * Format: password
+                     * @description Unsaved form value; blank uses the saved provider key.
+                     */
+                    api_key?: string;
+                    /** @description Unsaved form value; blank uses the saved provider value. */
+                    model?: string;
+                };
+            };
+        };
+        AIProposalApplyInput: {
+            content: {
+                "application/json": {
+                    /** @description One-time token returned by the confirm endpoint. */
+                    confirmation_token: string;
+                };
             };
         };
     };
@@ -3917,7 +4241,13 @@ export interface operations {
     };
     getAiModels: {
         parameters: {
-            query?: never;
+            query?: {
+                provider?: "openai" | "gemini" | "claude";
+                /** @description API format. OpenAI uses openai; Gemini and Claude default to native. */
+                format?: "native" | "openai";
+                base_url?: string;
+                model?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3925,6 +4255,45 @@ export interface operations {
         requestBody?: never;
         responses: {
             200: components["responses"]["Success"];
+        };
+    };
+    listAiModels: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: components["requestBodies"]["AIProviderInput"];
+        responses: {
+            200: components["responses"]["Success"];
+            400: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+        };
+    };
+    testAiConnection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: components["requestBodies"]["AIProviderInput"];
+        responses: {
+            200: components["responses"]["Success"];
+            400: components["responses"]["Error"];
+        };
+    };
+    getAssistantMessages: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["AssistantMessages"];
         };
     };
     sendAssistantMessage: {
@@ -3949,6 +4318,157 @@ export interface operations {
         requestBody?: never;
         responses: {
             200: components["responses"]["Success"];
+        };
+    };
+    requestAiFilenameResolution: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: components["requestBodies"]["JsonObject"];
+        responses: {
+            202: components["responses"]["AIAnalysisAccepted"];
+            400: components["responses"]["Error"];
+            412: components["responses"]["Error"];
+        };
+    };
+    requestAiHealthAnalysis: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: components["responses"]["AIAnalysisAccepted"];
+            412: components["responses"]["Error"];
+        };
+    };
+    requestAiLibraryIssueAnalysis: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: components["responses"]["AIAnalysisAccepted"];
+            400: components["responses"]["Error"];
+            412: components["responses"]["Error"];
+        };
+    };
+    requestAiMetadataSuggestion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: components["requestBodies"]["JsonObject"];
+        responses: {
+            202: components["responses"]["AIAnalysisAccepted"];
+            400: components["responses"]["Error"];
+            412: components["responses"]["Error"];
+        };
+    };
+    requestAiSubscriptionRuleSuggestion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: components["responses"]["AIAnalysisAccepted"];
+            400: components["responses"]["Error"];
+            412: components["responses"]["Error"];
+        };
+    };
+    getAiProposal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["AIProposalResponse"];
+            404: components["responses"]["Error"];
+        };
+    };
+    confirmAiProposal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["Success"];
+            409: components["responses"]["Error"];
+        };
+    };
+    applyAiProposal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: components["requestBodies"]["AIProposalApplyInput"];
+        responses: {
+            202: components["responses"]["Success"];
+            400: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+        };
+    };
+    dismissAiProposal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["Success"];
+            404: components["responses"]["Error"];
+        };
+    };
+    listAiToolRuns: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["AIToolRuns"];
         };
     };
 }

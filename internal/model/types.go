@@ -104,6 +104,61 @@ type AuditLog struct {
 	Details    string    `gorm:"type:text" json:"details"`
 }
 
+// AIProposal stores a validated, user-scoped AI recommendation. The model is
+// never allowed to apply Payload directly: ApplyTool is an internal allowlisted
+// tool and confirmation fields are issued and consumed by the server.
+type AIProposal struct {
+	ID               string     `gorm:"primaryKey;size:36" json:"id"`
+	CreatedAt        time.Time  `gorm:"index" json:"created_at"`
+	UpdatedAt        time.Time  `json:"updated_at"`
+	UserID           uint       `gorm:"index" json:"user_id"`
+	Type             string     `gorm:"size:48;index" json:"type"`
+	Status           string     `gorm:"size:24;index" json:"status"`
+	TargetType       string     `gorm:"size:48;index" json:"target_type"`
+	TargetID         string     `gorm:"size:160;index" json:"target_id"`
+	Summary          string     `gorm:"type:text" json:"summary"`
+	Confidence       float64    `json:"confidence"`
+	Evidence         string     `gorm:"type:text" json:"-"`
+	Warnings         string     `gorm:"type:text" json:"-"`
+	Payload          string     `gorm:"type:text" json:"-"`
+	InputFingerprint string     `gorm:"size:64;index" json:"input_fingerprint"`
+	ApplyTool        string     `gorm:"size:96" json:"apply_tool"`
+	Provider         string     `gorm:"size:32" json:"provider"`
+	Model            string     `gorm:"size:160" json:"model"`
+	Error            string     `gorm:"type:text" json:"error,omitempty"`
+	ExpiresAt        *time.Time `gorm:"index" json:"expires_at,omitempty"`
+	AppliedAt        *time.Time `json:"applied_at,omitempty"`
+	ConfirmTokenHash string     `gorm:"size:64" json:"-"`
+	ConfirmExpiresAt *time.Time `json:"-"`
+	ConfirmUsedAt    *time.Time `json:"-"`
+}
+
+// AIToolRun is the append-only operational record for every AI tool call.
+// Arguments and results contain only the bounded, redacted summaries produced
+// by the tool observer.
+type AIToolRun struct {
+	ID                    string    `gorm:"primaryKey;size:36" json:"id"`
+	CreatedAt             time.Time `gorm:"index" json:"created_at"`
+	RequestID             string    `gorm:"size:64;index" json:"request_id"`
+	TaskID                string    `gorm:"size:96;index" json:"task_id"`
+	SessionID             string    `gorm:"size:160;index" json:"session_id"`
+	ProposalID            string    `gorm:"size:36;index" json:"proposal_id"`
+	UserID                uint      `gorm:"index" json:"user_id"`
+	Username              string    `gorm:"size:128;index" json:"username"`
+	ToolName              string    `gorm:"size:96;index" json:"tool_name"`
+	Risk                  string    `gorm:"size:16;index" json:"risk"`
+	ArgumentsSummary      string    `gorm:"type:text" json:"arguments_summary"`
+	ArgumentsHash         string    `gorm:"size:64" json:"arguments_hash"`
+	ResultSummary         string    `gorm:"type:text" json:"result_summary"`
+	Outcome               string    `gorm:"size:16;index" json:"outcome"`
+	ErrorType             string    `gorm:"size:96" json:"error_type"`
+	DurationMilliseconds  int64     `json:"duration_ms"`
+	Provider              string    `gorm:"size:32" json:"provider"`
+	Model                 string    `gorm:"size:160" json:"model"`
+	ConfirmationRequired  bool      `json:"confirmation_required"`
+	ConfirmationValidated bool      `json:"confirmation_validated"`
+}
+
 // AnimeMetadata 统一的番剧元数据表
 type AnimeMetadata struct {
 	gorm.Model
@@ -119,7 +174,7 @@ type AnimeMetadata struct {
 	TitleJP string `json:"title_jp"`
 
 	// Sources IDs
-	BangumiID int `json:"bangumi_id" gorm:"uniqueIndex"`
+	BangumiID int `json:"bangumi_id" gorm:"uniqueIndex:idx_anime_metadata_bangumi_id,where:bangumi_id != 0"`
 	TMDBID    int `json:"tmdb_id" gorm:"index"`
 	AniListID int `json:"anilist_id" gorm:"index"`
 
@@ -244,9 +299,21 @@ const (
 	ConfigKeyR2Bucket    = "r2_bucket"
 
 	// AI Assistant
-	ConfigKeyAIBaseURL = "ai_base_url"
-	ConfigKeyAIApiKey  = "ai_api_key" //nolint:gosec
-	ConfigKeyAIModel   = "ai_model"
+	ConfigKeyAIProvider      = "ai_provider"
+	ConfigKeyAIBaseURL       = "ai_base_url" // Legacy OpenAI-compatible key.
+	ConfigKeyAIApiKey        = "ai_api_key"  //nolint:gosec // Legacy OpenAI-compatible key.
+	ConfigKeyAIModel         = "ai_model"    // Legacy OpenAI-compatible key.
+	ConfigKeyAIOpenAIBaseURL = "ai_openai_base_url"
+	ConfigKeyAIOpenAIAPIKey  = "ai_openai_api_key" //nolint:gosec
+	ConfigKeyAIOpenAIModel   = "ai_openai_model"
+	ConfigKeyAIGeminiBaseURL = "ai_gemini_base_url"
+	ConfigKeyAIGeminiAPIKey  = "ai_gemini_api_key" //nolint:gosec
+	ConfigKeyAIGeminiModel   = "ai_gemini_model"
+	ConfigKeyAIGeminiFormat  = "ai_gemini_api_format"
+	ConfigKeyAIClaudeBaseURL = "ai_claude_base_url"
+	ConfigKeyAIClaudeAPIKey  = "ai_claude_api_key" //nolint:gosec
+	ConfigKeyAIClaudeModel   = "ai_claude_model"
+	ConfigKeyAIClaudeFormat  = "ai_claude_api_format"
 )
 
 // LocalAnimeDirectory 用户配置的本地番剧目录根路径

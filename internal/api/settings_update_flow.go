@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/pokerjest/animateAutoTool/internal/ai"
 	"github.com/pokerjest/animateAutoTool/internal/alist"
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/model"
@@ -336,6 +337,36 @@ func loadSettingsViewData() (map[string]string, string, any) {
 	}
 	if strings.TrimSpace(configMap[model.ConfigKeyAutoRenameEpisodeTemplate]) == "" {
 		configMap[model.ConfigKeyAutoRenameEpisodeTemplate] = renamer.DefaultEpisodeTemplate
+	}
+	if strings.TrimSpace(configMap[model.ConfigKeyAIProvider]) == "" {
+		configMap[model.ConfigKeyAIProvider] = "openai"
+	}
+	if strings.TrimSpace(configMap[model.ConfigKeyAIOpenAIBaseURL]) == "" {
+		configMap[model.ConfigKeyAIOpenAIBaseURL] = strings.TrimSpace(configMap[model.ConfigKeyAIBaseURL])
+	}
+	if strings.TrimSpace(configMap[model.ConfigKeyAIOpenAIBaseURL]) == "" {
+		configMap[model.ConfigKeyAIOpenAIBaseURL] = defaultAIBaseURL("openai", ai.ProviderFormatOpenAI)
+	}
+	if strings.TrimSpace(configMap[model.ConfigKeyAIOpenAIAPIKey]) == "" {
+		configMap[model.ConfigKeyAIOpenAIAPIKey] = strings.TrimSpace(configMap[model.ConfigKeyAIApiKey])
+	}
+	if strings.TrimSpace(configMap[model.ConfigKeyAIOpenAIModel]) == "" {
+		configMap[model.ConfigKeyAIOpenAIModel] = strings.TrimSpace(configMap[model.ConfigKeyAIModel])
+	}
+	if strings.TrimSpace(configMap[model.ConfigKeyAIOpenAIModel]) == "" {
+		configMap[model.ConfigKeyAIOpenAIModel] = defaultAIModel
+	}
+	if strings.TrimSpace(configMap[model.ConfigKeyAIGeminiFormat]) == "" {
+		configMap[model.ConfigKeyAIGeminiFormat] = ai.ProviderFormatNative
+	}
+	if strings.TrimSpace(configMap[model.ConfigKeyAIGeminiBaseURL]) == "" {
+		configMap[model.ConfigKeyAIGeminiBaseURL] = defaultAIBaseURL("gemini", configMap[model.ConfigKeyAIGeminiFormat])
+	}
+	if strings.TrimSpace(configMap[model.ConfigKeyAIClaudeFormat]) == "" {
+		configMap[model.ConfigKeyAIClaudeFormat] = ai.ProviderFormatNative
+	}
+	if strings.TrimSpace(configMap[model.ConfigKeyAIClaudeBaseURL]) == "" {
+		configMap[model.ConfigKeyAIClaudeBaseURL] = defaultAIBaseURL("claude", configMap[model.ConfigKeyAIClaudeFormat])
 	}
 
 	return configMap, "", getDBStats(db.DB, db.CurrentDBPath)

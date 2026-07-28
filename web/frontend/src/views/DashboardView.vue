@@ -10,6 +10,7 @@ import StateBlock from '../components/StateBlock.vue'
 import { useAsyncActions } from '../composables/useAsyncActions'
 import { usePlaybackStore } from '../stores/playback'
 import { useUIStore } from '../stores/ui'
+import { localPlayerLocation, localPlayerPath } from '../utils/playerRoutes'
 
 const router = useRouter()
 const ui = useUIStore()
@@ -29,7 +30,7 @@ async function sync() {
 
 async function resume(item: ContinueWatchingItem) {
   const started = playback.resume(item, true)
-  await router.push(`/player?anime=${item.anime_id}&episode=${item.episode_id}`)
+  await router.push(localPlayerLocation(item.anime_id, item.episode_id, true))
   await started
 }
 
@@ -51,7 +52,7 @@ function remainingLabel(seconds: number) {
       <section v-if="continueQuery.data.value?.items.length" class="panel overflow-hidden p-5 sm:p-6">
         <div class="mb-5 flex items-center justify-between gap-3">
           <div><p class="eyebrow">CONTINUE WATCHING</p><h2 class="mt-1 text-2xl font-black">继续观看</h2></div>
-          <RouterLink to="/player" class="btn btn-quiet">打开播放器<ArrowRight :size="16" /></RouterLink>
+          <RouterLink :to="{ path: localPlayerPath }" class="btn btn-quiet">打开播放器<ArrowRight :size="16" /></RouterLink>
         </div>
         <div class="-mx-1 flex snap-x gap-4 overflow-x-auto px-1 pb-2">
           <button v-for="item in continueQuery.data.value.items" :key="`${item.anime_id}:${item.episode_id}`" type="button" class="group w-[210px] shrink-0 snap-start text-left sm:w-[250px]" @click="resume(item)">

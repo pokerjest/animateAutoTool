@@ -25,7 +25,7 @@ export function useAsyncActions() {
     return promise
   }
 
-  async function runTask(key: string, action: () => Promise<TaskAccepted>, title: string, kind = 'task', detail = '任务已经启动') {
+  async function runTask<T extends TaskAccepted>(key: string, action: () => Promise<T>, title: string, kind = 'task', detail = '任务已经启动'): Promise<T> {
     return run(key, async () => {
       const accepted = await action()
       taskIDs.set(key, accepted.task_id)

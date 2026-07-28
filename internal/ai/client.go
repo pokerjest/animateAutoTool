@@ -72,7 +72,7 @@ func (c *Client) CreateChatCompletion(ctx context.Context, req ChatCompletionReq
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		errorBody, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("API error (status %d): %s", resp.StatusCode, string(errorBody))
+		return nil, &ProviderError{StatusCode: resp.StatusCode, Body: string(errorBody)}
 	}
 
 	var chatResp ChatCompletionResponse
@@ -109,7 +109,7 @@ func (c *Client) ListModels(ctx context.Context) ([]string, error) {
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		errorBody, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("API error (status %d): %s", resp.StatusCode, string(errorBody))
+		return nil, &ProviderError{StatusCode: resp.StatusCode, Body: string(errorBody)}
 	}
 
 	var listResp ModelListResponse

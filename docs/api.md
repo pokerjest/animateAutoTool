@@ -118,7 +118,25 @@ curl -b cookies.txt \
 | 备份 | `/backup`、`/backup/export`、`/backup/analyze`、`/backup/restore`、`/backup/r2/*` |
 | 系统 | `/health`、`/runtime`、`/audit-logs`、`/diagnostics/*` |
 | 设置 | `/settings`、`/settings/proxy/test`、`/settings/connections/{provider}` |
-| AI | `/settings/ai`、`/settings/ai/models`、`/assistant/messages` |
+| AI | `/settings/ai`、`/settings/ai/models`、`/settings/ai/test`、`/assistant/messages`、`/ai/*` |
+
+## AI 运维提案与工具日志
+
+AI 助手和业务页面只会调用内部白名单工具。读取工具可以自动运行；涉及文件整理、元数据匹配、订阅规则、扫描或健康修复时，后端只创建提案，不会直接修改数据。
+
+提案需要在对应业务页面查看差异后点击确认。确认接口签发一次性短期令牌，执行接口只接受该令牌，实际参数始终来自服务器保存的提案，不接受浏览器重新提交的目标或执行参数。提案过期、目标状态变化、令牌跨用户或重复使用都会被拒绝。
+
+相关接口：
+
+| 用途 | 接口 |
+| --- | --- |
+| 创建分析任务 | `POST /ai/filename-resolutions`、`POST /ai/health/analyze`、`POST /ai/library-issues/{id}/analyze`、`POST /ai/metadata/local-anime/{id}/suggest`、`POST /ai/subscriptions/{id}/rules/suggest` |
+| 查看提案 | `GET /ai/proposals/{id}` |
+| 确认并执行 | `POST /ai/proposals/{id}/confirm` → `POST /ai/proposals/{id}/apply` |
+| 忽略提案 | `POST /ai/proposals/{id}/dismiss` |
+| 工具调用日志 | `GET /ai/tool-runs` |
+
+`GET /ai/tool-runs` 只返回有界的脱敏参数和结果摘要。日志会保留工具、风险等级、模型、耗时、任务/提案关联和成功失败状态，但不会保存 API Key、密码、Cookie、Authorization 或完整模型提示词。
 
 ## 代理与部署边界
 

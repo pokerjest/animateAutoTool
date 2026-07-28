@@ -52,40 +52,58 @@ func V1ApplyLocalOrganizeHandler(c *gin.Context) {
 		return
 	}
 
+	taskID, err := startLocalOrganizePlan(localOrganizeOwner(c), request.PlanID, request.IncludeAnimeIDs)
+	if errors.Is(err, errLocalOrganizeInProgress) {
+		v1Error(c, http.StatusConflict, "organize_in_progress", "已有整理任务正在运行，请等待完成后再试")
+		return
+	}
+	if errors.Is(err, service.ErrOrganizePlanNotFound) {
+		v1Error(c, http.StatusGone, "organize_plan_expired", "整理预览已过期，请重新生成预览")
+		return
+	}
+	if errors.Is(err, errInvalidOrganizeSelection) {
+		v1Error(c, http.StatusBadRequest, "invalid_organize_selection", "执行范围不属于当前预览计划")
+		return
+	}
+	if err != nil {
+		v1Error(c, http.StatusBadGateway, "organizer_unavailable", err.Error())
+		return
+	}
+	v1Message(c, http.StatusAccepted, "本地番剧整理已经启动", gin.H{"task_id": taskID, "status": "running"})
+}
+
+var (
+	errLocalOrganizeInProgress  = errors.New("local organize already running")
+	errInvalidOrganizeSelection = errors.New("invalid local organize selection")
+)
+
+func startLocalOrganizePlan(owner, planID string, includedIDs []uint) (string, error) {
 	localOrganizeRunMu.Lock()
 	if localOrganizeRunning {
 		localOrganizeRunMu.Unlock()
-		v1Error(c, http.StatusConflict, "organize_in_progress", "已有整理任务正在运行，请等待完成后再试")
-		return
+		return "", errLocalOrganizeInProgress
 	}
 	organizer, err := newLocalOrganizer()
 	if err != nil {
 		localOrganizeRunMu.Unlock()
-		v1Error(c, http.StatusBadGateway, "organizer_unavailable", err.Error())
-		return
+		return "", err
 	}
-	plan, err := service.GlobalLocalOrganizePlans.Take(request.PlanID, localOrganizeOwner(c))
+	plan, err := service.GlobalLocalOrganizePlans.Take(planID, owner)
 	if err != nil {
 		localOrganizeRunMu.Unlock()
-		if errors.Is(err, service.ErrOrganizePlanNotFound) {
-			v1Error(c, http.StatusGone, "organize_plan_expired", "整理预览已过期，请重新生成预览")
-			return
-		}
-		v1Error(c, http.StatusBadRequest, "invalid_organize_plan", err.Error())
-		return
+		return "", err
 	}
-	if !validOrganizeIncludes(plan, request.IncludeAnimeIDs) {
+	if !validOrganizeIncludes(plan, includedIDs) {
 		localOrganizeRunMu.Unlock()
-		v1Error(c, http.StatusBadRequest, "invalid_organize_selection", "执行范围不属于当前预览计划")
-		return
+		return "", errInvalidOrganizeSelection
 	}
 	localOrganizeRunning = true
 	localOrganizeRunMu.Unlock()
 
 	taskID := "local-organize-" + shortOrganizePlanID(plan.PlanID)
 	taskstate.Global.Start(taskID, "organize", "整理本地番剧", "正在复核文件并准备整理")
-	go runLocalOrganizeTask(taskID, organizer, plan, request.IncludeAnimeIDs)
-	v1Message(c, http.StatusAccepted, "本地番剧整理已经启动", gin.H{"task_id": taskID, "status": "running"})
+	go runLocalOrganizeTask(taskID, organizer, plan, includedIDs)
+	return taskID, nil
 }
 
 func runLocalOrganizeTask(taskID string, organizer *service.LocalOrganizer, plan *service.LocalOrganizePreview, included []uint) {

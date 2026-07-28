@@ -8,6 +8,13 @@
 
 ## [Unreleased]
 
+## [0.9.4] - 2026-07-27
+
+### Fixed
+- 修复从本地番剧、概览、订阅和继续观看入口播放时仍停留在管理模式的问题。
+- 新增媒体工作区本地播放器路由，点击播放后自动进入媒体模式并开始播放。
+- 保留旧 `/player` 路由兼容已有书签和旧客户端。
+
 ## [0.9.3] - 2026-07-27
 
 ### Fixed
@@ -311,7 +318,8 @@
 
 ---
 
-[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v0.9.2.1...HEAD
+[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v0.9.4...HEAD
+[0.9.4]: https://github.com/pokerjest/animateAutoTool/compare/v0.9.3...v0.9.4
 [0.9.2.1]: https://github.com/pokerjest/animateAutoTool/compare/v0.9.2...v0.9.2.1
 [0.9.2]: https://github.com/pokerjest/animateAutoTool/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/pokerjest/animateAutoTool/compare/v0.9.0...v0.9.1

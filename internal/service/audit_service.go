@@ -24,6 +24,8 @@ const (
 	AuditActionR2BackupRestore      = "backup.r2.restore"
 	AuditActionR2BackupDelete       = "backup.r2.delete"
 	AuditActionAISettingsUpdate     = "settings.ai.update"
+	AuditActionAIProposalApply      = "ai.proposal.apply"
+	AuditActionAIProposalDismiss    = "ai.proposal.dismiss"
 	AuditActionSettingsUpdate       = "settings.update"
 )
 
