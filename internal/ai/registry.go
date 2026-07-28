@@ -200,21 +200,6 @@ func (r *Registry) RegisterProposal(name, description string, params any, handle
 	})
 }
 
-// Deprecated compatibility implementation retained for old call sites.
-func (r *Registry) registerLegacy(name, description string, params any, handler ToolHandler) {
-	r.tools[name] = RegisteredTool{
-		Definition: Tool{
-			Type: "function",
-			Function: FunctionSchema{
-				Name:        name,
-				Description: description,
-				Parameters:  params,
-			},
-		},
-		Spec: ToolSpec{Name: name, Description: description, InputSchema: params, Risk: ToolRiskRead, Handler: handler},
-	}
-}
-
 // GetToolDefinitions returns the schema for all registered tools, ready to be sent to the LLM.
 func (r *Registry) GetToolDefinitions() []Tool {
 	r.mu.RLock()
@@ -358,92 +343,117 @@ func validateToolArguments(schema any, raw string) error {
 
 func validateJSONSchemaValue(schema map[string]any, value any, path string) error {
 	expected, _ := schema["type"].(string)
+	var err error
 	switch expected {
 	case "object":
-		object, ok := value.(map[string]any)
-		if !ok || object == nil {
-			return fmt.Errorf("%s must be an object", path)
+		err = validateJSONSchemaObject(schema, value, path)
+	case "array":
+		err = validateJSONSchemaArray(schema, value, path)
+	case "string":
+		err = validateJSONSchemaString(schema, value, path)
+	case "integer":
+		err = validateJSONSchemaNumericType(schema, value, path, true)
+	case "number":
+		err = validateJSONSchemaNumericType(schema, value, path, false)
+	case "boolean":
+		if _, ok := value.(bool); !ok {
+			err = fmt.Errorf("%s must be a boolean", path)
 		}
-		properties, _ := schema["properties"].(map[string]any)
-		if additional, exists := schema["additionalProperties"]; exists && additional == false {
-			for key := range object {
-				if _, ok := properties[key]; !ok {
-					return fmt.Errorf("unknown field %q", key)
-				}
+	}
+	if err != nil {
+		return err
+	}
+	return validateJSONSchemaEnum(schema, value, path)
+}
+
+func validateJSONSchemaObject(schema map[string]any, value any, path string) error {
+	object, ok := value.(map[string]any)
+	if !ok || object == nil {
+		return fmt.Errorf("%s must be an object", path)
+	}
+	properties, _ := schema["properties"].(map[string]any)
+	if additional, exists := schema["additionalProperties"]; exists && additional == false {
+		for key := range object {
+			if _, ok := properties[key]; !ok {
+				return fmt.Errorf("unknown field %q", key)
 			}
 		}
-		if required, ok := schema["required"].([]any); ok {
-			for _, item := range required {
-				key, _ := item.(string)
-				if key == "" {
-					continue
-				}
-				field, exists := object[key]
-				if !exists || field == nil {
-					return fmt.Errorf("field %q is required", key)
-				}
-			}
-		}
-		for key, field := range object {
-			property, ok := properties[key].(map[string]any)
-			if !ok || field == nil {
+	}
+	if required, ok := schema["required"].([]any); ok {
+		for _, item := range required {
+			key, _ := item.(string)
+			if key == "" {
 				continue
 			}
-			if err := validateJSONSchemaValue(property, field, path+"."+key); err != nil {
-				return err
+			field, exists := object[key]
+			if !exists || field == nil {
+				return fmt.Errorf("field %q is required", key)
 			}
 		}
-	case "array":
-		items, ok := value.([]any)
-		if !ok {
-			return fmt.Errorf("%s must be an array", path)
+	}
+	for key, field := range object {
+		property, ok := properties[key].(map[string]any)
+		if !ok || field == nil {
+			continue
 		}
-		itemSchema, _ := schema["items"].(map[string]any)
-		if itemSchema != nil {
-			for index, item := range items {
-				if err := validateJSONSchemaValue(itemSchema, item, fmt.Sprintf("%s[%d]", path, index)); err != nil {
-					return err
-				}
-			}
+		if err := validateJSONSchemaValue(property, field, path+"."+key); err != nil {
+			return err
 		}
-	case "string":
-		text, ok := value.(string)
-		if !ok {
-			return fmt.Errorf("%s must be a string", path)
+	}
+	return nil
+}
+
+func validateJSONSchemaArray(schema map[string]any, value any, path string) error {
+	items, ok := value.([]any)
+	if !ok {
+		return fmt.Errorf("%s must be an array", path)
+	}
+	itemSchema, _ := schema["items"].(map[string]any)
+	if itemSchema == nil {
+		return nil
+	}
+	for index, item := range items {
+		if err := validateJSONSchemaValue(itemSchema, item, fmt.Sprintf("%s[%d]", path, index)); err != nil {
+			return err
 		}
-		if minimum, ok := schema["minLength"].(float64); ok && float64(len([]rune(text))) < minimum {
-			return fmt.Errorf("%s is shorter than the minimum length", path)
-		}
-		if maximum, ok := schema["maxLength"].(float64); ok && float64(len([]rune(text))) > maximum {
-			return fmt.Errorf("%s is longer than the maximum length", path)
-		}
-	case "integer":
-		number, ok := value.(json.Number)
-		if !ok {
+	}
+	return nil
+}
+
+func validateJSONSchemaString(schema map[string]any, value any, path string) error {
+	text, ok := value.(string)
+	if !ok {
+		return fmt.Errorf("%s must be a string", path)
+	}
+	length := float64(len([]rune(text)))
+	if minimum, ok := schema["minLength"].(float64); ok && length < minimum {
+		return fmt.Errorf("%s is shorter than the minimum length", path)
+	}
+	if maximum, ok := schema["maxLength"].(float64); ok && length > maximum {
+		return fmt.Errorf("%s is longer than the maximum length", path)
+	}
+	return nil
+}
+
+func validateJSONSchemaNumericType(schema map[string]any, value any, path string, integer bool) error {
+	number, ok := value.(json.Number)
+	if !ok {
+		if integer {
 			return fmt.Errorf("%s must be an integer", path)
 		}
+		return fmt.Errorf("%s must be a number", path)
+	}
+	if integer {
 		if _, err := number.Int64(); err != nil {
 			return fmt.Errorf("%s must be an integer", path)
 		}
-		if err := validateJSONSchemaNumber(schema, number, path); err != nil {
-			return err
-		}
-	case "number":
-		number, ok := value.(json.Number)
-		if !ok {
-			return fmt.Errorf("%s must be a number", path)
-		}
-		if _, err := number.Float64(); err != nil {
-			return fmt.Errorf("%s must be a number", path)
-		}
-		if err := validateJSONSchemaNumber(schema, number, path); err != nil {
-			return err
-		}
-	case "boolean":
-		if _, ok := value.(bool); !ok {
-			return fmt.Errorf("%s must be a boolean", path)
-		}
+	} else if _, err := number.Float64(); err != nil {
+		return fmt.Errorf("%s must be a number", path)
 	}
+	return validateJSONSchemaNumber(schema, number, path)
+}
+
+func validateJSONSchemaEnum(schema map[string]any, value any, path string) error {
 	if enumValues, ok := schema["enum"].([]any); ok && len(enumValues) > 0 {
 		for _, candidate := range enumValues {
 			if fmt.Sprint(candidate) == fmt.Sprint(value) {

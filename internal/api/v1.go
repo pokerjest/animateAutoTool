@@ -32,6 +32,8 @@ import (
 	"gorm.io/gorm"
 )
 
+const assistantRoleUser = "user"
+
 type v1Envelope struct {
 	Data    any            `json:"data,omitempty"`
 	Meta    map[string]any `json:"meta,omitempty"`
@@ -1030,7 +1032,7 @@ func V1AssistantMessageHandler(c *gin.Context) {
 	if len(history) == 0 {
 		history = append(history, ai.ChatMessage{Role: "system", Content: aiSystemPrompt})
 	}
-	history = append(history, ai.ChatMessage{Role: "user", Content: strings.TrimSpace(req.Message)})
+	history = append(history, ai.ChatMessage{Role: assistantRoleUser, Content: strings.TrimSpace(req.Message)})
 	client, err := buildAIClient(settings)
 	if err != nil {
 		v1Error(c, http.StatusBadRequest, "invalid_ai_provider", err.Error())
@@ -1080,8 +1082,8 @@ func visibleAssistantMessages(history []ai.ChatMessage) []v1AssistantMessage {
 	for _, message := range history {
 		content := strings.TrimSpace(service.SanitizeAIText(message.Content))
 		switch {
-		case message.Role == "user" && content != "":
-			messages = append(messages, v1AssistantMessage{Role: "user", Content: content})
+		case message.Role == assistantRoleUser && content != "":
+			messages = append(messages, v1AssistantMessage{Role: assistantRoleUser, Content: content})
 		case message.Role == "assistant" && len(message.ToolCalls) == 0 && content != "":
 			messages = append(messages, v1AssistantMessage{Role: "assistant", Content: content})
 		}

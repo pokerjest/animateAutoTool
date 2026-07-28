@@ -20,7 +20,10 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/taskstate"
 )
 
-const aiAnalysisTimeout = 90 * time.Second
+const (
+	aiAnalysisTimeout = 90 * time.Second
+	aiErrorLiteral    = "error"
+)
 
 type aiAnalysisRunner func(context.Context, ai.ToolExecutionMeta, aiProviderSettings) error
 
@@ -161,7 +164,7 @@ func startHealthAIAnalysis(c *gin.Context, issueID uint) {
 			return err
 		}
 		issueJSON := "{}"
-		logQuery := "error"
+		logQuery := aiErrorLiteral
 		if issueID != 0 {
 			issueJSON, err = executeAIAnalysisTool(ctx, meta, "get_library_issue_context", mustJSON(map[string]any{"issue_id": issueID}))
 			if err != nil {
@@ -378,7 +381,7 @@ func V1AIProposalApplyHandler(c *gin.Context) {
 		service.RecordAudit(buildAuditContext(c), service.AuditEntry{
 			Action: service.AuditActionAIProposalApply, Outcome: service.AuditOutcomeFailure,
 			TargetType: row.TargetType, TargetID: row.TargetID,
-			Details: map[string]any{"proposal_id": row.ID, "tool": row.ApplyTool, "error": service.SanitizeAIText(err.Error())},
+			Details: map[string]any{"proposal_id": row.ID, "tool": row.ApplyTool, aiErrorLiteral: service.SanitizeAIText(err.Error())},
 		})
 		v1Error(c, http.StatusBadGateway, "ai_proposal_apply_failed", service.SanitizeAIText(err.Error()))
 		return
