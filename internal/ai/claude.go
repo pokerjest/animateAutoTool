@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -165,8 +164,7 @@ func (c *ClaudeClient) CreateChatCompletion(ctx context.Context, req ChatComplet
 		_ = resp.Body.Close()
 	}()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		errorBody, _ := io.ReadAll(resp.Body)
-		return nil, &ProviderError{StatusCode: resp.StatusCode, Body: string(errorBody)}
+		return nil, NewProviderErrorFromResponse(resp)
 	}
 	var apiResp claudeResponse
 	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
@@ -210,8 +208,7 @@ func (c *ClaudeClient) ListModels(ctx context.Context) ([]string, error) {
 		_ = resp.Body.Close()
 	}()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		errorBody, _ := io.ReadAll(resp.Body)
-		return nil, &ProviderError{StatusCode: resp.StatusCode, Body: string(errorBody)}
+		return nil, NewProviderErrorFromResponse(resp)
 	}
 	var payload struct {
 		Data []struct {

@@ -7,6 +7,7 @@ import (
 	"html"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -23,6 +24,7 @@ import (
 var (
 	globalChatHistories = map[string][]ai.ChatMessage{}
 	chatMutex           sync.Mutex
+	aiModelCatalogCache sync.Map
 )
 
 const (
@@ -343,19 +345,94 @@ func GetAIModelsHandler(c *gin.Context) {
 	models, err := client.ListModels(context.Background())
 	if err != nil {
 		log.Printf("AI models (%s): %s", settings.Provider, aiSafeErrorSummary(err))
-		c.JSON(http.StatusBadGateway, gin.H{"error": aiConnectionFailureDetail(err)})
+		if fallback, source := fallbackAIModelCatalog(settings); len(fallback) > 0 {
+			result := gin.H{
+				"provider":        settings.Provider,
+				"provider_label":  settings.Label,
+				"format":          settings.Format,
+				"models":          fallback,
+				"source":          source,
+				"warning":         aiConnectionFailureDetail(settings.Provider, err),
+				"upstream_status": ai.ProviderStatusCode(err),
+			}
+			if retryAfter := ai.ProviderRetryAfter(err); retryAfter > 0 {
+				result["retry_after_seconds"] = retryAfterSeconds(retryAfter)
+			}
+			c.JSON(http.StatusOK, result)
+			return
+		}
+		applyAIRetryAfterHeader(c, err)
+		c.JSON(aiProviderFailureHTTPStatus(err), gin.H{"error": aiConnectionFailureDetail(settings.Provider, err)})
 		return
 	}
+	cacheAIModelCatalog(settings, models)
 
 	c.JSON(http.StatusOK, gin.H{
 		"provider":       settings.Provider,
 		"provider_label": settings.Label,
 		"format":         settings.Format,
 		"models":         models,
+		"source":         "provider",
 	})
 }
 
-func aiConnectionFailureDetail(err error) string {
+func aiModelCatalogCacheKey(settings aiProviderSettings) string {
+	return strings.Join([]string{
+		settings.Provider,
+		settings.Format,
+		strings.TrimRight(strings.ToLower(strings.TrimSpace(settings.BaseURL)), "/"),
+	}, "|")
+}
+
+func uniqueAIModels(values ...[]string) []string {
+	seen := map[string]struct{}{}
+	result := make([]string, 0)
+	for _, group := range values {
+		for _, modelName := range group {
+			modelName = strings.TrimSpace(strings.TrimPrefix(modelName, "models/"))
+			if modelName == "" {
+				continue
+			}
+			if _, exists := seen[modelName]; exists {
+				continue
+			}
+			seen[modelName] = struct{}{}
+			result = append(result, modelName)
+		}
+	}
+	return result
+}
+
+func cacheAIModelCatalog(settings aiProviderSettings, models []string) {
+	if catalog := uniqueAIModels(models); len(catalog) > 0 {
+		aiModelCatalogCache.Store(aiModelCatalogCacheKey(settings), catalog)
+	}
+}
+
+func fallbackAIModelCatalog(settings aiProviderSettings) ([]string, string) {
+	current := []string{settings.Model}
+	if cached, ok := aiModelCatalogCache.Load(aiModelCatalogCacheKey(settings)); ok {
+		if models, valid := cached.([]string); valid && len(models) > 0 {
+			return uniqueAIModels(current, models), "cache"
+		}
+	}
+	if settings.Provider == ai.ProviderGemini && isDefaultAIBaseURL(settings.Provider, settings.BaseURL) {
+		return uniqueAIModels(current, []string{
+			"gemini-3.6-flash",
+			"gemini-3.5-flash",
+			"gemini-3.5-flash-lite",
+			"gemini-2.5-pro",
+			"gemini-2.5-flash",
+			"gemini-2.5-flash-lite",
+		}), "fallback"
+	}
+	if models := uniqueAIModels(current); len(models) > 0 {
+		return models, "configured"
+	}
+	return nil, ""
+}
+
+func aiConnectionFailureDetail(provider string, err error) string {
 	switch ai.ProviderStatusCode(err) {
 	case http.StatusBadRequest:
 		return "请求格式或模型能力不兼容，请检查 API 格式和模型是否支持工具调用"
@@ -364,7 +441,16 @@ func aiConnectionFailureDetail(err error) string {
 	case http.StatusNotFound:
 		return "Base URL 或模型名称不存在，请检查接口前缀和模型 ID"
 	case http.StatusTooManyRequests:
-		return "服务返回限流或额度不足（HTTP 429）"
+		detail := "AI 服务请求过于频繁，或当前项目/免费额度已耗尽（HTTP 429）"
+		if provider == ai.ProviderGemini || strings.EqualFold(ai.ProviderErrorCode(err), "RESOURCE_EXHAUSTED") {
+			detail = "Google Gemini 当前项目的请求频率、令牌、每日额度或消费额度已达到限制（HTTP 429）"
+		}
+		if retryAfter := ai.ProviderRetryAfter(err); retryAfter > 0 {
+			detail += fmt.Sprintf("；请等待至少 %d 秒后重试", retryAfterSeconds(retryAfter))
+		} else {
+			detail += "；请稍后重试"
+		}
+		return detail + "。若持续出现，请到服务商控制台检查当前项目配额，或在设置中手动选择另一个已配置的模型/服务商；系统不会自动切换。"
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
 		return "连接超时，请检查 Base URL、网络代理和服务状态"
@@ -379,11 +465,59 @@ func aiConnectionFailureDetail(err error) string {
 	return "连接失败，请检查 Base URL、API Key、模型和网络代理"
 }
 
+func aiProviderFailureHTTPStatus(err error) int {
+	switch status := ai.ProviderStatusCode(err); status {
+	case http.StatusBadRequest,
+		http.StatusUnauthorized,
+		http.StatusForbidden,
+		http.StatusNotFound,
+		http.StatusRequestTimeout,
+		http.StatusTooManyRequests:
+		return status
+	default:
+		return http.StatusBadGateway
+	}
+}
+
+func aiProviderFailureCode(err error, fallback string) string {
+	switch ai.ProviderStatusCode(err) {
+	case http.StatusBadRequest:
+		return "ai_bad_request"
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return "ai_auth_failed"
+	case http.StatusNotFound:
+		return "ai_endpoint_not_found"
+	case http.StatusRequestTimeout:
+		return "ai_timeout"
+	case http.StatusTooManyRequests:
+		return "ai_rate_limited"
+	default:
+		return fallback
+	}
+}
+
+func retryAfterSeconds(duration time.Duration) int {
+	seconds := int((duration + time.Second - 1) / time.Second)
+	if seconds < 1 {
+		return 1
+	}
+	return seconds
+}
+
+func applyAIRetryAfterHeader(c *gin.Context, err error) {
+	if retryAfter := ai.ProviderRetryAfter(err); retryAfter > 0 {
+		c.Header("Retry-After", strconv.Itoa(retryAfterSeconds(retryAfter)))
+	}
+}
+
 func aiSafeErrorSummary(err error) string {
 	if err == nil {
 		return ""
 	}
 	if status := ai.ProviderStatusCode(err); status != 0 {
+		if code := ai.ProviderErrorCode(err); code != "" {
+			return fmt.Sprintf("HTTP %d (%s)", status, code)
+		}
 		return fmt.Sprintf("HTTP %d", status)
 	}
 	return service.SanitizeAIText(err.Error())
@@ -408,14 +542,29 @@ func V1AIModelsPostHandler(c *gin.Context) {
 	models, err := client.ListModels(c.Request.Context())
 	if err != nil {
 		log.Printf("AI models (%s): %s", settings.Provider, aiSafeErrorSummary(err))
-		v1Error(c, http.StatusBadGateway, "ai_models_failed", aiConnectionFailureDetail(err))
+		if fallback, source := fallbackAIModelCatalog(settings); len(fallback) > 0 {
+			result := gin.H{
+				"provider": settings.Provider, "provider_label": settings.Label, "format": settings.Format,
+				"models": fallback, "source": source, "warning": aiConnectionFailureDetail(settings.Provider, err),
+				"upstream_status": ai.ProviderStatusCode(err),
+			}
+			if retryAfter := ai.ProviderRetryAfter(err); retryAfter > 0 {
+				result["retry_after_seconds"] = retryAfterSeconds(retryAfter)
+			}
+			v1Data(c, http.StatusOK, result)
+			return
+		}
+		applyAIRetryAfterHeader(c, err)
+		v1Error(c, aiProviderFailureHTTPStatus(err), aiProviderFailureCode(err, "ai_models_failed"), aiConnectionFailureDetail(settings.Provider, err))
 		return
 	}
+	cacheAIModelCatalog(settings, models)
 	v1Data(c, http.StatusOK, gin.H{
 		"provider":       settings.Provider,
 		"provider_label": settings.Label,
 		"format":         settings.Format,
 		"models":         models,
+		"source":         "provider",
 	})
 }
 
@@ -467,7 +616,11 @@ func V1AITestHandler(c *gin.Context) {
 	}
 	if requestErr != nil {
 		log.Printf("AI connection test (%s): %s", settings.Provider, aiSafeErrorSummary(requestErr))
-		result["detail"] = aiConnectionFailureDetail(requestErr)
+		result["detail"] = aiConnectionFailureDetail(settings.Provider, requestErr)
+		result["upstream_status"] = ai.ProviderStatusCode(requestErr)
+		if retryAfter := ai.ProviderRetryAfter(requestErr); retryAfter > 0 {
+			result["retry_after_seconds"] = retryAfterSeconds(retryAfter)
+		}
 		v1Data(c, http.StatusOK, result)
 		return
 	}

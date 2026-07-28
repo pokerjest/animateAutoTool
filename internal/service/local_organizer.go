@@ -76,6 +76,8 @@ type LocalOrganizeChange struct {
 	qbNewRelative string
 	qbOldDir      string
 	qbTargetDir   string
+	targetSeason  int
+	targetEpisode int
 }
 
 type LocalOrganizeAnimePreview struct {
@@ -303,6 +305,19 @@ func (o *LocalOrganizer) previewAnime(anime model.LocalAnime, directory model.Lo
 		if found {
 			season = episode.SeasonNum
 			episodeNumber = episode.EpisodeNum
+			filenameSeason := season
+			if parsed.HasExplicitSeason() && parsed.Season > 0 {
+				filenameSeason = parsed.Season
+			}
+			if parsed.HasExplicitEpisode() && parsed.Episode > 0 &&
+				(parsed.Episode != episodeNumber || filenameSeason != season) {
+				result.Warnings = append(result.Warnings, fmt.Sprintf(
+					"%s 的文件名编号 S%02dE%02d 与数据库 S%02dE%02d 不一致，本次按文件名整理",
+					filepath.Base(source), filenameSeason, parsed.Episode, season, episodeNumber,
+				))
+				season = filenameSeason
+				episodeNumber = parsed.Episode
+			}
 		}
 		if override, ok := overrides[filepath.Clean(source)]; ok {
 			season = override.Season
@@ -329,6 +344,8 @@ func (o *LocalOrganizer) previewAnime(anime model.LocalAnime, directory model.Lo
 		}
 		groupKey := filepath.Clean(source)
 		change := o.newChange(organizeKindVideo, source, target, episode.ID, groupKey, "", "")
+		change.targetSeason = season
+		change.targetEpisode = episodeNumber
 		o.classifyQB(&change)
 		result.Changes = append(result.Changes, change)
 		for _, sidecar := range organizerSidecars(source) {
@@ -565,11 +582,18 @@ func (o *LocalOrganizer) persistMovedChanges(changes []LocalOrganizeChange) erro
 	return o.db.Transaction(func(tx *gorm.DB) error {
 		for _, change := range changes {
 			if change.Kind == organizeKindVideo {
+				updates := map[string]any{"path": change.Target}
+				if change.targetSeason > 0 {
+					updates["season_num"] = change.targetSeason
+				}
+				if change.targetEpisode > 0 {
+					updates["episode_num"] = change.targetEpisode
+				}
 				if change.episodeID > 0 {
-					if err := tx.Model(&model.LocalEpisode{}).Where("id = ?", change.episodeID).Update("path", change.Target).Error; err != nil {
+					if err := tx.Model(&model.LocalEpisode{}).Where("id = ?", change.episodeID).Updates(updates).Error; err != nil {
 						return err
 					}
-				} else if err := tx.Model(&model.LocalEpisode{}).Where("path = ?", change.Original).Update("path", change.Target).Error; err != nil {
+				} else if err := tx.Model(&model.LocalEpisode{}).Where("path = ?", change.Original).Updates(updates).Error; err != nil {
 					return err
 				}
 			}

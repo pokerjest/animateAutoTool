@@ -109,6 +109,25 @@ func TestScannerUsesSeriesAndEpisodeNFOData(t *testing.T) {
 	require.Equal(t, 7, anime.Episodes[0].EpisodeNum)
 }
 
+func TestScannerPrefersExplicitFilenameEpisodeOverConflictingNFO(t *testing.T) {
+	withServiceTestDB(t)
+	root := t.TempDir()
+	showPath := filepath.Join(root, "Explicit Number Show")
+	videoPath := filepath.Join(showPath, "[Group] Explicit Number Show [01][AVC-8bit 1080P].mp4")
+	writeScannerFixture(t, videoPath)
+	nfoPath := strings.TrimSuffix(videoPath, filepath.Ext(videoPath)) + ".nfo"
+	require.NoError(t, os.WriteFile(nfoPath, []byte(`<episodedetails><title>Sidecar Title</title><season>1</season><episode>8</episode></episodedetails>`), 0o600))
+	directory := createScannerDirectory(t, root)
+
+	_, err := NewScannerService().ScanDirectory(&directory)
+	require.NoError(t, err)
+	var anime model.LocalAnime
+	require.NoError(t, db.DB.Preload("Episodes").First(&anime).Error)
+	require.Len(t, anime.Episodes, 1)
+	require.Equal(t, "Sidecar Title", anime.Episodes[0].Title)
+	require.Equal(t, 1, anime.Episodes[0].EpisodeNum)
+}
+
 func TestScannerConsolidatesDuplicateReleaseFoldersAndPreservesMetadata(t *testing.T) {
 	withServiceTestDB(t)
 	root := t.TempDir()

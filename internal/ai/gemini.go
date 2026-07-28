@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -252,8 +251,7 @@ func (c *GeminiClient) CreateChatCompletion(ctx context.Context, req ChatComplet
 		_ = resp.Body.Close()
 	}()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		errorBody, _ := io.ReadAll(resp.Body)
-		return nil, &ProviderError{StatusCode: resp.StatusCode, Body: string(errorBody)}
+		return nil, NewProviderErrorFromResponse(resp)
 	}
 	var apiResp geminiResponse
 	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
@@ -298,8 +296,7 @@ func (c *GeminiClient) ListModels(ctx context.Context) ([]string, error) {
 		_ = resp.Body.Close()
 	}()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		errorBody, _ := io.ReadAll(resp.Body)
-		return nil, &ProviderError{StatusCode: resp.StatusCode, Body: string(errorBody)}
+		return nil, NewProviderErrorFromResponse(resp)
 	}
 	var payload struct {
 		Models []struct {

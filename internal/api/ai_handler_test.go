@@ -8,9 +8,12 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pokerjest/animateAutoTool/internal/ai"
+	"github.com/pokerjest/animateAutoTool/internal/db"
+	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -221,6 +224,124 @@ func TestV1AIModelsPostHandlerUsesUnsavedSettingsWithoutModel(t *testing.T) {
 	assert.Equal(t, "/v1beta/models", requestPath)
 	assert.Equal(t, "unsaved-key", apiKey)
 	assert.Contains(t, recorder.Body.String(), `"gemini-test"`)
+}
+
+func TestV1AIModelsPostHandlerKeepsGeminiSwitchingAvailableWhenQuotaIsExhausted(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{
+			"error": {
+				"code": 429,
+				"message": "quota exhausted",
+				"status": "RESOURCE_EXHAUSTED",
+				"details": [{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"19s"}]
+			}
+		}`))
+	}))
+	defer server.Close()
+	settings := aiProviderSettings{
+		Provider: ai.ProviderGemini,
+		Label:    aiProviderLabel(ai.ProviderGemini),
+		Format:   ai.ProviderFormatNative,
+		BaseURL:  server.URL,
+		Model:    "gemini-3.6-flash",
+	}
+	cacheKey := aiModelCatalogCacheKey(settings)
+	cacheAIModelCatalog(settings, []string{"gemini-3.6-flash", "gemini-2.5-flash"})
+	t.Cleanup(func() { aiModelCatalogCache.Delete(cacheKey) })
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/v1/settings/ai/models", bytes.NewBufferString(fmt.Sprintf(
+		`{"provider":"gemini","format":"native","base_url":%q,"api_key":"test-key","model":"gemini-3.6-flash"}`, server.URL,
+	)))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+
+	V1AIModelsPostHandler(ctx)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	assert.Contains(t, recorder.Body.String(), `"source":"cache"`)
+	assert.Contains(t, recorder.Body.String(), `"gemini-3.6-flash"`)
+	assert.Contains(t, recorder.Body.String(), `"gemini-2.5-flash"`)
+	assert.Contains(t, recorder.Body.String(), `"upstream_status":429`)
+	assert.Contains(t, recorder.Body.String(), `"retry_after_seconds":19`)
+	assert.Contains(t, recorder.Body.String(), "系统不会自动切换")
+	assert.NotContains(t, recorder.Body.String(), "test-key")
+}
+
+func TestFallbackAIModelCatalogProvidesOfficialGeminiAlternatives(t *testing.T) {
+	models, source := fallbackAIModelCatalog(aiProviderSettings{
+		Provider: ai.ProviderGemini,
+		Format:   ai.ProviderFormatNative,
+		BaseURL:  defaultAIBaseURL(ai.ProviderGemini, ai.ProviderFormatNative),
+		Model:    "gemini-3.6-flash",
+	})
+
+	assert.Equal(t, "fallback", source)
+	assert.Contains(t, models, "gemini-3.6-flash")
+	assert.Contains(t, models, "gemini-3.5-flash")
+	assert.Contains(t, models, "gemini-2.5-flash")
+}
+
+func TestAIConnectionFailureDetailExplainsGeminiRateLimit(t *testing.T) {
+	err := &ai.ProviderError{
+		StatusCode: http.StatusTooManyRequests,
+		Code:       "RESOURCE_EXHAUSTED",
+		RetryAfter: 12*time.Second + 100*time.Millisecond,
+	}
+
+	detail := aiConnectionFailureDetail(ai.ProviderGemini, err)
+
+	assert.Contains(t, detail, "Google Gemini")
+	assert.Contains(t, detail, "13 秒")
+	assert.Contains(t, detail, "项目配额")
+	assert.Contains(t, detail, "系统不会自动切换")
+	assert.Equal(t, http.StatusTooManyRequests, aiProviderFailureHTTPStatus(err))
+	assert.Equal(t, "ai_rate_limited", aiProviderFailureCode(err, "ai_request_failed"))
+}
+
+func TestV1AssistantPreservesGeminiRateLimitStatusAndActionableMessage(t *testing.T) {
+	resetAuthFixtures(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{
+			"error": {
+				"code": 429,
+				"message": "quota exhausted; api_key=must-not-leak",
+				"status": "RESOURCE_EXHAUSTED",
+				"details": [{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"21s"}]
+			}
+		}`))
+	}))
+	defer server.Close()
+
+	for key, value := range map[string]string{
+		model.ConfigKeyAIProvider:      ai.ProviderGemini,
+		model.ConfigKeyAIGeminiFormat:  ai.ProviderFormatNative,
+		model.ConfigKeyAIGeminiBaseURL: server.URL,
+		model.ConfigKeyAIGeminiAPIKey:  "test-key",
+		model.ConfigKeyAIGeminiModel:   "gemini-3.6-flash",
+	} {
+		require.NoError(t, db.SaveGlobalConfig(key, value))
+	}
+	r := setupRouter()
+	cookie, _ := loginCookie(t, r, "admin")
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/assistant/messages", strings.NewReader(`{"message":"检查系统"}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Cookie", cookie)
+	markLocalRequest(request)
+
+	r.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusTooManyRequests, recorder.Code, recorder.Body.String())
+	assert.Equal(t, "21", recorder.Header().Get("Retry-After"))
+	assert.Contains(t, recorder.Body.String(), `"code":"ai_rate_limited"`)
+	assert.Contains(t, recorder.Body.String(), "Google Gemini")
+	assert.Contains(t, recorder.Body.String(), "21 秒")
+	assert.NotContains(t, recorder.Body.String(), "must-not-leak")
+	assert.NotContains(t, recorder.Body.String(), "test-key")
 }
 
 func TestClaudeOfficialCompatibilityUsesNativeModelListing(t *testing.T) {

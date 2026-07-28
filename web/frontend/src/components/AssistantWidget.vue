@@ -402,7 +402,10 @@ onBeforeUnmount(() => {
           <div v-if="assistant.hydrating || assistant.sending" class="flex items-center gap-2 text-xs font-bold muted" role="status" aria-live="polite">
             <Sparkles class="animate-pulse text-[var(--brand)]" :size="17" />{{ assistant.hydrating ? '正在恢复对话…' : '正在读取系统上下文并思考…' }}
           </div>
-          <p v-if="assistant.error" class="rounded-xl bg-[var(--danger-soft)] p-3 text-xs font-bold text-[var(--danger)]" role="alert">{{ assistant.error }}</p>
+          <div v-if="assistant.error" class="rounded-xl bg-[var(--danger-soft)] p-3 text-xs leading-5 text-[var(--danger)]" role="alert">
+            <strong class="block">AI 请求未完成</strong>
+            <span class="mt-1 block font-semibold">{{ assistant.error }}</span>
+          </div>
         </div>
       </div>
     </div>
@@ -462,7 +465,10 @@ onBeforeUnmount(() => {
               <div class="max-w-[85%] overflow-hidden rounded-2xl px-3.5 py-2.5 text-sm leading-6" :class="message.role === 'user' ? 'whitespace-pre-wrap bg-[var(--brand)] text-white' : 'bg-[var(--surface-muted)]'"><SafeMarkdown v-if="message.role === 'assistant'" :content="message.content" /><template v-else>{{ message.content }}</template></div>
             </article>
             <div v-if="assistant.hydrating || assistant.sending" class="flex items-center gap-2 text-xs font-bold muted" role="status"><Sparkles class="animate-pulse text-[var(--brand)]" :size="17" />{{ assistant.hydrating ? '正在恢复对话…' : '正在读取系统上下文并思考…' }}</div>
-            <p v-if="assistant.error" class="rounded-xl bg-[var(--danger-soft)] p-3 text-xs font-bold text-[var(--danger)]" role="alert">{{ assistant.error }}</p>
+            <div v-if="assistant.error" class="rounded-xl bg-[var(--danger-soft)] p-3 text-xs leading-5 text-[var(--danger)]" role="alert">
+              <strong class="block">AI 请求未完成</strong>
+              <span class="mt-1 block font-semibold">{{ assistant.error }}</span>
+            </div>
           </div>
         </div>
       </div>

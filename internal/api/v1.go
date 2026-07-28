@@ -1042,8 +1042,9 @@ func V1AssistantMessageHandler(c *gin.Context) {
 	for attempts := 0; attempts < 6; attempts++ {
 		resp, err := client.CreateChatCompletion(c.Request.Context(), ai.ChatCompletionRequest{Model: settings.Model, Messages: history, Tools: GlobalAIRegistry.GetToolDefinitions()})
 		if err != nil {
-			log.Printf("AI assistant (%s): %s", settings.Provider, service.SanitizeAIText(err.Error()))
-			v1Error(c, http.StatusBadGateway, "ai_request_failed", "调用大模型失败："+aiConnectionFailureDetail(err))
+			log.Printf("AI assistant (%s): %s", settings.Provider, aiSafeErrorSummary(err))
+			applyAIRetryAfterHeader(c, err)
+			v1Error(c, aiProviderFailureHTTPStatus(err), aiProviderFailureCode(err, "ai_request_failed"), "调用大模型失败："+aiConnectionFailureDetail(settings.Provider, err))
 			return
 		}
 		if len(resp.Choices) == 0 {

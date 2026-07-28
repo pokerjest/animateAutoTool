@@ -514,8 +514,13 @@ func inspectMediaFile(root, path string, size int64) scannedMediaFile {
 	nfoPath := strings.TrimSuffix(path, filepath.Ext(path)) + ".nfo"
 	if nfo, err := parser.ParseEpisodeNFO(nfoPath); err == nil {
 		if nfo.Episode > 0 {
-			season = nfo.Season
-			episode = nfo.Episode
+			// A clear filename marker is safer than stale or mismatched sidecar
+			// numbering. NFO numbering remains authoritative when the filename
+			// only yielded an ambiguous standalone-number fallback.
+			if !parsed.HasExplicitEpisode() {
+				season = nfo.Season
+				episode = nfo.Episode
+			}
 		}
 		if strings.TrimSpace(nfo.Title) != "" {
 			title = strings.TrimSpace(nfo.Title)

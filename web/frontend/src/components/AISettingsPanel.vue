@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, reactive } from 'vue'
-import { Bot, CheckCircle2, KeyRound, RefreshCw, Send, Sparkles } from '@lucide/vue'
+import { Bot, CheckCircle2, ExternalLink, Gauge, KeyRound, RefreshCw, Send, Sparkles } from '@lucide/vue'
 import { api } from '../api/client'
 import { useAsyncActions } from '../composables/useAsyncActions'
 import { useUIStore } from '../stores/ui'
@@ -29,6 +29,9 @@ interface AIProviderDefinition {
   formats: AIFormatDefinition[]
   credentialLabel: string
   credentialHint: string
+  quotaHint: string
+  quotaURL: string
+  quotaLabel: string
 }
 
 interface AIConnectionResult {
@@ -41,6 +44,19 @@ interface AIConnectionResult {
   detail: string
   latency_ms: number
   checked_at: string
+  upstream_status?: number
+  retry_after_seconds?: number
+}
+
+interface AIModelListResult {
+  provider: AIProviderID
+  provider_label: string
+  format: AIProviderFormat
+  models: string[]
+  source?: 'provider' | 'cache' | 'fallback' | 'configured'
+  warning?: string
+  upstream_status?: number
+  retry_after_seconds?: number
 }
 
 const props = defineProps<{
@@ -59,6 +75,9 @@ const providers: AIProviderDefinition[] = [
     modelKey: 'ai_openai_model',
     credentialLabel: 'OpenAI API Key',
     credentialHint: '模型调用使用单个 API Key，不使用 OAuth Client ID / Client Secret。',
+    quotaHint: '普通 API Key 和 Models API 不返回账户余额。组织级 Usage / Costs API 需要独立的 Admin API Key；这里仅记录每个模型最近一次手动 hi 检测结果。',
+    quotaURL: 'https://platform.openai.com/usage',
+    quotaLabel: '打开 OpenAI Usage',
     formats: [{
       value: 'openai',
       label: 'OpenAI Chat Completions',
@@ -78,6 +97,9 @@ const providers: AIProviderDefinition[] = [
     formatKey: 'ai_gemini_api_format',
     credentialLabel: 'Gemini API Key',
     credentialHint: 'Google OAuth Client ID / Client Secret 用于登录和用户授权；这里的模型调用使用 Gemini API Key。',
+    quotaHint: 'Gemini Models API 不返回各模型剩余 RPM、TPM 或每日额度。这里会保留可切换模型，并标记每个模型最近一次手动 hi 检测结果；准确额度请在 Google AI Studio 查看。',
+    quotaURL: 'https://aistudio.google.com/rate-limit',
+    quotaLabel: '打开 Gemini 配额',
     formats: [
       {
         value: 'native',
@@ -106,6 +128,9 @@ const providers: AIProviderDefinition[] = [
     formatKey: 'ai_claude_api_format',
     credentialLabel: 'Anthropic API Key',
     credentialHint: '模型调用使用单个 Anthropic API Key，不使用 OAuth Client ID / Client Secret。',
+    quotaHint: '普通 Anthropic API Key 和 Models API 不返回组织余额。Usage / Cost 报表需要独立的 Admin API Key；这里仅记录每个模型最近一次手动 hi 检测结果。',
+    quotaURL: 'https://console.anthropic.com/settings/usage',
+    quotaLabel: '打开 Claude Usage',
     formats: [
       {
         value: 'native',
@@ -128,7 +153,9 @@ const providers: AIProviderDefinition[] = [
 const actions = useAsyncActions()
 const ui = useUIStore()
 const modelOptions = reactive<Record<AIProviderID, string[]>>({ openai: [], gemini: [], claude: [] })
+const modelCatalogs = reactive<Record<AIProviderID, AIModelListResult | null>>({ openai: null, gemini: null, claude: null })
 const testResults = reactive<Record<AIProviderID, AIConnectionResult | null>>({ openai: null, gemini: null, claude: null })
+const modelChecks = reactive<Record<AIProviderID, Record<string, AIConnectionResult>>>({ openai: {}, gemini: {}, claude: {} })
 
 const activeProvider = computed<AIProviderID>({
   get: () => (['openai', 'gemini', 'claude'].includes(props.form.ai_provider) ? props.form.ai_provider : 'openai') as AIProviderID,
@@ -149,6 +176,7 @@ function setProviderFormat(provider: AIProviderDefinition, format: AIProviderFor
     props.form[provider.baseURLKey] = provider.formats.find(item => item.value === format)?.defaultBaseURL || ''
   }
   modelOptions[provider.id] = []
+  modelCatalogs[provider.id] = null
   testResults[provider.id] = null
 }
 
@@ -165,16 +193,30 @@ function requestBody(provider: AIProviderDefinition) {
 async function loadModels(provider: AIProviderDefinition) {
   try {
     await actions.run(`ai-models-${provider.id}`, async () => {
-      const result = await api<{ models: string[] }>('/settings/ai/models', {
+      const result = await api<AIModelListResult>('/settings/ai/models', {
         method: 'POST',
         body: JSON.stringify(requestBody(provider)),
         headers: { 'Content-Type': 'application/json' },
       })
       modelOptions[provider.id] = result.models || []
-      ui.toast(result.models?.length ? `${provider.label} 返回 ${result.models.length} 个模型` : `${provider.label} 没有返回可用模型`, 'info')
+      modelCatalogs[provider.id] = result
+      if (result.warning) {
+        ui.toast(`实时列表不可用，已保留 ${result.models.length} 个可切换模型`, 'info')
+      } else {
+        ui.toast(result.models?.length ? `${provider.label} 返回 ${result.models.length} 个模型` : `${provider.label} 没有返回可用模型`, 'info')
+      }
     })
   } catch (error) {
     ui.toast(error instanceof Error ? error.message : '模型列表读取失败', 'error')
+  }
+}
+
+function rememberModelCheck(provider: AIProviderDefinition, result: AIConnectionResult) {
+  const modelName = (result.model || props.form[provider.modelKey] || '').trim()
+  if (!modelName) return
+  modelChecks[provider.id][modelName] = { ...result, model: modelName }
+  if (!modelOptions[provider.id].includes(modelName)) {
+    modelOptions[provider.id] = [modelName, ...modelOptions[provider.id]]
   }
 }
 
@@ -187,6 +229,7 @@ async function testConnection(provider: AIProviderDefinition) {
         body: JSON.stringify(requestBody(provider)),
         headers: { 'Content-Type': 'application/json' },
       })
+      rememberModelCheck(provider, testResults[provider.id]!)
     })
   } catch (error) {
     testResults[provider.id] = {
@@ -199,6 +242,37 @@ async function testConnection(provider: AIProviderDefinition) {
       latency_ms: 0,
       checked_at: new Date().toISOString(),
     }
+    rememberModelCheck(provider, testResults[provider.id]!)
+  }
+}
+
+function selectModel(provider: AIProviderDefinition, modelName: string) {
+  props.form[provider.modelKey] = modelName
+  testResults[provider.id] = modelChecks[provider.id][modelName] || null
+}
+
+function modelCheckLabel(provider: AIProviderDefinition, modelName: string) {
+  const result = modelChecks[provider.id][modelName]
+  if (!result) return '未检测'
+  if (result.connected) return '本次可用'
+  if (result.upstream_status === 429) return '配额受限'
+  return '检测失败'
+}
+
+function modelCheckClass(provider: AIProviderDefinition, modelName: string) {
+  const result = modelChecks[provider.id][modelName]
+  if (!result) return ''
+  if (result.connected) return 'badge-success'
+  return result.upstream_status === 429 ? 'badge-warning' : 'badge-danger'
+}
+
+function modelSourceLabel(source?: AIModelListResult['source']) {
+  switch (source) {
+    case 'provider': return '实时列表'
+    case 'cache': return '上次列表'
+    case 'fallback': return '内置备用列表'
+    case 'configured': return '当前配置'
+    default: return '尚未读取'
   }
 }
 </script>
@@ -301,8 +375,15 @@ async function testConnection(provider: AIProviderDefinition) {
 
         <div v-if="modelOptions[provider.id].length" class="mt-4 border-t border-[var(--line)] pt-4">
           <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
-            <span class="text-xs font-bold muted">可用模型</span>
-            <span class="badge">{{ modelOptions[provider.id].length }} 个</span>
+            <span class="text-xs font-bold muted">可切换模型</span>
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="badge">{{ modelSourceLabel(modelCatalogs[provider.id]?.source) }}</span>
+              <span class="badge">{{ modelOptions[provider.id].length }} 个</span>
+            </div>
+          </div>
+          <div v-if="modelCatalogs[provider.id]?.warning" class="mb-3 rounded-xl border border-[var(--warning)]/30 bg-[var(--warning-soft)] p-3 text-xs leading-5 text-[var(--warning)]">
+            <strong class="block">实时模型列表读取失败，切换功能仍然可用</strong>
+            <span class="mt-1 block">{{ modelCatalogs[provider.id]?.warning }}</span>
           </div>
           <div class="grid max-h-48 gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
             <button
@@ -311,12 +392,24 @@ async function testConnection(provider: AIProviderDefinition) {
               type="button"
               class="flex min-h-11 min-w-0 items-center gap-2 rounded-xl border px-3 py-2 text-left text-xs font-bold transition"
               :class="form[provider.modelKey]===modelName?'border-[var(--brand)] bg-[var(--brand-soft)] text-[var(--brand-strong)]':'border-[var(--line)] bg-[var(--surface-muted)] text-[var(--ink-muted)] hover:border-[var(--brand)]'"
-              @click="form[provider.modelKey]=modelName"
+              @click="selectModel(provider, modelName)"
             >
               <span class="min-w-0 flex-1 break-all">{{ modelName }}</span>
+              <span class="badge shrink-0" :class="modelCheckClass(provider, modelName)">{{ modelCheckLabel(provider, modelName) }}</span>
               <CheckCircle2 v-if="form[provider.modelKey]===modelName" class="shrink-0" :size="15"/>
             </button>
           </div>
+        </div>
+
+        <div class="mt-4 flex flex-col gap-3 rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] p-3 text-xs leading-5 sm:flex-row sm:items-start sm:p-4">
+          <Gauge class="mt-0.5 shrink-0 text-[var(--sky)]" :size="18"/>
+          <div class="min-w-0 flex-1">
+            <strong class="block">额度与模型状态</strong>
+            <p class="muted mt-1">{{ provider.quotaHint }}</p>
+          </div>
+          <a class="btn btn-quiet w-full shrink-0 sm:w-auto" :href="provider.quotaURL" target="_blank" rel="noopener noreferrer">
+            {{ provider.quotaLabel }}<ExternalLink :size="14"/>
+          </a>
         </div>
 
         <div
@@ -332,6 +425,7 @@ async function testConnection(provider: AIProviderDefinition) {
               <span class="badge">{{ testResults[provider.id]?.latency_ms }} ms</span>
             </div>
             <p class="muted mt-1 leading-5">{{ testResults[provider.id]?.detail }}</p>
+            <p v-if="testResults[provider.id]?.model" class="muted mt-2 text-xs">检测模型：<code>{{ testResults[provider.id]?.model }}</code></p>
             <p v-if="testResults[provider.id]?.reply" class="mt-3 break-words rounded-lg bg-[var(--surface-solid)] px-3 py-2">
               <span class="muted">模型回复：</span>{{ testResults[provider.id]?.reply }}
             </p>

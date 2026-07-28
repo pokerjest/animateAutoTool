@@ -712,10 +712,15 @@ paths:
       responses: { "200": { $ref: "#/components/responses/Success" } }
     post:
       operationId: listAiModels
+      description: Lists models using the unsaved provider form. If the provider is rate limited, the response can remain 200 with source=cache/fallback/configured, a warning, and a selectable cached or official fallback catalog.
       requestBody: { $ref: "#/components/requestBodies/AIProviderInput" }
       responses:
         "200": { $ref: "#/components/responses/Success" }
         "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
         "502": { $ref: "#/components/responses/Error" }
   /settings/ai/test:
     post:
@@ -731,7 +736,15 @@ paths:
       description: Returns only the current user's displayable user messages and final assistant replies. System prompts, tool calls and tool results are excluded.
       responses:
         "200": { $ref: "#/components/responses/AssistantMessages" }
-    post: { operationId: sendAssistantMessage, requestBody: { $ref: "#/components/requestBodies/JsonObject" }, responses: { "200": { $ref: "#/components/responses/Success" } } }
+    post:
+      operationId: sendAssistantMessage
+      requestBody: { $ref: "#/components/requestBodies/JsonObject" }
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+        "400": { $ref: "#/components/responses/Error" }
+        "412": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
     delete: { operationId: clearAssistantMessages, responses: { "200": { $ref: "#/components/responses/Success" } } }
   /ai/filename-resolutions:
     post:

@@ -54,7 +54,10 @@ function follow_logs() {
 }
 
 function get_pid_by_port() {
-    lsof -ti :$SERVER_PORT
+    # Only return the server that is listening on the configured port.
+    # A broad `lsof -ti :PORT` also returns browser/client processes with an
+    # established connection and can make status/stop target unrelated apps.
+    lsof -tiTCP:$SERVER_PORT -sTCP:LISTEN
 }
 
 function list_port_pids() {

@@ -65,4 +65,21 @@ describe('assistant store', () => {
     const storage = Array.from({ length: localStorage.length }, (_, index) => localStorage.getItem(localStorage.key(index) || '')).join('')
     expect(storage).not.toContain('private media path')
   })
+
+  it('shows the actionable provider error instead of replacing it with a generic failure', async () => {
+    const message = '调用大模型失败：Google Gemini 当前项目额度已达到限制（HTTP 429）；请等待至少 20 秒后重试。'
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      error: { code: 'ai_rate_limited', message },
+    }), {
+      status: 429,
+      headers: { 'Content-Type': 'application/json', 'Retry-After': '20' },
+    })))
+    const store = useAssistantStore()
+
+    await expect(store.send('帮我分析问题')).rejects.toMatchObject({ status: 429, message })
+
+    expect(store.error).toBe(message)
+    expect(store.messages.at(-1)).toEqual({ role: 'user', content: '帮我分析问题' })
+    expect(store.sending).toBe(false)
+  })
 })
