@@ -230,6 +230,134 @@ func TestProcessSubscriptionRecoversExistingQBTaskAfterFailsResponse(t *testing.
 	}
 }
 
+func TestProcessSubscriptionRecoversRejectedTaskByEpisodeAndSavePath(t *testing.T) {
+	withServiceTestDB(t)
+
+	sub := model.Subscription{
+		Title:    "恋爱游戏世界对路人角色很不友好",
+		RSSUrl:   "https://example.test/alternate-title",
+		SavePath: `E:\Bangumi\恋爱游戏世界对路人角色很不友好`,
+		IsActive: true,
+	}
+	if err := db.DB.Create(&sub).Error; err != nil {
+		t.Fatalf("failed to create subscription: %v", err)
+	}
+
+	down := &fakeDownloader{
+		addErr: downloader.ErrTorrentRejected,
+		torrents: []downloader.TorrentInfo{{
+			Hash:        "localized-season-hash",
+			Name:        "[ANi] 女性向游戏世界对路人角色很不友好 第二季 - 03 [1080P]",
+			State:       "downloading",
+			SavePath:    `e:\bangumi\恋爱游戏世界对路人角色很不友好\Season 01`,
+			ContentPath: `e:\bangumi\恋爱游戏世界对路人角色很不友好\Season 01\[ANi] female-game - 03.mkv`,
+			Progress:    0.42,
+		}},
+	}
+	mgr := &SubscriptionManager{
+		RSSParser: fakeRSSParser{episodes: []parser.Episode{{
+			Title:      "[ANi] 女性向游戏世界对路人角色很不友好 第二季 - 03 [1080P]",
+			EpisodeNum: "03",
+			TorrentURL: "magnet:?xt=urn:btih:localized-season-hash",
+		}}},
+		Downloader: down,
+		DB:         db.DB,
+	}
+
+	mgr.ProcessSubscription(&sub)
+
+	var entry model.DownloadLog
+	if err := db.DB.Where("subscription_id = ?", sub.ID).First(&entry).Error; err != nil {
+		t.Fatalf("expected rejected task to be recovered: %v", err)
+	}
+	if entry.InfoHash != "localized-season-hash" {
+		t.Fatalf("expected recovered hash, got %q", entry.InfoHash)
+	}
+	if entry.Status != downloadLogStatusDownloading {
+		t.Fatalf("expected active qB task status, got %q", entry.Status)
+	}
+}
+
+func TestProcessSubscriptionRecoversRejectedHTTPTask(t *testing.T) {
+	withServiceTestDB(t)
+
+	sub := model.Subscription{
+		Title:    "HTTP Torrent Show",
+		RSSUrl:   "https://example.test/http-torrent",
+		IsActive: true,
+	}
+	if err := db.DB.Create(&sub).Error; err != nil {
+		t.Fatalf("failed to create subscription: %v", err)
+	}
+
+	down := &fakeTorrentFileDownloader{
+		fakeDownloader: fakeDownloader{
+			torrents: []downloader.TorrentInfo{{
+				Hash:        "http-existing-hash",
+				Name:        "[Group] HTTP Torrent Show - 02",
+				SavePath:    `downloads\HTTP Torrent Show\Season 01`,
+				ContentPath: `downloads\HTTP Torrent Show\Season 01\episode-02.mkv`,
+				State:       "uploading",
+			}},
+		},
+		uploadErr: downloader.ErrTorrentRejected,
+	}
+	fetcher := &fakeTorrentFetcher{
+		fakeRSSParser: fakeRSSParser{episodes: []parser.Episode{{
+			Title:      "[Group] HTTP Torrent Show - 02",
+			EpisodeNum: "02",
+			TorrentURL: "https://example.test/http-torrent-file",
+		}}},
+		filename: "episode.torrent",
+		data:     []byte("d4:infode"),
+	}
+	mgr := &SubscriptionManager{RSSParser: fetcher, Downloader: down, DB: db.DB}
+
+	mgr.ProcessSubscription(&sub)
+
+	var entry model.DownloadLog
+	if err := db.DB.Where("subscription_id = ?", sub.ID).First(&entry).Error; err != nil {
+		t.Fatalf("expected HTTP rejected task to be recovered: %v", err)
+	}
+	if entry.InfoHash != "http-existing-hash" {
+		t.Fatalf("expected recovered HTTP task hash, got %q", entry.InfoHash)
+	}
+}
+
+func TestFindExistingTorrentDoesNotCrossEpisodeOrDirectory(t *testing.T) {
+	withServiceTestDB(t)
+
+	sub := model.Subscription{
+		Title:    "Scoped Show",
+		RSSUrl:   "https://example.test/scoped",
+		SavePath: `/downloads/Scoped Show`,
+		IsActive: true,
+	}
+	down := &fakeDownloader{torrents: []downloader.TorrentInfo{
+		{
+			Hash:        "wrong-episode",
+			Name:        "[Group] Scoped Show - 02",
+			SavePath:    `/downloads/Scoped Show/Season 01`,
+			ContentPath: `/downloads/Scoped Show/Season 01/Scoped Show - 02.mkv`,
+		},
+		{
+			Hash:        "wrong-directory",
+			Name:        "[Other] Another Show - 01",
+			SavePath:    `/downloads/Other Show/Season 01`,
+			ContentPath: `/downloads/Other Show/Season 01/Scoped Show - 01.mkv`,
+		},
+	}}
+	mgr := &SubscriptionManager{Downloader: down}
+
+	got, found, err := mgr.findExistingTorrent(context.Background(), &sub, "[Group] Scoped Show - 01", "S01", "01", "episode:1:1")
+	if err != nil {
+		t.Fatalf("findExistingTorrent returned error: %v", err)
+	}
+	if found {
+		t.Fatalf("expected no match, got %q", got.Hash)
+	}
+}
+
 func TestAddTorrentFetchesHTTPFileAndUploadsIt(t *testing.T) {
 	t.Parallel()
 

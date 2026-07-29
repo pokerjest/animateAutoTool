@@ -60,6 +60,12 @@ func loadSubscriptionTrendReport(windowDays int) SubscriptionTrendReport {
 		switch sub.LastRunStatus {
 		case service.SubscriptionRunStatusSuccess:
 			report.SuccessCount++
+		case service.SubscriptionRunStatusIdle:
+			// An idle run completed its RSS check successfully but found no
+			// new item (for example, all entries were already tracked). Count
+			// it as a normal check so the overview does not misleadingly show
+			// "success 0" for healthy subscriptions.
+			report.SuccessCount++
 		case service.SubscriptionRunStatusWarning:
 			report.WarningCount++
 			report.ActiveIssueCount++

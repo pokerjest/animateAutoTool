@@ -223,7 +223,7 @@ func (m *SubscriptionManager) ProcessSubscriptionWithSourceContext(ctx context.C
 		addErr := m.addTorrent(ctx, ep.TorrentURL, savePath, "Anime", false)
 		var matchedTorrent downloader.TorrentInfo
 		recoveredExisting := false
-		if errors.Is(addErr, downloader.ErrTorrentRejected) {
+		if isTorrentRejectedError(addErr) {
 			existingTorrent, found, lookupErr := m.findExistingTorrent(ctx, sub, ep.Title, seasonVal, episodeNum, identityKey)
 			if lookupErr != nil {
 				log.Printf("SubscriptionManager: failed to verify rejected qB task for %s - %s: %v", sub.Title, ep.Title, lookupErr)
@@ -375,6 +375,17 @@ func subscriptionAcceptedSummary(accepted, recovered int) string {
 	}
 }
 
+type existingTorrentMatchContext struct {
+	releaseTitle       string
+	normalizedRelease  string
+	expectedPath       string
+	targetSeason       string
+	targetEpisode      string
+	identityKey        string
+	subscriptionTitle  string
+	allowMultiSubgroup bool
+}
+
 func (m *SubscriptionManager) findExistingTorrent(
 	ctx context.Context,
 	sub *model.Subscription,
@@ -397,42 +408,34 @@ func (m *SubscriptionManager) findExistingTorrent(
 	case downloader.TorrentLister:
 		torrents, err = source.ListTorrents()
 	default:
+		log.Printf("SubscriptionManager: downloader %T cannot list qB tasks while verifying a rejected torrent", m.Downloader)
 		return downloader.TorrentInfo{}, false, nil
 	}
 	if err != nil {
 		return downloader.TorrentInfo{}, false, err
 	}
+	log.Printf("SubscriptionManager: checking %d qB tasks after rejected torrent", len(torrents))
 
-	releaseTitle = strings.TrimSpace(releaseTitle)
-	normalizedRelease := parser.NormalizeReleaseTitle(releaseTitle)
+	matchCtx := existingTorrentMatchContext{
+		releaseTitle:       strings.TrimSpace(releaseTitle),
+		targetSeason:       parser.NormalizeSeasonNumber(seasonValue),
+		targetEpisode:      parser.NormalizeEpisodeNumber(episode),
+		identityKey:        identityKey,
+		allowMultiSubgroup: sub != nil && sub.AllowMultiSubgroup,
+	}
+	matchCtx.normalizedRelease = parser.NormalizeReleaseTitle(matchCtx.releaseTitle)
+	if sub != nil {
+		matchCtx.expectedPath = normalizeTorrentPath(m.resolveSavePath(sub, seasonValue))
+		matchCtx.subscriptionTitle = strings.TrimSpace(sub.Title)
+	}
+	if matchCtx.targetEpisode == "" {
+		matchCtx.targetEpisode = parser.EpisodeNumberFromTitle(matchCtx.releaseTitle)
+	}
+
 	bestScore := 0
 	best := downloader.TorrentInfo{}
 	for _, torrent := range torrents {
-		name := strings.TrimSpace(torrent.Name)
-		if name == "" {
-			continue
-		}
-
-		score := 0
-		switch {
-		case strings.EqualFold(name, releaseTitle):
-			score = 100
-		case normalizedRelease != "" && parser.NormalizeReleaseTitle(name) == normalizedRelease:
-			score = 90
-		default:
-			candidateSeason, candidateEpisode := parser.EpisodeIdentityFromTitle(name)
-			if candidateEpisode == "" {
-				candidateEpisode = parser.EpisodeNumberFromTitle(name)
-			}
-			if candidateSeason == "" {
-				candidateSeason = seasonValue
-			}
-			candidateIdentity := subscriptionEpisodeIdentity(candidateSeason, candidateEpisode, name, sub != nil && sub.AllowMultiSubgroup)
-			if identityKey != "" && candidateIdentity == identityKey &&
-				(titlesLookRelated(name, releaseTitle) || (sub != nil && titlesLookRelated(name, sub.Title))) {
-				score = 80
-			}
-		}
+		score := scoreExistingTorrent(torrent, matchCtx)
 		if score == 0 {
 			continue
 		}
@@ -441,7 +444,120 @@ func (m *SubscriptionManager) findExistingTorrent(
 			best = torrent
 		}
 	}
+	if bestScore == 0 {
+		log.Printf("SubscriptionManager: no existing qB task matched rejected torrent (tasks=%d, episode=%s, target=%s, subscription=%s)",
+			len(torrents), matchCtx.targetEpisode, matchCtx.expectedPath, matchCtx.subscriptionTitle)
+	}
 	return best, bestScore > 0, nil
+}
+
+func scoreExistingTorrent(torrent downloader.TorrentInfo, matchCtx existingTorrentMatchContext) int {
+	name := strings.TrimSpace(torrent.Name)
+	if name == "" {
+		return 0
+	}
+
+	pathMatch := torrentPathMatches(torrent.SavePath, matchCtx.expectedPath) ||
+		torrentPathMatches(torrent.ContentPath, matchCtx.expectedPath)
+	candidateSeason, candidateEpisode := parser.EpisodeIdentityFromTitle(name)
+	if candidateEpisode == "" {
+		candidateEpisode = parser.EpisodeNumberFromTitle(strings.ReplaceAll(torrentContentPath(torrent), `\`, "/"))
+	}
+	candidateSeason = parser.NormalizeSeasonNumber(candidateSeason)
+	candidateEpisode = parser.NormalizeEpisodeNumber(candidateEpisode)
+	episodeMatch := matchCtx.targetEpisode != "" && candidateEpisode == matchCtx.targetEpisode
+	titleRelated := titlesLookRelated(name, matchCtx.releaseTitle) ||
+		(matchCtx.subscriptionTitle != "" && titlesLookRelated(name, matchCtx.subscriptionTitle))
+
+	score := scoreExistingTorrentEvidence(
+		name,
+		candidateSeason,
+		candidateEpisode,
+		episodeMatch,
+		titleRelated,
+		pathMatch,
+		matchCtx,
+	)
+	if pathMatch && score > 0 {
+		score += 12
+	}
+	return score
+}
+
+func scoreExistingTorrentEvidence(
+	name string,
+	candidateSeason string,
+	candidateEpisode string,
+	episodeMatch bool,
+	titleRelated bool,
+	pathMatch bool,
+	matchCtx existingTorrentMatchContext,
+) int {
+	switch {
+	case strings.EqualFold(name, matchCtx.releaseTitle):
+		return 110
+	case matchCtx.normalizedRelease != "" && parser.NormalizeReleaseTitle(name) == matchCtx.normalizedRelease:
+		return 100
+	case matchCtx.identityKey != "" &&
+		subscriptionEpisodeIdentity(candidateSeason, candidateEpisode, name, matchCtx.allowMultiSubgroup) == matchCtx.identityKey &&
+		titleRelated:
+		if matchCtx.expectedPath == "" || pathMatch {
+			return 88
+		}
+	case episodeMatch && titleRelated:
+		// A feed may use a localized/alternate series title or include a
+		// season marker that does not match the subscription's storage season.
+		if matchCtx.expectedPath != "" && !pathMatch {
+			return 0
+		}
+		if matchCtx.targetSeason == "" || candidateSeason == "" || candidateSeason == matchCtx.targetSeason {
+			return 82
+		}
+		if pathMatch {
+			return 78
+		}
+	case episodeMatch && pathMatch:
+		// The path is the strongest evidence available when qB's display name
+		// has been normalized or replaced by a localized title.
+		return 72
+	case pathMatch && titleRelated && candidateEpisode == "":
+		return 55
+	}
+	return 0
+}
+
+// isTorrentRejectedError accepts the typed qB error as well as wrapped errors
+// from downloader adapters. Some older adapters only preserved qB's literal
+// "Fails." response, so matching the stable server text keeps reconciliation
+// working across versions.
+func isTorrentRejectedError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, downloader.ErrTorrentRejected) {
+		return true
+	}
+	lower := strings.ToLower(err.Error())
+	return strings.Contains(lower, "rejected the torrent") || strings.Contains(lower, "fails.")
+}
+
+func normalizeTorrentPath(value string) string {
+	value = strings.TrimSpace(strings.ReplaceAll(value, `\`, "/"))
+	value = strings.TrimPrefix(value, "./")
+	for strings.Contains(value, "//") {
+		value = strings.ReplaceAll(value, "//", "/")
+	}
+	value = strings.Trim(value, "/")
+	return strings.ToLower(value)
+}
+
+func torrentPathMatches(candidate, expected string) bool {
+	candidate = normalizeTorrentPath(candidate)
+	expected = normalizeTorrentPath(expected)
+	if candidate == "" || expected == "" {
+		return false
+	}
+	return candidate == expected || strings.HasPrefix(candidate, expected+"/")
 }
 
 // subscriptionEpisodeIdentity returns the stable identity used to avoid

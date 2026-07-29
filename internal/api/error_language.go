@@ -10,6 +10,9 @@ func humanizeOperationError(raw string) string {
 
 	lower := strings.ToLower(raw)
 	switch {
+	case strings.Contains(lower, "rejected the torrent"),
+		strings.Contains(lower, "fails."):
+		return "qBittorrent 拒绝了这条种子，可能是重复任务、种子无效或目标路径不可写。"
 	case strings.Contains(lower, "qb offline"),
 		strings.Contains(lower, "qb timeout"),
 		strings.Contains(lower, "invalid credentials"),

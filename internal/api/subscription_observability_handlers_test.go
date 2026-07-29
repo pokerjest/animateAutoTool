@@ -161,6 +161,38 @@ func TestSubscriptionTrendsEndpointRendersRecentLeaders(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "最近最活跃")
 }
 
+func TestSubscriptionTrendsCountsIdleChecksAsSuccess(t *testing.T) {
+	resetAuthFixtures(t)
+	before := loadSubscriptionTrendReport(7)
+	now := time.Now()
+	sub := model.Subscription{
+		Title:          "No New Episodes",
+		RSSUrl:         "https://example.test/no-new",
+		IsActive:       true,
+		LastRunStatus:  service.SubscriptionRunStatusIdle,
+		LastRunSummary: "本次 RSS 返回 4 条资源，均已存在于历史下载记录",
+		LastCheckAt:    &now,
+		LastSuccessAt:  &now,
+	}
+	if err := db.DB.Create(&sub).Error; err != nil {
+		t.Fatalf("failed to seed idle subscription: %v", err)
+	}
+
+	report := loadSubscriptionTrendReport(7)
+	if report.CheckedCount != before.CheckedCount+1 {
+		t.Fatalf("expected one additional checked subscription, before=%d after=%d", before.CheckedCount, report.CheckedCount)
+	}
+	if report.SuccessCount != before.SuccessCount+1 {
+		t.Fatalf("expected idle check to count as success, before=%d after=%d", before.SuccessCount, report.SuccessCount)
+	}
+	if report.WarningCount != before.WarningCount || report.ErrorCount != before.ErrorCount ||
+		report.ActiveIssueCount != before.ActiveIssueCount {
+		t.Fatalf("idle check should not add an issue: before=(warning=%d,error=%d,active=%d) after=(warning=%d,error=%d,active=%d)",
+			before.WarningCount, before.ErrorCount, before.ActiveIssueCount,
+			report.WarningCount, report.ErrorCount, report.ActiveIssueCount)
+	}
+}
+
 func TestSubscriptionProcessFlowUpdatesTrendEndpoint(t *testing.T) {
 	resetAuthFixtures(t)
 	r := setupRouter()

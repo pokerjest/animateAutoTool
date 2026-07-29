@@ -592,6 +592,7 @@ func TestTaskOverviewTextCatalogKeepsStatusLanguageConsistent(t *testing.T) {
 
 func TestHumanizeOperationErrorUsesFriendlyExplanations(t *testing.T) {
 	assert.Equal(t, "无法连接 qBittorrent，请检查 WebUI 地址、账号或服务状态。", humanizeOperationError("qb offline"))
+	assert.Equal(t, "qBittorrent 拒绝了这条种子，可能是重复任务、种子无效或目标路径不可写。", humanizeOperationError("upload torrent file to downloader: qBittorrent rejected the torrent (Fails.)"))
 	assert.Equal(t, "订阅源暂时不可用，请稍后重试或检查 RSS 配置。", humanizeOperationError("rss unavailable"))
 	assert.Equal(t, "权限不足，请检查目录或文件访问权限。", humanizeOperationError("permission denied"))
 }
