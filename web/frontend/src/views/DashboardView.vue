@@ -5,6 +5,7 @@ import { AlertCircle, ArrowRight, CheckCircle2, Download, Library, Play, PlayCir
 import { api, posterThumbnailURL } from '../api/client'
 import type { ContinueWatchingItem, ContinueWatchingResponse, Dashboard, TaskAccepted } from '../api/types'
 import AsyncButton from '../components/AsyncButton.vue'
+import DashboardUpdaterCard from '../components/DashboardUpdaterCard.vue'
 import PageHeader from '../components/PageHeader.vue'
 import StateBlock from '../components/StateBlock.vue'
 import { useAsyncActions } from '../composables/useAsyncActions'
@@ -67,6 +68,8 @@ function remainingLabel(seconds: number) {
           </button>
         </div>
       </section>
+
+      <DashboardUpdaterCard />
 
       <section class="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <article v-for="item in [{ label: '活跃订阅', value: query.data.value.active_subscriptions, icon: Tv, tone: 'brand' }, { label: '下载记录', value: query.data.value.downloads, icon: Download, tone: 'sky' }, { label: '番剧图鉴', value: query.data.value.library_items, icon: Library, tone: 'brand' }, { label: '本地剧集', value: query.data.value.local_series, icon: PlayCircle, tone: 'sky' }, { label: '待处理问题', value: query.data.value.open_issues, icon: AlertCircle, tone: 'danger' }]" :key="item.label" class="panel p-5">

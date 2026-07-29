@@ -2,7 +2,9 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -621,15 +623,53 @@ func V1MaintenanceHandler(c *gin.Context) {
 	v1Data(c, http.StatusOK, gin.H{"deployment": buildDeploymentCheckReport(), "updater": updater.Snapshot()})
 }
 
+func V1UpdaterReleasesHandler(c *gin.Context) {
+	channel, err := updater.ParseReleaseChannel(c.Query("channel"))
+	if err != nil {
+		v1Error(c, http.StatusBadRequest, "invalid_update_channel", err.Error())
+		return
+	}
+	catalog, err := updater.ListReleases(channel)
+	if err != nil {
+		v1Error(c, http.StatusBadGateway, "update_releases_unavailable", "读取 GitHub Release 列表失败: "+err.Error())
+		return
+	}
+	v1Data(c, http.StatusOK, catalog)
+}
+
 func V1UpdaterActionHandler(c *gin.Context) {
 	action := c.Param("action")
 	taskID := "repo-update-" + action
 	var title string
+	version := ""
 	switch action {
 	case "check":
 		title = "检查应用更新"
 	case "apply":
 		title = "下载并应用更新"
+		if c.Request.Body != nil && c.Request.ContentLength != 0 {
+			var input struct {
+				Version string `json:"version"`
+			}
+			decoder := json.NewDecoder(io.LimitReader(c.Request.Body, 8*1024))
+			decoder.DisallowUnknownFields()
+			if err := decoder.Decode(&input); err != nil && err != io.EOF {
+				v1Error(c, http.StatusBadRequest, "invalid_update_request", "更新请求格式无效")
+				return
+			}
+			if err := decoder.Decode(&struct{}{}); err != io.EOF {
+				v1Error(c, http.StatusBadRequest, "invalid_update_request", "更新请求只能包含一个 JSON 对象")
+				return
+			}
+			version = strings.TrimSpace(input.Version)
+			if version != "" && !updater.ValidReleaseVersion(version) {
+				v1Error(c, http.StatusBadRequest, "invalid_update_version", "指定的版本号格式无效")
+				return
+			}
+			if version != "" {
+				title = "更新到 " + version
+			}
+		}
 	default:
 		v1Error(c, http.StatusBadRequest, "invalid_update_action", "不支持的更新操作")
 		return
@@ -639,6 +679,8 @@ func V1UpdaterActionHandler(c *gin.Context) {
 		var status updater.Status
 		if action == "check" {
 			status = updater.CheckNow("api-v1")
+		} else if version != "" {
+			status = updater.CheckAndPullVersionNow("api-v1", version)
 		} else {
 			status = updater.CheckAndPullNow("api-v1")
 		}
@@ -648,7 +690,7 @@ func V1UpdaterActionHandler(c *gin.Context) {
 		}
 		taskstate.Global.Complete(taskID, status.LastMessage)
 	}()
-	v1Message(c, http.StatusAccepted, "更新任务已经启动", gin.H{"task_id": taskID, "status": "running"})
+	v1Message(c, http.StatusAccepted, "更新任务已经启动", gin.H{"task_id": taskID, "status": "running", "version": version})
 }
 
 func V1R2ListHandler(c *gin.Context) { v1RunJSONHandler(c, ListR2BackupsHandler) }

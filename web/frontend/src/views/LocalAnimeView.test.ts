@@ -113,13 +113,12 @@ describe('LocalAnimeView pagination', () => {
     await vi.waitFor(() => expect(wrapper.text()).toContain('198 部本地番剧'))
 
     await wrapper.findAll('button').find(button => button.text().includes('批量整理'))!.trigger('click')
-    const selectButtons = wrapper.findAll('button').filter(button => button.text().includes('选择此番剧'))
-    await selectButtons[0].trigger('click')
+    await wrapper.findAll('[data-testid="poster-open"]')[0].trigger('click')
     await wrapper.findAll('button').find(button => button.text().includes('预览并整理'))!.trigger('click')
     expect(wrapper.get('[data-testid="organize-selection"]').text()).toContain('"anime_ids":[1]')
 
     await wrapper.findAll('button').find(button => button.text().includes('全选当前搜索结果'))!.trigger('click')
-    await wrapper.findAll('button').filter(button => button.text().includes('取消选择'))[0].trigger('click')
+    await wrapper.findAll('[data-testid="poster-open"]')[0].trigger('click')
     await wrapper.findAll('button').find(button => button.text().includes('预览并整理'))!.trigger('click')
     const selection = wrapper.get('[data-testid="organize-selection"]').text()
     expect(selection).toContain('"mode":"query"')
@@ -131,10 +130,10 @@ describe('LocalAnimeView pagination', () => {
     const { wrapper } = mountView()
     await vi.waitFor(() => expect(wrapper.text()).toContain('媒体番剧'))
 
-    const link = wrapper.find('a[data-to*="media/local-player"]')
-    expect(link.exists()).toBe(true)
-    expect(link.attributes('data-to')).toContain('"anime":"7"')
-    expect(link.attributes('data-to')).toContain('"autoplay":"1"')
+    expect(wrapper.text()).not.toContain('查看与播放')
+    expect(wrapper.text()).toContain('点击卡片播放')
+    expect(wrapper.find('button[aria-label="整理文件"]').exists()).toBe(true)
+    expect(wrapper.find('button[aria-label="元数据与匹配"]').exists()).toBe(true)
   })
 
   it('opens playback from the whole card outside batch mode', async () => {

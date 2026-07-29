@@ -71,7 +71,7 @@ describe('metadata search', () => {
     await vi.waitFor(() => expect(wrapper.text()).toContain('测试番剧'))
     expect(wrapper.text()).not.toContain('详情与匹配')
     const poster = wrapper.get('[data-testid="poster-open"]')
-    expect(poster.attributes('aria-label')).toBe('打开 测试番剧 详情')
+    expect(poster.attributes('aria-label')).toBe('查看详情 测试番剧')
     await poster.trigger('click')
     const inputs = wrapper.findAll('input')
     await inputs[1].setValue('测试')

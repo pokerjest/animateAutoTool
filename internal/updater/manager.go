@@ -92,6 +92,10 @@ type Manager struct {
 	cachedRelease       *githubRelease
 	cachedRepoOwner     string
 	cachedRepoName      string
+	releaseCatalogCache []githubRelease
+	releaseCatalogAt    time.Time
+	releaseCatalogOwner string
+	releaseCatalogName  string
 	consecutiveFailures int
 	backoffUntil        time.Time
 }
@@ -144,6 +148,11 @@ func CheckNow(triggerSource string) Status {
 func CheckAndPullNow(triggerSource string) Status {
 	Start()
 	return manager.runCheck(triggerSource, true)
+}
+
+func CheckAndPullVersionNow(triggerSource, version string) Status {
+	Start()
+	return manager.runCheckVersion(triggerSource, version)
 }
 
 func TriggerCheckNow(triggerSource string) Status {
@@ -222,7 +231,11 @@ func (m *Manager) runPeriodicCheck(source string) {
 }
 
 func (m *Manager) runCheck(source string, applyWhenBehind bool) Status {
-	return m.runCheckInternal(source, applyWhenBehind, false)
+	return m.runCheckInternal(source, applyWhenBehind, false, "")
+}
+
+func (m *Manager) runCheckVersion(source, version string) Status {
+	return m.runCheckInternal(source, true, false, strings.TrimSpace(version))
 }
 
 func (m *Manager) runCheckAsync(source string, applyWhenBehind bool) Status {
@@ -231,7 +244,7 @@ func (m *Manager) runCheckAsync(source string, applyWhenBehind bool) Status {
 	if !started {
 		return snapshot
 	}
-	go m.runCheckInternal(source, applyWhenBehind, true)
+	go m.runCheckInternal(source, applyWhenBehind, true, "")
 	return snapshot
 }
 
@@ -297,7 +310,7 @@ func (m *Manager) updateProgress(phase, message string, currentBytes, totalBytes
 	}
 }
 
-func (m *Manager) runCheckInternal(source string, applyWhenBehind, alreadyStarted bool) Status {
+func (m *Manager) runCheckInternal(source string, applyWhenBehind, alreadyStarted bool, targetVersion string) Status {
 	cfg := loadSettings()
 	now := time.Now()
 
@@ -353,13 +366,28 @@ func (m *Manager) runCheckInternal(source string, applyWhenBehind, alreadyStarte
 	}
 
 	m.updateProgress("连接 GitHub", "正在获取最新 Release 信息...", 0, 0)
-	release, notModified, retryAfter, err := m.fetchLatestRelease(cfg.RepoOwner, cfg.RepoName, currentVersionWantsPrerelease(current))
+	var (
+		release     *githubRelease
+		notModified bool
+		retryAfter  time.Time
+		err         error
+	)
+	if targetVersion != "" {
+		targetVersion = normalizeVersion(targetVersion)
+		m.updateProgress("连接 GitHub", fmt.Sprintf("正在重新校验指定版本 %s...", targetVersion), 0, 0)
+		release, retryAfter, err = m.fetchReleaseByVersion(cfg.RepoOwner, cfg.RepoName, targetVersion)
+	} else {
+		release, notModified, retryAfter, err = m.fetchLatestRelease(cfg.RepoOwner, cfg.RepoName, currentVersionWantsPrerelease(current))
+	}
 	if err != nil {
 		backoffUntil = m.recordFailure(now, retryAfter)
 		result = resultError
 		message = "获取最新 Release 失败"
+		if targetVersion != "" {
+			message = "获取指定 Release 失败"
+		}
 		if !backoffUntil.IsZero() {
-			message = fmt.Sprintf("获取最新 Release 失败，自动重试时间：%s", backoffUntil.Local().Format("2006-01-02 15:04:05"))
+			message = fmt.Sprintf("%s，自动重试时间：%s", message, backoffUntil.Local().Format("2006-01-02 15:04:05"))
 		}
 		errText = err.Error()
 		return finish()
@@ -396,14 +424,28 @@ func (m *Manager) runCheckInternal(source string, applyWhenBehind, alreadyStarte
 	cmp := compareVersions(current, latest)
 	if cmp >= 0 {
 		hasUpdate = false
+		if targetVersion != "" && cmp > 0 {
+			result = "refused"
+			message = fmt.Sprintf("不允许从 %s 在线降级到 %s", current, latest)
+			errText = "selected release is older than the running version"
+			return finish()
+		}
 		result = "up_to_date"
-		message = "当前已是最新版本"
+		if targetVersion != "" {
+			message = fmt.Sprintf("当前已经是 %s", latest)
+		} else {
+			message = "当前已是最新版本"
+		}
 		return finish()
 	}
 
 	hasUpdate = true
 	result = "behind"
-	message = fmt.Sprintf("检测到新版本 %s", latest)
+	if targetVersion != "" {
+		message = fmt.Sprintf("已选择版本 %s", latest)
+	} else {
+		message = fmt.Sprintf("检测到新版本 %s", latest)
+	}
 
 	if !applyWhenBehind {
 		return finish()
@@ -461,6 +503,10 @@ func (m *Manager) applySettingsLocked(cfg settings) {
 		m.cachedRelease = nil
 		m.cachedRepoOwner = ""
 		m.cachedRepoName = ""
+		m.releaseCatalogCache = nil
+		m.releaseCatalogAt = time.Time{}
+		m.releaseCatalogOwner = ""
+		m.releaseCatalogName = ""
 	}
 	m.status.Enabled = cfg.Enabled
 	m.status.AutoApplyEnable = cfg.AutoApplyEnable

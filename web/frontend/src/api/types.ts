@@ -78,6 +78,8 @@ export type MediaLibrary = components['schemas']['MediaLibrary']
 export type MediaItem = components['schemas']['MediaItem']
 export type MediaPlaybackInfo = components['schemas']['MediaPlaybackInfo']
 export type MediaPage = components['schemas']['MediaPage']
+export type UpdateRelease = components['schemas']['UpdateRelease']
+export type UpdateReleaseCatalog = components['schemas']['UpdateReleaseCatalog']
 
 export interface AIProposal {
   id: string

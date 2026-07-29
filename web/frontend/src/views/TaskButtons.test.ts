@@ -42,6 +42,7 @@ describe('background task buttons', () => {
       const path = String(input)
       if (path.endsWith('/api/v1/dashboard')) return response({ active_subscriptions: 0, downloads: 0, library_items: 0, local_series: 0, open_issues: 0, services: {}, tasks: [], recent_downloads: [] })
       if (path.includes('/api/v1/playback/continue')) return response({ items: [] })
+      if (path.includes('/api/v1/settings/updater/releases')) return response({ channel: 'stable', current_version: 'v0.9.7', items: [] })
       if (path.endsWith('/api/v1/tasks/sync') && init?.method === 'POST') return response({ task_id: 'manual-sync', status: 'running' }, 202)
       throw new Error(`unexpected request: ${path}`)
     }))
