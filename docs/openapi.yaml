@@ -706,8 +706,29 @@ paths:
         "400": { $ref: "#/components/responses/Error" }
   /settings/maintenance:
     get: { operationId: getMaintenance, responses: { "200": { $ref: "#/components/responses/Success" } } }
+  /settings/updater/releases:
+    get:
+      operationId: listUpdaterReleases
+      description: Lists published GitHub releases for the selected manual update channel. Stable excludes prereleases; beta includes both stable and prerelease builds.
+      parameters:
+        - { name: channel, in: query, required: false, schema: { type: string, enum: [stable, beta], default: stable } }
+      responses:
+        "200": { $ref: "#/components/responses/UpdateReleaseCatalog" }
+        "400": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
   /settings/updater/{action}:
-    post: { operationId: runUpdaterAction, parameters: [{ name: action, in: path, required: true, schema: { type: string, enum: [check, apply] } }], responses: { "202": { $ref: "#/components/responses/TaskAccepted" } } }
+    post:
+      operationId: runUpdaterAction
+      description: Checks for an update or applies one. When action is apply, version can pin a published release; the server re-fetches that release and never trusts a client-supplied asset URL.
+      parameters: [{ name: action, in: path, required: true, schema: { type: string, enum: [check, apply] } }]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateApplyInput" }
+      responses:
+        "202": { $ref: "#/components/responses/TaskAccepted" }
+        "400": { $ref: "#/components/responses/Error" }
   /settings/ai:
     get: { operationId: getAiSettings, responses: { "200": { $ref: "#/components/responses/Success" } } }
   /settings/ai/models:
@@ -867,6 +888,16 @@ components:
                   data: { $ref: "#/components/schemas/SessionState" }
     Paginated: { description: Paginated successful response, content: { application/json: { schema: { $ref: "#/components/schemas/PaginatedEnvelope" } } } }
     TaskAccepted: { description: Background task accepted, content: { application/json: { schema: { $ref: "#/components/schemas/TaskEnvelope" } } } }
+    UpdateReleaseCatalog:
+      description: Releases visible in the selected manual update channel
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/Envelope"
+              - type: object
+                properties:
+                  data: { $ref: "#/components/schemas/UpdateReleaseCatalog" }
     AIAnalysisAccepted:
       description: AI analysis task accepted
       content:
@@ -1400,6 +1431,34 @@ components:
       properties:
         task_id: { type: string, minLength: 1 }
         status: { type: string, enum: [queued, running] }
+    UpdateApplyInput:
+      type: object
+      additionalProperties: false
+      properties:
+        version: { type: string, pattern: "^v?[0-9]+\\.[0-9]+\\.[0-9]+(?:\\.[0-9]+)?(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$" }
+    UpdateRelease:
+      type: object
+      additionalProperties: false
+      required: [version, prerelease, release_url, asset_available, newer_than_current]
+      properties:
+        version: { type: string }
+        prerelease: { type: boolean }
+        published_at: { type: string, format: date-time }
+        release_url: { type: string, format: uri }
+        asset_name: { type: string }
+        asset_available: { type: boolean }
+        newer_than_current: { type: boolean }
+    UpdateReleaseCatalog:
+      type: object
+      additionalProperties: false
+      required: [channel, current_version, items]
+      properties:
+        channel: { type: string, enum: [stable, beta] }
+        current_version: { type: string }
+        latest_version: { type: string }
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/UpdateRelease" }
     AIAnalysisAccepted:
       type: object
       required: [task_id, proposal_id, status]

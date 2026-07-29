@@ -206,6 +206,7 @@ func initV1Routes(r *gin.Engine) {
 		protected.POST("/settings/proxy/test", V1ProxyTestHandler)
 		protected.GET("/settings/connections/:provider", V1ConnectionStatusHandler)
 		protected.GET("/settings/maintenance", V1MaintenanceHandler)
+		protected.GET("/settings/updater/releases", V1UpdaterReleasesHandler)
 		protected.POST("/settings/updater/:action", V1UpdaterActionHandler)
 		protected.GET("/settings/ai", V1AIStatusHandler)
 		protected.GET("/settings/ai/models", V1AIModelsHandler)

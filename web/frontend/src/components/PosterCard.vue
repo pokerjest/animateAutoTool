@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { ImageOff } from '@lucide/vue'
+import { ChevronRight, ImageOff } from '@lucide/vue'
 import { handlePosterError, posterThumbnailURL } from '../api/client'
 
 const props = defineProps<{
@@ -10,11 +10,13 @@ const props = defineProps<{
   meta?: string
   badges?: string[]
   openable?: boolean
+  openLabel?: string
 }>()
 
 const emit = defineEmits<{ open: [] }>()
 const failed = defineModel<boolean>('failed', { default: false })
 const src = computed(() => posterThumbnailURL(props.image, 360))
+const openLabel = computed(() => props.openLabel ?? '')
 
 function onImageError(event: Event) {
   if (!handlePosterError(event, props.fallbackImage)) failed.value = true
@@ -33,10 +35,11 @@ function onCardClick(event: MouseEvent) {
 
 <template>
   <article
-    class="panel group overflow-hidden"
-    :class="openable ? 'cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)]' : ''"
-    :aria-label="openable ? `打开 ${title} 详情` : undefined"
+    class="panel poster-card group"
+    :class="openable ? 'poster-card-openable focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)]' : ''"
+    :aria-label="openable ? (openLabel ? `${openLabel} ${title}` : `打开 ${title} 详情`) : undefined"
     :data-testid="openable ? 'poster-open' : undefined"
+    :data-openable="openable || undefined"
     :role="openable ? 'button' : undefined"
     :tabindex="openable ? 0 : undefined"
     @click="onCardClick"
@@ -46,6 +49,9 @@ function onCardClick(event: MouseEvent) {
     <div
       class="relative block aspect-[2/3] w-full overflow-hidden bg-[var(--surface-muted)] text-left"
     >
+      <div v-if="$slots.actions" class="poster-card-tools" @click.stop>
+        <slot name="actions" />
+      </div>
       <img
         v-if="!failed"
         :src="src"
@@ -61,7 +67,7 @@ function onCardClick(event: MouseEvent) {
       </div>
     </div>
 
-    <div class="p-3">
+    <div class="poster-card-body p-3">
       <div v-if="badges?.length" class="mb-2 flex flex-wrap gap-1.5">
         <span v-for="badge in badges" :key="badge" class="badge">
           {{ badge }}
@@ -72,6 +78,10 @@ function onCardClick(event: MouseEvent) {
       </h3>
       <p v-if="meta" class="muted mt-1 truncate text-xs">{{ meta }}</p>
       <slot />
+      <div v-if="openable && openLabel" class="poster-card-open-cue" aria-hidden="true">
+        <span>{{ openLabel }}</span>
+        <ChevronRight :size="15" />
+      </div>
     </div>
   </article>
 </template>

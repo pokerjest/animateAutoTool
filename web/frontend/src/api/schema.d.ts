@@ -1542,6 +1542,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/settings/updater/releases": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Lists published GitHub releases for the selected manual update channel. Stable excludes prereleases; beta includes both stable and prerelease builds. */
+        get: operations["listUpdaterReleases"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/settings/updater/{action}": {
         parameters: {
             query?: never;
@@ -1551,6 +1568,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /** @description Checks for an update or applies one. When action is apply, version can pin a published release; the server re-fetches that release and never trusts a client-supplied asset URL. */
         post: operations["runUpdaterAction"];
         delete?: never;
         options?: never;
@@ -2220,6 +2238,27 @@ export interface components {
             /** @enum {string} */
             status: "queued" | "running";
         };
+        UpdateApplyInput: {
+            version?: string;
+        };
+        UpdateRelease: {
+            version: string;
+            prerelease: boolean;
+            /** Format: date-time */
+            published_at?: string;
+            /** Format: uri */
+            release_url: string;
+            asset_name?: string;
+            asset_available: boolean;
+            newer_than_current: boolean;
+        };
+        UpdateReleaseCatalog: {
+            /** @enum {string} */
+            channel: "stable" | "beta";
+            current_version: string;
+            latest_version?: string;
+            items: components["schemas"]["UpdateRelease"][];
+        };
         AIAnalysisAccepted: {
             task_id: string;
             proposal_id: string;
@@ -2359,6 +2398,17 @@ export interface components {
             };
             content: {
                 "application/json": components["schemas"]["TaskEnvelope"];
+            };
+        };
+        /** @description Releases visible in the selected manual update channel */
+        UpdateReleaseCatalog: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Envelope"] & {
+                    data?: components["schemas"]["UpdateReleaseCatalog"];
+                };
             };
         };
         /** @description AI analysis task accepted */
@@ -4296,6 +4346,22 @@ export interface operations {
             200: components["responses"]["Success"];
         };
     };
+    listUpdaterReleases: {
+        parameters: {
+            query?: {
+                channel?: "stable" | "beta";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["UpdateReleaseCatalog"];
+            400: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+        };
+    };
     runUpdaterAction: {
         parameters: {
             query?: never;
@@ -4305,9 +4371,14 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["UpdateApplyInput"];
+            };
+        };
         responses: {
             202: components["responses"]["TaskAccepted"];
+            400: components["responses"]["Error"];
         };
     };
     getAiSettings: {

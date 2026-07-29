@@ -10,6 +10,7 @@ describe('PosterCard', () => {
         image: '',
         badges: ['已订阅', '本地可用'],
         openable: true,
+        openLabel: '查看详情',
       },
       slots: {
         default: '<button data-testid="inner-action">卡片操作</button>',
@@ -20,6 +21,7 @@ describe('PosterCard', () => {
     expect(body.text()).toContain('已订阅')
     expect(body.text()).toContain('本地可用')
     expect(wrapper.find('.absolute .badge').exists()).toBe(false)
+    expect(wrapper.text()).toContain('查看详情')
 
     await wrapper.get('h3').trigger('click')
     expect(wrapper.emitted('open')).toHaveLength(1)
