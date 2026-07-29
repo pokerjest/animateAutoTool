@@ -166,6 +166,24 @@ func (m *SubscriptionManager) ProcessSubscriptionWithSourceContext(ctx context.C
 	latestTitle := ""
 	lastError := ""
 
+	// Build a canonical identity index once per run. Matching by full release
+	// title is too strict for RSS feeds because a replacement such as [V2] can
+	// change the title while still representing the same season/episode.
+	existingKeys := make(map[string]struct{})
+	if m.DB != nil && sub.ID != 0 {
+		var existingLogs []model.DownloadLog
+		if err := m.DB.Where("subscription_id = ?", sub.ID).Find(&existingLogs).Error; err != nil {
+			log.Printf("SubscriptionManager: failed to load download history for %s: %v", sub.Title, err)
+		} else {
+			for _, logEntry := range existingLogs {
+				if key := subscriptionEpisodeIdentity(logEntry.SeasonVal, logEntry.Episode, logEntry.Title, sub.AllowMultiSubgroup); key != "" {
+					existingKeys[key] = struct{}{}
+				}
+			}
+		}
+	}
+	seenKeys := make(map[string]struct{}, len(episodes))
+
 	for _, ep := range episodes {
 		// 1. 规则过滤
 		if !rules.allows(ep) {
@@ -174,25 +192,28 @@ func (m *SubscriptionManager) ProcessSubscriptionWithSourceContext(ctx context.C
 			continue
 		}
 
-		// 2. 去重
-		var count int64
-		// 查重逻辑：同一个订阅下，TargetFile或者Source URL不能重复
-		m.DB.Model(&model.DownloadLog{}).Where("subscription_id = ? AND title = ?", sub.ID, ep.Title).Count(&count)
-		if count > 0 {
-			log.Printf("DEBUG: Duplicate check skipped: %s (Already exists in logs)", ep.Title)
-			duplicateCount++
-			continue // 已存在
-		}
-
+		// 2. 解析集数并按季/集去重。保留原始值写入日志，身份比较使用
+		// 规范化值，因此 "01"、"1" 和带 [V2] 的同集资源会归为一类。
 		episodeNum := strings.TrimSpace(ep.EpisodeNum)
 		if episodeNum == "" {
-			if parsed := parser.ParseFilename(ep.Title); parsed.Episode > 0 {
-				episodeNum = strconv.Itoa(parsed.Episode)
+			episodeNum = parser.EpisodeNumberFromTitle(ep.Title)
+		}
+		seasonVal := fmt.Sprintf("S%s", mediaSeasonValue(sub, ep.Season))
+		identityKey := subscriptionEpisodeIdentity(seasonVal, episodeNum, ep.Title, sub.AllowMultiSubgroup)
+		if identityKey != "" {
+			if _, exists := existingKeys[identityKey]; exists {
+				log.Printf("DEBUG: Duplicate check skipped: %s (same canonical episode already exists)", ep.Title)
+				duplicateCount++
+				continue
+			}
+			if _, exists := seenKeys[identityKey]; exists {
+				log.Printf("DEBUG: Duplicate check skipped: %s (same canonical episode already returned by RSS)", ep.Title)
+				duplicateCount++
+				continue
 			}
 		}
 
 		// 3. 添加下载
-		seasonVal := fmt.Sprintf("S%s", mediaSeasonValue(sub, ep.Season))
 		savePath := m.resolveSavePath(sub, seasonVal)
 
 		log.Printf("DEBUG: Adding torrent to QB: %s -> %s", ep.Title, savePath)
@@ -206,6 +227,9 @@ func (m *SubscriptionManager) ProcessSubscriptionWithSourceContext(ctx context.C
 			continue
 		}
 
+		if identityKey != "" {
+			seenKeys[identityKey] = struct{}{}
+		}
 		log.Printf("Added torrent: %s [%s]", sub.Title, ep.Title)
 		addedCount++
 		latestTitle = ep.Title
@@ -258,9 +282,15 @@ func (m *SubscriptionManager) ProcessSubscriptionWithSourceContext(ctx context.C
 	case addedCount > 0 && failedCount == 0:
 		state.Status = SubscriptionRunStatusSuccess
 		state.Summary = fmt.Sprintf("新增 %d 集待下载", addedCount)
+		if duplicateCount > 0 {
+			state.Summary = fmt.Sprintf("%s，跳过 %d 个重复版本", state.Summary, duplicateCount)
+		}
 	case addedCount > 0 && failedCount > 0:
 		state.Status = SubscriptionRunStatusWarning
 		state.Summary = fmt.Sprintf("新增 %d 集，另有 %d 集加入下载失败", addedCount, failedCount)
+		if duplicateCount > 0 {
+			state.Summary = fmt.Sprintf("%s，跳过 %d 个重复版本", state.Summary, duplicateCount)
+		}
 	case failedCount > 0:
 		state.Status = SubscriptionRunStatusError
 		state.Summary = fmt.Sprintf("本次检查有 %d 集加入下载失败", failedCount)
@@ -295,6 +325,31 @@ func (m *SubscriptionManager) ProcessSubscriptionWithSourceContext(ctx context.C
 	}
 
 	m.persistRunState(sub, state)
+}
+
+// subscriptionEpisodeIdentity returns the stable identity used to avoid
+// downloading multiple releases for one episode. By default, one season and
+// episode is enough; subscriptions explicitly allowing multiple subtitle
+// groups additionally include the normalized group label.
+func subscriptionEpisodeIdentity(seasonValue, episode, title string, allowMultiSubgroup bool) string {
+	season := parser.NormalizeSeasonNumber(seasonValue)
+	if season == "" {
+		season = parser.SeasonNumberFromTitle(title)
+	}
+	episode = parser.NormalizeEpisodeNumber(episode)
+	if episode == "" {
+		episode = parser.EpisodeNumberFromTitle(title)
+	}
+	if episode != "" {
+		if allowMultiSubgroup {
+			return fmt.Sprintf("episode:%s:%s:%s", season, episode, parser.ReleaseSubgroup(title))
+		}
+		return fmt.Sprintf("episode:%s:%s", season, episode)
+	}
+	if normalized := parser.NormalizeReleaseTitle(title); normalized != "" {
+		return "title:" + normalized
+	}
+	return ""
 }
 
 func (m *SubscriptionManager) parseRSSWithFallback(ctx context.Context, sub *model.Subscription) ([]parser.Episode, string, bool, error) {

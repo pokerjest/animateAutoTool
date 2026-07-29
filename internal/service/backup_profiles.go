@@ -112,11 +112,11 @@ func BackupFilename(mode string, t time.Time) string {
 	timestamp := t.Format("20060102_150405")
 	switch NormalizeBackupMode(mode) {
 	case BackupModeSettings:
-		return fmt.Sprintf("animateData_settings_%s.db", timestamp)
+		return fmt.Sprintf("animateData_settings_%s.zip", timestamp)
 	case BackupModeCloudflare:
-		return fmt.Sprintf("animateData_cloudflare_%s.db", timestamp)
+		return fmt.Sprintf("animateData_cloudflare_%s.zip", timestamp)
 	default:
-		return fmt.Sprintf("animateData_full_%s.db", timestamp)
+		return fmt.Sprintf("animateData_full_%s.zip", timestamp)
 	}
 }
 
@@ -124,11 +124,11 @@ func R2BackupObjectKey(mode string, t time.Time) string {
 	timestamp := t.Format("20060102_150405")
 	switch NormalizeBackupMode(mode) {
 	case BackupModeSettings:
-		return fmt.Sprintf("animate_backup_settings_%s.db", timestamp)
+		return fmt.Sprintf("animate_backup_settings_%s.zip", timestamp)
 	case BackupModeCloudflare:
-		return fmt.Sprintf("animate_backup_cloudflare_%s.db", timestamp)
+		return fmt.Sprintf("animate_backup_cloudflare_%s.zip", timestamp)
 	default:
-		return fmt.Sprintf("animate_backup_full_%s.db", timestamp)
+		return fmt.Sprintf("animate_backup_full_%s.zip", timestamp)
 	}
 }
 

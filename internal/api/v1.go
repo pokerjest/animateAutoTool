@@ -3,11 +3,9 @@ package api
 import (
 	"context"
 	"errors"
-	"io"
 	"log"
 	"net/http"
 	"net/url"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -186,7 +184,7 @@ func initV1Routes(r *gin.Engine) {
 		protected.POST("/bangumi/subject/:id/progress", V1BangumiProgressHandler)
 
 		protected.GET("/backup", V1BackupHandler)
-		protected.GET("/backup/export", ExportBackupHandler)
+		protected.POST("/backup/export", ExportBackupHandler)
 		protected.POST("/backup/analyze", V1AnalyzeBackupHandler)
 		protected.POST("/backup/restore", V1RestoreBackupHandler)
 		protected.GET("/backup/r2/list", V1R2ListHandler)
@@ -765,32 +763,31 @@ func V1AnalyzeBackupHandler(c *gin.Context) {
 		v1Error(c, http.StatusBadRequest, "backup_file_missing", "请选择一个备份文件")
 		return
 	}
-	tempFile, err := os.CreateTemp("", "restore_analyze_*.db")
+	sourcePath, err := saveUploadedBackup(file)
 	if err != nil {
-		v1Error(c, http.StatusInternalServerError, "temp_file_failed", "无法创建临时文件")
+		v1Error(c, http.StatusInternalServerError, "temp_file_failed", "无法保存上传的备份文件")
 		return
 	}
-	src, err := file.Open()
+
+	password := ""
+	if service.IsBackupArchive(sourcePath) {
+		password, err = resolveBackupRestorePassword(backupPasswordRequestFromForm(c))
+		if err != nil {
+			safeio.Remove(sourcePath)
+			v1Error(c, http.StatusBadRequest, "backup_password_required", err.Error())
+			return
+		}
+	}
+	stats, databasePath, err := inspectBackupForRestore(sourcePath, password)
 	if err != nil {
-		safeio.Remove(tempFile.Name())
-		v1Error(c, http.StatusBadRequest, "backup_open_failed", "无法打开备份文件")
+		code := "invalid_backup"
+		if errors.Is(err, service.ErrBackupArchivePassword) {
+			code = "backup_password_invalid"
+		}
+		v1Error(c, http.StatusBadRequest, code, backupArchiveErrorMessage(err))
 		return
 	}
-	_, copyErr := io.Copy(tempFile, src)
-	safeio.Close(src)
-	safeio.Close(tempFile)
-	if copyErr != nil || !isValidSQLite(tempFile.Name()) {
-		safeio.Remove(tempFile.Name())
-		v1Error(c, http.StatusBadRequest, "invalid_backup", "无效的数据库备份文件")
-		return
-	}
-	stats, err := service.InspectBackup(tempFile.Name())
-	if err != nil {
-		safeio.Remove(tempFile.Name())
-		v1Error(c, http.StatusBadRequest, "invalid_backup", "无法分析备份内容")
-		return
-	}
-	token := registerRestoreArtifact(tempFile.Name())
+	token := registerRestoreArtifact(databasePath)
 	v1Data(c, http.StatusOK, gin.H{"stats": stats, "restore_token": token})
 }
 

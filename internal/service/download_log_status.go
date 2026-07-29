@@ -11,6 +11,7 @@ import (
 
 	"github.com/pokerjest/animateAutoTool/internal/downloader"
 	"github.com/pokerjest/animateAutoTool/internal/model"
+	"github.com/pokerjest/animateAutoTool/internal/parser"
 )
 
 type TorrentStatusSource interface {
@@ -144,19 +145,23 @@ func SyncDownloadLogStatuses(source TorrentStatusSource) (DownloadLogStatusSyncR
 
 	byHash := make(map[string]downloader.TorrentInfo, len(torrents))
 	byName := make(map[string]downloader.TorrentInfo, len(torrents))
+	byNormalizedName := make(map[string]downloader.TorrentInfo, len(torrents))
 	for _, torrent := range torrents {
 		if torrent.Hash != "" {
-			byHash[strings.ToLower(strings.TrimSpace(torrent.Hash))] = torrent
+			addPreferredTorrent(byHash, strings.ToLower(strings.TrimSpace(torrent.Hash)), torrent)
 		}
 		if torrent.Name != "" {
-			byName[strings.TrimSpace(torrent.Name)] = torrent
+			addPreferredTorrent(byName, strings.TrimSpace(torrent.Name), torrent)
+			if normalized := parser.NormalizeReleaseTitle(torrent.Name); normalized != "" {
+				addPreferredTorrent(byNormalizedName, normalized, torrent)
+			}
 		}
 	}
 
 	result := DownloadLogStatusSyncResult{}
 	completedTargetSet := make(map[string]struct{})
 	for _, logEntry := range logs {
-		torrent, ok := matchTorrentForLog(logEntry, byHash, byName)
+		torrent, ok := matchTorrentForLogWithNormalized(logEntry, byHash, byName, byNormalizedName)
 		if !ok {
 			result.Unmatched++
 			continue
@@ -211,6 +216,10 @@ func SyncDownloadLogStatuses(source TorrentStatusSource) (DownloadLogStatusSyncR
 }
 
 func matchTorrentForLog(logEntry model.DownloadLog, byHash map[string]downloader.TorrentInfo, byName map[string]downloader.TorrentInfo) (downloader.TorrentInfo, bool) {
+	return matchTorrentForLogWithNormalized(logEntry, byHash, byName, nil)
+}
+
+func matchTorrentForLogWithNormalized(logEntry model.DownloadLog, byHash map[string]downloader.TorrentInfo, byName, byNormalizedName map[string]downloader.TorrentInfo) (downloader.TorrentInfo, bool) {
 	if hash := strings.ToLower(strings.TrimSpace(logEntry.InfoHash)); hash != "" {
 		if torrent, ok := byHash[hash]; ok {
 			return torrent, true
@@ -223,7 +232,62 @@ func matchTorrentForLog(logEntry model.DownloadLog, byHash map[string]downloader
 	}
 
 	torrent, ok := byName[title]
-	return torrent, ok
+	if ok {
+		return torrent, true
+	}
+	if normalized := parser.NormalizeReleaseTitle(title); normalized != "" {
+		torrent, ok := byNormalizedName[normalized]
+		return torrent, ok
+	}
+	return downloader.TorrentInfo{}, false
+}
+
+func addPreferredTorrent(index map[string]downloader.TorrentInfo, key string, candidate downloader.TorrentInfo) {
+	if strings.TrimSpace(key) == "" {
+		return
+	}
+	current, ok := index[key]
+	if !ok || preferredTorrent(candidate, current) {
+		index[key] = candidate
+	}
+}
+
+func preferredTorrent(candidate, current downloader.TorrentInfo) bool {
+	candidateRank := torrentStateRank(candidate.State)
+	currentRank := torrentStateRank(current.State)
+	if candidateRank != currentRank {
+		return candidateRank > currentRank
+	}
+	candidateProgress := normalizeTorrentProgress(candidate.Progress)
+	currentProgress := normalizeTorrentProgress(current.Progress)
+	if candidateProgress != currentProgress {
+		return candidateProgress > currentProgress
+	}
+	return candidate.DownloadSpeed > current.DownloadSpeed
+}
+
+func torrentStateRank(state string) int {
+	switch mapTorrentStateToLogStatus(state) {
+	case downloadLogStatusCompleted:
+		return 2
+	case downloadLogStatusDownloading:
+		return 1
+	default:
+		return 0
+	}
+}
+
+func normalizeTorrentProgress(progress float64) float64 {
+	if progress > 1 {
+		progress /= 100
+	}
+	if progress < 0 {
+		return 0
+	}
+	if progress > 1 {
+		return 1
+	}
+	return progress
 }
 
 func mapTorrentStateToLogStatus(state string) string {
@@ -237,6 +301,13 @@ func mapTorrentStateToLogStatus(state string) string {
 	default:
 		return ""
 	}
+}
+
+// DownloadLogStatusFromTorrentState exposes the same deterministic mapping to
+// API presenters. This lets the history view show a just-finished torrent as
+// completed before the background synchronizer writes the next database tick.
+func DownloadLogStatusFromTorrentState(state string) string {
+	return mapTorrentStateToLogStatus(state)
 }
 
 func deriveTargetFile(torrent downloader.TorrentInfo) string {
@@ -435,6 +506,7 @@ func ArchiveStaleDownloadLogs(source TorrentStatusSource, maxAge time.Duration) 
 
 	byHash := map[string]downloader.TorrentInfo{}
 	byName := map[string]downloader.TorrentInfo{}
+	byNormalizedName := map[string]downloader.TorrentInfo{}
 	if source != nil {
 		torrents, err := source.ListTorrents()
 		if err != nil {
@@ -442,10 +514,13 @@ func ArchiveStaleDownloadLogs(source TorrentStatusSource, maxAge time.Duration) 
 		}
 		for _, torrent := range torrents {
 			if torrent.Hash != "" {
-				byHash[strings.ToLower(strings.TrimSpace(torrent.Hash))] = torrent
+				addPreferredTorrent(byHash, strings.ToLower(strings.TrimSpace(torrent.Hash)), torrent)
 			}
 			if torrent.Name != "" {
-				byName[strings.TrimSpace(torrent.Name)] = torrent
+				addPreferredTorrent(byName, strings.TrimSpace(torrent.Name), torrent)
+				if normalized := parser.NormalizeReleaseTitle(torrent.Name); normalized != "" {
+					addPreferredTorrent(byNormalizedName, normalized, torrent)
+				}
 			}
 		}
 	}
@@ -473,7 +548,7 @@ func ArchiveStaleDownloadLogs(source TorrentStatusSource, maxAge time.Duration) 
 		}
 		result.Scanned++
 
-		if _, ok := matchTorrentForLog(logEntry, byHash, byName); ok {
+		if _, ok := matchTorrentForLogWithNormalized(logEntry, byHash, byName, byNormalizedName); ok {
 			result.Protected++
 			continue
 		}

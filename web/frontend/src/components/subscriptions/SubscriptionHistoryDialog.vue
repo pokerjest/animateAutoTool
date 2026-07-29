@@ -26,6 +26,31 @@ function field(row: Record<string, unknown>, primary: string, fallback: string) 
   return String(row[primary] ?? row[fallback] ?? '')
 }
 
+function statusLabel(value: string) {
+  switch (value.trim().toLowerCase()) {
+    case 'downloading':
+      return '下载中'
+    case 'completed':
+      return '已完成'
+    case 'renamed':
+      return '已整理'
+    case 'failed':
+      return '失败'
+    case 'archived':
+      return '已归档'
+    case 'success':
+      return '成功'
+    case 'warning':
+      return '警告'
+    case 'error':
+      return '失败'
+    case 'idle':
+      return '无更新'
+    default:
+      return value
+  }
+}
+
 function numberField(row: Record<string, unknown>, primary: string, fallback: string) {
   const value = Number(row[primary] ?? row[fallback] ?? 0)
   return Number.isFinite(value) ? value : 0
@@ -33,6 +58,9 @@ function numberField(row: Record<string, unknown>, primary: string, fallback: st
 
 function hasLiveProgress(row: Record<string, unknown>) {
   return numberField(row, 'total_bytes', 'TotalBytes') > 0
+    || numberField(row, 'downloaded_bytes', 'DownloadedBytes') > 0
+    || numberField(row, 'download_speed', 'DownloadSpeed') > 0
+    || numberField(row, 'progress_percent', 'ProgressPercent') > 0
 }
 
 function progressPercent(row: Record<string, unknown>) {
@@ -100,7 +128,7 @@ function formatSpeed(value: number) {
         <div class="mt-3 space-y-2">
           <article v-for="run in runs" :key="field(run, 'ID', 'id')" class="panel-muted p-3 text-sm">
             <div class="flex items-center justify-between gap-2">
-              <strong>{{ field(run, 'Status', 'status') || '已检查' }}</strong>
+              <strong>{{ statusLabel(field(run, 'Status', 'status')) || '已检查' }}</strong>
               <span class="muted flex items-center gap-1 text-xs">
                 <Clock3 :size="13" />
                 {{ field(run, 'CheckedAt', 'checked_at') }}
@@ -117,7 +145,7 @@ function formatSpeed(value: number) {
           <article v-for="log in logs" :key="field(log, 'ID', 'id')" class="panel-muted p-3 text-sm">
             <strong class="line-clamp-2">{{ field(log, 'Title', 'title') }}</strong>
             <div class="muted mt-1 flex items-center justify-between gap-2">
-              <p>第 {{ field(log, 'Episode', 'episode') || '?' }} 集 · {{ field(log, 'Status', 'status') }}</p>
+              <p>第 {{ field(log, 'Episode', 'episode') || '?' }} 集 · {{ statusLabel(field(log, 'Status', 'status')) }}</p>
               <strong v-if="hasLiveProgress(log)" class="shrink-0 text-[var(--brand)]">{{ progressPercent(log).toFixed(1) }}%</strong>
             </div>
             <template v-if="hasLiveProgress(log)">
@@ -130,6 +158,9 @@ function formatSpeed(value: number) {
                 <span v-if="formatSpeed(numberField(log, 'download_speed', 'DownloadSpeed'))"> · {{ formatSpeed(numberField(log, 'download_speed', 'DownloadSpeed')) }}</span>
               </p>
             </template>
+            <p v-else-if="field(log, 'Status', 'status') === 'downloading'" class="muted mt-2 text-xs">
+              正在等待下载器同步进度…
+            </p>
           </article>
         </div>
       </section>

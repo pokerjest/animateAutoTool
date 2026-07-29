@@ -667,17 +667,71 @@ paths:
   /backup:
     get: { operationId: getBackupStatus, responses: { "200": { $ref: "#/components/responses/Success" } } }
   /backup/export:
-    get: { operationId: exportBackup, responses: { "200": { description: SQLite backup attachment, content: { application/octet-stream: { schema: { type: string, format: binary } } } } } }
+    post:
+      operationId: exportBackup
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/BackupArchivePasswordInput"
+              properties:
+                mode: { type: string, enum: [full, settings, cloudflare], default: full }
+      responses:
+        "200":
+          description: AES-256 encrypted ZIP backup attachment
+          content:
+            application/zip:
+              schema: { type: string, format: binary }
+        "400": { $ref: "#/components/responses/Error" }
   /backup/analyze:
-    post: { operationId: analyzeBackup, responses: { "200": { $ref: "#/components/responses/Success" } } }
+    post:
+      operationId: analyzeBackup
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/BackupArchivePasswordInput"
+              required: [backup_file]
+              properties:
+                backup_file: { type: string, format: binary }
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+        "400": { $ref: "#/components/responses/Error" }
   /backup/restore:
     post: { operationId: restoreBackup, requestBody: { $ref: "#/components/requestBodies/JsonObject" }, responses: { "200": { $ref: "#/components/responses/Success" } } }
   /backup/r2/list:
     get: { operationId: listR2Backups, responses: { "200": { $ref: "#/components/responses/Success" } } }
   /backup/r2/upload:
-    post: { operationId: uploadR2Backup, responses: { "202": { $ref: "#/components/responses/TaskAccepted" } } }
+    post:
+      operationId: uploadR2Backup
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BackupArchivePasswordInput" }
+      responses:
+        "202": { $ref: "#/components/responses/TaskAccepted" }
+        "400": { $ref: "#/components/responses/Error" }
   /backup/r2/stage:
-    post: { operationId: stageR2Backup, requestBody: { $ref: "#/components/requestBodies/JsonObject" }, responses: { "202": { $ref: "#/components/responses/TaskAccepted" } } }
+    post:
+      operationId: stageR2Backup
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/BackupArchivePasswordInput"
+              required: [key]
+              properties:
+                key: { type: string, minLength: 1 }
+      responses:
+        "202": { $ref: "#/components/responses/TaskAccepted" }
+        "400": { $ref: "#/components/responses/Error" }
   /backup/r2/progress/{taskId}:
     get: { operationId: getR2Progress, parameters: [{ name: taskId, in: path, required: true, schema: { type: string } }], responses: { "200": { $ref: "#/components/responses/Success" } } }
   /backup/r2/delete:
@@ -1053,6 +1107,12 @@ components:
       type: object
       required: [username, password]
       properties: { username: { type: string }, password: { type: string, format: password }, remember_me: { type: boolean, default: false } }
+    BackupArchivePasswordInput:
+      type: object
+      properties:
+        password: { type: string, format: password, description: Custom archive password or password entered for restore. }
+        password_confirm: { type: string, format: password }
+        admin_password: { type: string, format: password, description: Current administrator password used as the default archive password. }
     SubscriptionInput:
       type: object
       required: [title, rss_url]

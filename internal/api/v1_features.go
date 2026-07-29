@@ -743,7 +743,17 @@ func V1UpdaterActionHandler(c *gin.Context) {
 
 func V1R2ListHandler(c *gin.Context) { v1RunJSONHandler(c, ListR2BackupsHandler) }
 func V1R2UploadHandler(c *gin.Context) {
-	taskID, err := startR2UploadTask(c.Request.Context())
+	var req backupPasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		v1Error(c, http.StatusBadRequest, "backup_password_required", "请输入管理员登录密码，或设置自定义备份密码")
+		return
+	}
+	password, err := resolveBackupArchivePassword(c, req)
+	if err != nil {
+		v1Error(c, http.StatusBadRequest, "backup_password_invalid", err.Error())
+		return
+	}
+	taskID, err := startR2UploadTask(c.Request.Context(), password)
 	if err != nil {
 		v1Error(c, http.StatusBadRequest, "r2_not_configured", "R2 配置有误: "+err.Error())
 		return
@@ -755,13 +765,21 @@ func V1R2TestHandler(c *gin.Context)     { v1RunJSONHandler(c, TestR2ConnectionH
 
 func V1R2StageHandler(c *gin.Context) {
 	var req struct {
-		Key string `json:"key"`
+		Key             string `json:"key"`
+		Password        string `json:"password"`
+		PasswordConfirm string `json:"password_confirm"`
+		AdminPassword   string `json:"admin_password"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil || strings.TrimSpace(req.Key) == "" {
 		v1Error(c, http.StatusBadRequest, "backup_key_missing", "没有提供备份标识")
 		return
 	}
-	c.Request.Form = url.Values{"key": []string{strings.TrimSpace(req.Key)}}
+	c.Request.Form = url.Values{
+		"key":              []string{strings.TrimSpace(req.Key)},
+		"password":         []string{req.Password},
+		"password_confirm": []string{req.PasswordConfirm},
+		"admin_password":   []string{req.AdminPassword},
+	}
 	c.Request.PostForm = c.Request.Form
 	v1RunJSONHandler(c, StageR2BackupHandler)
 }

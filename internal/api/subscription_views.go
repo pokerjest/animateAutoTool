@@ -687,7 +687,13 @@ func missingEpisodeSummary(sub *model.Subscription) string {
 
 	observed := make(map[int]struct{}, len(logs))
 	for _, logEntry := range logs {
-		ep := strings.TrimSpace(logEntry.Episode)
+		ep := parser.NormalizeEpisodeNumber(logEntry.Episode)
+		if ep == "" {
+			// Older download logs may not have persisted Episode yet. Reuse
+			// the same title parser as subscription de-duplication so those
+			// records still participate in missing-episode diagnostics.
+			ep = parser.EpisodeNumberFromTitle(logEntry.Title)
+		}
 		if ep == "" || strings.Contains(ep, ".") {
 			continue
 		}

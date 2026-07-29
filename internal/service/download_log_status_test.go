@@ -78,6 +78,41 @@ func TestSyncDownloadLogStatusesMarksCompletedAndStoresMetadata(t *testing.T) {
 	}
 }
 
+func TestSyncDownloadLogStatusesMatchesVersionedReleaseTitle(t *testing.T) {
+	withServiceTestDB(t)
+
+	logEntry := model.DownloadLog{
+		SubscriptionID: 12,
+		Title:          "[ANi] Chainsmoker Cat - 01 [1080P][AAC AVC][MP4]",
+		Status:         downloadLogStatusDownloading,
+	}
+	if err := db.DB.Create(&logEntry).Error; err != nil {
+		t.Fatalf("failed to create log entry: %v", err)
+	}
+
+	result, err := SyncDownloadLogStatuses(fakeTorrentStatusSource{
+		torrents: []downloader.TorrentInfo{{
+			Hash:  "versioned-123",
+			Name:  "[ANi] Chainsmoker Cat - 01 [1080P][V2][AAC AVC][MP4]",
+			State: "uploading",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+	if result.Updated != 1 || result.Completed != 1 {
+		t.Fatalf("expected V2 title to be treated as completed, got %#v", result)
+	}
+
+	var updated model.DownloadLog
+	if err := db.DB.First(&updated, logEntry.ID).Error; err != nil {
+		t.Fatalf("failed to reload log entry: %v", err)
+	}
+	if updated.Status != downloadLogStatusCompleted {
+		t.Fatalf("expected completed status after V2 match, got %q", updated.Status)
+	}
+}
+
 func TestSyncDownloadLogStatusesQueuesCompletedTargetBeforeFileAppears(t *testing.T) {
 	withServiceTestDB(t)
 

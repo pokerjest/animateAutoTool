@@ -88,6 +88,7 @@ func initLegacyAPICompatProduction(r *gin.Engine) {
 			api.GET("/jellyfin/play/:id", GetPlayInfoHandler)
 			api.POST("/jellyfin/progress", ReportProgressHandler)
 			api.GET("/backup/export", ExportBackupHandler)
+			api.POST("/backup/export", ExportBackupHandler)
 			api.POST("/backup/import", ImportBackupHandler)
 			api.POST("/backup/analyze", AnalyzeBackupHandler)
 			api.POST("/backup/execute", ExecuteRestoreHandler)

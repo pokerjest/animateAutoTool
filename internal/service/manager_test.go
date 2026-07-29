@@ -277,6 +277,88 @@ func TestProcessSubscriptionPersistsIdleStateForDuplicates(t *testing.T) {
 	}
 }
 
+func TestProcessSubscriptionDeduplicatesVersionedEpisodes(t *testing.T) {
+	withServiceTestDB(t)
+
+	sub := model.Subscription{
+		Title:    "Versioned Show",
+		RSSUrl:   "https://example.test/versioned",
+		IsActive: true,
+	}
+	if err := db.DB.Create(&sub).Error; err != nil {
+		t.Fatalf("failed to create subscription: %v", err)
+	}
+
+	down := &fakeDownloader{}
+	mgr := &SubscriptionManager{
+		RSSParser: fakeRSSParser{
+			episodes: []parser.Episode{
+				{Title: "[ANi] Versioned Show - 01 [1080P][MP4]", EpisodeNum: "01", TorrentURL: "magnet:?xt=urn:btih:v1"},
+				{Title: "[ANi] Versioned Show - 01 [1080P][V2][MP4]", EpisodeNum: "01", TorrentURL: "magnet:?xt=urn:btih:v2"},
+				{Title: "[ANi] Versioned Show - 02 [1080P][MP4]", EpisodeNum: "02", TorrentURL: "magnet:?xt=urn:btih:v3"},
+			},
+		},
+		Downloader: down,
+		DB:         db.DB,
+	}
+
+	mgr.ProcessSubscription(&sub)
+
+	if len(down.added) != 2 {
+		t.Fatalf("expected two unique torrents, got %d (%v)", len(down.added), down.added)
+	}
+	var updated model.Subscription
+	if err := db.DB.First(&updated, sub.ID).Error; err != nil {
+		t.Fatalf("failed to reload subscription: %v", err)
+	}
+	if updated.LastRunSummary != "新增 2 集待下载，跳过 1 个重复版本" {
+		t.Fatalf("unexpected duplicate-aware summary: %q", updated.LastRunSummary)
+	}
+	var logs []model.DownloadLog
+	if err := db.DB.Where("subscription_id = ?", sub.ID).Order("id ASC").Find(&logs).Error; err != nil {
+		t.Fatalf("failed to load download logs: %v", err)
+	}
+	if len(logs) != 2 {
+		t.Fatalf("expected two download logs, got %d", len(logs))
+	}
+	if logs[0].Title != "[ANi] Versioned Show - 01 [1080P][MP4]" {
+		t.Fatalf("expected the first release to win the duplicate slot, got %q", logs[0].Title)
+	}
+}
+
+func TestProcessSubscriptionAllowsDifferentSubgroupsWhenConfigured(t *testing.T) {
+	withServiceTestDB(t)
+
+	sub := model.Subscription{
+		Title:              "Multi Group Show",
+		RSSUrl:             "https://example.test/multi-group",
+		IsActive:           true,
+		AllowMultiSubgroup: true,
+	}
+	if err := db.DB.Create(&sub).Error; err != nil {
+		t.Fatalf("failed to create subscription: %v", err)
+	}
+
+	down := &fakeDownloader{}
+	mgr := &SubscriptionManager{
+		RSSParser: fakeRSSParser{
+			episodes: []parser.Episode{
+				{Title: "[ANi] Multi Group Show - 01 [1080P]", EpisodeNum: "01", SubGroup: "ANi", TorrentURL: "magnet:?xt=urn:btih:ani"},
+				{Title: "[Other] Multi Group Show - 01 [1080P][V2]", EpisodeNum: "01", SubGroup: "Other", TorrentURL: "magnet:?xt=urn:btih:other"},
+				{Title: "[ANi] Multi Group Show - 01 [1080P][V2]", EpisodeNum: "01", SubGroup: "ANi", TorrentURL: "magnet:?xt=urn:btih:ani-v2"},
+			},
+		},
+		Downloader: down,
+		DB:         db.DB,
+	}
+
+	mgr.ProcessSubscription(&sub)
+
+	if len(down.added) != 2 {
+		t.Fatalf("expected one release per subgroup, got %d (%v)", len(down.added), down.added)
+	}
+}
+
 func TestProcessSubscriptionPersistsIdleStateForEmptySubgroupRSS(t *testing.T) {
 	withServiceTestDB(t)
 

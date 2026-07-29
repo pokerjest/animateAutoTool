@@ -1293,9 +1293,9 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["exportBackup"];
+        get?: never;
         put?: never;
-        post?: never;
+        post: operations["exportBackup"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1909,6 +1909,20 @@ export interface components {
             password: string;
             /** @default false */
             remember_me: boolean;
+        };
+        BackupArchivePasswordInput: {
+            /**
+             * Format: password
+             * @description Custom archive password or password entered for restore.
+             */
+            password?: string;
+            /** Format: password */
+            password_confirm?: string;
+            /**
+             * Format: password
+             * @description Current administrator password used as the default archive password.
+             */
+            admin_password?: string;
         };
         SubscriptionInput: {
             title: string;
@@ -4197,17 +4211,28 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * @default full
+                     * @enum {string}
+                     */
+                    mode?: "full" | "settings" | "cloudflare";
+                } & components["schemas"]["BackupArchivePasswordInput"];
+            };
+        };
         responses: {
-            /** @description SQLite backup attachment */
+            /** @description AES-256 encrypted ZIP backup attachment */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/octet-stream": string;
+                    "application/zip": string;
                 };
             };
+            400: components["responses"]["Error"];
         };
     };
     analyzeBackup: {
@@ -4217,9 +4242,17 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    /** Format: binary */
+                    backup_file: string;
+                } & components["schemas"]["BackupArchivePasswordInput"];
+            };
+        };
         responses: {
             200: components["responses"]["Success"];
+            400: components["responses"]["Error"];
         };
     };
     restoreBackup: {
@@ -4253,9 +4286,14 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BackupArchivePasswordInput"];
+            };
+        };
         responses: {
             202: components["responses"]["TaskAccepted"];
+            400: components["responses"]["Error"];
         };
     };
     stageR2Backup: {
@@ -4265,9 +4303,16 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody: components["requestBodies"]["JsonObject"];
+        requestBody: {
+            content: {
+                "application/json": {
+                    key: string;
+                } & components["schemas"]["BackupArchivePasswordInput"];
+            };
+        };
         responses: {
             202: components["responses"]["TaskAccepted"];
+            400: components["responses"]["Error"];
         };
     };
     getR2Progress: {
