@@ -390,76 +390,83 @@ type R2BackupFile struct {
 // ... existing globals ...
 var r2FetchLock sync.Mutex
 
-// ...
+const r2BackupCacheTTL = 5 * time.Minute
 
-func ListR2BackupsHandler(c *gin.Context) {
-	forceRefresh := c.Query("force") == ValueTrue
-
-	// 1. Fast Path: Check cache
+// listR2Backups returns a coherent list for both the dedicated R2 endpoint
+// and the backup overview endpoint. Mutations invalidate the cache, so the
+// next overview request must repopulate it instead of displaying an empty
+// list until the next process restart.
+func listR2Backups(ctx context.Context, forceRefresh bool) ([]R2BackupFile, error) {
 	r2BackupCacheLock.RLock()
-	if !forceRefresh && time.Since(r2BackupCacheTime) < 5*time.Minute {
-		debugLog("DEBUG: ListR2BackupsHandler - Returning Cached Result (%d files)", len(r2BackupCache))
-		c.JSON(http.StatusOK, gin.H{"backups": r2BackupCache})
+	if !forceRefresh && time.Since(r2BackupCacheTime) < r2BackupCacheTTL {
+		files := append([]R2BackupFile(nil), r2BackupCache...)
 		r2BackupCacheLock.RUnlock()
-		return
+		debugLog("DEBUG: listR2Backups - Returning cached result (%d files)", len(files))
+		return files, nil
 	}
 	r2BackupCacheLock.RUnlock()
 
-	// 2. Slow Path: Acquire fetch lock to prevent stampede
 	r2FetchLock.Lock()
 	defer r2FetchLock.Unlock()
 
-	// 3. Double-Check: Maybe someone else refreshed it while we were waiting?
 	r2BackupCacheLock.RLock()
-	if !forceRefresh && time.Since(r2BackupCacheTime) < 5*time.Minute {
-		debugLog("DEBUG: ListR2BackupsHandler - Returning Cached Result after wait (%d files)", len(r2BackupCache))
-		c.JSON(http.StatusOK, gin.H{"backups": r2BackupCache})
+	if !forceRefresh && time.Since(r2BackupCacheTime) < r2BackupCacheTTL {
+		files := append([]R2BackupFile(nil), r2BackupCache...)
 		r2BackupCacheLock.RUnlock()
-		return
+		debugLog("DEBUG: listR2Backups - Returning cached result after wait (%d files)", len(files))
+		return files, nil
 	}
 	r2BackupCacheLock.RUnlock()
 
-	debugLog("DEBUG: ListR2BackupsHandler - Fetching from R2 (Force: %v)", forceRefresh)
-
-	// Use a strict timeout for the R2 operation
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
+	debugLog("DEBUG: listR2Backups - Fetching from R2 (Force: %v)", forceRefresh)
+	requestCtx, cancel := context.WithTimeout(ctx, r2RequestTimeout)
 	defer cancel()
 
-	client, bucket, err := getR2Client(ctx)
+	client, bucket, err := getR2Client(requestCtx)
 	if err != nil {
-		c.JSON(http.StatusOK, gin.H{"backups": []R2BackupFile{}, "error": "R2 配置有误: " + err.Error()})
-		return
+		return nil, err
 	}
 
-	output, err := client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+	output, err := client.ListObjectsV2(requestCtx, &s3.ListObjectsV2Input{
 		Bucket: aws.String(bucket),
-		Prefix: aws.String("animate_backup_"), // optional filter
+		Prefix: aws.String("animate_backup_"),
 	})
 	if err != nil {
-		jsonServerError(c, "读取 R2 备份列表", err)
-		return
+		return nil, err
 	}
 
-	var backups []R2BackupFile
+	backups := make([]R2BackupFile, 0, len(output.Contents))
 	for _, obj := range output.Contents {
+		if obj.Key == nil || obj.Size == nil || obj.LastModified == nil {
+			continue
+		}
 		backups = append(backups, R2BackupFile{
 			Key:          *obj.Key,
 			Size:         *obj.Size,
 			LastModified: obj.LastModified.Format("2006-01-02 15:04:05"),
 		})
 	}
-
-	// Sort desc by time
 	sort.Slice(backups, func(i, j int) bool {
 		return backups[i].LastModified > backups[j].LastModified
 	})
 
-	// Update Cache
 	r2BackupCacheLock.Lock()
-	r2BackupCache = backups
+	r2BackupCache = append([]R2BackupFile(nil), backups...)
 	r2BackupCacheTime = time.Now()
 	r2BackupCacheLock.Unlock()
+	return backups, nil
+}
 
+func ListR2BackupsHandler(c *gin.Context) {
+	backups, err := listR2Backups(c.Request.Context(), c.Query("force") == ValueTrue)
+	if err != nil {
+		if strings.Contains(err.Error(), "configuration is incomplete") {
+			c.JSON(http.StatusOK, gin.H{"backups": []R2BackupFile{}, "error": "R2 配置有误: " + err.Error()})
+			return
+		}
+		jsonServerError(c, "读取 R2 备份列表", err)
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{"backups": backups})
 }
 

@@ -76,11 +76,17 @@ onMounted(() => {
           </RouterLink>
         </section>
       </nav>
-      <div class="panel-muted mt-2 flex items-center justify-between p-2">
+      <div class="panel-muted mt-2 grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-1.5 p-2">
         <button class="btn btn-quiet h-10 min-h-10 w-10 p-0" type="button" @click="toggleTheme" aria-label="切换明暗主题"><component :is="themeIcon" :size="18" /></button>
-        <div v-if="session.passwordless" class="min-w-0 flex-1 truncate px-2 text-left text-xs font-bold"><span class="block truncate">{{ session.state?.username || '管理员' }}</span><span class="muted">IP 白名单免密</span></div>
-        <AsyncButton v-else class="min-w-0 flex-1 truncate px-2 text-left text-xs font-bold" :loading="actions.isBusy('logout')" loading-label="退出中…" @click="logout"><span class="block truncate">{{ session.state?.username || '管理员' }}</span><span class="muted">退出登录</span></AsyncButton>
-        <span class="badge">{{ session.state?.version }}</span>
+        <div v-if="session.passwordless" class="sidebar-account min-w-0">
+          <span class="block max-w-full truncate">{{ session.state?.username || '管理员' }}</span>
+          <span class="muted block max-w-full truncate">IP 白名单免密</span>
+        </div>
+        <AsyncButton v-else class="sidebar-account min-w-0" :loading="actions.isBusy('logout')" loading-label="退出中…" @click="logout">
+          <span class="block max-w-full truncate">{{ session.state?.username || '管理员' }}</span>
+          <span class="muted block max-w-full truncate">退出登录</span>
+        </AsyncButton>
+        <span class="badge sidebar-version" :title="session.state?.version || '版本未知'">{{ session.state?.version || '未知版本' }}</span>
       </div>
     </aside>
 

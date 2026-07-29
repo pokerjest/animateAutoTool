@@ -738,9 +738,20 @@ func V1AddLocalDirectoryHandler(c *gin.Context) {
 func V1BackupHandler(c *gin.Context) {
 	stats := getDBStats(db.DB, db.CurrentDBPath)
 	configured := configValue(model.ConfigKeyR2Endpoint) != "" && configValue(model.ConfigKeyR2Bucket) != ""
-	r2BackupCacheLock.RLock()
-	files := append([]R2BackupFile(nil), r2BackupCache...)
-	r2BackupCacheLock.RUnlock()
+	files := []R2BackupFile{}
+	if configured {
+		// The overview is also the first request after an upload/delete. Use
+		// the shared cache loader so an invalidated cache is repopulated from
+		// R2 instead of making the cloud section appear to lose all backups.
+		if loaded, err := listR2Backups(c.Request.Context(), false); err == nil {
+			files = loaded
+		} else {
+			debugLog("DEBUG: V1BackupHandler - Unable to refresh R2 list: %v", err)
+			r2BackupCacheLock.RLock()
+			files = append(files, r2BackupCache...)
+			r2BackupCacheLock.RUnlock()
+		}
+	}
 	v1Data(c, http.StatusOK, gin.H{
 		"stats": gin.H{"subscription_count": stats.SubscriptionCount, "download_log_count": stats.DownloadLogCount, "local_anime_count": stats.LocalAnimeCount, "user_count": stats.UserCount, "global_config_count": stats.GlobalConfigCount, "database_size": stats.DatabaseSize, "last_modified": stats.LastModified},
 		"r2":    gin.H{"configured": configured, "files": files},
