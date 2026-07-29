@@ -26,17 +26,19 @@ func TestEncryptedBackupArchiveRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open archive: %v", err)
 	}
+	defer func() {
+		if err := reader.Close(); err != nil {
+			t.Errorf("close archive: %v", err)
+		}
+	}()
 	if len(reader.File) != 2 {
-		reader.Close()
 		t.Fatalf("archive entry count = %d, want 2", len(reader.File))
 	}
 	for _, entry := range reader.File {
 		if !entry.IsEncrypted() {
-			reader.Close()
 			t.Fatalf("entry %q is not encrypted", entry.Name)
 		}
 	}
-	_ = reader.Close()
 
 	extractedPath := filepath.Join(t.TempDir(), "extracted.db")
 	manifest, err := ExtractEncryptedBackupArchive(archivePath, password, extractedPath)
@@ -46,6 +48,7 @@ func TestEncryptedBackupArchiveRoundTrip(t *testing.T) {
 	if manifest.Encryption != "AES-256" || manifest.BackupMode != BackupModeFull {
 		t.Fatalf("unexpected manifest: %#v", manifest)
 	}
+	// #nosec G304 -- extractedPath is created under this test's private temporary directory.
 	got, err := os.ReadFile(extractedPath)
 	if err != nil {
 		t.Fatalf("read extracted database: %v", err)

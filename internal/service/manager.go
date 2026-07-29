@@ -138,6 +138,7 @@ func (m *SubscriptionManager) ProcessSubscriptionWithSource(sub *model.Subscript
 	m.ProcessSubscriptionWithSourceContext(context.Background(), sub, source)
 }
 
+//nolint:gocyclo // The branches mirror the subscription run-state audit trail and are kept together intentionally.
 func (m *SubscriptionManager) ProcessSubscriptionWithSourceContext(ctx context.Context, sub *model.Subscription, source string) {
 	log.Printf("DEBUG: Processing subscription %s (URL: %s)", sub.Title, sub.RSSUrl)
 	checkedAt := time.Now()

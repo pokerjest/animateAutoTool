@@ -152,10 +152,30 @@ func ExtractEncryptedBackupArchive(archivePath, password, databasePath string) (
 	if err != nil {
 		return BackupArchiveManifest{}, fmt.Errorf("%w: %v", ErrBackupArchiveFormat, err)
 	}
-	defer reader.Close()
+	defer safeio.Close(reader)
 
+	databaseEntry, manifestEntry, err := findEncryptedBackupEntries(reader.File)
+	if err != nil {
+		return BackupArchiveManifest{}, err
+	}
+
+	manifest, err := readEncryptedBackupManifest(manifestEntry, password)
+	if err != nil {
+		return BackupArchiveManifest{}, err
+	}
+	if err := validateBackupArchiveManifest(manifest, databaseEntry); err != nil {
+		return BackupArchiveManifest{}, err
+	}
+
+	if err := extractEncryptedBackupDatabase(databaseEntry, password, databasePath, manifest); err != nil {
+		return BackupArchiveManifest{}, err
+	}
+	return manifest, nil
+}
+
+func findEncryptedBackupEntries(files []*securezip.File) (*securezip.File, *securezip.File, error) {
 	var databaseEntry, manifestEntry *securezip.File
-	for _, file := range reader.File {
+	for _, file := range files {
 		switch filepath.ToSlash(file.Name) {
 		case backupArchiveDatabaseName:
 			databaseEntry = file
@@ -164,32 +184,39 @@ func ExtractEncryptedBackupArchive(archivePath, password, databasePath string) (
 		}
 	}
 	if databaseEntry == nil || manifestEntry == nil || !databaseEntry.IsEncrypted() || !manifestEntry.IsEncrypted() {
-		return BackupArchiveManifest{}, ErrBackupArchiveFormat
+		return nil, nil, ErrBackupArchiveFormat
 	}
 	if databaseEntry.UncompressedSize64 > uint64(backupArchiveMaxEntrySize) {
-		return BackupArchiveManifest{}, errors.New("备份数据库解压后超过安全大小限制")
+		return nil, nil, errors.New("备份数据库解压后超过安全大小限制")
 	}
+	return databaseEntry, manifestEntry, nil
+}
 
-	manifest, err := readEncryptedBackupManifest(manifestEntry, password)
-	if err != nil {
-		return BackupArchiveManifest{}, err
-	}
+func validateBackupArchiveManifest(manifest BackupArchiveManifest, databaseEntry *securezip.File) error {
 	if manifest.FormatVersion != BackupArchiveFormatVersion {
-		return BackupArchiveManifest{}, fmt.Errorf("备份压缩包格式版本 %d 不受当前版本支持", manifest.FormatVersion)
+		return fmt.Errorf("备份压缩包格式版本 %d 不受当前版本支持", manifest.FormatVersion)
 	}
 	if manifest.Encryption != "AES-256" {
-		return BackupArchiveManifest{}, fmt.Errorf("%w: 不支持的加密方式 %q", ErrBackupArchiveFormat, manifest.Encryption)
+		return fmt.Errorf("%w: 不支持的加密方式 %q", ErrBackupArchiveFormat, manifest.Encryption)
 	}
 	if manifest.DatabaseSize < 0 || manifest.DatabaseSize > backupArchiveMaxEntrySize {
-		return BackupArchiveManifest{}, errors.New("备份 manifest 中的数据库大小无效")
+		return errors.New("备份 manifest 中的数据库大小无效")
 	}
 	if manifest.DatabaseSize != 0 && uint64(manifest.DatabaseSize) != databaseEntry.UncompressedSize64 {
-		return BackupArchiveManifest{}, errors.New("备份压缩包校验失败，数据库大小与 manifest 不一致")
+		return errors.New("备份压缩包校验失败，数据库大小与 manifest 不一致")
 	}
+	return nil
+}
 
+func extractEncryptedBackupDatabase(
+	databaseEntry *securezip.File,
+	password string,
+	databasePath string,
+	manifest BackupArchiveManifest,
+) error {
 	output, err := os.OpenFile(filepath.Clean(databasePath), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
 	if err != nil {
-		return BackupArchiveManifest{}, fmt.Errorf("创建解包数据库: %w", err)
+		return fmt.Errorf("创建解包数据库: %w", err)
 	}
 	cleanupOutput := true
 	defer func() {
@@ -203,36 +230,36 @@ func ExtractEncryptedBackupArchive(archivePath, password, databasePath string) (
 	entryReader, err := databaseEntry.Open()
 	if err != nil {
 		if errors.Is(err, securezip.ErrPassword) {
-			return BackupArchiveManifest{}, ErrBackupArchivePassword
+			return ErrBackupArchivePassword
 		}
-		return BackupArchiveManifest{}, fmt.Errorf("打开加密数据库条目: %w", err)
+		return fmt.Errorf("打开加密数据库条目: %w", err)
 	}
 	_, copyErr := io.Copy(output, io.LimitReader(entryReader, backupArchiveMaxEntrySize+1))
 	safeio.Close(entryReader)
 	if copyErr != nil {
 		if errors.Is(copyErr, securezip.ErrPassword) {
-			return BackupArchiveManifest{}, ErrBackupArchivePassword
+			return ErrBackupArchivePassword
 		}
-		return BackupArchiveManifest{}, fmt.Errorf("解包数据库备份: %w", copyErr)
+		return fmt.Errorf("解包数据库备份: %w", copyErr)
 	}
 	if err := output.Close(); err != nil {
-		return BackupArchiveManifest{}, fmt.Errorf("关闭解包数据库: %w", err)
+		return fmt.Errorf("关闭解包数据库: %w", err)
 	}
 	if info, err := os.Stat(filepath.Clean(databasePath)); err != nil {
-		return BackupArchiveManifest{}, fmt.Errorf("读取解包数据库: %w", err)
+		return fmt.Errorf("读取解包数据库: %w", err)
 	} else if info.Size() > backupArchiveMaxEntrySize {
-		return BackupArchiveManifest{}, errors.New("备份数据库解压后超过安全大小限制")
+		return errors.New("备份数据库解压后超过安全大小限制")
 	} else if manifest.DatabaseSize != 0 && info.Size() != manifest.DatabaseSize {
-		return BackupArchiveManifest{}, errors.New("备份压缩包校验失败，解包数据库大小不一致")
+		return errors.New("备份压缩包校验失败，解包数据库大小不一致")
 	}
 	if manifest.DatabaseSHA256 != "" && !strings.EqualFold(manifest.DatabaseSHA256, sha256File(databasePath)) {
-		return BackupArchiveManifest{}, errors.New("备份压缩包校验失败，数据库内容可能已损坏")
+		return errors.New("备份压缩包校验失败，数据库内容可能已损坏")
 	}
 	if !isSQLiteFile(databasePath) {
-		return BackupArchiveManifest{}, errors.New("备份压缩包中的数据库无效")
+		return errors.New("备份压缩包中的数据库无效")
 	}
 	cleanupOutput = false
-	return manifest, nil
+	return nil
 }
 
 func readEncryptedBackupManifest(file *securezip.File, password string) (BackupArchiveManifest, error) {
