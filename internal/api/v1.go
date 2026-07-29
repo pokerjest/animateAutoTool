@@ -148,6 +148,7 @@ func initV1Routes(r *gin.Engine) {
 		protected.POST("/library/metadata/:id/refresh", V1RefreshMetadataItemHandler)
 		protected.POST("/library/fix-match", V1FixMatchHandler)
 		protected.GET("/metadata/search", V1MetadataSearchHandler)
+		protected.GET("/metadata/match-search", V1MetadataMatchSearchHandler)
 		protected.GET("/media/providers", V1MediaProvidersHandler)
 		protected.GET("/media/providers/:provider/libraries", V1MediaLibrariesHandler)
 		protected.GET("/media/providers/:provider/items", V1MediaItemsHandler)

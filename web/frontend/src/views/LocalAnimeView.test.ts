@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query'
 import { createPinia, setActivePinia } from 'pinia'
+import { routerKey } from 'vue-router'
 import LocalAnimeView from './LocalAnimeView.vue'
 
 interface TestAnime {
@@ -39,9 +40,13 @@ function mountView() {
   const pinia = createPinia()
   setActivePinia(pinia)
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
-  return mount(LocalAnimeView, {
+  const routerPush = vi.fn()
+  const wrapper = mount(LocalAnimeView, {
     global: {
       plugins: [pinia, [VueQueryPlugin, { queryClient }]],
+      provide: {
+        [routerKey as symbol]: { push: routerPush },
+      },
       stubs: {
         RouterLink: {
           props: ['to'],
@@ -55,6 +60,7 @@ function mountView() {
       },
     },
   })
+  return { wrapper, routerPush }
 }
 
 afterEach(() => {
@@ -72,7 +78,7 @@ describe('LocalAnimeView pagination', () => {
       throw new Error(`unexpected request: ${requestURL}`)
     }))
 
-    const wrapper = mountView()
+    const { wrapper } = mountView()
     await vi.waitFor(() => expect(wrapper.text()).toContain('3 部本地番剧'))
     expect(wrapper.text()).not.toContain('第二页 C')
 
@@ -90,7 +96,7 @@ describe('LocalAnimeView pagination', () => {
     })
     vi.stubGlobal('fetch', fetchMock)
 
-    const wrapper = mountView()
+    const { wrapper } = mountView()
     await vi.waitFor(() => expect(wrapper.text()).toContain('198 部本地番剧'))
     await wrapper.get('input[aria-label="搜索本地番剧"]').setValue('跨页命中')
     await new Promise(resolve => setTimeout(resolve, 300))
@@ -103,7 +109,7 @@ describe('LocalAnimeView pagination', () => {
 
   it('supports explicit and server-wide search-result batch selection', async () => {
     vi.stubGlobal('fetch', vi.fn(() => response([anime(1, '番剧 A'), anime(2, '番剧 B')], 1, 48, 198)))
-    const wrapper = mountView()
+    const { wrapper } = mountView()
     await vi.waitFor(() => expect(wrapper.text()).toContain('198 部本地番剧'))
 
     await wrapper.findAll('button').find(button => button.text().includes('批量整理'))!.trigger('click')
@@ -122,12 +128,37 @@ describe('LocalAnimeView pagination', () => {
 
   it('routes local playback into the media workspace player', async () => {
     vi.stubGlobal('fetch', vi.fn(() => response([anime(7, '媒体番剧')], 1, 48, 1)))
-    const wrapper = mountView()
+    const { wrapper } = mountView()
     await vi.waitFor(() => expect(wrapper.text()).toContain('媒体番剧'))
 
     const link = wrapper.find('a[data-to*="media/local-player"]')
     expect(link.exists()).toBe(true)
     expect(link.attributes('data-to')).toContain('"anime":"7"')
     expect(link.attributes('data-to')).toContain('"autoplay":"1"')
+  })
+
+  it('opens playback from the whole card outside batch mode', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => response([anime(7, '整卡播放')], 1, 48, 1)))
+    const { wrapper, routerPush } = mountView()
+    await vi.waitFor(() => expect(wrapper.text()).toContain('整卡播放'))
+
+    await wrapper.get('[data-testid="poster-open"]').trigger('click')
+
+    expect(routerPush).toHaveBeenCalledWith({
+      path: '/media/local-player',
+      query: { anime: '7', autoplay: '1' },
+    })
+  })
+
+  it('selects the item from the whole card in batch mode without navigating', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => response([anime(7, '批量选择')], 1, 48, 1)))
+    const { wrapper, routerPush } = mountView()
+    await vi.waitFor(() => expect(wrapper.text()).toContain('批量选择'))
+
+    await wrapper.findAll('button').find(button => button.text().includes('批量整理'))!.trigger('click')
+    await wrapper.get('[data-testid="poster-open"]').trigger('click')
+
+    expect(wrapper.text()).toContain('已选择 1 部')
+    expect(routerPush).not.toHaveBeenCalled()
   })
 })

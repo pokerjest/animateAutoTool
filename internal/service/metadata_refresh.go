@@ -88,8 +88,11 @@ func (s *MetadataService) RegenerateAllNFOs() (int, error) {
 	return count, nil
 }
 
-// MatchSeries manually links a series to a specific metadata record from a source
-func (s *MetadataService) MatchSeries(animeID uint, source string, sourceID int) error {
+// MatchSeriesSources links a local series to one or more real provider IDs.
+// Zero IDs mean "leave the existing value unchanged", which preserves the
+// legacy single-source matching behavior while allowing a confirmed tri-source
+// proposal to apply all IDs atomically through the same enrichment pipeline.
+func (s *MetadataService) MatchSeriesSources(animeID uint, bangumiID, tmdbID, aniListID int) error {
 	laStore := localAnimeStore()
 	if laStore == nil {
 		return nil
@@ -104,13 +107,17 @@ func (s *MetadataService) MatchSeries(animeID uint, source string, sourceID int)
 		m = &model.AnimeMetadata{}
 	}
 
-	switch source {
-	case metadataSourceBangumi:
-		m.BangumiID = sourceID
-	case metadataSourceTMDB:
-		m.TMDBID = sourceID
-	case metadataSourceAniList:
-		m.AniListID = sourceID
+	if bangumiID > 0 {
+		m.BangumiID = bangumiID
+	}
+	if tmdbID > 0 {
+		m.TMDBID = tmdbID
+	}
+	if aniListID > 0 {
+		m.AniListID = aniListID
+	}
+	if m.BangumiID == 0 && m.TMDBID == 0 && m.AniListID == 0 {
+		return fmt.Errorf("至少需要一个有效的元数据来源 ID")
 	}
 
 	s.EnrichMetadata(m, anime.Title)
@@ -133,6 +140,21 @@ func (s *MetadataService) MatchSeries(animeID uint, source string, sourceID int)
 	_ = ResolveLibraryIssue("scrape:" + strconv.FormatUint(uint64(anime.ID), 10))
 
 	return nil
+}
+
+// MatchSeries manually links a series to a specific metadata record from a
+// source. It remains as a compatibility wrapper for older clients.
+func (s *MetadataService) MatchSeries(animeID uint, source string, sourceID int) error {
+	switch source {
+	case metadataSourceBangumi:
+		return s.MatchSeriesSources(animeID, sourceID, 0, 0)
+	case metadataSourceTMDB:
+		return s.MatchSeriesSources(animeID, 0, sourceID, 0)
+	case metadataSourceAniList:
+		return s.MatchSeriesSources(animeID, 0, 0, sourceID)
+	default:
+		return fmt.Errorf("不支持的元数据来源 %q", source)
+	}
 }
 
 // RefreshAllMetadata updates metadata records.
@@ -246,6 +268,22 @@ func (s *MetadataService) RefreshSingleMetadata(id uint) error {
 // MatchMetadata links a metadata record directly to a source ID
 // This is used for Library items that might not be LocalAnime (e.g. Subscriptions)
 func (s *MetadataService) MatchMetadata(metadataID uint, source string, sourceID int) error {
+	switch source {
+	case metadataSourceBangumi:
+		return s.MatchMetadataSources(metadataID, sourceID, 0, 0)
+	case metadataSourceTMDB:
+		return s.MatchMetadataSources(metadataID, 0, sourceID, 0)
+	case metadataSourceAniList:
+		return s.MatchMetadataSources(metadataID, 0, 0, sourceID)
+	default:
+		return fmt.Errorf("不支持的元数据来源 %q", source)
+	}
+}
+
+// MatchMetadataSources links a library metadata row to one or more provider
+// IDs. It shares the same enrichment and synchronization logic as the legacy
+// single-source method.
+func (s *MetadataService) MatchMetadataSources(metadataID uint, bangumiID, tmdbID, aniListID int) error {
 	mStore := metadataStore()
 	if mStore == nil {
 		return nil
@@ -255,13 +293,17 @@ func (s *MetadataService) MatchMetadata(metadataID uint, source string, sourceID
 		return err
 	}
 
-	switch source {
-	case metadataSourceBangumi:
-		m.BangumiID = sourceID
-	case metadataSourceTMDB:
-		m.TMDBID = sourceID
-	case metadataSourceAniList:
-		m.AniListID = sourceID
+	if bangumiID > 0 {
+		m.BangumiID = bangumiID
+	}
+	if tmdbID > 0 {
+		m.TMDBID = tmdbID
+	}
+	if aniListID > 0 {
+		m.AniListID = aniListID
+	}
+	if m.BangumiID == 0 && m.TMDBID == 0 && m.AniListID == 0 {
+		return fmt.Errorf("至少需要一个有效的元数据来源 ID")
 	}
 
 	s.EnrichMetadata(m, m.Title)

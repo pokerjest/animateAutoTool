@@ -13,6 +13,33 @@ export type MikanSubgroup = components['schemas']['MikanSubgroup']
 export type MikanEpisode = components['schemas']['MikanEpisode']
 export type MikanEpisodePreview = components['schemas']['MikanEpisodePreview']
 export type MetadataSearchResult = components['schemas']['MetadataSearchResult']
+export interface MetadataSourceCandidate {
+  id: number
+  source: 'bangumi' | 'tmdb' | 'anilist'
+  name: string
+  name_cn: string
+  image: string
+  summary: string
+  air_date: string
+}
+export interface MetadataMatchCandidate {
+  title: string
+  summary: string
+  air_date: string
+  image: string
+  bangumi?: MetadataSourceCandidate
+  tmdb?: MetadataSourceCandidate
+  anilist?: MetadataSourceCandidate
+  score: number
+  evidence: string[]
+}
+export interface MetadataMatchSearchResult {
+  query: string
+  source: string
+  source_id?: number
+  source_status: Record<string, { configured: boolean; searched: boolean; error?: string; count: number }>
+  candidates: MetadataMatchCandidate[]
+}
 export type RandomBackground = components['schemas']['RandomBackground']
 export type JellyfinPlayInfo = components['schemas']['JellyfinPlayInfo']
 export type PlaybackDiagnostic = components['schemas']['PlaybackDiagnostic']

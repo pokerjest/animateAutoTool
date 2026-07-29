@@ -89,6 +89,8 @@ button { cursor: pointer; }
 .eyebrow { color: var(--brand); font-size: .72rem; font-weight: 800; letter-spacing: .13em; text-transform: uppercase; }
 .muted { color: var(--ink-muted); }
 .btn { min-height: 2.75rem; display: inline-flex; align-items: center; justify-content: center; gap: .5rem; border-radius: .85rem; border: 1px solid var(--line); padding: .65rem 1rem; font-weight: 750; transition: transform .18s, border-color .18s, background .18s; }
+.btn.p-0 { flex-shrink: 0; padding: 0; }
+.btn > svg { flex: 0 0 auto; }
 .btn:hover { transform: translateY(-1px); border-color: color-mix(in srgb, var(--brand) 45%, var(--line)); }
 .btn:active { transform: translateY(0); }
 .btn:disabled { cursor: not-allowed; opacity: .62; transform: none; }

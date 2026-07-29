@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pokerjest/animateAutoTool/internal/anilist"
@@ -162,6 +163,11 @@ type FixMatchRequest struct {
 	Type     string `json:"type"` // "local" or "metadata"
 	Source   string `json:"source"`
 	SourceID int    `json:"source_id"`
+	Matches  *struct {
+		BangumiID int `json:"bangumi_id"`
+		TMDBID    int `json:"tmdb_id"`
+		AniListID int `json:"anilist_id"`
+	} `json:"matches,omitempty"`
 	// Backwards compatibility
 	AnimeID uint `json:"anime_id"`
 }
@@ -186,13 +192,25 @@ func FixMatchHandler(c *gin.Context) {
 		if req.AnimeID > 0 {
 			id = req.AnimeID
 		}
-		if err := metaSvc.MatchSeries(id, req.Source, req.SourceID); err != nil {
+		var err error
+		if req.Matches != nil {
+			err = metaSvc.MatchSeriesSources(id, req.Matches.BangumiID, req.Matches.TMDBID, req.Matches.AniListID)
+		} else {
+			err = metaSvc.MatchSeries(id, req.Source, req.SourceID)
+		}
+		if err != nil {
 			jsonServerError(c, "修正本地番剧匹配", err)
 			return
 		}
 	} else {
 		// Metadata only fix
-		if err := metaSvc.MatchMetadata(req.ID, req.Source, req.SourceID); err != nil {
+		var err error
+		if req.Matches != nil {
+			err = metaSvc.MatchMetadataSources(req.ID, req.Matches.BangumiID, req.Matches.TMDBID, req.Matches.AniListID)
+		} else {
+			err = metaSvc.MatchMetadata(req.ID, req.Source, req.SourceID)
+		}
+		if err != nil {
 			jsonServerError(c, "修正元数据匹配", err)
 			return
 		}
@@ -214,6 +232,35 @@ type SearchResult struct {
 	} `json:"images"`
 	Summary string `json:"summary"`
 	AirDate string `json:"air_date"`
+}
+
+// SearchMetadataMatchHandler performs a deterministic cross-provider lookup.
+// It returns grouped candidates while keeping the legacy /metadata/search
+// endpoint unchanged for older clients.
+func SearchMetadataMatchHandler(c *gin.Context) {
+	keyword := c.Query("q")
+	source := c.DefaultQuery("source", SourceBangumi)
+	sourceID, _ := strconv.Atoi(c.Query("source_id"))
+	if keyword == "" {
+		if localID, err := strconv.ParseUint(c.Query("local_anime_id"), 10, 32); err == nil && localID > 0 {
+			var anime model.LocalAnime
+			if db.DB.First(&anime, uint(localID)).Error == nil {
+				keyword = anime.Title
+			}
+		}
+	}
+	result, err := searchMetadataMatchCandidates(c.Request.Context(), metadataSearchOptions{
+		Query: keyword, Source: source, SourceID: sourceID,
+	})
+	if err != nil {
+		if strings.Contains(err.Error(), "不支持的元数据来源") || strings.Contains(err.Error(), "关键词不能为空") {
+			jsonBadRequest(c, "搜索三源元数据: "+err.Error())
+		} else {
+			jsonServerError(c, "搜索三源元数据", err)
+		}
+		return
+	}
+	c.JSON(http.StatusOK, result)
 }
 
 func bangumiMetadataSearchResults(results []bangumi.SearchResult) []SearchResult {

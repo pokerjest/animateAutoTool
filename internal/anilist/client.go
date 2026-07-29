@@ -91,9 +91,29 @@ func (c *Client) SearchAnime(query string) (*Media, error) {
 }
 
 func (c *Client) SearchAnimeContext(ctx context.Context, query string) (*Media, error) {
+	results, err := c.SearchAnimeResultsContext(ctx, query, 1)
+	if err != nil {
+		return nil, err
+	}
+	if len(results) > 0 {
+		return &results[0], nil
+	}
+	return nil, nil
+}
+
+// SearchAnimeResultsContext returns several real AniList candidates. The
+// single-result SearchAnimeContext API remains as a compatibility wrapper for
+// existing callers.
+func (c *Client) SearchAnimeResultsContext(ctx context.Context, query string, limit int) ([]Media, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	if limit > 20 {
+		limit = 20
+	}
 	graphqlQuery := `
 	query ($search: String) {
-	  Page(page: 1, perPage: 1) {
+	  Page(page: 1, perPage: 20) {
 	    media(search: $search, type: ANIME, sort: SEARCH_MATCH) {
 	      id
 	      title {
@@ -137,11 +157,10 @@ func (c *Client) SearchAnimeContext(ctx context.Context, query string) (*Media, 
 		return nil, fmt.Errorf("AniList GraphQL Error: %s", result.Errors[0].Message)
 	}
 
-	if len(result.Data.Page.Media) > 0 {
-		return &result.Data.Page.Media[0], nil
+	if len(result.Data.Page.Media) > limit {
+		result.Data.Page.Media = result.Data.Page.Media[:limit]
 	}
-
-	return nil, nil
+	return result.Data.Page.Media, nil
 }
 
 func (c *Client) GetAnimeDetails(id int) (*Media, error) {
