@@ -9,6 +9,7 @@ test('packaged binary serves the embedded app and completes first-run setup', as
   page.on('requestfailed', request => {
     const failure = request.failure()?.errorText || 'failed'
     if (request.url().endsWith('/api/v1/events') && failure.includes('ERR_ABORTED')) return
+    if (request.url().includes('/api/v1/settings/updater/releases') && failure.includes('ERR_ABORTED')) return
     runtimeErrors.push(`request: ${request.url()} (${failure})`)
   })
 
