@@ -76,17 +76,22 @@ onMounted(() => {
           </RouterLink>
         </section>
       </nav>
-      <div class="panel-muted mt-2 grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-1.5 p-2">
-        <button class="btn btn-quiet h-10 min-h-10 w-10 p-0" type="button" @click="toggleTheme" aria-label="切换明暗主题"><component :is="themeIcon" :size="18" /></button>
-        <div v-if="session.passwordless" class="sidebar-account min-w-0">
-          <span class="block max-w-full truncate">{{ session.state?.username || '管理员' }}</span>
-          <span class="muted block max-w-full truncate">IP 白名单免密</span>
+      <div class="panel-muted sidebar-footer mt-2 p-2">
+        <div class="sidebar-account-row">
+          <button class="btn btn-quiet h-10 min-h-10 w-10 p-0" type="button" @click="toggleTheme" aria-label="切换明暗主题"><component :is="themeIcon" :size="18" /></button>
+          <div v-if="session.passwordless" class="sidebar-account min-w-0">
+            <span class="block truncate">{{ session.state?.username || '管理员' }}</span>
+            <span class="muted block truncate">IP 白名单免密</span>
+          </div>
+          <AsyncButton v-else class="sidebar-account sidebar-logout min-w-0" :loading="actions.isBusy('logout')" loading-label="退出中…" @click="logout">
+            <span class="block truncate">{{ session.state?.username || '管理员' }}</span>
+            <span class="muted block truncate">退出登录</span>
+          </AsyncButton>
         </div>
-        <AsyncButton v-else class="sidebar-account min-w-0" :loading="actions.isBusy('logout')" loading-label="退出中…" @click="logout">
-          <span class="block max-w-full truncate">{{ session.state?.username || '管理员' }}</span>
-          <span class="muted block max-w-full truncate">退出登录</span>
-        </AsyncButton>
-        <span class="badge sidebar-version" :title="session.state?.version || '版本未知'">{{ session.state?.version || '未知版本' }}</span>
+        <div class="sidebar-version-row">
+          <span class="sidebar-version-label muted">当前版本</span>
+          <span class="badge sidebar-version" :title="session.state?.version || '版本未知'">{{ session.state?.version || '未知版本' }}</span>
+        </div>
       </div>
     </aside>
 

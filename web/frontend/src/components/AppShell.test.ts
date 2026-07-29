@@ -57,6 +57,8 @@ describe('management workspace navigation', () => {
       expect.objectContaining({ href: '/assistant' }),
     ]))
     expect(wrapper.find('assistant-widget-stub').exists()).toBe(false)
+    expect(wrapper.find('.sidebar-footer .sidebar-account-row').exists()).toBe(true)
+    expect(wrapper.find('.sidebar-footer .sidebar-version-row').text()).toContain('当前版本')
 
     const mobilePrimaryLinks = wrapper
       .get('nav[aria-label="移动端主导航"]')

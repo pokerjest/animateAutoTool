@@ -559,6 +559,7 @@ func V1SubscriptionHistoryHandler(c *gin.Context) {
 		v1Error(c, http.StatusNotFound, "subscription_not_found", "未找到对应订阅")
 		return
 	}
+	enrichSubscriptionDownloadProgress(c.Request.Context(), data.Logs)
 	v1Data(c, http.StatusOK, data)
 }
 

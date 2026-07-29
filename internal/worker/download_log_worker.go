@@ -5,7 +5,6 @@ import (
 	"errors"
 	"log"
 	"net/url"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -20,7 +19,11 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/service"
 )
 
-const downloadLogSyncInterval = 90 * time.Second
+// qBittorrent may expose a completed torrent before the file move is visible
+// to the application. Keep this short enough that a newly finished episode
+// appears in the local library promptly, while the delayed rescan below
+// handles the settling window.
+const downloadLogSyncInterval = 15 * time.Second
 
 func StartDownloadLogSyncWorker(ctx context.Context) {
 	if ctx == nil {
@@ -69,6 +72,11 @@ func syncDownloadLogStatuses(ctx context.Context) {
 		}
 	}
 
+	// Scan as soon as qBittorrent reports completion. The target may still be
+	// moving, so scheduleCompletedDownloadRescan performs a second pass after
+	// the filesystem has had time to settle.
+	autoScanCompletedDownloads(result.CompletedTargets)
+
 	if repairResult, err := service.RepairDownloadLogsFromLocalLibrary(6 * time.Hour); err != nil {
 		log.Printf("Worker: download log library repair failed: %v", err)
 	} else if repairResult.Repaired > 0 {
@@ -92,7 +100,6 @@ func syncDownloadLogStatuses(ctx context.Context) {
 		log.Printf("Worker: retried %d stale subscriptions", retried)
 	}
 
-	autoScanCompletedDownloads(result.CompletedTargets)
 	scheduleCompletedDownloadRescan(ctx, result.CompletedTargets)
 }
 
@@ -179,9 +186,6 @@ func autoScanCompletedDownloads(targets []string) {
 	for _, target := range targets {
 		target = strings.TrimSpace(target)
 		if target == "" {
-			continue
-		}
-		if _, err := os.Stat(target); err != nil {
 			continue
 		}
 

@@ -277,7 +277,7 @@ function confirmSelection() {
       <StateBlock v-if="subgroups.isLoading.value" state="loading" title="正在读取字幕组" />
       <StateBlock v-else-if="subgroups.isError.value" state="error" title="字幕组加载失败" description="Mikan 暂时不可用时仍可返回手动填写 RSS。" :retrying="subgroups.isFetching.value" @retry="subgroups.refetch()" />
       <StateBlock v-else-if="!groupItems.length" state="empty" title="没有可用字幕组" description="该番剧目前还没有公开字幕组 RSS。" />
-      <div v-else class="grid gap-5 lg:grid-cols-[minmax(240px,0.8fr)_minmax(0,1.4fr)]">
+      <div v-else class="mikan-subgroup-layout grid gap-5 lg:grid-cols-[minmax(240px,0.8fr)_minmax(0,1.4fr)]">
         <section>
           <h3 class="flex items-center gap-2 font-black"><Users :size="18" />字幕组</h3>
           <div class="mt-3 grid gap-2" role="radiogroup" aria-label="选择字幕组">
@@ -321,13 +321,13 @@ function confirmSelection() {
           </div>
         </section>
 
-        <section aria-live="polite">
+        <section class="mikan-preview-column" aria-live="polite">
           <div class="flex items-center justify-between gap-3"><h3 class="flex items-center gap-2 font-black"><Film :size="18" />最近资源</h3><span v-if="episodes.data.value" class="badge">预览命中 {{ filteredEpisodes.length }} / {{ episodes.data.value.items.length }}</span></div>
           <StateBlock v-if="episodes.isLoading.value" class="mt-3" state="loading" title="正在预览字幕组资源" />
           <StateBlock v-else-if="episodes.isError.value" class="mt-3" state="error" title="资源预览失败" description="可以重试；预览失败不会修改现有订阅。" :retrying="episodes.isFetching.value" @retry="episodes.refetch()" />
           <StateBlock v-else-if="!episodes.data.value?.items.length" class="mt-3" state="empty" title="该字幕组暂时没有资源" description="可以选择其他字幕组或稍后再试。" />
           <StateBlock v-else-if="!filteredEpisodes.length" class="mt-3" state="empty" title="最近资源没有命中筛选" description="可以放宽清晰度或字幕语言；保存后，新发布资源仍会继续按当前条件检查。" />
-          <div v-else class="mt-3 max-h-80 space-y-2 overflow-y-auto pr-1" data-testid="mikan-episode-preview">
+          <div v-else class="mikan-preview-list mt-3 space-y-2 overflow-y-scroll pr-1" data-testid="mikan-episode-preview">
             <article v-for="episode in filteredEpisodes" :key="`${episode.title}-${episode.pub_date}`" class="panel-muted p-3 text-sm">
               <strong class="line-clamp-2">{{ episode.title }}</strong>
               <div class="muted mt-2 flex flex-wrap gap-2 text-xs"><span v-if="episode.sub_group" class="badge">{{ episode.sub_group }}</span><span v-if="episode.episode_num">第 {{ episode.episode_num }} 集</span><span v-if="episode.resolution">{{ episode.resolution }}</span><span v-if="episode.size">{{ episode.size }}</span></div>

@@ -109,6 +109,8 @@ const history = useQuery({
   queryKey: computed(() => ['subscription-history', detailTarget.value?.ID]),
   queryFn: () => api<HistoryData>(`/subscriptions/${detailTarget.value!.ID}/history`),
   enabled: computed(() => Boolean(detailTarget.value)),
+  refetchInterval: computed(() => detailTarget.value ? 3000 : false),
+  refetchIntervalInBackground: false,
 })
 
 const items = computed(() => {

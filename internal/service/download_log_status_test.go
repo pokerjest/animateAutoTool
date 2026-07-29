@@ -78,6 +78,38 @@ func TestSyncDownloadLogStatusesMarksCompletedAndStoresMetadata(t *testing.T) {
 	}
 }
 
+func TestSyncDownloadLogStatusesQueuesCompletedTargetBeforeFileAppears(t *testing.T) {
+	withServiceTestDB(t)
+
+	targetFile := filepath.Join(t.TempDir(), "episode-not-yet-visible.mkv")
+	logEntry := model.DownloadLog{
+		SubscriptionID: 11,
+		Title:          "[Group] Settling Show - 01",
+		Status:         downloadLogStatusDownloading,
+	}
+	if err := db.DB.Create(&logEntry).Error; err != nil {
+		t.Fatalf("failed to create log entry: %v", err)
+	}
+
+	result, err := SyncDownloadLogStatuses(fakeTorrentStatusSource{
+		torrents: []downloader.TorrentInfo{
+			{
+				Hash:        "settling-123",
+				Name:        "[Group] Settling Show - 01",
+				State:       "uploading",
+				ContentPath: targetFile,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+
+	if len(result.CompletedTargets) != 1 || result.CompletedTargets[0] != targetFile {
+		t.Fatalf("expected missing completed target to be queued, got %#v", result.CompletedTargets)
+	}
+}
+
 func TestSyncDownloadLogStatusesMarksFailedByInfoHash(t *testing.T) {
 	withServiceTestDB(t)
 

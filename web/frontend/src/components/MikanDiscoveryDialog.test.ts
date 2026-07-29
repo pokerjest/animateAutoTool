@@ -103,6 +103,7 @@ describe('MikanDiscoveryDialog', () => {
     await waitForText(wrapper, 'ANi')
     await buttonByText(wrapper, 'ANi').trigger('click')
     await waitForText(wrapper, '[ANi] 测试番剧 01 [1080P][CHS]')
+    expect(wrapper.get('[data-testid="mikan-episode-preview"]').classes()).toEqual(expect.arrayContaining(['mikan-preview-list', 'overflow-y-scroll']))
     await wrapper.get('#mikan-resolution-filter').setValue('1080p')
     await wrapper.get('#mikan-subtitle-language').setValue('chs')
     await wrapper.get('#mikan-include-rule').setValue('1080[Pp].*(CHS|简中)')

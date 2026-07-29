@@ -23,11 +23,15 @@ type QBittorrentClient struct {
 }
 
 type TorrentInfo struct {
-	Hash        string `json:"hash"`
-	Name        string `json:"name"`
-	State       string `json:"state"`
-	ContentPath string `json:"content_path"`
-	SavePath    string `json:"save_path"`
+	Hash          string  `json:"hash"`
+	Name          string  `json:"name"`
+	State         string  `json:"state"`
+	ContentPath   string  `json:"content_path"`
+	SavePath      string  `json:"save_path"`
+	Progress      float64 `json:"progress"`
+	Size          int64   `json:"size"`
+	Completed     int64   `json:"completed"`
+	DownloadSpeed int64   `json:"dlspeed"`
 }
 
 func NewQBittorrentClient(baseURL string) *QBittorrentClient {

@@ -216,6 +216,13 @@ type DownloadLog struct {
 	Status         string // "downloading", "completed", "failed", "renamed"
 	InfoHash       string // 种子唯一标识 (由于RSS可能拿不到，不设唯一索引)
 	TargetFile     string // 最终重命名后的文件路径
+
+	// Live qBittorrent progress is populated only for API responses. These
+	// fields are intentionally ignored by GORM and are never persisted.
+	ProgressPercent float64 `json:"progress_percent" gorm:"-"`
+	DownloadedBytes int64   `json:"downloaded_bytes" gorm:"-"`
+	TotalBytes      int64   `json:"total_bytes" gorm:"-"`
+	DownloadSpeed   int64   `json:"download_speed" gorm:"-"`
 }
 
 // SubscriptionRunLog records each subscription check as a first-class run entry

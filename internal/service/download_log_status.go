@@ -197,11 +197,12 @@ func SyncDownloadLogStatuses(source TorrentStatusSource) (DownloadLogStatusSyncR
 		}
 		result.Updated++
 		if shouldQueueCompletedTarget(nextStatus, logEntry, targetFile) {
-			if _, err := os.Stat(targetFile); err == nil {
-				if _, seen := completedTargetSet[targetFile]; !seen {
-					completedTargetSet[targetFile] = struct{}{}
-					result.CompletedTargets = append(result.CompletedTargets, targetFile)
-				}
+			// qBittorrent can report a completed torrent before the final file
+			// move/flush is visible on disk. Queue the path anyway so the worker
+			// can scan immediately and retry after the filesystem settles.
+			if _, seen := completedTargetSet[targetFile]; !seen {
+				completedTargetSet[targetFile] = struct{}{}
+				result.CompletedTargets = append(result.CompletedTargets, targetFile)
 			}
 		}
 	}

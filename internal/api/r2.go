@@ -81,6 +81,31 @@ func (r *CountingReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
+// Seek forwards to the underlying file so the AWS SDK can rewind the upload
+// body when it retries a request. Without this method CountingReader is only
+// an io.Reader; a transient R2/network retry then fails with "request stream
+// is not seekable".
+func (r *CountingReader) Seek(offset int64, whence int) (int64, error) {
+	seeker, ok := r.Reader.(io.Seeker)
+	if !ok {
+		return 0, fmt.Errorf("upload reader is not seekable")
+	}
+	position, err := seeker.Seek(offset, whence)
+	if err != nil {
+		return position, err
+	}
+	if position >= 0 {
+		r.Downloaded = position
+		if val, ok := progressMap.Load(r.TaskID); ok {
+			newProgress := *(val.(*DownloadProgress))
+			newProgress.Downloaded = position
+			newProgress.UpdatedAt = time.Now()
+			progressMap.Store(r.TaskID, &newProgress)
+		}
+	}
+	return position, nil
+}
+
 type R2Config struct {
 	Endpoint  string `json:"endpoint"`
 	AccessKey string `json:"access_key"`
@@ -317,7 +342,12 @@ func startR2UploadTask(ctx context.Context) (string, error) {
 		reader := &CountingReader{Reader: file, Total: total, TaskID: tID}
 		bgCtx, cancel := context.WithTimeout(context.Background(), r2UploadTimeout)
 		defer cancel()
-		if _, err := cli.PutObject(bgCtx, &s3.PutObjectInput{Bucket: aws.String(b), Key: aws.String(key), Body: reader}); err != nil {
+		if _, err := cli.PutObject(bgCtx, &s3.PutObjectInput{
+			Bucket:        aws.String(b),
+			Key:           aws.String(key),
+			Body:          reader,
+			ContentLength: aws.Int64(total),
+		}); err != nil {
 			updateProgress(tID, "error", "上传备份到 R2 失败: "+err.Error(), total, 0, nil)
 			return
 		}
