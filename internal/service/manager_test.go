@@ -358,6 +358,52 @@ func TestFindExistingTorrentDoesNotCrossEpisodeOrDirectory(t *testing.T) {
 	}
 }
 
+func TestFindExistingTorrentMatchesRejectedMagnetByInfoHash(t *testing.T) {
+	withServiceTestDB(t)
+
+	const infoHash = "0123456789abcdef0123456789abcdef01234567"
+	sub := model.Subscription{
+		Title:    "Hash Matched Show",
+		RSSUrl:   "https://example.test/hash-matched",
+		SavePath: "/downloads/hash-matched",
+		IsActive: true,
+	}
+	down := &fakeDownloader{torrents: []downloader.TorrentInfo{{
+		Hash:        infoHash,
+		Name:        "qB normalized display name",
+		State:       "uploading",
+		ContentPath: "/other/path/episode.mkv",
+	}}}
+	mgr := &SubscriptionManager{Downloader: down}
+
+	got, found, err := mgr.findExistingTorrent(
+		context.Background(),
+		&sub,
+		"RSS title that qB rewrote",
+		"S01",
+		"03",
+		"episode:1:3",
+		"magnet:?xt=urn:btih:"+infoHash,
+	)
+	if err != nil {
+		t.Fatalf("findExistingTorrent returned error: %v", err)
+	}
+	if !found {
+		t.Fatal("expected the rejected magnet to match qB by info hash")
+	}
+	if got.Hash != infoHash {
+		t.Fatalf("expected hash %q, got %q", infoHash, got.Hash)
+	}
+}
+
+func TestTorrentInfoHashFromURLEncodedMagnet(t *testing.T) {
+	const infoHash = "0123456789abcdef0123456789abcdef01234567"
+	got := torrentInfoHashFromURL("magnet:?xt=urn%3Abtih%3A" + infoHash + "&dn=episode")
+	if got != infoHash {
+		t.Fatalf("expected %q, got %q", infoHash, got)
+	}
+}
+
 func TestAddTorrentFetchesHTTPFileAndUploadsIt(t *testing.T) {
 	t.Parallel()
 

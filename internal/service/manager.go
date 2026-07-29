@@ -163,6 +163,7 @@ func (m *SubscriptionManager) ProcessSubscriptionWithSourceContext(ctx context.C
 
 	addedCount := 0
 	recoveredCount := 0
+	recoveredLocalCount := 0
 	failedCount := 0
 	filteredCount := 0
 	duplicateCount := 0
@@ -223,8 +224,9 @@ func (m *SubscriptionManager) ProcessSubscriptionWithSourceContext(ctx context.C
 		addErr := m.addTorrent(ctx, ep.TorrentURL, savePath, "Anime", false)
 		var matchedTorrent downloader.TorrentInfo
 		recoveredExisting := false
+		recoveredLocal := false
 		if isTorrentRejectedError(addErr) {
-			existingTorrent, found, lookupErr := m.findExistingTorrent(ctx, sub, ep.Title, seasonVal, episodeNum, identityKey)
+			existingTorrent, found, lookupErr := m.findExistingTorrent(ctx, sub, ep.Title, seasonVal, episodeNum, identityKey, ep.TorrentURL)
 			if lookupErr != nil {
 				log.Printf("SubscriptionManager: failed to verify rejected qB task for %s - %s: %v", sub.Title, ep.Title, lookupErr)
 			} else if found {
@@ -232,6 +234,26 @@ func (m *SubscriptionManager) ProcessSubscriptionWithSourceContext(ctx context.C
 				recoveredExisting = true
 				addErr = nil
 				log.Printf("SubscriptionManager: qB already contains %s (hash=%s); rebuilding download history", existingTorrent.Name, existingTorrent.Hash)
+			}
+			// qB can reject a duplicate even after the original task has been
+			// removed from its active list. If the local library already has
+			// the exact subscription episode, that file is stronger evidence
+			// than the rejected upload and should rebuild the history record.
+			if addErr != nil {
+				if targetFile, matched := resolveLogTargetFromLibrary(model.DownloadLog{
+					SubscriptionID: sub.ID,
+					Episode:        episodeNum,
+				}, *sub); matched && targetFile != "" {
+					matchedTorrent = downloader.TorrentInfo{
+						Name:        ep.Title,
+						State:       "uploading",
+						ContentPath: targetFile,
+					}
+					recoveredExisting = true
+					recoveredLocal = true
+					addErr = nil
+					log.Printf("SubscriptionManager: local library already contains episode %s for %s; rebuilding download history from %s", episodeNum, sub.Title, targetFile)
+				}
 			}
 		}
 		if addErr != nil {
@@ -249,7 +271,11 @@ func (m *SubscriptionManager) ProcessSubscriptionWithSourceContext(ctx context.C
 		log.Printf("Added torrent: %s [%s]", sub.Title, ep.Title)
 		addedCount++
 		if recoveredExisting {
-			recoveredCount++
+			if recoveredLocal {
+				recoveredLocalCount++
+			} else {
+				recoveredCount++
+			}
 		}
 		latestTitle = ep.Title
 
@@ -318,6 +344,9 @@ func (m *SubscriptionManager) ProcessSubscriptionWithSourceContext(ctx context.C
 	case addedCount > 0 && failedCount == 0:
 		state.Status = SubscriptionRunStatusSuccess
 		state.Summary = subscriptionAcceptedSummary(addedCount, recoveredCount)
+		if recoveredLocalCount > 0 {
+			state.Summary = subscriptionAcceptedSummaryWithLocal(addedCount, recoveredCount, recoveredLocalCount)
+		}
 		if duplicateCount > 0 {
 			state.Summary = fmt.Sprintf("%s，跳过 %d 个重复版本", state.Summary, duplicateCount)
 		}
@@ -375,10 +404,29 @@ func subscriptionAcceptedSummary(accepted, recovered int) string {
 	}
 }
 
+func subscriptionAcceptedSummaryWithLocal(accepted, recoveredQB, recoveredLocal int) string {
+	newDownloads := accepted - recoveredQB - recoveredLocal
+	parts := make([]string, 0, 3)
+	if newDownloads > 0 {
+		parts = append(parts, fmt.Sprintf("新增 %d 集待下载", newDownloads))
+	}
+	if recoveredQB > 0 {
+		parts = append(parts, fmt.Sprintf("恢复 %d 个 qB 现有任务", recoveredQB))
+	}
+	if recoveredLocal > 0 {
+		parts = append(parts, fmt.Sprintf("恢复 %d 个本地媒体文件记录", recoveredLocal))
+	}
+	if len(parts) == 0 {
+		return fmt.Sprintf("新增 %d 集待下载", accepted)
+	}
+	return strings.Join(parts, "，")
+}
+
 type existingTorrentMatchContext struct {
 	releaseTitle       string
 	normalizedRelease  string
 	expectedPath       string
+	expectedInfoHash   string
 	targetSeason       string
 	targetEpisode      string
 	identityKey        string
@@ -393,6 +441,7 @@ func (m *SubscriptionManager) findExistingTorrent(
 	seasonValue string,
 	episode string,
 	identityKey string,
+	torrentURL ...string,
 ) (downloader.TorrentInfo, bool, error) {
 	if m == nil || m.Downloader == nil {
 		return downloader.TorrentInfo{}, false, nil
@@ -424,6 +473,9 @@ func (m *SubscriptionManager) findExistingTorrent(
 		allowMultiSubgroup: sub != nil && sub.AllowMultiSubgroup,
 	}
 	matchCtx.normalizedRelease = parser.NormalizeReleaseTitle(matchCtx.releaseTitle)
+	if len(torrentURL) > 0 {
+		matchCtx.expectedInfoHash = torrentInfoHashFromURL(torrentURL[0])
+	}
 	if sub != nil {
 		matchCtx.expectedPath = normalizeTorrentPath(m.resolveSavePath(sub, seasonValue))
 		matchCtx.subscriptionTitle = strings.TrimSpace(sub.Title)
@@ -453,10 +505,13 @@ func (m *SubscriptionManager) findExistingTorrent(
 
 func scoreExistingTorrent(torrent downloader.TorrentInfo, matchCtx existingTorrentMatchContext) int {
 	name := strings.TrimSpace(torrent.Name)
-	if name == "" {
+	contentPath := strings.TrimSpace(torrent.ContentPath)
+	if name == "" && contentPath == "" && strings.TrimSpace(torrent.Hash) == "" {
 		return 0
 	}
 
+	hashMatch := matchCtx.expectedInfoHash != "" &&
+		normalizeTorrentInfoHash(torrent.Hash) == matchCtx.expectedInfoHash
 	pathMatch := torrentPathMatches(torrent.SavePath, matchCtx.expectedPath) ||
 		torrentPathMatches(torrent.ContentPath, matchCtx.expectedPath)
 	candidateSeason, candidateEpisode := parser.EpisodeIdentityFromTitle(name)
@@ -473,6 +528,7 @@ func scoreExistingTorrent(torrent downloader.TorrentInfo, matchCtx existingTorre
 		name,
 		candidateSeason,
 		candidateEpisode,
+		hashMatch,
 		episodeMatch,
 		titleRelated,
 		pathMatch,
@@ -488,12 +544,15 @@ func scoreExistingTorrentEvidence(
 	name string,
 	candidateSeason string,
 	candidateEpisode string,
+	hashMatch bool,
 	episodeMatch bool,
 	titleRelated bool,
 	pathMatch bool,
 	matchCtx existingTorrentMatchContext,
 ) int {
 	switch {
+	case hashMatch:
+		return 140
 	case strings.EqualFold(name, matchCtx.releaseTitle):
 		return 110
 	case matchCtx.normalizedRelease != "" && parser.NormalizeReleaseTitle(name) == matchCtx.normalizedRelease:
@@ -524,6 +583,36 @@ func scoreExistingTorrentEvidence(
 		return 55
 	}
 	return 0
+}
+
+func torrentInfoHashFromURL(rawURL string) string {
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
+		return ""
+	}
+
+	if parsed, err := url.Parse(rawURL); err == nil {
+		for _, value := range parsed.Query()["xt"] {
+			const prefix = "urn:btih:"
+			if strings.HasPrefix(strings.ToLower(value), prefix) {
+				return normalizeTorrentInfoHash(strings.TrimPrefix(strings.ToLower(value), prefix))
+			}
+		}
+	}
+
+	lower := strings.ToLower(rawURL)
+	const marker = "urn:btih:"
+	if index := strings.Index(lower, marker); index >= 0 {
+		return normalizeTorrentInfoHash(lower[index+len(marker):])
+	}
+	return ""
+}
+
+func normalizeTorrentInfoHash(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	value = strings.ReplaceAll(value, " ", "")
+	value = strings.ReplaceAll(value, "-", "")
+	return value
 }
 
 // isTorrentRejectedError accepts the typed qB error as well as wrapped errors
