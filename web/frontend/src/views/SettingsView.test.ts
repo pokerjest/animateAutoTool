@@ -31,6 +31,18 @@ describe('SettingsView proxy settings', () => {
       }
       if (path.includes('/api/v1/audit-logs')) return response({ items: [] })
       if (path.endsWith('/api/v1/settings/maintenance')) return response({ deployment: { items: [] }, updater: {} })
+      if (path.includes('/api/v1/settings/updater/releases')) return response({
+        channel: path.includes('channel=beta') ? 'beta' : 'stable',
+        current_version: 'v0.9.8',
+        latest_version: path.includes('channel=beta') ? 'v0.9.9-beta.1' : 'v0.9.9',
+        items: [{
+          version: path.includes('channel=beta') ? 'v0.9.9-beta.1' : 'v0.9.9',
+          prerelease: path.includes('channel=beta'),
+          release_url: 'https://example.test/release',
+          asset_available: true,
+          newer_than_current: true,
+        }],
+      })
       if (path.endsWith('/api/v1/settings/proxy/test')) {
         proxyTestBody = JSON.parse(String(init?.body)) as Record<string, string>
         return response({ connected: true, detail: '代理连接成功', protocol: 'http' })
@@ -136,6 +148,17 @@ describe('SettingsView proxy settings', () => {
     await flushPromises()
     expect(settingsSaveBody?.values.auth_ip_allowlist_enabled).toBe('true')
     expect(settingsSaveBody?.values.auth_ip_allowlist).toBe('192.168.1.20\n100.64.0.0/10')
+
+    const maintenanceTab = wrapper.findAll('button').find(button => button.text() === '应用维护')
+    expect(maintenanceTab).toBeDefined()
+    await maintenanceTab!.trigger('click')
+    await vi.waitFor(() => expect(wrapper.text()).toContain('v0.9.9 · 稳定版'))
+    expect(wrapper.text()).toContain('选择要更新的版本')
+    expect(wrapper.text()).toContain('稳定版')
+    expect(wrapper.text()).toContain('测试版')
+    expect(wrapper.text()).not.toContain('立即检查')
+    await wrapper.findAll('button').find(button => button.text().includes('测试版'))!.trigger('click')
+    await vi.waitFor(() => expect(wrapper.text()).toContain('v0.9.9-beta.1 · 测试版'))
 
     wrapper.unmount()
     queryClient.clear()
