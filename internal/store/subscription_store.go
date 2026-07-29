@@ -85,6 +85,32 @@ func (s *SubscriptionStore) Create(sub *model.Subscription) error {
 	return retrySQLiteBusy(func() error { return s.db.Create(sub).Error })
 }
 
+func (s *SubscriptionStore) UpdateLastEpisodeIfGreater(id uint, episode int) error {
+	if s == nil || s.db == nil {
+		return gorm.ErrInvalidDB
+	}
+	if id == 0 || episode <= 0 {
+		return nil
+	}
+	return retrySQLiteBusy(func() error {
+		return s.db.Model(&model.Subscription{}).
+			Where("id = ? AND last_ep < ?", id, episode).
+			Update("last_ep", episode).Error
+	})
+}
+
+func (s *SubscriptionStore) SetLastEpisode(id uint, episode int) error {
+	if s == nil || s.db == nil {
+		return gorm.ErrInvalidDB
+	}
+	if id == 0 || episode < 0 {
+		return nil
+	}
+	return retrySQLiteBusy(func() error {
+		return s.db.Model(&model.Subscription{}).Where("id = ?", id).Update("last_ep", episode).Error
+	})
+}
+
 // FindByRSSURLUnscoped looks up a subscription by RSS URL including
 // soft-deleted rows. The bool reports whether a matching row exists.
 func (s *SubscriptionStore) FindByRSSURLUnscoped(rssURL string) (*model.Subscription, bool, error) {

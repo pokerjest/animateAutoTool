@@ -245,6 +245,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/subscriptions/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Reconcile qBittorrent progress and local-library download history, archive stale records, then recheck every active subscription. */
+        post: operations["refreshAndRepairSubscriptions"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/subscriptions/batch": {
         parameters: {
             query?: never;
@@ -2867,6 +2884,19 @@ export interface operations {
         responses: {
             201: components["responses"]["Success"];
             400: components["responses"]["Error"];
+        };
+    };
+    refreshAndRepairSubscriptions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: components["responses"]["TaskAccepted"];
+            409: components["responses"]["Error"];
         };
     };
     createSubscriptionsBatch: {

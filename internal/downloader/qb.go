@@ -22,6 +22,8 @@ type QBittorrentClient struct {
 	cookies []*http.Cookie // Manually store cookies
 }
 
+var ErrTorrentRejected = errors.New("qBittorrent rejected the torrent (Fails.)")
+
 type TorrentInfo struct {
 	Hash          string  `json:"hash"`
 	Name          string  `json:"name"`
@@ -195,7 +197,7 @@ func validateAddTorrentResponse(resp *resty.Response) error {
 		return nil
 	}
 	if strings.EqualFold(body, "Fails.") {
-		return errors.New("qBittorrent rejected the torrent (Fails.)")
+		return ErrTorrentRejected
 	}
 	return fmt.Errorf("qBittorrent returned an unexpected add response: %q", body)
 }

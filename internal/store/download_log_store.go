@@ -17,6 +17,16 @@ func NewDownloadLogStore(db *gorm.DB) *DownloadLogStore {
 	return &DownloadLogStore{db: db}
 }
 
+func (s *DownloadLogStore) Create(logEntry *model.DownloadLog) error {
+	if s == nil || s.db == nil {
+		return gorm.ErrInvalidDB
+	}
+	if logEntry == nil {
+		return nil
+	}
+	return retrySQLiteBusy(func() error { return s.db.Create(logEntry).Error })
+}
+
 // ListActiveOrIncompleteCompleted returns logs that are either still in flight
 // (downloading/failed) or marked completed but missing a target file path.
 func (s *DownloadLogStore) ListActiveOrIncompleteCompleted(downloading, failed, completed string) ([]model.DownloadLog, error) {
@@ -78,7 +88,9 @@ func (s *DownloadLogStore) UpdateByID(id uint, updates map[string]interface{}) e
 	if len(updates) == 0 {
 		return nil
 	}
-	return s.db.Model(&model.DownloadLog{}).Where("id = ?", id).Updates(updates).Error
+	return retrySQLiteBusy(func() error {
+		return s.db.Model(&model.DownloadLog{}).Where("id = ?", id).Updates(updates).Error
+	})
 }
 
 // MarkArchived flips a log's status to the supplied archived value.
@@ -86,7 +98,9 @@ func (s *DownloadLogStore) MarkArchived(id uint, archivedStatus string) error {
 	if s == nil || s.db == nil {
 		return gorm.ErrInvalidDB
 	}
-	return s.db.Model(&model.DownloadLog{}).Where("id = ?", id).Update("status", archivedStatus).Error
+	return retrySQLiteBusy(func() error {
+		return s.db.Model(&model.DownloadLog{}).Where("id = ?", id).Update("status", archivedStatus).Error
+	})
 }
 
 // HasCompletedSibling reports whether the same subscription already has a

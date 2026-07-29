@@ -93,6 +93,13 @@ paths:
       operationId: createSubscription
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/SubscriptionInput" } } } }
       responses: { "201": { $ref: "#/components/responses/Success" }, "400": { $ref: "#/components/responses/Error" } }
+  /subscriptions/refresh:
+    post:
+      operationId: refreshAndRepairSubscriptions
+      description: Reconcile qBittorrent progress and local-library download history, archive stale records, then recheck every active subscription.
+      responses:
+        "202": { $ref: "#/components/responses/TaskAccepted" }
+        "409": { $ref: "#/components/responses/Error" }
   /subscriptions/batch:
     post: { operationId: createSubscriptionsBatch, requestBody: { $ref: "#/components/requestBodies/JsonArray" }, responses: { "200": { $ref: "#/components/responses/Success" } } }
   /subscriptions/batch-preview:

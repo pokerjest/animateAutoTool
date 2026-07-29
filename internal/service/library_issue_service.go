@@ -9,6 +9,7 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/event"
 	"github.com/pokerjest/animateAutoTool/internal/model"
+	"github.com/pokerjest/animateAutoTool/internal/store"
 	"gorm.io/gorm"
 )
 
@@ -39,10 +40,10 @@ func ReportLibraryIssue(input LibraryIssueInput) error {
 		strings.TrimSpace(input.DirectoryPath), strings.TrimSpace(input.Message), strings.TrimSpace(input.Hint))
 
 	now := time.Now()
-	issue := model.LibraryIssue{}
-	err := db.DB.Where("issue_key = ?", strings.TrimSpace(input.IssueKey)).First(&issue).Error
-	switch err {
-	case nil:
+	issueStore := store.NewLibraryIssueStore(db.DB)
+	issue, err := issueStore.GetByKey(strings.TrimSpace(input.IssueKey))
+	switch {
+	case err == nil:
 		updates := map[string]interface{}{
 			"issue_type":       strings.TrimSpace(input.IssueType),
 			"status":           LibraryIssueStatusOpen,
@@ -55,11 +56,11 @@ func ReportLibraryIssue(input LibraryIssueInput) error {
 			"last_seen_at":     now,
 			"resolved_at":      nil,
 		}
-		if err := db.DB.Model(&model.LibraryIssue{}).Where("id = ?", issue.ID).Updates(updates).Error; err != nil {
+		if err := issueStore.UpdateByID(issue.ID, updates); err != nil {
 			return err
 		}
-	case gorm.ErrRecordNotFound:
-		issue = model.LibraryIssue{
+	case errors.Is(err, gorm.ErrRecordNotFound):
+		newIssue := model.LibraryIssue{
 			IssueKey:        strings.TrimSpace(input.IssueKey),
 			IssueType:       strings.TrimSpace(input.IssueType),
 			Status:          LibraryIssueStatusOpen,
@@ -71,7 +72,7 @@ func ReportLibraryIssue(input LibraryIssueInput) error {
 			OccurrenceCount: 1,
 			LastSeenAt:      &now,
 		}
-		if err := db.DB.Create(&issue).Error; err != nil {
+		if err := issueStore.Create(&newIssue); err != nil {
 			return err
 		}
 	default:
@@ -95,9 +96,9 @@ func ResolveLibraryIssue(issueKey string) error {
 		return nil
 	}
 
-	var issue model.LibraryIssue
-	err := db.DB.Where("issue_key = ? AND status = ?", strings.TrimSpace(issueKey), LibraryIssueStatusOpen).First(&issue).Error
-	if err == gorm.ErrRecordNotFound {
+	issueStore := store.NewLibraryIssueStore(db.DB)
+	issue, err := issueStore.GetOpenByKey(strings.TrimSpace(issueKey), LibraryIssueStatusOpen)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil
 	}
 	if err != nil {
@@ -105,12 +106,10 @@ func ResolveLibraryIssue(issueKey string) error {
 	}
 
 	now := time.Now()
-	if err := db.DB.Model(&model.LibraryIssue{}).
-		Where("id = ?", issue.ID).
-		Updates(map[string]interface{}{
-			"status":      LibraryIssueStatusResolved,
-			"resolved_at": &now,
-		}).Error; err != nil {
+	if err := issueStore.UpdateByID(issue.ID, map[string]interface{}{
+		"status":      LibraryIssueStatusResolved,
+		"resolved_at": &now,
+	}); err != nil {
 		return err
 	}
 
@@ -135,11 +134,7 @@ func ListOpenLibraryIssues(limit int) ([]model.LibraryIssue, error) {
 		limit = 20
 	}
 
-	var issues []model.LibraryIssue
-	err := db.DB.Where("status = ?", LibraryIssueStatusOpen).
-		Order("last_seen_at DESC").
-		Limit(limit).
-		Find(&issues).Error
+	issues, err := store.NewLibraryIssueStore(db.DB).ListOpen(LibraryIssueStatusOpen, limit)
 	if err != nil {
 		return nil, err
 	}

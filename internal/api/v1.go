@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"net/url"
@@ -130,6 +131,7 @@ func initV1Routes(r *gin.Engine) {
 		protected.GET("/subscriptions/mikan/poster", V1MikanPosterHandler)
 		protected.GET("/subscriptions/mikan/resolve", V1MikanResolveHandler)
 		protected.GET("/subscriptions/mikan/subgroups", V1MikanSubgroupsHandler)
+		protected.POST("/subscriptions/refresh", V1RefreshSubscriptionsHandler)
 		protected.PUT("/subscriptions/:id", V1UpdateSubscriptionHandler)
 		protected.POST("/subscriptions/:id/toggle", V1SubscriptionActionHandler("toggle"))
 		protected.POST("/subscriptions/:id/run", V1SubscriptionActionHandler("run"))
@@ -692,13 +694,18 @@ func V1LocalScanHandler(c *gin.Context) {
 			return
 		}
 		current, _ := taskstate.Global.Get(taskID)
-		taskstate.Global.Progress(taskID, "文件扫描完成，正在整理元数据并通知 Jellyfin", current.Current, current.Total)
-		service.NewAgentService().RunAgentForLibrary()
+		taskstate.Global.Progress(taskID, "文件扫描完成，正在整理元数据并修复历史数据库冲突", current.Current, current.Total)
+		repairResult, repairErr := runLocalMetadataPhase(taskID)
+		if repairErr != nil {
+			taskstate.Global.Fail(taskID, repairErr)
+			return
+		}
 		triggerJellyfinLibraryRefresh(context.Background())
 		summary := service.GlobalScanStatus.Snapshot().LastSummary
 		if summary == "" {
 			summary = "本地扫描完成"
 		}
+		summary = appendMetadataRepairSummary(summary, repairResult)
 		taskstate.Global.Complete(taskID, summary)
 	}()
 	v1Message(c, http.StatusAccepted, "本地扫描已经启动", gin.H{"task_id": taskID, "status": "running"})
@@ -726,12 +733,39 @@ func V1AddLocalDirectoryHandler(c *gin.Context) {
 			return
 		}
 		current, _ := taskstate.Global.Get(taskID)
-		taskstate.Global.Progress(taskID, "文件扫描完成，正在整理元数据并通知 Jellyfin", current.Current, current.Total)
-		service.NewAgentService().RunAgentForLibrary()
+		taskstate.Global.Progress(taskID, "文件扫描完成，正在整理元数据并修复历史数据库冲突", current.Current, current.Total)
+		repairResult, repairErr := runLocalMetadataPhase(taskID)
+		if repairErr != nil {
+			taskstate.Global.Fail(taskID, repairErr)
+			return
+		}
 		triggerJellyfinLibraryRefresh(context.Background())
-		taskstate.Global.Complete(taskID, "目录已添加，本地扫描完成")
+		taskstate.Global.Complete(taskID, appendMetadataRepairSummary("目录已添加，本地扫描完成", repairResult))
 	}()
 	v1Message(c, http.StatusAccepted, "目录已添加，扫描任务已经启动", gin.H{"task_id": taskID, "status": "running"})
+}
+
+func runLocalMetadataPhase(taskID string) (service.MetadataIssueRepairResult, error) {
+	task, _ := taskstate.Global.Get(taskID)
+	baseCurrent := task.Current
+	baseTotal := task.Total
+	return service.NewAgentService().RunAgentForLibraryWithRepair(func(progress service.MetadataIssueRepairProgress) {
+		total := baseTotal + progress.Total
+		if total <= 0 {
+			total = progress.Total
+		}
+		taskstate.Global.Progress(taskID, progress.Message, baseCurrent+progress.Current, total)
+	})
+}
+
+func appendMetadataRepairSummary(summary string, result service.MetadataIssueRepairResult) string {
+	if result.Scanned == 0 {
+		return summary
+	}
+	if result.Failed > 0 {
+		return fmt.Sprintf("%s；历史数据库冲突修复 %d 条，仍有 %d 条待处理", summary, result.Repaired, result.Failed)
+	}
+	return fmt.Sprintf("%s；已修复 %d 条历史数据库冲突", summary, result.Repaired)
 }
 
 func V1BackupHandler(c *gin.Context) {

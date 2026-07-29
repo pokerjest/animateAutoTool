@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/pokerjest/animateAutoTool/internal/db"
+	"github.com/pokerjest/animateAutoTool/internal/downloader"
 	"github.com/pokerjest/animateAutoTool/internal/event"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/parser"
@@ -49,6 +50,8 @@ type fakeDownloader struct {
 	addErr    error
 	added     []string
 	savePaths []string
+	torrents  []downloader.TorrentInfo
+	listErr   error
 }
 
 func (f *fakeDownloader) Login(username, password string) error { return nil }
@@ -61,6 +64,9 @@ func (f *fakeDownloader) AddTorrent(url, savePath, category string, paused bool)
 	return nil
 }
 func (f *fakeDownloader) Ping() error { return nil }
+func (f *fakeDownloader) ListTorrents() ([]downloader.TorrentInfo, error) {
+	return append([]downloader.TorrentInfo(nil), f.torrents...), f.listErr
+}
 
 type fakeTorrentFetcher struct {
 	fakeRSSParser
@@ -161,6 +167,66 @@ func TestProcessSubscriptionPersistsSuccessState(t *testing.T) {
 	}
 	if runLogs[0].TriggerSource != "manual" {
 		t.Fatalf("expected manual trigger source, got %q", runLogs[0].TriggerSource)
+	}
+}
+
+func TestProcessSubscriptionRecoversExistingQBTaskAfterFailsResponse(t *testing.T) {
+	withServiceTestDB(t)
+
+	sub := model.Subscription{
+		Title:    "Recovered Show",
+		RSSUrl:   "https://example.test/recovered",
+		IsActive: true,
+	}
+	if err := db.DB.Create(&sub).Error; err != nil {
+		t.Fatalf("failed to create subscription: %v", err)
+	}
+
+	down := &fakeDownloader{
+		addErr: downloader.ErrTorrentRejected,
+		torrents: []downloader.TorrentInfo{{
+			Hash:        "existing-hash",
+			Name:        "[ANi] Recovered Show - 01 [1080P]",
+			State:       "uploading",
+			ContentPath: "/downloads/Recovered Show/Recovered Show - 01.mkv",
+			Progress:    1,
+		}},
+	}
+	mgr := &SubscriptionManager{
+		RSSParser: fakeRSSParser{episodes: []parser.Episode{{
+			Title:      "[ANi] Recovered Show - 01 [1080P]",
+			EpisodeNum: "01",
+			TorrentURL: "magnet:?xt=urn:btih:existing-hash",
+		}}},
+		Downloader: down,
+		DB:         db.DB,
+	}
+
+	mgr.ProcessSubscription(&sub)
+
+	var logEntry model.DownloadLog
+	if err := db.DB.Where("subscription_id = ?", sub.ID).First(&logEntry).Error; err != nil {
+		t.Fatalf("expected recovered download log: %v", err)
+	}
+	if logEntry.InfoHash != "existing-hash" {
+		t.Fatalf("expected existing hash, got %q", logEntry.InfoHash)
+	}
+	if logEntry.Status != downloadLogStatusCompleted {
+		t.Fatalf("expected completed status, got %q", logEntry.Status)
+	}
+	if logEntry.TargetFile != "/downloads/Recovered Show/Recovered Show - 01.mkv" {
+		t.Fatalf("unexpected recovered target: %q", logEntry.TargetFile)
+	}
+
+	var updated model.Subscription
+	if err := db.DB.First(&updated, sub.ID).Error; err != nil {
+		t.Fatalf("reload subscription: %v", err)
+	}
+	if updated.LastRunStatus != SubscriptionRunStatusSuccess {
+		t.Fatalf("expected successful recovery, got %q", updated.LastRunStatus)
+	}
+	if updated.LastRunSummary != "已恢复 1 个 qB 现有任务的下载记录" {
+		t.Fatalf("unexpected recovery summary: %q", updated.LastRunSummary)
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"time"
 
@@ -19,18 +20,31 @@ type AgentService struct {
 	NetworkWorkerCount int
 	NetworkRateLimit   time.Duration
 	metaSvc            *MetadataService
+	enrichAnime        func(*model.LocalAnime) error
 }
 
 func NewAgentService() *AgentService {
+	metaSvc := NewMetadataService()
 	return &AgentService{
 		NetworkWorkerCount: 2, // Low concurrency for network
 		NetworkRateLimit:   500 * time.Millisecond,
-		metaSvc:            NewMetadataService(),
+		metaSvc:            metaSvc,
+		enrichAnime:        metaSvc.EnrichAnime,
 	}
 }
 
 // RunAgentForLibrary starts the metadata/agent phase for all local animes
 func (s *AgentService) RunAgentForLibrary() {
+	if _, err := s.RunAgentForLibraryWithRepair(nil); err != nil {
+		log.Printf("Agent: failed to repair historical metadata database issues: %v", err)
+	}
+}
+
+// RunAgentForLibraryWithRepair performs the normal enrichment phase and then
+// serially retries historical scrape failures caused by SQLite write
+// contention. The serial pass is intentionally last: it runs after the normal
+// workers have stopped, when the database is least likely to be busy again.
+func (s *AgentService) RunAgentForLibraryWithRepair(report MetadataIssueRepairProgressFunc) (MetadataIssueRepairResult, error) {
 	log.Println("Agent: Starting metadata enrichment (Agent Phase)...")
 
 	networkQueue := make(chan uint, 1000)
@@ -86,6 +100,7 @@ func (s *AgentService) RunAgentForLibrary() {
 
 	wg.Wait()
 	log.Println("Agent: Metadata enrichment completed.")
+	return s.RepairDatabaseMetadataIssues(context.Background(), report)
 }
 
 // scanLocalAssets looks for NFOs and local images
@@ -114,8 +129,9 @@ func (s *AgentService) scanLocalAssets(anime *model.LocalAnime) {
 				anime.Metadata.TMDBID = nfo.TMDBID
 			}
 
-			db.DB.Save(anime.Metadata)
-			s.metaSvc.SyncMetadataToModels(anime.Metadata)
+			if err := s.persistLocalAssetMetadata(anime); err != nil {
+				log.Printf("Agent: Failed to persist local NFO metadata for %s: %v", anime.Title, err)
+			}
 		}
 	}
 
@@ -134,9 +150,6 @@ func (s *AgentService) scanLocalAssets(anime *model.LocalAnime) {
 			if err == nil && len(data) > 0 {
 				if anime.MetadataID == nil || *anime.MetadataID == 0 {
 					anime.Metadata = &model.AnimeMetadata{Title: anime.Title}
-					db.DB.Create(anime.Metadata)
-					anime.MetadataID = &anime.Metadata.ID
-					db.DB.Save(anime)
 				}
 
 				// Prioritize local image in one of the raw fields or a new field?
@@ -147,14 +160,67 @@ func (s *AgentService) scanLocalAssets(anime *model.LocalAnime) {
 					anime.Metadata.TMDBImageRaw = data
 					anime.Metadata.Image = fmt.Sprintf("/api/v1/posters/%d", anime.Metadata.ID)
 
-					db.DB.Save(anime.Metadata)
-					s.metaSvc.SyncMetadataToModels(anime.Metadata)
-					log.Printf("Agent: Consumed local poster for %s", anime.Title)
+					if err := s.persistLocalAssetMetadata(anime); err != nil {
+						log.Printf("Agent: Failed to persist local poster for %s: %v", anime.Title, err)
+					} else {
+						log.Printf("Agent: Consumed local poster for %s", anime.Title)
+					}
 				}
 				break // Found best match
 			}
 		}
 	}
+}
+
+func (s *AgentService) persistLocalAssetMetadata(anime *model.LocalAnime) error {
+	if anime == nil || anime.Metadata == nil {
+		return fmt.Errorf("local metadata is empty")
+	}
+	mStore := metadataStore()
+	laStore := localAnimeStore()
+	if mStore == nil || laStore == nil {
+		return gorm.ErrInvalidDB
+	}
+
+	if anime.Metadata.ID == 0 {
+		if err := mStore.Create(anime.Metadata); err != nil {
+			return err
+		}
+	} else if err := mStore.Save(anime.Metadata); err != nil {
+		return err
+	}
+	if len(anime.Metadata.BangumiImageRaw) > 0 || len(anime.Metadata.TMDBImageRaw) > 0 || len(anime.Metadata.AniListImageRaw) > 0 {
+		posterURL := fmt.Sprintf("/api/v1/posters/%d", anime.Metadata.ID)
+		if anime.Metadata.Image != posterURL {
+			anime.Metadata.Image = posterURL
+			if err := mStore.Save(anime.Metadata); err != nil {
+				return err
+			}
+		}
+	}
+
+	anime.MetadataID = &anime.Metadata.ID
+	anime.Image = anime.Metadata.Image
+	anime.Summary = anime.Metadata.Summary
+	if err := laStore.SaveAnime(anime); err != nil {
+		return err
+	}
+	s.metadataService().SyncMetadataToModels(anime.Metadata)
+	return nil
+}
+
+func (s *AgentService) metadataService() *MetadataService {
+	if s.metaSvc == nil {
+		s.metaSvc = NewMetadataService()
+	}
+	return s.metaSvc
+}
+
+func (s *AgentService) enrich(anime *model.LocalAnime) error {
+	if s.enrichAnime != nil {
+		return s.enrichAnime(anime)
+	}
+	return s.metadataService().EnrichAnime(anime)
 }
 
 func (s *AgentService) networkWorker(queue <-chan uint) {
@@ -167,24 +233,23 @@ func (s *AgentService) networkWorker(queue <-chan uint) {
 			continue
 		}
 
-		// Re-use existing Enrich Logic with isolated context timeout
+		// The metadata clients already enforce request timeouts. Run enrichment
+		// synchronously inside the worker so wg.Wait truly means every database
+		// writer has stopped before the serial repair pass begins.
 		log.Printf("Agent: Network enriching %s", anime.Title)
-
-		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
-		done := make(chan error, 1)
-
-		go func(a *model.LocalAnime) {
-			done <- s.metaSvc.EnrichAnime(a)
-		}(&anime)
-
-		select {
-		case err := <-done:
-			if err != nil {
-				log.Printf("Agent: Failed to enrich anime %s: %v", anime.Title, err)
-			}
-		case <-ctx.Done():
-			log.Printf("Agent: Timeout enriching anime %s after 45s", anime.Title)
+		if err := s.enrich(&anime); err != nil {
+			log.Printf("Agent: Failed to enrich anime %s: %v", anime.Title, err)
+			_ = ReportLibraryIssue(LibraryIssueInput{
+				IssueKey:      "scrape:" + strconv.FormatUint(uint64(anime.ID), 10),
+				IssueType:     LibraryIssueTypeScrape,
+				Title:         anime.Title,
+				DirectoryPath: anime.Path,
+				LocalAnimeID:  &anime.ID,
+				Message:       err.Error(),
+				Hint:          MetadataIssueHint(err),
+			})
+		} else {
+			_ = ResolveLibraryIssue("scrape:" + strconv.FormatUint(uint64(anime.ID), 10))
 		}
-		cancel()
 	}
 }

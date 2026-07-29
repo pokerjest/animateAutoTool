@@ -27,3 +27,15 @@ type ContextDownloader interface {
 type TorrentFileDownloader interface {
 	AddTorrentFileContext(ctx context.Context, filename string, data []byte, savePath, category string, paused bool) error
 }
+
+// TorrentLister exposes the downloader task list for reconciliation after an
+// ambiguous add response. qBittorrent returns "Fails." both for genuine add
+// failures and for torrents that already exist, so callers must verify the
+// current task list before treating the operation as failed.
+type TorrentLister interface {
+	ListTorrents() ([]TorrentInfo, error)
+}
+
+type ContextTorrentLister interface {
+	ListTorrentsContext(ctx context.Context) ([]TorrentInfo, error)
+}

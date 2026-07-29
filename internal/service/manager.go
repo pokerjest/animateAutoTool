@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/url"
@@ -161,6 +162,7 @@ func (m *SubscriptionManager) ProcessSubscriptionWithSourceContext(ctx context.C
 	rules := buildSubscriptionRuleSet(sub)
 
 	addedCount := 0
+	recoveredCount := 0
 	failedCount := 0
 	filteredCount := 0
 	duplicateCount := 0
@@ -173,7 +175,7 @@ func (m *SubscriptionManager) ProcessSubscriptionWithSourceContext(ctx context.C
 	existingKeys := make(map[string]struct{})
 	if m.DB != nil && sub.ID != 0 {
 		var existingLogs []model.DownloadLog
-		if err := m.DB.Where("subscription_id = ?", sub.ID).Find(&existingLogs).Error; err != nil {
+		if err := m.DB.Where("subscription_id = ? AND status <> ?", sub.ID, downloadLogStatusArchived).Find(&existingLogs).Error; err != nil {
 			log.Printf("SubscriptionManager: failed to load download history for %s: %v", sub.Title, err)
 		} else {
 			for _, logEntry := range existingLogs {
@@ -218,12 +220,25 @@ func (m *SubscriptionManager) ProcessSubscriptionWithSourceContext(ctx context.C
 		savePath := m.resolveSavePath(sub, seasonVal)
 
 		log.Printf("DEBUG: Adding torrent to QB: %s -> %s", ep.Title, savePath)
-		err := m.addTorrent(ctx, ep.TorrentURL, savePath, "Anime", false)
-		if err != nil {
-			log.Printf("Failed to add torrent for %s - %s: %v", sub.Title, ep.Title, err)
+		addErr := m.addTorrent(ctx, ep.TorrentURL, savePath, "Anime", false)
+		var matchedTorrent downloader.TorrentInfo
+		recoveredExisting := false
+		if errors.Is(addErr, downloader.ErrTorrentRejected) {
+			existingTorrent, found, lookupErr := m.findExistingTorrent(ctx, sub, ep.Title, seasonVal, episodeNum, identityKey)
+			if lookupErr != nil {
+				log.Printf("SubscriptionManager: failed to verify rejected qB task for %s - %s: %v", sub.Title, ep.Title, lookupErr)
+			} else if found {
+				matchedTorrent = existingTorrent
+				recoveredExisting = true
+				addErr = nil
+				log.Printf("SubscriptionManager: qB already contains %s (hash=%s); rebuilding download history", existingTorrent.Name, existingTorrent.Hash)
+			}
+		}
+		if addErr != nil {
+			log.Printf("Failed to add torrent for %s - %s: %v", sub.Title, ep.Title, addErr)
 			failedCount++
 			if lastError == "" {
-				lastError = fmt.Sprintf("%s: %v", ep.Title, err)
+				lastError = fmt.Sprintf("%s: %v", ep.Title, addErr)
 			}
 			continue
 		}
@@ -233,26 +248,46 @@ func (m *SubscriptionManager) ProcessSubscriptionWithSourceContext(ctx context.C
 		}
 		log.Printf("Added torrent: %s [%s]", sub.Title, ep.Title)
 		addedCount++
+		if recoveredExisting {
+			recoveredCount++
+		}
 		latestTitle = ep.Title
 
 		// 4. 记录日志
+		status := downloadLogStatusDownloading
+		infoHash := ""
+		targetFile := ""
+		if recoveredExisting {
+			if mapped := mapTorrentStateToLogStatus(matchedTorrent.State); mapped != "" {
+				status = mapped
+			}
+			infoHash = strings.TrimSpace(matchedTorrent.Hash)
+			targetFile = deriveTargetFile(matchedTorrent)
+		}
 		logEntry := model.DownloadLog{
 			SubscriptionID: sub.ID,
 			Title:          ep.Title,
 			Magnet:         ep.TorrentURL,
 			Episode:        episodeNum,
 			SeasonVal:      seasonVal,
-			// InfoHash:       ep.InfoHash, // Undefined in parser.Episode
-			Status: "downloading",
+			Status:         status,
+			InfoHash:       infoHash,
+			TargetFile:     targetFile,
 		}
-		if err := m.DB.Create(&logEntry).Error; err != nil {
+		var logStore *store.DownloadLogStore
+		if m.DB != nil {
+			logStore = store.NewDownloadLogStore(m.DB)
+		}
+		if logStore == nil {
+			log.Printf("Failed to create log for %s: database is unavailable", ep.Title)
+		} else if err := logStore.Create(&logEntry); err != nil {
 			log.Printf("Failed to create log for %s: %v", ep.Title, err)
 		} else {
 			// Update LastEp
 			if val, err := strconv.Atoi(episodeNum); err == nil {
 				if val > sub.LastEp {
 					sub.LastEp = val
-					m.DB.Model(sub).Update("last_ep", val)
+					_ = store.NewSubscriptionStore(m.DB).UpdateLastEpisodeIfGreater(sub.ID, val)
 				}
 			} else {
 				// Try float roughly
@@ -260,7 +295,7 @@ func (m *SubscriptionManager) ProcessSubscriptionWithSourceContext(ctx context.C
 					val = int(f)
 					if val > sub.LastEp {
 						sub.LastEp = val
-						m.DB.Model(sub).Update("last_ep", val)
+						_ = store.NewSubscriptionStore(m.DB).UpdateLastEpisodeIfGreater(sub.ID, val)
 					}
 				}
 			}
@@ -282,13 +317,13 @@ func (m *SubscriptionManager) ProcessSubscriptionWithSourceContext(ctx context.C
 	switch {
 	case addedCount > 0 && failedCount == 0:
 		state.Status = SubscriptionRunStatusSuccess
-		state.Summary = fmt.Sprintf("新增 %d 集待下载", addedCount)
+		state.Summary = subscriptionAcceptedSummary(addedCount, recoveredCount)
 		if duplicateCount > 0 {
 			state.Summary = fmt.Sprintf("%s，跳过 %d 个重复版本", state.Summary, duplicateCount)
 		}
 	case addedCount > 0 && failedCount > 0:
 		state.Status = SubscriptionRunStatusWarning
-		state.Summary = fmt.Sprintf("新增 %d 集，另有 %d 集加入下载失败", addedCount, failedCount)
+		state.Summary = fmt.Sprintf("%s，另有 %d 集加入下载失败", subscriptionAcceptedSummary(addedCount, recoveredCount), failedCount)
 		if duplicateCount > 0 {
 			state.Summary = fmt.Sprintf("%s，跳过 %d 个重复版本", state.Summary, duplicateCount)
 		}
@@ -326,6 +361,87 @@ func (m *SubscriptionManager) ProcessSubscriptionWithSourceContext(ctx context.C
 	}
 
 	m.persistRunState(sub, state)
+}
+
+func subscriptionAcceptedSummary(accepted, recovered int) string {
+	newDownloads := accepted - recovered
+	switch {
+	case newDownloads > 0 && recovered > 0:
+		return fmt.Sprintf("新增 %d 集待下载，并恢复 %d 个 qB 现有任务", newDownloads, recovered)
+	case recovered > 0:
+		return fmt.Sprintf("已恢复 %d 个 qB 现有任务的下载记录", recovered)
+	default:
+		return fmt.Sprintf("新增 %d 集待下载", accepted)
+	}
+}
+
+func (m *SubscriptionManager) findExistingTorrent(
+	ctx context.Context,
+	sub *model.Subscription,
+	releaseTitle string,
+	seasonValue string,
+	episode string,
+	identityKey string,
+) (downloader.TorrentInfo, bool, error) {
+	if m == nil || m.Downloader == nil {
+		return downloader.TorrentInfo{}, false, nil
+	}
+
+	var (
+		torrents []downloader.TorrentInfo
+		err      error
+	)
+	switch source := m.Downloader.(type) {
+	case downloader.ContextTorrentLister:
+		torrents, err = source.ListTorrentsContext(ctx)
+	case downloader.TorrentLister:
+		torrents, err = source.ListTorrents()
+	default:
+		return downloader.TorrentInfo{}, false, nil
+	}
+	if err != nil {
+		return downloader.TorrentInfo{}, false, err
+	}
+
+	releaseTitle = strings.TrimSpace(releaseTitle)
+	normalizedRelease := parser.NormalizeReleaseTitle(releaseTitle)
+	bestScore := 0
+	best := downloader.TorrentInfo{}
+	for _, torrent := range torrents {
+		name := strings.TrimSpace(torrent.Name)
+		if name == "" {
+			continue
+		}
+
+		score := 0
+		switch {
+		case strings.EqualFold(name, releaseTitle):
+			score = 100
+		case normalizedRelease != "" && parser.NormalizeReleaseTitle(name) == normalizedRelease:
+			score = 90
+		default:
+			candidateSeason, candidateEpisode := parser.EpisodeIdentityFromTitle(name)
+			if candidateEpisode == "" {
+				candidateEpisode = parser.EpisodeNumberFromTitle(name)
+			}
+			if candidateSeason == "" {
+				candidateSeason = seasonValue
+			}
+			candidateIdentity := subscriptionEpisodeIdentity(candidateSeason, candidateEpisode, name, sub != nil && sub.AllowMultiSubgroup)
+			if identityKey != "" && candidateIdentity == identityKey &&
+				(titlesLookRelated(name, releaseTitle) || (sub != nil && titlesLookRelated(name, sub.Title))) {
+				score = 80
+			}
+		}
+		if score == 0 {
+			continue
+		}
+		if score > bestScore || (score == bestScore && preferredTorrent(torrent, best)) {
+			bestScore = score
+			best = torrent
+		}
+	}
+	return best, bestScore > 0, nil
 }
 
 // subscriptionEpisodeIdentity returns the stable identity used to avoid
