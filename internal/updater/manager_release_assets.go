@@ -45,7 +45,7 @@ func pickAssetForCurrentPlatform(release *githubRelease) (*releaseAsset, error) 
 
 func platformAssetCandidates(goos, goarch string, inAppBundle bool) []string {
 	switch goos {
-	case "windows":
+	case goosWindows:
 		return []string{fmt.Sprintf("_windows_%s.exe", goarch)}
 	case goosDarwin:
 		dmg := fmt.Sprintf("_darwin_%s.dmg", goarch)

@@ -15,6 +15,7 @@ import (
 
 	"github.com/pokerjest/animateAutoTool/internal/config"
 	"github.com/pokerjest/animateAutoTool/internal/db"
+	"github.com/pokerjest/animateAutoTool/internal/safeio"
 	appversion "github.com/pokerjest/animateAutoTool/internal/version"
 )
 
@@ -22,6 +23,7 @@ const (
 	safetySnapshotFormatVersion = 1
 	safetySnapshotKeepCount     = 5
 	safetySnapshotKeepAge       = 30 * 24 * time.Hour
+	sqliteMemoryPath            = ":memory:"
 )
 
 // SafetySnapshot describes a point-in-time copy of the runtime database and
@@ -47,8 +49,8 @@ func snapshotRoot() string {
 }
 
 func CreateSafetySnapshot(reason string) (SafetySnapshot, error) {
-	if db.DB == nil || strings.TrimSpace(db.CurrentDBPath) == "" || db.CurrentDBPath == ":memory:" {
-		if db.CurrentDBPath == ":memory:" {
+	if db.DB == nil || strings.TrimSpace(db.CurrentDBPath) == "" || db.CurrentDBPath == sqliteMemoryPath {
+		if db.CurrentDBPath == sqliteMemoryPath {
 			return SafetySnapshot{}, nil
 		}
 		return SafetySnapshot{}, errors.New("runtime database is not available for snapshot")
@@ -167,7 +169,7 @@ func RestoreSafetySnapshot(id string) error {
 	if err != nil {
 		return err
 	}
-	if db.CurrentDBPath == ":memory:" {
+	if db.CurrentDBPath == sqliteMemoryPath {
 		return nil
 	}
 	if db.DB != nil {
@@ -209,7 +211,7 @@ func fileSHA256(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer file.Close()
+	defer safeio.Close(file)
 	hash := sha256.New()
 	buf := make([]byte, 128*1024)
 	for {
@@ -240,7 +242,7 @@ func copyFile(source, destination string, mode os.FileMode) error {
 	if err != nil {
 		return err
 	}
-	defer in.Close()
+	defer safeio.Close(in)
 	info, err := in.Stat()
 	if err != nil {
 		return err

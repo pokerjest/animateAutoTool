@@ -40,6 +40,7 @@ const (
 	versionZero      = "v0.0.0"
 	goosDarwin       = "darwin"
 	goosLinux        = "linux"
+	goosWindows      = "windows"
 )
 
 type settings struct {
@@ -312,6 +313,33 @@ func (m *Manager) updateProgress(phase, message string, currentBytes, totalBytes
 	}
 }
 
+func (m *Manager) fetchReleaseForCheck(cfg settings, current, targetVersion string) (*githubRelease, time.Time, error) {
+	if targetVersion != "" {
+		targetVersion = normalizeVersion(targetVersion)
+		m.updateProgress("连接 GitHub", fmt.Sprintf("正在重新校验指定版本 %s...", targetVersion), 0, 0)
+		release, retryAfter, err := m.fetchReleaseByVersion(cfg.RepoOwner, cfg.RepoName, targetVersion)
+		return release, retryAfter, err
+	}
+
+	release, notModified, retryAfter, err := m.fetchLatestRelease(
+		cfg.RepoOwner,
+		cfg.RepoName,
+		currentVersionWantsPrerelease(current),
+	)
+	if err != nil {
+		return nil, retryAfter, err
+	}
+	if !notModified {
+		return release, retryAfter, nil
+	}
+
+	release = m.getCachedRelease(cfg.RepoOwner, cfg.RepoName)
+	if release == nil {
+		return nil, retryAfter, errors.New("remote release is unchanged but the local cache is empty")
+	}
+	return release, retryAfter, nil
+}
+
 func (m *Manager) runCheckInternal(source string, applyWhenBehind, alreadyStarted bool, targetVersion string) Status {
 	cfg := loadSettings()
 	now := time.Now()
@@ -368,19 +396,7 @@ func (m *Manager) runCheckInternal(source string, applyWhenBehind, alreadyStarte
 	}
 
 	m.updateProgress("连接 GitHub", "正在获取最新 Release 信息...", 0, 0)
-	var (
-		release     *githubRelease
-		notModified bool
-		retryAfter  time.Time
-		err         error
-	)
-	if targetVersion != "" {
-		targetVersion = normalizeVersion(targetVersion)
-		m.updateProgress("连接 GitHub", fmt.Sprintf("正在重新校验指定版本 %s...", targetVersion), 0, 0)
-		release, retryAfter, err = m.fetchReleaseByVersion(cfg.RepoOwner, cfg.RepoName, targetVersion)
-	} else {
-		release, notModified, retryAfter, err = m.fetchLatestRelease(cfg.RepoOwner, cfg.RepoName, currentVersionWantsPrerelease(current))
-	}
+	release, retryAfter, err := m.fetchReleaseForCheck(cfg, current, targetVersion)
 	if err != nil {
 		backoffUntil = m.recordFailure(now, retryAfter)
 		result = resultError
@@ -393,17 +409,6 @@ func (m *Manager) runCheckInternal(source string, applyWhenBehind, alreadyStarte
 		}
 		errText = err.Error()
 		return finish()
-	}
-
-	if notModified {
-		release = m.getCachedRelease(cfg.RepoOwner, cfg.RepoName)
-		if release == nil {
-			backoffUntil = m.recordFailure(now, time.Time{})
-			result = resultError
-			message = "远端返回未修改，但本地无缓存可用"
-			errText = "release cache is empty"
-			return finish()
-		}
 	}
 
 	m.clearFailures()

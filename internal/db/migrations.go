@@ -328,7 +328,7 @@ type migrationLock struct {
 }
 
 func acquireMigrationLock() (migrationLock, error) {
-	if CurrentDBPath == "" || strings.HasPrefix(CurrentDBPath, "file:") || CurrentDBPath == ":memory:" {
+	if CurrentDBPath == "" || strings.HasPrefix(CurrentDBPath, "file:") || CurrentDBPath == sqliteMemoryPath {
 		return migrationLock{}, nil
 	}
 	path := CurrentDBPath + ".migration.lock"
@@ -376,7 +376,7 @@ type migrationSnapshotManifest struct {
 }
 
 func createMigrationSnapshot(target *gorm.DB) error {
-	if CurrentDBPath == "" || CurrentDBPath == ":memory:" {
+	if CurrentDBPath == "" || CurrentDBPath == sqliteMemoryPath {
 		return nil
 	}
 	if _, err := os.Stat(CurrentDBPath); err != nil {

@@ -20,7 +20,7 @@ import (
 
 func applyUpdateForPlatform(artifactPath, snapshotID, readiness, databasePath, configPath string) error {
 	switch {
-	case runtime.GOOS == "windows":
+	case runtime.GOOS == goosWindows:
 		return applyWindowsUpdate(artifactPath, snapshotID, readiness, databasePath, configPath)
 	case runtime.GOOS == goosDarwin && strings.HasSuffix(strings.ToLower(artifactPath), ".dmg"):
 		return applyDarwinUpdate(artifactPath, snapshotID, readiness, databasePath, configPath)

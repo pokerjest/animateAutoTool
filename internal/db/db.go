@@ -13,6 +13,11 @@ import (
 	"gorm.io/gorm"
 )
 
+const (
+	sqliteMemoryPath       = ":memory:"
+	sqliteSharedMemoryPath = "file::memory:?cache=shared"
+)
+
 var DB *gorm.DB
 var CurrentDBPath string
 var currentDBGOOS = func() string { return runtime.GOOS }
@@ -33,7 +38,7 @@ func InitDB(storagePath string) {
 	if isInMemoryDB(storagePath) {
 		// SQLite keeps plain :memory: databases per connection, which causes tables to
 		// disappear when GORM opens additional pooled connections during tests.
-		driverPath = "file::memory:?cache=shared"
+		driverPath = sqliteSharedMemoryPath
 	} else {
 		driverPath = sqliteDriverPath(storagePath)
 	}
@@ -123,7 +128,7 @@ func ExportGlobalConfigsToConfigFile() error {
 }
 
 func isInMemoryDB(storagePath string) bool {
-	return storagePath == ":memory:" || strings.HasPrefix(storagePath, "file::memory:")
+	return storagePath == sqliteMemoryPath || strings.HasPrefix(storagePath, "file::memory:")
 }
 
 func sqliteDriverPath(storagePath string) string {

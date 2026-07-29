@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/pokerjest/animateAutoTool/internal/db"
+	"github.com/pokerjest/animateAutoTool/internal/safeio"
 )
 
 const releaseManifestAssetName = "animate-release-manifest.json"
@@ -150,7 +151,7 @@ func fetchReleaseManifest(release *githubRelease) (ReleaseManifest, error) {
 	if err != nil {
 		return ReleaseManifest{}, err
 	}
-	defer resp.Body.Close()
+	defer safeio.Close(resp.Body)
 	if resp.StatusCode != http.StatusOK {
 		return ReleaseManifest{}, fmt.Errorf("manifest download returned HTTP %d", resp.StatusCode)
 	}

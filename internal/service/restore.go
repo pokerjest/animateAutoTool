@@ -211,141 +211,177 @@ func validateRestoreOptions(desc BackupDescriptor, options RestoreOptions) error
 }
 
 func (s *RestoreService) writeRestoreData(tx *gorm.DB, d *restoreData, options RestoreOptions, desc BackupDescriptor) error {
-	createBatch := func(data interface{}) error {
+	createBatch := func(data any) error {
 		return tx.CreateInBatches(data, s.BatchSize).Error
 	}
 
 	if options.Configs {
-		if BackupConfigMerges(desc.Mode) {
-			for _, cfg := range d.configs {
-				if err := tx.Where(model.GlobalConfig{Key: cfg.Key}).Assign(model.GlobalConfig{Value: cfg.Value}).FirstOrCreate(&model.GlobalConfig{}).Error; err != nil {
-					return err
-				}
-			}
-		} else if d.hasConfigs {
-			var preserved []model.GlobalConfig
-			if !desc.ContainsSecrets {
-				if err := tx.Where("key LIKE ? OR key LIKE ? OR key LIKE ? OR key LIKE ? OR key LIKE ?",
-					"%password%", "%secret%", "%token%", "%key%", "%credential%").
-					Find(&preserved).Error; err != nil {
-					return err
-				}
-			}
-			if err := tx.Exec("DELETE FROM global_configs").Error; err != nil {
-				return err
-			}
-			if len(d.configs) > 0 {
-				if err := createBatch(&d.configs); err != nil {
-					return err
-				}
-			}
-			if len(preserved) > 0 {
-				if err := createBatch(&preserved); err != nil {
-					return err
-				}
-			}
+		if err := writeRestoreConfigs(tx, d, desc, createBatch); err != nil {
+			return err
 		}
 	}
 
-	if options.Metadata && d.hasMetadata {
-		if err := tx.Exec("DELETE FROM anime_metadata").Error; err != nil {
+	if options.Metadata {
+		if err := replaceRestoreRows(
+			d.hasMetadata,
+			len(d.metas),
+			func() error { return tx.Exec("DELETE FROM anime_metadata").Error },
+			&d.metas,
+			createBatch,
+		); err != nil {
 			return err
-		}
-		if len(d.metas) > 0 {
-			if err := createBatch(&d.metas); err != nil {
-				return err
-			}
 		}
 	}
 
-	if options.Subscriptions && d.hasSubscriptions {
-		if err := tx.Exec("DELETE FROM subscriptions").Error; err != nil {
+	if options.Subscriptions {
+		if err := replaceRestoreRows(
+			d.hasSubscriptions,
+			len(d.subs),
+			func() error { return tx.Exec("DELETE FROM subscriptions").Error },
+			&d.subs,
+			createBatch,
+		); err != nil {
 			return err
-		}
-		if len(d.subs) > 0 {
-			if err := createBatch(&d.subs); err != nil {
-				return err
-			}
 		}
 	}
 
 	if options.Logs {
-		if d.hasRunLogs {
-			if err := tx.Exec("DELETE FROM subscription_run_logs").Error; err != nil {
-				return err
-			}
-		}
-		if d.hasDownloadLogs {
-			if err := tx.Exec("DELETE FROM download_logs").Error; err != nil {
-				return err
-			}
-		}
-		if d.hasDownloadLogs && len(d.logs) > 0 {
-			if err := createBatch(&d.logs); err != nil {
-				return err
-			}
-		}
-		if d.hasRunLogs && len(d.runLogs) > 0 {
-			if err := createBatch(&d.runLogs); err != nil {
-				return err
-			}
+		if err := writeRestoreLogs(tx, d, createBatch); err != nil {
+			return err
 		}
 	}
 
 	if options.Local {
-		if d.hasPlayback {
-			if err := tx.Exec("DELETE FROM playback_histories").Error; err != nil {
-				return err
-			}
-		}
-		if d.hasEpisodes {
-			if err := tx.Exec("DELETE FROM local_episodes").Error; err != nil {
-				return err
-			}
-		}
-		if d.hasAnimes {
-			if err := tx.Exec("DELETE FROM local_animes").Error; err != nil {
-				return err
-			}
-		}
-		if d.hasDirs {
-			if err := tx.Exec("DELETE FROM local_anime_directories").Error; err != nil {
-				return err
-			}
-		}
-
-		if d.hasDirs && len(d.dirs) > 0 {
-			if err := createBatch(&d.dirs); err != nil {
-				return err
-			}
-		}
-		if d.hasAnimes && len(d.animes) > 0 {
-			if err := createBatch(&d.animes); err != nil {
-				return err
-			}
-		}
-		if d.hasEpisodes && len(d.episodes) > 0 {
-			if err := createBatch(&d.episodes); err != nil {
-				return err
-			}
-		}
-		if d.hasPlayback && len(d.playback) > 0 {
-			if err := createBatch(&d.playback); err != nil {
-				return err
-			}
-		}
-	}
-
-	if options.Users && d.hasUsers {
-		if err := tx.Exec("DELETE FROM users").Error; err != nil {
+		if err := writeRestoreLocalLibrary(tx, d, createBatch); err != nil {
 			return err
 		}
-		if len(d.users) > 0 {
-			if err := createBatch(&d.users); err != nil {
-				return err
-			}
+	}
+
+	if options.Users {
+		if err := replaceRestoreRows(
+			d.hasUsers,
+			len(d.users),
+			func() error { return tx.Exec("DELETE FROM users").Error },
+			&d.users,
+			createBatch,
+		); err != nil {
+			return err
 		}
 	}
 
+	return nil
+}
+
+type restoreBatchWriter func(data any) error
+
+func writeRestoreConfigs(tx *gorm.DB, d *restoreData, desc BackupDescriptor, createBatch restoreBatchWriter) error {
+	if BackupConfigMerges(desc.Mode) {
+		for _, cfg := range d.configs {
+			if err := tx.Where(model.GlobalConfig{Key: cfg.Key}).
+				Assign(model.GlobalConfig{Value: cfg.Value}).
+				FirstOrCreate(&model.GlobalConfig{}).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if !d.hasConfigs {
+		return nil
+	}
+
+	var preserved []model.GlobalConfig
+	if !desc.ContainsSecrets {
+		if err := tx.Where("key LIKE ? OR key LIKE ? OR key LIKE ? OR key LIKE ? OR key LIKE ?",
+			"%password%", "%secret%", "%token%", "%key%", "%credential%").
+			Find(&preserved).Error; err != nil {
+			return err
+		}
+	}
+	if err := tx.Exec("DELETE FROM global_configs").Error; err != nil {
+		return err
+	}
+	if len(d.configs) > 0 {
+		if err := createBatch(&d.configs); err != nil {
+			return err
+		}
+	}
+	if len(preserved) > 0 {
+		return createBatch(&preserved)
+	}
+	return nil
+}
+
+func replaceRestoreRows(hasTable bool, rowCount int, deleteRows func() error, data any, createBatch restoreBatchWriter) error {
+	if !hasTable {
+		return nil
+	}
+	if err := deleteRows(); err != nil {
+		return err
+	}
+	if rowCount == 0 {
+		return nil
+	}
+	return createBatch(data)
+}
+
+func writeRestoreLogs(tx *gorm.DB, d *restoreData, createBatch restoreBatchWriter) error {
+	if err := replaceRestoreRows(
+		d.hasDownloadLogs,
+		len(d.logs),
+		func() error { return tx.Exec("DELETE FROM download_logs").Error },
+		&d.logs,
+		createBatch,
+	); err != nil {
+		return err
+	}
+	return replaceRestoreRows(
+		d.hasRunLogs,
+		len(d.runLogs),
+		func() error { return tx.Exec("DELETE FROM subscription_run_logs").Error },
+		&d.runLogs,
+		createBatch,
+	)
+}
+
+func writeRestoreLocalLibrary(tx *gorm.DB, d *restoreData, createBatch restoreBatchWriter) error {
+	if d.hasPlayback {
+		if err := tx.Exec("DELETE FROM playback_histories").Error; err != nil {
+			return err
+		}
+	}
+	if d.hasEpisodes {
+		if err := tx.Exec("DELETE FROM local_episodes").Error; err != nil {
+			return err
+		}
+	}
+	if d.hasAnimes {
+		if err := tx.Exec("DELETE FROM local_animes").Error; err != nil {
+			return err
+		}
+	}
+	if d.hasDirs {
+		if err := tx.Exec("DELETE FROM local_anime_directories").Error; err != nil {
+			return err
+		}
+	}
+
+	if d.hasDirs && len(d.dirs) > 0 {
+		if err := createBatch(&d.dirs); err != nil {
+			return err
+		}
+	}
+	if d.hasAnimes && len(d.animes) > 0 {
+		if err := createBatch(&d.animes); err != nil {
+			return err
+		}
+	}
+	if d.hasEpisodes && len(d.episodes) > 0 {
+		if err := createBatch(&d.episodes); err != nil {
+			return err
+		}
+	}
+	if d.hasPlayback && len(d.playback) > 0 {
+		return createBatch(&d.playback)
+	}
 	return nil
 }

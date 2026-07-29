@@ -24,12 +24,12 @@ func TestHistoricalFixturesUpgradeToCurrent(t *testing.T) {
 	}
 
 	originalDBPath := CurrentDBPath
-	CurrentDBPath = ":memory:"
+	CurrentDBPath = sqliteMemoryPath
 	t.Cleanup(func() { CurrentDBPath = originalDBPath })
 
 	for _, fixture := range checkpoints {
 		t.Run(fixture.name, func(t *testing.T) {
-			target, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+			target, err := gorm.Open(sqlite.Open(sqliteMemoryPath), &gorm.Config{})
 			if err != nil {
 				t.Fatalf("open fixture database: %v", err)
 			}

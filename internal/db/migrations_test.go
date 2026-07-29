@@ -32,7 +32,7 @@ func TestValidateMigrationOrderRejectsDuplicateAndOutOfOrderIDs(t *testing.T) {
 }
 
 func TestSchemaSequenceMigrationBackfillsHistoricalRows(t *testing.T) {
-	target, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	target, err := gorm.Open(sqlite.Open(sqliteMemoryPath), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("open sqlite db: %v", err)
 	}

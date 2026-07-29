@@ -29,7 +29,7 @@ system_settings:
 		t.Fatalf("LoadConfig: %v", err)
 	}
 
-	InitDB(":memory:")
+	InitDB(sqliteMemoryPath)
 	t.Cleanup(func() {
 		_ = CloseDB()
 		DB = nil

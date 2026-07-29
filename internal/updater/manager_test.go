@@ -80,7 +80,7 @@ func TestPlatformAssetCandidates(t *testing.T) {
 	if got := platformAssetCandidates("linux", "amd64", false); len(got) != 1 || got[0] != "_linux_amd64.tar.gz" {
 		t.Fatalf("unexpected linux candidates: %#v", got)
 	}
-	if got := platformAssetCandidates("windows", "amd64", false); len(got) != 1 || got[0] != "_windows_amd64.exe" {
+	if got := platformAssetCandidates(goosWindows, "amd64", false); len(got) != 1 || got[0] != "_windows_amd64.exe" {
 		t.Fatalf("unexpected windows candidates: %#v", got)
 	}
 	if got := platformAssetCandidates("darwin", "arm64", false); len(got) != 2 || got[0] != "_darwin_arm64.tar.gz" || got[1] != "_darwin_arm64.dmg" {
