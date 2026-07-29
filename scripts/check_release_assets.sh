@@ -57,6 +57,7 @@ checksum_has_entry() {
 }
 
 expected_assets=()
+expected_assets+=("animate-release-manifest.json")
 while IFS= read -r arch; do
     expected_assets+=("${APP_NAME}_${VERSION}_windows_${arch}.exe")
 done < <(trim_csv_items "$WINDOWS_ARCHES")
@@ -88,7 +89,61 @@ for asset in "${expected_assets[@]}"; do
 done
 
 echo
-echo "2) SHA256SUMS.txt"
+echo "2) Compatibility manifest"
+manifest_path="$DIST_DIR/animate-release-manifest.json"
+if [ -f "$manifest_path" ]; then
+    if python3 - "$manifest_path" "$VERSION" <<'PY'
+import json
+import re
+import sys
+
+path, expected = sys.argv[1:3]
+with open(path, "r", encoding="utf-8") as handle:
+    manifest = json.load(handle)
+
+required = (
+    "format_version",
+    "version",
+    "channel",
+    "schema_version",
+    "min_upgrade_from",
+    "min_readable_schema",
+    "max_readable_schema",
+    "switchable_from_prerelease",
+    "rollback_supported",
+)
+missing = [key for key in required if key not in manifest]
+if missing:
+    raise SystemExit(f"missing fields: {', '.join(missing)}")
+
+normalize = lambda value: str(value).removeprefix("v")
+if normalize(manifest["version"]) != normalize(expected):
+    raise SystemExit("manifest version does not match requested package version")
+if manifest["format_version"] != 1:
+    raise SystemExit("unsupported manifest format_version")
+if manifest["channel"] not in ("stable", "beta"):
+    raise SystemExit("manifest channel must be stable or beta")
+if manifest["channel"] == "beta" and "-" not in normalize(expected):
+    raise SystemExit("beta manifest requires a prerelease version")
+if manifest["channel"] == "stable" and "-" in normalize(expected):
+    raise SystemExit("stable manifest cannot describe a prerelease version")
+for key in ("schema_version", "min_readable_schema", "max_readable_schema"):
+    if not re.fullmatch(r"\d+(?:_[A-Za-z0-9.-]+)?", str(manifest[key])):
+        raise SystemExit(f"invalid schema field: {key}")
+PY
+    then
+        echo -e "  - ${GREEN}OK${NC}   manifest fields and version"
+    else
+        echo -e "  - ${RED}FAIL${NC} manifest validation"
+        fail=1
+    fi
+else
+    echo -e "  - ${RED}MISS${NC} animate-release-manifest.json"
+    fail=1
+fi
+
+echo
+echo "3) SHA256SUMS.txt"
 if [ -f "$checksum_file" ]; then
     echo -e "  - ${GREEN}OK${NC}   SHA256SUMS.txt exists"
 else
@@ -98,7 +153,7 @@ fi
 
 if [ -f "$checksum_file" ]; then
     echo
-    echo "3) Checksum entries for updater assets"
+    echo "4) Checksum entries for updater assets"
     for asset in "${expected_assets[@]}"; do
         if ! asset_exists "$asset"; then
             echo -e "  - ${YELLOW}SKIP${NC} $asset (asset missing)"

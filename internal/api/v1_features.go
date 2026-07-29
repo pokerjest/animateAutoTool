@@ -637,6 +637,54 @@ func V1UpdaterReleasesHandler(c *gin.Context) {
 	v1Data(c, http.StatusOK, catalog)
 }
 
+func V1UpdaterSnapshotsHandler(c *gin.Context) {
+	snapshots := service.ListSafetySnapshots()
+	items := make([]gin.H, 0, len(snapshots))
+	for _, snapshot := range snapshots {
+		if snapshot.Reason != "self-update" {
+			continue
+		}
+		items = append(items, gin.H{
+			"id":                 snapshot.ID,
+			"reason":             snapshot.Reason,
+			"operation_type":     snapshot.OperationType,
+			"app_version":        snapshot.AppVersion,
+			"schema_version":     snapshot.SchemaVersion,
+			"created_at":         snapshot.CreatedAt,
+			"rollback_supported": snapshot.RollbackSupported,
+		})
+	}
+	v1Data(c, http.StatusOK, gin.H{"items": items})
+}
+
+func V1UpdaterRollbackHandler(c *gin.Context) {
+	var req struct {
+		ID string `json:"id"`
+	}
+	decoder := json.NewDecoder(io.LimitReader(c.Request.Body, 8*1024))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&req); err != nil || strings.TrimSpace(req.ID) == "" {
+		v1Error(c, http.StatusBadRequest, "snapshot_id_missing", "没有提供有效的更新快照")
+		return
+	}
+	req.ID = strings.TrimSpace(req.ID)
+	restarting, err := updater.RollbackSnapshot(req.ID)
+	if err != nil {
+		v1Error(c, http.StatusConflict, "snapshot_restore_failed", err.Error())
+		return
+	}
+	service.RecordAudit(buildAuditContext(c), service.AuditEntry{
+		Action:  service.AuditActionBackupRestore,
+		Outcome: service.AuditOutcomeSuccess,
+		Details: map[string]any{"snapshot_id": req.ID, "source": "updater-rollback", "restarting": restarting},
+	})
+	if restarting {
+		v1Message(c, http.StatusAccepted, "正在恢复更新快照并重启应用", gin.H{"snapshot_id": req.ID, "restarting": true})
+		return
+	}
+	v1Message(c, http.StatusOK, "更新快照已恢复，建议重启应用", gin.H{"snapshot_id": req.ID})
+}
+
 func V1UpdaterActionHandler(c *gin.Context) {
 	action := c.Param("action")
 	taskID := "repo-update-" + action

@@ -18,20 +18,20 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/safeio"
 )
 
-func applyUpdateForPlatform(artifactPath string) error {
+func applyUpdateForPlatform(artifactPath, snapshotID, readiness, databasePath, configPath string) error {
 	switch {
 	case runtime.GOOS == "windows":
-		return applyWindowsUpdate(artifactPath)
+		return applyWindowsUpdate(artifactPath, snapshotID, readiness, databasePath, configPath)
 	case runtime.GOOS == goosDarwin && strings.HasSuffix(strings.ToLower(artifactPath), ".dmg"):
-		return applyDarwinUpdate(artifactPath)
+		return applyDarwinUpdate(artifactPath, snapshotID, readiness, databasePath, configPath)
 	case (runtime.GOOS == goosDarwin || runtime.GOOS == goosLinux) && strings.HasSuffix(strings.ToLower(artifactPath), ".tar.gz"):
-		return applyArchiveBinaryUpdate(artifactPath)
+		return applyArchiveBinaryUpdate(artifactPath, snapshotID, readiness, databasePath, configPath)
 	default:
 		return fmt.Errorf("platform/artifact combination is not supported for self-update: %s %s", runtime.GOOS, filepath.Base(artifactPath))
 	}
 }
 
-func applyArchiveBinaryUpdate(downloadedArchive string) error {
+func applyArchiveBinaryUpdate(downloadedArchive, snapshotID, readiness, databasePath, configPath string) error {
 	exePath, err := os.Executable()
 	if err != nil {
 		return err
@@ -62,6 +62,10 @@ OLD_PID="$1"
 NEW_BIN="$2"
 TARGET_BIN="$3"
 LOG_FILE="$4"
+SNAPSHOT_DIR="$5"
+READY_URL="$6"
+DATABASE_PATH="$7"
+CONFIG_PATH="$8"
 TMP_BIN="${TARGET_BIN}.new"
 BAK_BIN="${TARGET_BIN}.bak"
 
@@ -88,8 +92,38 @@ if ! mv "$TMP_BIN" "$TARGET_BIN"; then
   exit 1
 fi
 
-rm -f "$BAK_BIN" || true
 nohup "$TARGET_BIN" >> "$LOG_FILE" 2>&1 &
+NEW_PID=$!
+READY=0
+for i in $(seq 1 60); do
+  if curl -fsS --max-time 2 "$READY_URL" >/dev/null 2>&1; then
+    READY=1
+    break
+  fi
+  sleep 1
+done
+if [ "$READY" -ne 1 ]; then
+  kill "$NEW_PID" >/dev/null 2>&1 || true
+  sleep 1
+  rm -f "$DATABASE_PATH-wal" "$DATABASE_PATH-shm" || true
+  if [ -f "$SNAPSHOT_DIR/database.db" ]; then
+    cp "$SNAPSHOT_DIR/database.db" "$DATABASE_PATH.restore"
+    mv "$DATABASE_PATH.restore" "$DATABASE_PATH"
+  fi
+  if [ -f "$SNAPSHOT_DIR/config.yaml" ]; then
+    cp "$SNAPSHOT_DIR/config.yaml" "$CONFIG_PATH.restore"
+    mv "$CONFIG_PATH.restore" "$CONFIG_PATH"
+  fi
+  if [ -f "$BAK_BIN" ]; then
+    mv "$BAK_BIN" "$TARGET_BIN" || true
+  fi
+  nohup "$TARGET_BIN" >> "$LOG_FILE" 2>&1 &
+  echo "[$(date)] readiness check failed; previous version restored and restarted" >> "$LOG_FILE"
+  exit 1
+fi
+if [ -f "$BAK_BIN" ]; then
+  mv "$BAK_BIN" "$SNAPSHOT_DIR/previous-binary" || rm -f "$BAK_BIN"
+fi
 `
 	if err := os.WriteFile(scriptPath, []byte(script), 0600); err != nil {
 		return err
@@ -98,7 +132,8 @@ nohup "$TARGET_BIN" >> "$LOG_FILE" 2>&1 &
 		return err
 	}
 
-	cmd := exec.Command("/bin/bash", scriptPath, strconv.Itoa(os.Getpid()), stagedBinaryPath, exePath, logPath) //nolint:gosec
+	snapshotDir := filepath.Join(config.DataDir(), "updates", "snapshots", filepath.Base(snapshotID))
+	cmd := exec.Command("/bin/bash", scriptPath, strconv.Itoa(os.Getpid()), stagedBinaryPath, exePath, logPath, snapshotDir, readiness, databasePath, configPath) //nolint:gosec
 	if err := cmd.Start(); err != nil {
 		return err
 	}
@@ -177,7 +212,7 @@ func extractBinaryFromTarGz(archivePath, targetBinaryName, destinationPath strin
 	return fmt.Errorf("binary %s not found in archive %s", targetBinaryName, filepath.Base(archivePath))
 }
 
-func applyWindowsUpdate(downloadedExe string) error {
+func applyWindowsUpdate(downloadedExe, snapshotID, readiness, databasePath, configPath string) error {
 	exePath, err := os.Executable()
 	if err != nil {
 		return err
@@ -204,6 +239,10 @@ set "TARGET_EXE=%~3"
 set "LOG_FILE=%~4"
 set "TMP_EXE=%TARGET_EXE%.new"
 set "BAK_EXE=%TARGET_EXE%.bak"
+set "SNAPSHOT_DIR=%~5"
+set "READY_URL=%~6"
+set "DATABASE_PATH=%~7"
+set "CONFIG_PATH=%~8"
 
 :waitloop
 tasklist /FI "PID eq %OLD_PID%" | find "%OLD_PID%" >nul
@@ -233,14 +272,43 @@ if %ERRORLEVEL% neq 0 (
   exit /b 1
 )
 
-if exist "%BAK_EXE%" del /F /Q "%BAK_EXE%" >nul 2>nul
-start "" "%TARGET_EXE%"
+for /F "delims=" %%P in ('powershell -NoProfile -NonInteractive -Command "$p=Start-Process -FilePath $env:TARGET_EXE -WorkingDirectory (Split-Path -Parent $env:TARGET_EXE) -PassThru; $p.Id"') do set "NEW_PID=%%P"
+if not defined NEW_PID (
+  echo [%DATE% %TIME%] failed to start updated executable >> "%LOG_FILE%"
+  if exist "%BAK_EXE%" move /Y "%BAK_EXE%" "%TARGET_EXE%" >nul 2>nul
+  exit /b 1
+)
+set "READY=0"
+for /L %%I in (1,1,60) do (
+  curl.exe -fsS --max-time 2 "%READY_URL%" >nul 2>nul
+  if not errorlevel 1 (
+    set "READY=1"
+    goto ready
+  )
+  timeout /t 1 /nobreak >nul
+)
+:ready
+if "%READY%"=="0" (
+  taskkill /F /PID %NEW_PID% /T >nul 2>nul
+  if exist "%DATABASE_PATH%-wal" del /F /Q "%DATABASE_PATH%-wal" >nul 2>nul
+  if exist "%DATABASE_PATH%-shm" del /F /Q "%DATABASE_PATH%-shm" >nul
+  if exist "%SNAPSHOT_DIR%\database.db" copy /Y "%SNAPSHOT_DIR%\database.db" "%DATABASE_PATH%.restore" >nul
+  if exist "%DATABASE_PATH%.restore" move /Y "%DATABASE_PATH%.restore" "%DATABASE_PATH%" >nul
+  if exist "%SNAPSHOT_DIR%\config.yaml" copy /Y "%SNAPSHOT_DIR%\config.yaml" "%CONFIG_PATH%.restore" >nul
+  if exist "%CONFIG_PATH%.restore" move /Y "%CONFIG_PATH%.restore" "%CONFIG_PATH%" >nul
+  if exist "%BAK_EXE%" move /Y "%BAK_EXE%" "%TARGET_EXE%" >nul
+  start "" "%TARGET_EXE%"
+  echo [%DATE% %TIME%] readiness check failed; previous version restored and restarted >> "%LOG_FILE%"
+  exit /b 1
+)
+if exist "%BAK_EXE%" move /Y "%BAK_EXE%" "%SNAPSHOT_DIR%\previous-binary" >nul
 `
 	if err := os.WriteFile(scriptPath, []byte(script), 0600); err != nil {
 		return err
 	}
 
-	cmd := exec.Command("cmd", "/C", scriptPath, strconv.Itoa(os.Getpid()), downloadedExe, exePath, logPath) //nolint:gosec
+	snapshotDir := filepath.Join(config.DataDir(), "updates", "snapshots", filepath.Base(snapshotID))
+	cmd := exec.Command("cmd", "/C", scriptPath, strconv.Itoa(os.Getpid()), downloadedExe, exePath, logPath, snapshotDir, readiness, databasePath, configPath) //nolint:gosec
 	if err := cmd.Start(); err != nil {
 		return err
 	}
@@ -249,7 +317,7 @@ start "" "%TARGET_EXE%"
 	return nil
 }
 
-func applyDarwinUpdate(downloadedDMG string) error {
+func applyDarwinUpdate(downloadedDMG, snapshotID, readiness, databasePath, configPath string) error {
 	exePath, err := os.Executable()
 	if err != nil {
 		return err
@@ -289,6 +357,10 @@ TARGET_DIR="$3"
 APP_NAME="$4"
 LOG_FILE="$5"
 MOUNT_POINT="$6"
+SNAPSHOT_DIR="$7"
+READY_URL="$8"
+DATABASE_PATH="$9"
+CONFIG_PATH="${10}"
 
 while kill -0 "$OLD_PID" >/dev/null 2>&1; do
   sleep 1
@@ -328,11 +400,49 @@ if ! mv "$STAGE_APP" "$TARGET_APP"; then
   if [ -d "$BACKUP_APP" ]; then
     mv "$BACKUP_APP" "$TARGET_APP" || true
   fi
+  rm -f "$DATABASE_PATH-wal" "$DATABASE_PATH-shm" || true
+  if [ -f "$SNAPSHOT_DIR/database.db" ]; then
+    cp "$SNAPSHOT_DIR/database.db" "$DATABASE_PATH.restore"
+    mv "$DATABASE_PATH.restore" "$DATABASE_PATH"
+  fi
+  if [ -f "$SNAPSHOT_DIR/config.yaml" ]; then
+    cp "$SNAPSHOT_DIR/config.yaml" "$CONFIG_PATH.restore"
+    mv "$CONFIG_PATH.restore" "$CONFIG_PATH"
+  fi
   exit 1
 fi
 
-rm -rf "$BACKUP_APP" || true
 open "$TARGET_APP"
+READY=0
+for i in $(seq 1 60); do
+  if curl -fsS --max-time 2 "$READY_URL" >/dev/null 2>&1; then
+    READY=1
+    break
+  fi
+  sleep 1
+done
+if [ "$READY" -ne 1 ]; then
+  pkill -f "$TARGET_APP/Contents/MacOS/" >/dev/null 2>&1 || true
+  rm -rf "$TARGET_APP" || true
+  if [ -d "$BACKUP_APP" ]; then
+    mv "$BACKUP_APP" "$TARGET_APP" || true
+  fi
+  rm -f "$DATABASE_PATH-wal" "$DATABASE_PATH-shm" || true
+  if [ -f "$SNAPSHOT_DIR/database.db" ]; then
+    cp "$SNAPSHOT_DIR/database.db" "$DATABASE_PATH.restore"
+    mv "$DATABASE_PATH.restore" "$DATABASE_PATH"
+  fi
+  if [ -f "$SNAPSHOT_DIR/config.yaml" ]; then
+    cp "$SNAPSHOT_DIR/config.yaml" "$CONFIG_PATH.restore"
+    mv "$CONFIG_PATH.restore" "$CONFIG_PATH"
+  fi
+  open "$TARGET_APP"
+  echo "[$(date)] readiness check failed; previous version restored and restarted" >> "$LOG_FILE"
+  exit 1
+fi
+if [ -d "$BACKUP_APP" ]; then
+  mv "$BACKUP_APP" "$SNAPSHOT_DIR/previous-app" || rm -rf "$BACKUP_APP"
+fi
 `
 	if err := os.WriteFile(scriptPath, []byte(script), 0600); err != nil {
 		return err
@@ -341,7 +451,8 @@ open "$TARGET_APP"
 		return err
 	}
 
-	cmd := exec.Command("/bin/bash", scriptPath, strconv.Itoa(os.Getpid()), downloadedDMG, targetDir, appName, logPath, mountPoint) //nolint:gosec
+	snapshotDir := filepath.Join(config.DataDir(), "updates", "snapshots", filepath.Base(snapshotID))
+	cmd := exec.Command("/bin/bash", scriptPath, strconv.Itoa(os.Getpid()), downloadedDMG, targetDir, appName, logPath, mountPoint, snapshotDir, readiness, databasePath, configPath) //nolint:gosec
 	if err := cmd.Start(); err != nil {
 		_ = os.RemoveAll(mountPoint)
 		return err

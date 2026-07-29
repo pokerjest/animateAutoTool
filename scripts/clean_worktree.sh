@@ -28,8 +28,6 @@ rm -f \
 
 rm -f logs/*.log 2>/dev/null || true
 
-rm -rf debug_metadata
-
 for db_file in animate.db animate_auto.db data.db; do
   if [[ -f "$db_file" && ! -s "$db_file" ]]; then
     rm -f "$db_file"

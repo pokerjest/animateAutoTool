@@ -106,6 +106,7 @@ nav:
       - Cloudflare Tunnel: remote-access/cloudflare-tunnel.md
       - Windows Cloudflare 排障实录: remote-access/cloudflare-troubleshooting.md
       - Tailscale: remote-access/tailscale.md
+      - NetBird 兼容说明: remote-access/netbird.md
       - FRP: remote-access/frp.md
       - IPv6: remote-access/ipv6.md
   - 故障排查:

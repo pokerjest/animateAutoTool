@@ -2,7 +2,6 @@ package alist
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"time"
 
@@ -23,8 +22,6 @@ type Response struct {
 }
 
 var cachedToken string
-
-var ErrOfflineDownloadNotImplemented = errors.New("offline download via AList is not implemented yet")
 
 const DefaultAListURL = "http://127.0.0.1:5244"
 
@@ -285,64 +282,4 @@ func CheckConnection() (bool, string) {
 	}
 
 	return true, ""
-}
-
-func AddOfflineDownload(url, targetDir string) error {
-	return ErrOfflineDownloadNotImplemented
-}
-
-func ListFiles(path string) ([]interface{}, error) {
-	token := getToken()
-
-	payload := map[string]interface{}{
-		"path":     path,
-		"page":     1,
-		"per_page": 0,
-		"refresh":  true,
-	}
-
-	var res struct {
-		Code int `json:"code"`
-		Data struct {
-			Content []interface{} `json:"content"`
-		} `json:"data"`
-	}
-
-	_, err := client.R().
-		SetHeader("Authorization", token).
-		SetBody(payload).
-		SetResult(&res).
-		Post(getBaseUrl() + "/api/fs/list")
-
-	if err != nil {
-		return nil, err
-	}
-	return res.Data.Content, nil
-}
-
-func GetSignUrl(path string) (string, error) {
-	token := getToken()
-
-	payload := map[string]interface{}{
-		"path": path,
-	}
-
-	var res struct {
-		Code int `json:"code"`
-		Data struct {
-			RawUrl string `json:"raw_url"`
-			Sign   string `json:"sign"`
-		} `json:"data"`
-	}
-
-	_, err := client.R().
-		SetHeader("Authorization", token).
-		SetBody(payload).
-		SetResult(&res).
-		Post(getBaseUrl() + "/api/fs/get")
-
-	if err != nil {
-		return "", err
-	}
-	return res.Data.RawUrl, nil
 }

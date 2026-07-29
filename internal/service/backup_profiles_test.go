@@ -2,13 +2,25 @@ package service
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/glebarez/sqlite"
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/model"
+	"gorm.io/gorm"
 )
+
+func testGlobalConfigValue(t *testing.T, key string) string {
+	t.Helper()
+	var cfg model.GlobalConfig
+	if err := db.DB.First(&cfg, "key = ?", key).Error; err != nil {
+		t.Fatalf("load config %s: %v", key, err)
+	}
+	return cfg.Value
+}
 
 func TestFullBackupRestoresPlaybackHistoryWithLocalLibrary(t *testing.T) {
 	db.InitDB(":memory:")
@@ -55,6 +67,28 @@ func TestFullBackupRestoresPlaybackHistoryWithLocalLibrary(t *testing.T) {
 	}
 }
 
+func TestFullBackupRestoresCredentialsWhenManifestContainsSecrets(t *testing.T) {
+	db.InitDB(":memory:")
+	t.Cleanup(func() { _ = db.CloseDB() })
+
+	if err := db.SaveGlobalConfig(model.ConfigKeyQBPassword, "backup-password"); err != nil {
+		t.Fatalf("seed backup password: %v", err)
+	}
+	backupPath := filepath.Join(t.TempDir(), "full-settings.db")
+	if err := CreateBackupFile(backupPath, BackupModeFull); err != nil {
+		t.Fatalf("create full backup: %v", err)
+	}
+	if err := db.SaveGlobalConfig(model.ConfigKeyQBPassword, "current-password"); err != nil {
+		t.Fatalf("seed current password: %v", err)
+	}
+	if err := NewRestoreService().PerformRestore(backupPath, RestoreOptions{Configs: true}); err != nil {
+		t.Fatalf("restore full backup settings: %v", err)
+	}
+	if got := testGlobalConfigValue(t, model.ConfigKeyQBPassword); got != "backup-password" {
+		t.Fatalf("expected full backup credential to be restored, got %q", got)
+	}
+}
+
 func TestCreateSettingsBackupFileIncludesOnlyGlobalConfigs(t *testing.T) {
 	db.InitDB(":memory:")
 	t.Cleanup(func() {
@@ -89,6 +123,62 @@ func TestCreateSettingsBackupFileIncludesOnlyGlobalConfigs(t *testing.T) {
 	}
 	if desc.GlobalConfigCount != 1 {
 		t.Fatalf("expected 1 global config, got %d", desc.GlobalConfigCount)
+	}
+}
+
+func TestSettingsBackupOmitsSecretsAndRestorePreservesCurrentCredentials(t *testing.T) {
+	db.InitDB(":memory:")
+	t.Cleanup(func() { _ = db.CloseDB() })
+
+	if err := db.SaveGlobalConfig(model.ConfigKeyQBUrl, "http://backup-qb:8080"); err != nil {
+		t.Fatalf("seed non-sensitive config: %v", err)
+	}
+	if err := db.SaveGlobalConfig(model.ConfigKeyQBPassword, "backup-password"); err != nil {
+		t.Fatalf("seed sensitive config: %v", err)
+	}
+	if err := db.SaveGlobalConfig(model.ConfigKeyJellyfinApiKey, "backup-api-key"); err != nil {
+		t.Fatalf("seed API key: %v", err)
+	}
+
+	backupPath := filepath.Join(t.TempDir(), "settings.db")
+	if err := CreateBackupFile(backupPath, BackupModeSettings); err != nil {
+		t.Fatalf("create settings backup: %v", err)
+	}
+	backupDB, err := gorm.Open(sqlite.Open(backupPath), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open settings backup: %v", err)
+	}
+	var backedUp []model.GlobalConfig
+	if err := backupDB.Find(&backedUp).Error; err != nil {
+		t.Fatalf("load backed up settings: %v", err)
+	}
+	for _, cfg := range backedUp {
+		if IsSensitiveConfigKey(cfg.Key) {
+			t.Fatalf("sensitive config %q was written to selective backup", cfg.Key)
+		}
+	}
+
+	if err := db.SaveGlobalConfig(model.ConfigKeyQBUrl, "http://current-qb:8080"); err != nil {
+		t.Fatalf("update non-sensitive config: %v", err)
+	}
+	if err := db.SaveGlobalConfig(model.ConfigKeyQBPassword, "current-password"); err != nil {
+		t.Fatalf("update password: %v", err)
+	}
+	if err := db.SaveGlobalConfig(model.ConfigKeyJellyfinApiKey, "current-api-key"); err != nil {
+		t.Fatalf("update API key: %v", err)
+	}
+	if err := NewRestoreService().PerformRestore(backupPath, RestoreOptions{Configs: true}); err != nil {
+		t.Fatalf("restore settings backup: %v", err)
+	}
+
+	if got := testGlobalConfigValue(t, model.ConfigKeyQBUrl); got != "http://backup-qb:8080" {
+		t.Fatalf("expected non-sensitive setting from backup, got %q", got)
+	}
+	if got := testGlobalConfigValue(t, model.ConfigKeyQBPassword); got != "current-password" {
+		t.Fatalf("expected current password to be preserved, got %q", got)
+	}
+	if got := testGlobalConfigValue(t, model.ConfigKeyJellyfinApiKey); got != "current-api-key" {
+		t.Fatalf("expected current API key to be preserved, got %q", got)
 	}
 }
 
@@ -132,6 +222,12 @@ func TestCloudflareBackupRestoreMergesConfigs(t *testing.T) {
 	if err := db.SaveGlobalConfig(model.ConfigKeyR2Bucket, "bucket-current"); err != nil {
 		t.Fatalf("failed to update bucket config: %v", err)
 	}
+	if err := db.SaveGlobalConfig(model.ConfigKeyR2AccessKey, "CURRENT-ACCESS"); err != nil {
+		t.Fatalf("failed to update access key: %v", err)
+	}
+	if err := db.SaveGlobalConfig(model.ConfigKeyR2SecretKey, "CURRENT-SECRET"); err != nil {
+		t.Fatalf("failed to update secret key: %v", err)
+	}
 
 	svc := NewRestoreService()
 	if err := svc.PerformRestore(tempPath, RestoreOptions{Configs: true}); err != nil {
@@ -154,6 +250,89 @@ func TestCloudflareBackupRestoreMergesConfigs(t *testing.T) {
 	db.DB.Model(&model.GlobalConfig{}).Where("key = ?", model.ConfigKeyR2Bucket).Select("value").Scan(&bucket)
 	if bucket != backupValues[model.ConfigKeyR2Bucket] {
 		t.Fatalf("expected R2 bucket to be restored from backup, got %q", bucket)
+	}
+	if got := testGlobalConfigValue(t, model.ConfigKeyR2AccessKey); got != "CURRENT-ACCESS" {
+		t.Fatalf("expected current R2 access key to be preserved, got %q", got)
+	}
+	if got := testGlobalConfigValue(t, model.ConfigKeyR2SecretKey); got != "CURRENT-SECRET" {
+		t.Fatalf("expected current R2 secret key to be preserved, got %q", got)
+	}
+}
+
+func TestPartialLocalBackupDoesNotDeleteMissingEpisodeTable(t *testing.T) {
+	db.InitDB(":memory:")
+	t.Cleanup(func() { _ = db.CloseDB() })
+
+	currentDir := model.LocalAnimeDirectory{Path: "/current"}
+	if err := db.DB.Create(&currentDir).Error; err != nil {
+		t.Fatalf("seed current directory: %v", err)
+	}
+	currentAnime := model.LocalAnime{DirectoryID: currentDir.ID, Title: "Current", Path: "/current/show"}
+	if err := db.DB.Create(&currentAnime).Error; err != nil {
+		t.Fatalf("seed current anime: %v", err)
+	}
+	currentEpisode := model.LocalEpisode{LocalAnimeID: currentAnime.ID, Title: "Keep Me", EpisodeNum: 7, Path: "/current/show/07.mkv"}
+	if err := db.DB.Create(&currentEpisode).Error; err != nil {
+		t.Fatalf("seed current episode: %v", err)
+	}
+
+	backupPath := filepath.Join(t.TempDir(), "partial-local.db")
+	backupDB, err := gorm.Open(sqlite.Open(backupPath), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open partial backup: %v", err)
+	}
+	if err := backupDB.AutoMigrate(&model.LocalAnimeDirectory{}, &model.LocalAnime{}); err != nil {
+		t.Fatalf("create partial local schema: %v", err)
+	}
+	backupDir := model.LocalAnimeDirectory{Model: gorm.Model{ID: currentDir.ID}, Path: "/restored"}
+	backupAnime := model.LocalAnime{Model: gorm.Model{ID: currentAnime.ID}, DirectoryID: currentDir.ID, Title: "Restored", Path: "/restored/show"}
+	if err := backupDB.Create(&backupDir).Error; err != nil {
+		t.Fatalf("seed backup directory: %v", err)
+	}
+	if err := backupDB.Create(&backupAnime).Error; err != nil {
+		t.Fatalf("seed backup anime: %v", err)
+	}
+	sqlDB, err := backupDB.DB()
+	if err != nil {
+		t.Fatalf("resolve backup SQL handle: %v", err)
+	}
+	if err := sqlDB.Close(); err != nil {
+		t.Fatalf("close partial backup: %v", err)
+	}
+
+	if err := NewRestoreService().PerformRestore(backupPath, RestoreOptions{Local: true}); err != nil {
+		t.Fatalf("restore partial local backup: %v", err)
+	}
+	var episode model.LocalEpisode
+	if err := db.DB.First(&episode, currentEpisode.ID).Error; err != nil {
+		t.Fatalf("expected episode from missing backup table to remain: %v", err)
+	}
+	if episode.Path != currentEpisode.Path {
+		t.Fatalf("expected episode path %q to remain, got %q", currentEpisode.Path, episode.Path)
+	}
+}
+
+func TestRestoreRejectsBackupWithNewerSchema(t *testing.T) {
+	db.InitDB(":memory:")
+	t.Cleanup(func() { _ = db.CloseDB() })
+
+	backupPath := filepath.Join(t.TempDir(), "future.db")
+	if err := CreateBackupFile(backupPath, BackupModeSettings); err != nil {
+		t.Fatalf("create backup: %v", err)
+	}
+	backupDB, err := gorm.Open(sqlite.Open(backupPath), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open backup: %v", err)
+	}
+	if err := backupDB.Model(&backupManifest{}).Where("id = ?", 1).Update("schema_version", "999_future").Error; err != nil {
+		t.Fatalf("mark backup as future schema: %v", err)
+	}
+	sqlDB, _ := backupDB.DB()
+	_ = sqlDB.Close()
+
+	err = NewRestoreService().PerformRestore(backupPath, RestoreOptions{Configs: true})
+	if err == nil || !strings.Contains(err.Error(), "newer") {
+		t.Fatalf("expected newer schema rejection, got %v", err)
 	}
 }
 

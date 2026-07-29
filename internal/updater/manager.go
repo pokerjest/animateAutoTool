@@ -12,10 +12,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pokerjest/animateAutoTool/internal/config"
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/httpx"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/safeio"
+	"github.com/pokerjest/animateAutoTool/internal/service"
 	"github.com/pokerjest/animateAutoTool/internal/store"
 )
 
@@ -422,14 +424,27 @@ func (m *Manager) runCheckInternal(source string, applyWhenBehind, alreadyStarte
 	assetURL = asset.BrowserDownloadURL
 
 	cmp := compareVersions(current, latest)
-	if cmp >= 0 {
-		hasUpdate = false
+	compatible, compatibilityReason := true, ""
+	if cmp > 0 && targetVersion == "" {
+		compatible = false
+		compatibilityReason = "自动更新只允许向前升级"
+	} else if cmp != 0 {
+		_, compatible, compatibilityReason = compatibilityForRelease(*release, current)
+	}
+	if !compatible {
+		result = "refused"
+		message = fmt.Sprintf("版本 %s 不满足当前数据库兼容条件", latest)
 		if targetVersion != "" && cmp > 0 {
-			result = "refused"
-			message = fmt.Sprintf("不允许从 %s 在线降级到 %s", current, latest)
-			errText = "selected release is older than the running version"
-			return finish()
+			message = fmt.Sprintf("不允许从 %s 在线切换到 %s", current, latest)
 		}
+		errText = compatibilityReason
+		if errText == "" {
+			errText = "release compatibility manifest rejected the transition"
+		}
+		return finish()
+	}
+	if cmp == 0 {
+		hasUpdate = false
 		result = "up_to_date"
 		if targetVersion != "" {
 			message = fmt.Sprintf("当前已经是 %s", latest)
@@ -441,7 +456,10 @@ func (m *Manager) runCheckInternal(source string, applyWhenBehind, alreadyStarte
 
 	hasUpdate = true
 	result = "behind"
-	if targetVersion != "" {
+	if targetVersion != "" && cmp > 0 {
+		result = "switchable"
+		message = fmt.Sprintf("已选择可安全回切的稳定版本 %s", latest)
+	} else if targetVersion != "" {
 		message = fmt.Sprintf("已选择版本 %s", latest)
 	} else {
 		message = fmt.Sprintf("检测到新版本 %s", latest)
@@ -483,8 +501,15 @@ func (m *Manager) runCheckInternal(source string, applyWhenBehind, alreadyStarte
 		checksumVerified = true
 	}
 
+	snapshot, err := service.CreateSafetySnapshot("self-update")
+	if err != nil {
+		result = resultError
+		message = "更新前安全快照创建失败"
+		errText = err.Error()
+		return finish()
+	}
 	m.updateProgress("应用更新", "正在应用更新包并准备重启...", 0, 0)
-	if err := applyUpdateForPlatform(artifactPath); err != nil {
+	if err := applyUpdateForPlatform(artifactPath, snapshot.ID, readinessURL(), db.CurrentDBPath, config.ConfigFilePath()); err != nil {
 		result = resultError
 		message = "应用更新失败"
 		errText = err.Error()
@@ -495,6 +520,14 @@ func (m *Manager) runCheckInternal(source string, applyWhenBehind, alreadyStarte
 	message = "更新包已应用，正在重启到新版本"
 	lastUpdate = now
 	return finish()
+}
+
+func readinessURL() string {
+	port := 8306
+	if config.AppConfig != nil && config.AppConfig.Server.Port > 0 {
+		port = config.AppConfig.Server.Port
+	}
+	return fmt.Sprintf("http://127.0.0.1:%d/healthz/ready", port)
 }
 
 func (m *Manager) applySettingsLocked(cfg settings) {

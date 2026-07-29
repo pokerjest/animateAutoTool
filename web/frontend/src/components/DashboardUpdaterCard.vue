@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
-import { Download, FlaskConical, RefreshCw, ShieldCheck } from '@lucide/vue'
+import { Download, FlaskConical, RefreshCw, RotateCcw, ShieldCheck } from '@lucide/vue'
 import { api } from '../api/client'
-import type { TaskAccepted, UpdateRelease, UpdateReleaseCatalog } from '../api/types'
+import type { TaskAccepted, UpdaterSnapshot, UpdaterSnapshotList, UpdateRelease, UpdateReleaseCatalog } from '../api/types'
 import { useAsyncActions } from '../composables/useAsyncActions'
 import { useUIStore } from '../stores/ui'
 import AsyncButton from './AsyncButton.vue'
@@ -16,6 +16,7 @@ const storedChannel = localStorage.getItem(channelStorageKey)
 const channel = ref<UpdateChannel>(storedChannel === 'beta' ? 'beta' : 'stable')
 const selectedVersion = ref('')
 const confirmOpen = ref(false)
+const rollbackSnapshot = ref<UpdaterSnapshot | null>(null)
 const actions = useAsyncActions()
 const ui = useUIStore()
 
@@ -24,9 +25,14 @@ const releases = useQuery({
   queryFn: () => api<UpdateReleaseCatalog>(`/settings/updater/releases?channel=${channel.value}`),
   staleTime: 60_000,
 })
+const snapshots = useQuery({
+  queryKey: ['updater-snapshots'],
+  queryFn: () => api<UpdaterSnapshotList>('/settings/updater/snapshots'),
+  staleTime: 60_000,
+})
 
 const installableReleases = computed(() =>
-  (releases.data.value?.items || []).filter(item => item.newer_than_current && item.asset_available),
+  (releases.data.value?.items || []).filter(item => item.installable ?? (item.newer_than_current && item.asset_available)),
 )
 const selectedRelease = computed<UpdateRelease | undefined>(() =>
   installableReleases.value.find(item => item.version === selectedVersion.value),
@@ -80,6 +86,26 @@ async function applySelectedVersion() {
     ui.toast(error instanceof Error ? error.message : '启动更新失败', 'error')
   }
 }
+
+async function restoreSnapshot() {
+  const snapshot = rollbackSnapshot.value
+  if (!snapshot) return
+  try {
+    const result = await actions.run(
+      `rollback-${snapshot.id}`,
+      () => api<{ snapshot_id: string; restarting?: boolean }>('/settings/updater/rollback', {
+        method: 'POST',
+        body: JSON.stringify({ id: snapshot.id }),
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    rollbackSnapshot.value = null
+    ui.toast(result.restarting ? '更新快照已恢复，应用正在重启' : '更新快照已恢复，请重启应用使运行状态完全同步')
+    void snapshots.refetch()
+  } catch (error) {
+    ui.toast(error instanceof Error ? error.message : '恢复更新快照失败', 'error')
+  }
+}
 </script>
 
 <template>
@@ -127,10 +153,10 @@ async function applySelectedVersion() {
         目标版本
         <select v-model="selectedVersion" class="field" :disabled="releases.isLoading.value || !installableReleases.length">
           <option v-if="!installableReleases.length" value="">
-            {{ releases.isLoading.value ? '正在读取版本列表…' : '当前通道没有可升级版本' }}
+            {{ releases.isLoading.value ? '正在读取版本列表…' : '当前通道没有可安全切换版本' }}
           </option>
           <option v-for="item in installableReleases" :key="item.version" :value="item.version">
-            {{ item.version }}{{ item.prerelease ? ' · 测试版' : ' · 稳定版' }}{{ formatPublishedAt(item.published_at) ? ` · ${formatPublishedAt(item.published_at)}` : '' }}
+            {{ item.version }}{{ item.prerelease ? ' · 测试版' : ' · 稳定版' }}{{ item.switchable ? ' · 可回切' : '' }}{{ formatPublishedAt(item.published_at) ? ` · ${formatPublishedAt(item.published_at)}` : '' }}
           </option>
         </select>
       </label>
@@ -153,22 +179,59 @@ async function applySelectedVersion() {
 
     <div v-if="channel==='beta'" class="mt-4 flex items-start gap-3 rounded-xl border border-amber-300/70 bg-amber-50 p-4 text-sm leading-6 text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
       <FlaskConical class="mt-0.5 shrink-0" :size="18" />
-      <span>测试版可能包含未完成改动。它适合快速调试，但不建议开启无人值守自动更新；需要发布测试包时使用类似 <code>v0.9.9-beta.1</code> 的标签。</span>
+      <span>测试版可能包含未完成改动。它适合快速调试，但不建议开启无人值守自动更新；需要发布测试包时使用类似 <code>v0.9.9-beta.2</code> 的标签。</span>
     </div>
     <p v-else-if="releases.isError.value" class="mt-4 text-sm text-[var(--danger)]">版本列表读取失败，请检查 GitHub 网络或更新代理设置后重试。</p>
-    <p v-else class="muted mt-4 text-xs leading-5">这里只允许安装比当前版本新的 Release；安装包仍会经过平台匹配和 SHA256 校验。</p>
+    <p v-else class="muted mt-4 text-xs leading-5">自动更新只向前升级；手动切换到旧稳定版必须通过 Release 兼容清单、数据库 schema 和安装包校验。</p>
+
+    <section v-if="snapshots.data.value?.items?.length" class="mt-5 rounded-2xl border border-[var(--line)] p-4">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h3 class="font-black">可恢复的更新快照</h3>
+          <p class="muted mt-1 text-xs leading-5">更新前自动保存数据库和配置；恢复前请先停止正在运行的下载或播放任务。</p>
+        </div>
+        <RotateCcw :size="18" class="muted" />
+      </div>
+      <div class="mt-3 grid gap-2">
+        <button
+          v-for="snapshot in snapshots.data.value.items"
+          :key="snapshot.id"
+          type="button"
+          class="panel-muted flex min-h-12 items-center justify-between gap-3 p-3 text-left transition hover:border-[var(--brand)]"
+          @click="rollbackSnapshot=snapshot"
+        >
+          <span class="min-w-0">
+            <strong class="block truncate">{{ snapshot.app_version }} · {{ snapshot.reason || '更新前快照' }}</strong>
+            <span class="muted text-xs">{{ new Date(snapshot.created_at).toLocaleString() }} · schema {{ snapshot.schema_version }}</span>
+          </span>
+          <RotateCcw :size="16" class="shrink-0 text-[var(--brand)]" />
+        </button>
+      </div>
+    </section>
   </section>
 
   <ConfirmDialog
     :open="confirmOpen"
-    :title="selectedRelease?.prerelease ? `安装测试版 ${selectedRelease.version}？` : `更新到 ${selectedRelease?.version || ''}？`"
+    :title="selectedRelease?.switchable ? `切换到稳定版 ${selectedRelease.version}？` : selectedRelease?.prerelease ? `安装测试版 ${selectedRelease.version}？` : `更新到 ${selectedRelease?.version || ''}？`"
     :description="selectedRelease?.prerelease
       ? '测试版可能不稳定。确认后服务端会重新校验该 Release，下载对应平台安装包并在校验通过后自动重启。'
-      : '确认后服务端会重新校验该 Release，下载对应平台安装包并在校验通过后自动重启。'"
-    confirm-label="确认更新"
+      : selectedRelease?.switchable
+        ? '这是一次受兼容清单保护的通道切换。服务端会先创建数据库和配置快照，健康检查失败时自动恢复。'
+        : '确认后服务端会重新校验该 Release，下载对应平台安装包并在校验通过后自动重启。'"
+    :confirm-label="selectedRelease?.switchable ? '确认切换' : '确认更新'"
     :loading="actions.isBusy('dashboard-update','repo-update-apply')"
     loading-label="正在启动…"
     @update:open="confirmOpen=$event"
     @confirm="applySelectedVersion"
+  />
+  <ConfirmDialog
+    :open="!!rollbackSnapshot"
+    title="恢复这个更新快照？"
+    :description="rollbackSnapshot ? `将恢复 ${rollbackSnapshot.app_version} 创建的数据库和配置快照。恢复后建议重启应用。` : ''"
+    confirm-label="确认恢复"
+    :loading="rollbackSnapshot ? actions.isBusy(`rollback-${rollbackSnapshot.id}`) : false"
+    loading-label="恢复中…"
+    @update:open="($event) => { if (!$event) rollbackSnapshot=null }"
+    @confirm="restoreSnapshot"
   />
 </template>

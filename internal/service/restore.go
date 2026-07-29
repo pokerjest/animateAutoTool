@@ -43,6 +43,20 @@ func (s *RestoreService) PerformRestore(sourcePath string, options RestoreOption
 	if err := validateRestoreOptions(descriptor, options); err != nil {
 		return err
 	}
+	if backupSchema := backupSchemaNumber(descriptor.SchemaVersion); backupSchema >= 0 {
+		currentSchema := backupSchemaNumber(db.CurrentSchemaVersion(db.DB))
+		if currentSchema >= 0 && backupSchema > currentSchema {
+			return fmt.Errorf(
+				"backup schema %s is newer than the current readable schema %s",
+				descriptor.SchemaVersion,
+				db.CurrentSchemaVersion(db.DB),
+			)
+		}
+	}
+	snapshot, err := CreateSafetySnapshot("backup-restore")
+	if err != nil {
+		return fmt.Errorf("failed to create pre-restore snapshot: %w", err)
+	}
 
 	// 1. Open Source DB (ReadOnly)
 	srcDB, err := gorm.Open(sqlite.Open(sourcePath), &gorm.Config{
@@ -76,6 +90,9 @@ func (s *RestoreService) PerformRestore(sourcePath string, options RestoreOption
 	}
 	if options.Configs {
 		if err := db.ExportGlobalConfigsToConfigFile(); err != nil {
+			if snapshot.ID != "" {
+				_ = RestoreSafetySnapshot(snapshot.ID)
+			}
 			return fmt.Errorf("sync restored settings to config.yaml: %w", err)
 		}
 	}
@@ -83,16 +100,26 @@ func (s *RestoreService) PerformRestore(sourcePath string, options RestoreOption
 }
 
 type restoreData struct {
-	configs  []model.GlobalConfig
-	metas    []model.AnimeMetadata
-	subs     []model.Subscription
-	logs     []model.DownloadLog
-	runLogs  []model.SubscriptionRunLog
-	dirs     []model.LocalAnimeDirectory
-	animes   []model.LocalAnime
-	episodes []model.LocalEpisode
-	playback []model.PlaybackHistory
-	users    []model.User
+	configs          []model.GlobalConfig
+	metas            []model.AnimeMetadata
+	subs             []model.Subscription
+	logs             []model.DownloadLog
+	runLogs          []model.SubscriptionRunLog
+	dirs             []model.LocalAnimeDirectory
+	animes           []model.LocalAnime
+	episodes         []model.LocalEpisode
+	playback         []model.PlaybackHistory
+	users            []model.User
+	hasConfigs       bool
+	hasMetadata      bool
+	hasSubscriptions bool
+	hasDownloadLogs  bool
+	hasRunLogs       bool
+	hasDirs          bool
+	hasAnimes        bool
+	hasEpisodes      bool
+	hasPlayback      bool
+	hasUsers         bool
 }
 
 func (s *RestoreService) readBackupData(srcDB *gorm.DB, options RestoreOptions) (*restoreData, error) {
@@ -100,36 +127,62 @@ func (s *RestoreService) readBackupData(srcDB *gorm.DB, options RestoreOptions) 
 	var eg errgroup.Group
 
 	if options.Configs {
-		eg.Go(func() error { return srcDB.Find(&d.configs).Error })
+		if srcDB.Migrator().HasTable(&model.GlobalConfig{}) {
+			d.hasConfigs = true
+			eg.Go(func() error { return srcDB.Find(&d.configs).Error })
+		}
 	}
 	if options.Metadata {
-		eg.Go(func() error { return srcDB.Find(&d.metas).Error })
+		if srcDB.Migrator().HasTable(&model.AnimeMetadata{}) {
+			d.hasMetadata = true
+			eg.Go(func() error { return srcDB.Find(&d.metas).Error })
+		}
 	}
 	if options.Subscriptions {
-		eg.Go(func() error { return srcDB.Find(&d.subs).Error })
+		if srcDB.Migrator().HasTable(&model.Subscription{}) {
+			d.hasSubscriptions = true
+			eg.Go(func() error { return srcDB.Find(&d.subs).Error })
+		}
 	}
 	if options.Logs {
-		eg.Go(func() error { return srcDB.Find(&d.logs).Error })
+		if srcDB.Migrator().HasTable(&model.DownloadLog{}) {
+			d.hasDownloadLogs = true
+			eg.Go(func() error { return srcDB.Find(&d.logs).Error })
+		}
 		eg.Go(func() error {
 			if !srcDB.Migrator().HasTable(&model.SubscriptionRunLog{}) {
 				return nil
 			}
+			d.hasRunLogs = true
 			return srcDB.Find(&d.runLogs).Error
 		})
 	}
 	if options.Local {
-		eg.Go(func() error { return srcDB.Find(&d.dirs).Error })
-		eg.Go(func() error { return srcDB.Find(&d.animes).Error })
-		eg.Go(func() error { return srcDB.Find(&d.episodes).Error })
+		if srcDB.Migrator().HasTable(&model.LocalAnimeDirectory{}) {
+			d.hasDirs = true
+			eg.Go(func() error { return srcDB.Find(&d.dirs).Error })
+		}
+		if srcDB.Migrator().HasTable(&model.LocalAnime{}) {
+			d.hasAnimes = true
+			eg.Go(func() error { return srcDB.Find(&d.animes).Error })
+		}
+		if srcDB.Migrator().HasTable(&model.LocalEpisode{}) {
+			d.hasEpisodes = true
+			eg.Go(func() error { return srcDB.Find(&d.episodes).Error })
+		}
 		eg.Go(func() error {
 			if !srcDB.Migrator().HasTable(&model.PlaybackHistory{}) {
 				return nil
 			}
+			d.hasPlayback = true
 			return srcDB.Find(&d.playback).Error
 		})
 	}
 	if options.Users {
-		eg.Go(func() error { return srcDB.Find(&d.users).Error })
+		if srcDB.Migrator().HasTable(&model.User{}) {
+			d.hasUsers = true
+			eg.Go(func() error { return srcDB.Find(&d.users).Error })
+		}
 	}
 
 	if err := eg.Wait(); err != nil {
@@ -169,18 +222,35 @@ func (s *RestoreService) writeRestoreData(tx *gorm.DB, d *restoreData, options R
 					return err
 				}
 			}
-		} else {
-			tx.Exec("DELETE FROM global_configs")
+		} else if d.hasConfigs {
+			var preserved []model.GlobalConfig
+			if !desc.ContainsSecrets {
+				if err := tx.Where("key LIKE ? OR key LIKE ? OR key LIKE ? OR key LIKE ? OR key LIKE ?",
+					"%password%", "%secret%", "%token%", "%key%", "%credential%").
+					Find(&preserved).Error; err != nil {
+					return err
+				}
+			}
+			if err := tx.Exec("DELETE FROM global_configs").Error; err != nil {
+				return err
+			}
 			if len(d.configs) > 0 {
 				if err := createBatch(&d.configs); err != nil {
+					return err
+				}
+			}
+			if len(preserved) > 0 {
+				if err := createBatch(&preserved); err != nil {
 					return err
 				}
 			}
 		}
 	}
 
-	if options.Metadata {
-		tx.Exec("DELETE FROM anime_metadata")
+	if options.Metadata && d.hasMetadata {
+		if err := tx.Exec("DELETE FROM anime_metadata").Error; err != nil {
+			return err
+		}
 		if len(d.metas) > 0 {
 			if err := createBatch(&d.metas); err != nil {
 				return err
@@ -188,8 +258,10 @@ func (s *RestoreService) writeRestoreData(tx *gorm.DB, d *restoreData, options R
 		}
 	}
 
-	if options.Subscriptions {
-		tx.Exec("DELETE FROM subscriptions")
+	if options.Subscriptions && d.hasSubscriptions {
+		if err := tx.Exec("DELETE FROM subscriptions").Error; err != nil {
+			return err
+		}
 		if len(d.subs) > 0 {
 			if err := createBatch(&d.subs); err != nil {
 				return err
@@ -198,14 +270,22 @@ func (s *RestoreService) writeRestoreData(tx *gorm.DB, d *restoreData, options R
 	}
 
 	if options.Logs {
-		tx.Exec("DELETE FROM subscription_run_logs")
-		tx.Exec("DELETE FROM download_logs")
-		if len(d.logs) > 0 {
+		if d.hasRunLogs {
+			if err := tx.Exec("DELETE FROM subscription_run_logs").Error; err != nil {
+				return err
+			}
+		}
+		if d.hasDownloadLogs {
+			if err := tx.Exec("DELETE FROM download_logs").Error; err != nil {
+				return err
+			}
+		}
+		if d.hasDownloadLogs && len(d.logs) > 0 {
 			if err := createBatch(&d.logs); err != nil {
 				return err
 			}
 		}
-		if len(d.runLogs) > 0 {
+		if d.hasRunLogs && len(d.runLogs) > 0 {
 			if err := createBatch(&d.runLogs); err != nil {
 				return err
 			}
@@ -213,35 +293,53 @@ func (s *RestoreService) writeRestoreData(tx *gorm.DB, d *restoreData, options R
 	}
 
 	if options.Local {
-		tx.Exec("DELETE FROM playback_histories")
-		tx.Exec("DELETE FROM local_episodes")
-		tx.Exec("DELETE FROM local_animes")
-		tx.Exec("DELETE FROM local_anime_directories")
+		if d.hasPlayback {
+			if err := tx.Exec("DELETE FROM playback_histories").Error; err != nil {
+				return err
+			}
+		}
+		if d.hasEpisodes {
+			if err := tx.Exec("DELETE FROM local_episodes").Error; err != nil {
+				return err
+			}
+		}
+		if d.hasAnimes {
+			if err := tx.Exec("DELETE FROM local_animes").Error; err != nil {
+				return err
+			}
+		}
+		if d.hasDirs {
+			if err := tx.Exec("DELETE FROM local_anime_directories").Error; err != nil {
+				return err
+			}
+		}
 
-		if len(d.dirs) > 0 {
+		if d.hasDirs && len(d.dirs) > 0 {
 			if err := createBatch(&d.dirs); err != nil {
 				return err
 			}
 		}
-		if len(d.animes) > 0 {
+		if d.hasAnimes && len(d.animes) > 0 {
 			if err := createBatch(&d.animes); err != nil {
 				return err
 			}
 		}
-		if len(d.episodes) > 0 {
+		if d.hasEpisodes && len(d.episodes) > 0 {
 			if err := createBatch(&d.episodes); err != nil {
 				return err
 			}
 		}
-		if len(d.playback) > 0 {
+		if d.hasPlayback && len(d.playback) > 0 {
 			if err := createBatch(&d.playback); err != nil {
 				return err
 			}
 		}
 	}
 
-	if options.Users {
-		tx.Exec("DELETE FROM users")
+	if options.Users && d.hasUsers {
+		if err := tx.Exec("DELETE FROM users").Error; err != nil {
+			return err
+		}
 		if len(d.users) > 0 {
 			if err := createBatch(&d.users); err != nil {
 				return err
