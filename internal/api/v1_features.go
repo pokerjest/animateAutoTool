@@ -23,10 +23,13 @@ import (
 	"gorm.io/gorm"
 )
 
-func V1BatchPreviewHandler(c *gin.Context)    { v1RunJSONHandler(c, BatchPreviewHandler) }
-func V1BatchCreateHandler(c *gin.Context)     { v1RunJSONHandler(c, CreateBatchSubscriptionHandler) }
-func V1ValidateRSSHandler(c *gin.Context)     { v1RunJSONHandler(c, ValidateSubscriptionRSSHandler) }
-func V1MetadataSearchHandler(c *gin.Context)  { v1RunJSONHandler(c, SearchMetadataHandler) }
+func V1BatchPreviewHandler(c *gin.Context)   { v1RunJSONHandler(c, BatchPreviewHandler) }
+func V1BatchCreateHandler(c *gin.Context)    { v1RunJSONHandler(c, CreateBatchSubscriptionHandler) }
+func V1ValidateRSSHandler(c *gin.Context)    { v1RunJSONHandler(c, ValidateSubscriptionRSSHandler) }
+func V1MetadataSearchHandler(c *gin.Context) { v1RunJSONHandler(c, SearchMetadataHandler) }
+func V1MetadataMatchSearchHandler(c *gin.Context) {
+	v1RunJSONHandler(c, SearchMetadataMatchHandler)
+}
 func V1FixMatchHandler(c *gin.Context)        { v1RunJSONHandler(c, FixMatchHandler) }
 func V1RenamePreviewHandler(c *gin.Context)   { v1RunJSONHandler(c, PreviewDirectoryRenameHandler) }
 func V1RenameApplyHandler(c *gin.Context)     { v1RunJSONHandler(c, ApplyDirectoryRenameHandler) }

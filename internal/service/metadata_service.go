@@ -154,10 +154,22 @@ func (s *MetadataService) EnrichMetadata(m *model.AnimeMetadata, query string) {
 
 	wg.Wait()
 
-	// 4. Cross-reference the now-populated TMDB/AniList titles. The first
-	// Bangumi request runs in parallel and only knows the original query.
-	if m.BangumiID == 0 && (m.TMDBID != 0 || m.AniListID != 0) {
+	// 4. Cross-reference the now-populated provider details. The first three
+	// requests run in parallel and only know the original title; when a
+	// provider supplied a better title (or an explicitly selected source ID),
+	// retry every missing provider with those title variants. This is the
+	// deterministic path used by manual matching as well as background refresh.
+	mu.Lock()
+	crossReferenceTitles := getCandidateTitles(m, queryTitle)
+	mu.Unlock()
+	if m.BangumiID == 0 {
 		s.enrichBangumi(m, bgmClient, queryTitle, &mu)
+	}
+	if m.TMDBID == 0 && tmdbClient != nil {
+		s.processTMDB(m, tmdbClient, crossReferenceTitles, &mu)
+	}
+	if m.AniListID == 0 && anilistClient != nil {
+		s.processAniList(m, anilistClient, crossReferenceTitles, &mu)
 	}
 
 	// 5. Save and Consolidate

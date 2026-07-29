@@ -40,18 +40,22 @@ func searchMetadataCandidates(ctx context.Context, source, keyword string) ([]Se
 		if token == "" {
 			return nil, fmt.Errorf("还没有配置 AniList Token")
 		}
-		result, err := anilist.NewClient(token, configuredProxyURL(model.ConfigKeyProxyAniList)).SearchAnimeContext(ctx, keyword)
+		results, err := anilist.NewClient(token, configuredProxyURL(model.ConfigKeyProxyAniList)).SearchAnimeResultsContext(ctx, keyword, 10)
 		if err != nil {
 			return nil, err
 		}
-		if result == nil {
-			return []SearchResult{}, nil
+		items := make([]SearchResult, 0, len(results))
+		for _, result := range results {
+			name := result.Title.English
+			if name == "" {
+				name = result.Title.Romaji
+			}
+			items = append(items, SearchResult{
+				ID: result.ID, Name: result.Title.Native, NameCN: name,
+				Summary: result.Description,
+			})
 		}
-		name := result.Title.English
-		if name == "" {
-			name = result.Title.Romaji
-		}
-		return []SearchResult{{ID: result.ID, Name: result.Title.Native, NameCN: name, Summary: result.Description}}, nil
+		return items, nil
 	case SourceBangumi, "":
 		client := bangumi.NewClient("", "", "")
 		applyProxyToBangumiClient(client)

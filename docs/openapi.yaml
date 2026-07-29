@@ -209,6 +209,17 @@ paths:
       responses:
         "200": { $ref: "#/components/responses/MetadataSearch" }
         "400": { $ref: "#/components/responses/Error" }
+  /metadata/match-search:
+    get:
+      operationId: searchMetadataMatches
+      parameters:
+        - { name: q, in: query, schema: { type: string } }
+        - { name: source, in: query, schema: { type: string, enum: [bangumi, tmdb, anilist], default: bangumi } }
+        - { name: source_id, in: query, schema: { type: integer, minimum: 1 } }
+        - { name: local_anime_id, in: query, schema: { type: integer, minimum: 1 } }
+      responses:
+        "200": { $ref: "#/components/responses/MetadataMatchSearch" }
+        "400": { $ref: "#/components/responses/Error" }
   /ui/background/random:
     get:
       operationId: getRandomBackground
@@ -903,6 +914,16 @@ components:
                   data:
                     type: array
                     items: { $ref: "#/components/schemas/MetadataSearchResult" }
+    MetadataMatchSearch:
+      description: Grouped real candidates from Bangumi, TMDB and AniList
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/Envelope"
+              - type: object
+                properties:
+                  data: { $ref: "#/components/schemas/MetadataMatchSearchResult" }
     Error: { description: Error response, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
   schemas:
     HealthReport:
@@ -1052,6 +1073,52 @@ components:
             grid: { type: string }
         summary: { type: string }
         air_date: { type: string }
+    MetadataSourceCandidate:
+      type: object
+      required: [id, source, name, name_cn, image, summary, air_date]
+      properties:
+        id: { type: integer, minimum: 1 }
+        source: { type: string, enum: [bangumi, tmdb, anilist] }
+        name: { type: string }
+        name_cn: { type: string }
+        image: { type: string }
+        summary: { type: string }
+        air_date: { type: string }
+    MetadataMatchCandidate:
+      type: object
+      required: [title, summary, air_date, image, score, evidence]
+      properties:
+        title: { type: string }
+        summary: { type: string }
+        air_date: { type: string }
+        image: { type: string }
+        bangumi: { $ref: "#/components/schemas/MetadataSourceCandidate" }
+        tmdb: { $ref: "#/components/schemas/MetadataSourceCandidate" }
+        anilist: { $ref: "#/components/schemas/MetadataSourceCandidate" }
+        score: { type: number, minimum: 0, maximum: 1 }
+        evidence: { type: array, items: { type: string } }
+    MetadataSourceStatus:
+      type: object
+      required: [configured, searched, count]
+      properties:
+        configured: { type: boolean }
+        searched: { type: boolean }
+        error: { type: string }
+        count: { type: integer, minimum: 0 }
+    MetadataMatchSearchResult:
+      type: object
+      required: [query, source, source_status, candidates]
+      properties:
+        query: { type: string }
+        source: { type: string, enum: [bangumi, tmdb, anilist] }
+        source_id: { type: integer, minimum: 1 }
+        source_status:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/MetadataSourceStatus"
+        candidates:
+          type: array
+          items: { $ref: "#/components/schemas/MetadataMatchCandidate" }
     RandomBackground:
       type: object
       required: [url]

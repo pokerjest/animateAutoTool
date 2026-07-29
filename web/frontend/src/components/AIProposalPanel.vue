@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import { AlertTriangle, CheckCircle2, CircleAlert, Clock3, LoaderCircle, ShieldCheck, Sparkles, X } from '@lucide/vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { api } from '../api/client'
-import type { AIProposal } from '../api/types'
+import type { AIProposal, MetadataMatchCandidate } from '../api/types'
 import AsyncButton from './AsyncButton.vue'
 import { useAsyncActions } from '../composables/useAsyncActions'
 import { useUIStore } from '../stores/ui'
@@ -24,6 +24,12 @@ const query = useQuery({
 })
 
 const proposal = computed(() => query.data.value)
+const metadataCandidate = computed<MetadataMatchCandidate | null>(() => {
+  const payload = proposal.value?.payload
+  if (!payload || proposal.value?.type !== 'metadata_match') return null
+  const candidate = payload.candidate
+  return candidate && typeof candidate === 'object' ? candidate as MetadataMatchCandidate : null
+})
 const confidenceLabel = computed(() => {
   const value = proposal.value?.confidence || 0
   if (value >= .8) return '高置信度'
@@ -84,6 +90,15 @@ async function dismiss() {
         </div>
         <p v-if="proposal.status === 'analyzing'" class="muted mt-2">正在通过只读工具收集上下文，页面不会被修改。</p>
         <p v-else class="mt-2 leading-6">{{ proposal.summary || proposal.error || 'AI 没有提供摘要' }}</p>
+        <div v-if="metadataCandidate" class="mt-3 rounded-xl border border-[var(--line)] bg-[var(--surface-solid)] p-3">
+          <p class="text-xs font-black">三源候选快照（确认前可核对）</p>
+          <div class="mt-2 grid gap-2 text-xs sm:grid-cols-3">
+            <span :class="metadataCandidate.bangumi ? '' : 'muted'">Bangumi：{{ metadataCandidate.bangumi ? `${metadataCandidate.bangumi.name_cn || metadataCandidate.bangumi.name} (#${metadataCandidate.bangumi.id})` : '未找到' }}</span>
+            <span :class="metadataCandidate.tmdb ? '' : 'muted'">TMDB：{{ metadataCandidate.tmdb ? `${metadataCandidate.tmdb.name_cn || metadataCandidate.tmdb.name} (#${metadataCandidate.tmdb.id})` : '未找到/未配置' }}</span>
+            <span :class="metadataCandidate.anilist ? '' : 'muted'">AniList：{{ metadataCandidate.anilist ? `${metadataCandidate.anilist.name_cn || metadataCandidate.anilist.name} (#${metadataCandidate.anilist.id})` : '未找到/未配置' }}</span>
+          </div>
+          <p v-if="metadataCandidate.evidence?.length" class="muted mt-2 text-xs">{{ metadataCandidate.evidence.join(' · ') }}</p>
+        </div>
         <div v-if="proposal.evidence?.length" class="mt-3 space-y-1">
           <p v-for="item in proposal.evidence" :key="item" class="flex gap-2 text-xs leading-5"><ShieldCheck class="mt-0.5 shrink-0 text-[var(--success)]" :size="14"/>{{ item }}</p>
         </div>

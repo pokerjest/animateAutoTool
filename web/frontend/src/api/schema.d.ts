@@ -649,6 +649,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/metadata/match-search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["searchMetadataMatches"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/ui/background/random": {
         parameters: {
             query?: never;
@@ -1923,6 +1939,43 @@ export interface components {
             summary: string;
             air_date: string;
         };
+        MetadataSourceCandidate: {
+            id: number;
+            /** @enum {string} */
+            source: "bangumi" | "tmdb" | "anilist";
+            name: string;
+            name_cn: string;
+            image: string;
+            summary: string;
+            air_date: string;
+        };
+        MetadataMatchCandidate: {
+            title: string;
+            summary: string;
+            air_date: string;
+            image: string;
+            bangumi?: components["schemas"]["MetadataSourceCandidate"];
+            tmdb?: components["schemas"]["MetadataSourceCandidate"];
+            anilist?: components["schemas"]["MetadataSourceCandidate"];
+            score: number;
+            evidence: string[];
+        };
+        MetadataSourceStatus: {
+            configured: boolean;
+            searched: boolean;
+            error?: string;
+            count: number;
+        };
+        MetadataMatchSearchResult: {
+            query: string;
+            /** @enum {string} */
+            source: "bangumi" | "tmdb" | "anilist";
+            source_id?: number;
+            source_status: {
+                [key: string]: components["schemas"]["MetadataSourceStatus"];
+            };
+            candidates: components["schemas"]["MetadataMatchCandidate"][];
+        };
         RandomBackground: {
             url: string;
         };
@@ -2358,6 +2411,17 @@ export interface components {
             content: {
                 "application/json": components["schemas"]["Envelope"] & {
                     data?: components["schemas"]["MetadataSearchResult"][];
+                };
+            };
+        };
+        /** @description Grouped real candidates from Bangumi, TMDB and AniList */
+        MetadataMatchSearch: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Envelope"] & {
+                    data?: components["schemas"]["MetadataMatchSearchResult"];
                 };
             };
         };
@@ -3108,6 +3172,24 @@ export interface operations {
         requestBody?: never;
         responses: {
             200: components["responses"]["MetadataSearch"];
+            400: components["responses"]["Error"];
+        };
+    };
+    searchMetadataMatches: {
+        parameters: {
+            query?: {
+                q?: string;
+                source?: "bangumi" | "tmdb" | "anilist";
+                source_id?: number;
+                local_anime_id?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["MetadataMatchSearch"];
             400: components["responses"]["Error"];
         };
     };

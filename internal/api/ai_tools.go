@@ -77,13 +77,23 @@ func registerTools() {
 		getLocalAnimeContextTool)
 
 	GlobalAIRegistry.Register("get_metadata_candidates",
-		"从后端已配置的 Bangumi、TMDB 或 AniList 搜索真实元数据候选。只读。",
+		"兼容旧流程：从单个已配置的 Bangumi、TMDB 或 AniList 搜索真实候选。需要跨源匹配时请使用 search_metadata_sources。只读。",
 		ai.JSONSchemaObject(map[string]any{
 			"local_anime_id": ai.JSONSchemaProperty("integer", "本地番剧 ID"),
 			"source":         ai.JSONSchemaProperty("string", "bangumi、tmdb 或 anilist"),
 			"query":          ai.JSONSchemaProperty("string", "可选的搜索关键词"),
 		}, []string{"local_anime_id", "source"}),
 		getMetadataCandidatesTool)
+
+	GlobalAIRegistry.Register("search_metadata_sources",
+		"从已批准的 Bangumi、TMDB、AniList 接口联查同一作品的真实候选。只读，AI 不得自行访问 URL 或虚构 ID。",
+		ai.JSONSchemaObject(map[string]any{
+			"local_anime_id": ai.JSONSchemaProperty("integer", "本地番剧 ID"),
+			"source":         ai.JSONSchemaProperty("string", "可选的起始来源：bangumi、tmdb 或 anilist"),
+			"source_id":      ai.JSONSchemaProperty("integer", "可选的起始来源 ID"),
+			"query":          ai.JSONSchemaProperty("string", "可选的标题或关键词"),
+		}, []string{"local_anime_id"}),
+		searchMetadataSourcesTool)
 
 	GlobalAIRegistry.Register("get_subscription_diagnostics",
 		"读取订阅配置、最近检查结果、下载记录和 RSS 诊断。只读。",
@@ -118,14 +128,19 @@ func registerTools() {
 		"根据后端提供的真实候选创建待确认的元数据匹配提案，不执行修改。",
 		ai.JSONSchemaObject(map[string]any{
 			"local_anime_id": ai.JSONSchemaProperty("integer", "本地番剧 ID"),
-			"source":         ai.JSONSchemaProperty("string", "数据源"),
-			"source_id":      ai.JSONSchemaProperty("integer", "候选 ID"),
-			"query":          ai.JSONSchemaProperty("string", "后端候选搜索关键词"),
-			"confidence":     map[string]any{"type": "number", "minimum": 0, "maximum": 1, "description": "0 到 1 的置信度"},
-			"summary":        ai.JSONSchemaProperty("string", "匹配理由"),
-			"evidence":       map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "分析依据"},
-			"warnings":       map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "冲突或风险提示"},
-		}, []string{"local_anime_id", "source", "source_id", "confidence", "summary"}),
+			"source":         ai.JSONSchemaProperty("string", "兼容旧客户端的数据源"),
+			"source_id":      ai.JSONSchemaProperty("integer", "兼容旧客户端的候选 ID"),
+			"matches": map[string]any{"type": "object", "additionalProperties": false, "properties": map[string]any{
+				"bangumi_id": ai.JSONSchemaProperty("integer", "Bangumi ID"),
+				"tmdb_id":    ai.JSONSchemaProperty("integer", "TMDB ID"),
+				"anilist_id": ai.JSONSchemaProperty("integer", "AniList ID"),
+			}},
+			"query":      ai.JSONSchemaProperty("string", "后端候选搜索关键词"),
+			"confidence": map[string]any{"type": "number", "minimum": 0, "maximum": 1, "description": "0 到 1 的置信度"},
+			"summary":    ai.JSONSchemaProperty("string", "匹配理由"),
+			"evidence":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "分析依据"},
+			"warnings":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "冲突或风险提示"},
+		}, []string{"local_anime_id", "confidence", "summary"}),
 		proposeMetadataMatchTool)
 
 	GlobalAIRegistry.RegisterProposal("propose_health_repair",
@@ -176,9 +191,14 @@ func registerTools() {
 		"执行已经在页面确认的元数据匹配提案。",
 		ai.JSONSchemaObject(map[string]any{
 			"local_anime_id": ai.JSONSchemaProperty("integer", "本地番剧 ID"),
-			"source":         ai.JSONSchemaProperty("string", "真实候选来源"),
-			"source_id":      ai.JSONSchemaProperty("integer", "真实候选 ID"),
-		}, []string{"local_anime_id", "source", "source_id"}),
+			"source":         ai.JSONSchemaProperty("string", "兼容旧客户端的真实候选来源"),
+			"source_id":      ai.JSONSchemaProperty("integer", "兼容旧客户端的真实候选 ID"),
+			"matches": map[string]any{"type": "object", "additionalProperties": false, "properties": map[string]any{
+				"bangumi_id": ai.JSONSchemaProperty("integer", "Bangumi ID"),
+				"tmdb_id":    ai.JSONSchemaProperty("integer", "TMDB ID"),
+				"anilist_id": ai.JSONSchemaProperty("integer", "AniList ID"),
+			}},
+		}, []string{"local_anime_id"}),
 		applyMetadataMatchProposalTool)
 
 	GlobalAIRegistry.RegisterWrite("apply_subscription_rule_proposal",
@@ -326,6 +346,36 @@ func getMetadataCandidatesTool(ctx context.Context, raw string) (string, error) 
 		return "", err
 	}
 	return marshalToolResult(map[string]any{"query": query, "source": req.Source, "candidates": results})
+}
+
+func searchMetadataSourcesTool(ctx context.Context, raw string) (string, error) {
+	var req struct {
+		LocalAnimeID uint   `json:"local_anime_id"`
+		Source       string `json:"source"`
+		SourceID     int    `json:"source_id"`
+		Query        string `json:"query"`
+	}
+	if err := decodeToolArgs(raw, &req); err != nil || req.LocalAnimeID == 0 {
+		return "", errors.New("local_anime_id 无效")
+	}
+	var anime model.LocalAnime
+	if err := db.DB.Preload("Metadata").First(&anime, req.LocalAnimeID).Error; err != nil {
+		return "", err
+	}
+	query := strings.TrimSpace(req.Query)
+	if query == "" {
+		query = anime.Title
+		if anime.Metadata != nil {
+			query = firstNonEmpty(query, anime.Metadata.TitleCN, anime.Metadata.TitleJP, anime.Metadata.TitleEN)
+		}
+	}
+	result, err := searchMetadataMatchCandidates(ctx, metadataSearchOptions{
+		Query: query, Source: req.Source, SourceID: req.SourceID,
+	})
+	if err != nil {
+		return "", err
+	}
+	return marshalToolResult(result)
 }
 
 func getSubscriptionDiagnosticsTool(ctx context.Context, raw string) (string, error) {
@@ -481,16 +531,21 @@ func previewFilenameResolutionTool(ctx context.Context, raw string) (string, err
 
 func proposeMetadataMatchTool(ctx context.Context, raw string) (string, error) {
 	var req struct {
-		LocalAnimeID uint     `json:"local_anime_id"`
-		Source       string   `json:"source"`
-		SourceID     int      `json:"source_id"`
-		Query        string   `json:"query"`
-		Confidence   float64  `json:"confidence"`
-		Summary      string   `json:"summary"`
-		Evidence     []string `json:"evidence"`
-		Warnings     []string `json:"warnings"`
+		LocalAnimeID uint   `json:"local_anime_id"`
+		Source       string `json:"source"`
+		SourceID     int    `json:"source_id"`
+		Matches      *struct {
+			BangumiID int `json:"bangumi_id"`
+			TMDBID    int `json:"tmdb_id"`
+			AniListID int `json:"anilist_id"`
+		} `json:"matches"`
+		Query      string   `json:"query"`
+		Confidence float64  `json:"confidence"`
+		Summary    string   `json:"summary"`
+		Evidence   []string `json:"evidence"`
+		Warnings   []string `json:"warnings"`
 	}
-	if err := decodeToolArgs(raw, &req); err != nil || req.LocalAnimeID == 0 || req.SourceID <= 0 {
+	if err := decodeToolArgs(raw, &req); err != nil || req.LocalAnimeID == 0 {
 		return "", errors.New("元数据提案参数无效")
 	}
 	var anime model.LocalAnime
@@ -501,27 +556,66 @@ func proposeMetadataMatchTool(ctx context.Context, raw string) (string, error) {
 	if query == "" {
 		query = anime.Title
 	}
-	candidates, err := searchMetadataCandidates(ctx, strings.ToLower(req.Source), query)
+	source := strings.ToLower(strings.TrimSpace(req.Source))
+	if source == "" {
+		source = SourceBangumi
+	}
+	sourceID := req.SourceID
+	if req.Matches != nil {
+		switch source {
+		case SourceBangumi:
+			sourceID = req.Matches.BangumiID
+		case SourceTMDB:
+			sourceID = req.Matches.TMDBID
+		case SourceAniList:
+			sourceID = req.Matches.AniListID
+		}
+	}
+	matchResult, err := searchMetadataMatchCandidates(ctx, metadataSearchOptions{Query: query, Source: source, SourceID: sourceID})
 	if err != nil {
 		return "", err
 	}
-	var candidate *SearchResult
-	for i := range candidates {
-		if candidates[i].ID == req.SourceID {
-			candidate = &candidates[i]
+	matches := struct {
+		BangumiID int `json:"bangumi_id"`
+		TMDBID    int `json:"tmdb_id"`
+		AniListID int `json:"anilist_id"`
+	}{}
+	if req.Matches != nil {
+		matches = *req.Matches
+	} else {
+		switch source {
+		case SourceBangumi:
+			matches.BangumiID = req.SourceID
+		case SourceTMDB:
+			matches.TMDBID = req.SourceID
+		case SourceAniList:
+			matches.AniListID = req.SourceID
+		}
+	}
+	if matches.BangumiID <= 0 && matches.TMDBID <= 0 && matches.AniListID <= 0 {
+		return "", errors.New("至少需要一个真实元数据来源 ID")
+	}
+	var candidate *MetadataMatchCandidate
+	for i := range matchResult.Candidates {
+		if candidateMatchesIDs(matchResult.Candidates[i], matches.BangumiID, matches.TMDBID, matches.AniListID) {
+			candidate = &matchResult.Candidates[i]
 			break
 		}
 	}
 	if candidate == nil {
-		return "", errors.New("AI 选择的元数据 ID 不在后端候选列表中")
+		return "", errors.New("AI 选择的元数据 ID 不在后端三源候选列表中")
 	}
 	meta := currentAIToolMeta(ctx)
 	input := service.AIProposalInput{
 		UserID: meta.UserID, Type: service.AIProposalTypeMetadataMatch, TargetType: "local_anime",
 		TargetID: strconv.FormatUint(uint64(req.LocalAnimeID), 10), Summary: req.Summary, Confidence: req.Confidence,
-		Evidence:         append(req.Evidence, "候选由后端元数据搜索工具提供"),
-		Warnings:         req.Warnings,
-		Payload:          map[string]any{"local_anime_id": req.LocalAnimeID, "source": strings.ToLower(req.Source), "source_id": req.SourceID, "candidate": candidate},
+		Evidence: append(req.Evidence, "候选由后端三源元数据搜索工具提供"),
+		Warnings: req.Warnings,
+		Payload: map[string]any{
+			"local_anime_id": req.LocalAnimeID, "source": source, "source_id": req.SourceID,
+			"matches": matches, "candidate": candidate, "candidates": matchResult.Candidates,
+			"source_status": matchResult.SourceStatus, "query": query,
+		},
 		InputFingerprint: metadataProposalFingerprint(anime),
 		ApplyTool:        "apply_metadata_match_proposal", Provider: meta.Provider, Model: meta.Model,
 		Status: service.AIProposalStatusReady, ExpiresAt: ptrTime(proposalExpiry(service.AIProposalTypeMetadataMatch)),
@@ -530,10 +624,20 @@ func proposeMetadataMatchTool(ctx context.Context, raw string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return marshalToolResult(map[string]any{
-		"proposal_id": row.ID, "status": row.Status,
-		"review_url": "/local-anime",
-	})
+	return marshalToolResult(map[string]any{"proposal_id": row.ID, "status": row.Status, "review_url": "/local-anime"})
+}
+
+func candidateMatchesIDs(candidate MetadataMatchCandidate, bangumiID, tmdbID, aniListID int) bool {
+	if bangumiID > 0 && (candidate.Bangumi == nil || candidate.Bangumi.ID != bangumiID) {
+		return false
+	}
+	if tmdbID > 0 && (candidate.TMDB == nil || candidate.TMDB.ID != tmdbID) {
+		return false
+	}
+	if aniListID > 0 && (candidate.AniList == nil || candidate.AniList.ID != aniListID) {
+		return false
+	}
+	return true
 }
 
 func proposeHealthRepairTool(ctx context.Context, raw string) (string, error) {
@@ -749,11 +853,22 @@ func applyMetadataMatchProposalTool(ctx context.Context, raw string) (string, er
 		LocalAnimeID uint   `json:"local_anime_id"`
 		Source       string `json:"source"`
 		SourceID     int    `json:"source_id"`
+		Matches      *struct {
+			BangumiID int `json:"bangumi_id"`
+			TMDBID    int `json:"tmdb_id"`
+			AniListID int `json:"anilist_id"`
+		} `json:"matches"`
 	}
-	if err := decodeToolArgs(raw, &req); err != nil || req.LocalAnimeID == 0 || req.SourceID <= 0 {
+	if err := decodeToolArgs(raw, &req); err != nil || req.LocalAnimeID == 0 {
 		return "", errors.New("元数据匹配参数无效")
 	}
-	if err := service.NewMetadataService().MatchSeries(req.LocalAnimeID, strings.ToLower(strings.TrimSpace(req.Source)), req.SourceID); err != nil {
+	var err error
+	if req.Matches != nil {
+		err = service.NewMetadataService().MatchSeriesSources(req.LocalAnimeID, req.Matches.BangumiID, req.Matches.TMDBID, req.Matches.AniListID)
+	} else {
+		err = service.NewMetadataService().MatchSeries(req.LocalAnimeID, strings.ToLower(strings.TrimSpace(req.Source)), req.SourceID)
+	}
+	if err != nil {
 		return "", err
 	}
 	return marshalToolResult(map[string]any{"status": "success", "local_anime_id": req.LocalAnimeID})
