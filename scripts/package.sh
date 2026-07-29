@@ -7,7 +7,7 @@ APP_DISPLAY_NAME="Animate Auto Tool"
 APP_BUNDLE_NAME="${APP_DISPLAY_NAME}.app"
 APP_IDENTIFIER="com.pokerjest.animateautotool"
 VERSION_FILE="./VERSION"
-DEFAULT_VERSION="v0.9.9-beta.1"
+DEFAULT_VERSION="v0.9.9-beta.2"
 DIST_DIR="${DIST_DIR:-./dist}"
 SRC_PATH="cmd/server/main.go"
 
@@ -89,6 +89,7 @@ package_archive() {
     cp config.yaml.example "$platform_dir/"
     cp config.yaml.example "$platform_dir/config.yaml"
     cp README.md "$platform_dir/"
+    cp "$DIST_DIR/animate-release-manifest.json" "$platform_dir/"
     cp scripts/setup.sh "$platform_dir/scripts/"
     cp scripts/manage.sh "$platform_dir/scripts/"
 
@@ -165,6 +166,7 @@ package_macos_dmg() {
     chmod +x "$macos_dir/$APP_NAME"
     cp config.yaml.example "$resources_dir/"
     cp README.md "$resources_dir/"
+    cp "$DIST_DIR/animate-release-manifest.json" "$resources_dir/"
     if [ -f "internal/tray/icon.png" ]; then
         cp internal/tray/icon.png "$resources_dir/app_icon.png"
     fi
@@ -231,6 +233,26 @@ generate_checksums() {
     echo -e "${YELLOW}No checksum tool found (shasum/sha256sum). Skipping SHA256SUMS generation.${NC}"
 }
 
+write_release_manifest() {
+    local channel="stable"
+    if [[ "$VERSION" == *-* ]]; then
+        channel="beta"
+    fi
+    cat > "$DIST_DIR/animate-release-manifest.json" <<EOF
+{
+  "format_version": 1,
+  "version": "$VERSION",
+  "channel": "$channel",
+  "schema_version": "011",
+  "min_upgrade_from": "0.9.0",
+  "min_readable_schema": "001",
+  "max_readable_schema": "011",
+  "switchable_from_prerelease": true,
+  "rollback_supported": false
+}
+EOF
+}
+
 case "$DIST_DIR" in
     ""|"/"|"."|"./")
         echo "Refusing to use unsafe package output directory: $DIST_DIR" >&2
@@ -240,6 +262,7 @@ esac
 
 rm -rf "$DIST_DIR"
 mkdir -p "$DIST_DIR"
+write_release_manifest
 
 echo -e "${GREEN}Starting build for version $VERSION...${NC}"
 

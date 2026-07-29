@@ -637,7 +637,7 @@ func TestV1PaginationUsesStandardMeta(t *testing.T) {
 	assert.GreaterOrEqual(t, payload.Meta.Total, int64(2))
 }
 
-func TestProductionRouterDoesNotExposeLegacyAPI(t *testing.T) {
+func TestProductionRouterKeepsLegacyAPIWithDeprecationHeaders(t *testing.T) {
 	resetAuthFixtures(t)
 	previous := gin.Mode()
 	gin.SetMode(gin.ReleaseMode)
@@ -648,8 +648,9 @@ func TestProductionRouterDoesNotExposeLegacyAPI(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/login", bytes.NewBufferString(`{"username":"admin","password":"admin"}`))
 	markLocalRequest(req)
 	r.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusNotFound, w.Code)
-	assert.Contains(t, w.Body.String(), "not_found")
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "true", w.Header().Get("Deprecation"))
+	assert.Equal(t, `</api/v1>; rel="successor-version"`, w.Header().Get("Link"))
 }
 
 func TestV1MikanDiscoveryEndpointsUseTypedContracts(t *testing.T) {

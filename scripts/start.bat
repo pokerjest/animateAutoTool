@@ -2,8 +2,9 @@
 setlocal
 cd /d "%~dp0"
 set "APP_EXE=%CD%\bin\animate-server.exe"
+set "BIN_DIR=%CD%\bin"
 set "LOG_DIR=%CD%\logs"
-set "PID_FILE=%LOG_DIR%\animate-server.pid"
+set "PID_FILE=%BIN_DIR%\server.pid"
 
 if not exist "%CD%\config.yaml" if exist "%CD%\config.yaml.example" (
     copy /Y "%CD%\config.yaml.example" "%CD%\config.yaml" >nul

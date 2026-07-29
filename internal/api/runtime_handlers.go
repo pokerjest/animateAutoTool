@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/pokerjest/animateAutoTool/internal/db"
 )
 
 var runtimeStatsStartedAt = time.Now()
@@ -78,4 +79,20 @@ func HealthReportHandler(c *gin.Context) {
 
 func RuntimeStatsHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, buildRuntimeSnapshot())
+}
+
+// ReadinessHandler is intentionally local-only and unauthenticated so the
+// self-updater can verify a freshly started process before committing a binary
+// switch. It does not expose diagnostics or configuration values.
+func ReadinessHandler(c *gin.Context) {
+	if db.DB == nil || db.CurrentSchemaVersion(db.DB) == "" {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"ready": false})
+		return
+	}
+	sqlDB, err := db.DB.DB()
+	if err != nil || sqlDB.Ping() != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"ready": false})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ready": true})
 }

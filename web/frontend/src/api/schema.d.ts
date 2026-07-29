@@ -1559,6 +1559,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/settings/updater/snapshots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Lists local update snapshots without exposing filesystem paths. */
+        get: operations["listUpdaterSnapshots"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/settings/updater/rollback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Restores a locally stored database and configuration snapshot. If a previous binary is available, the service exits and a local helper replaces the executable before readiness-checking the restored version. */
+        post: operations["restoreUpdaterSnapshot"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/settings/updater/{action}": {
         parameters: {
             query?: never;
@@ -2251,6 +2285,14 @@ export interface components {
             asset_name?: string;
             asset_available: boolean;
             newer_than_current: boolean;
+            installable: boolean;
+            switchable: boolean;
+            blocked_reason?: string;
+            manifest_available?: boolean;
+            schema_version?: string;
+            min_readable_schema?: string;
+            max_readable_schema?: string;
+            rollback_supported?: boolean;
         };
         UpdateReleaseCatalog: {
             /** @enum {string} */
@@ -2258,6 +2300,22 @@ export interface components {
             current_version: string;
             latest_version?: string;
             items: components["schemas"]["UpdateRelease"][];
+        };
+        UpdaterSnapshot: {
+            id: string;
+            reason: string;
+            operation_type?: string;
+            app_version: string;
+            schema_version: string;
+            /** Format: date-time */
+            created_at: string;
+            rollback_supported: boolean;
+        };
+        UpdaterSnapshotList: {
+            items: components["schemas"]["UpdaterSnapshot"][];
+        };
+        UpdaterRollbackInput: {
+            id: string;
         };
         AIAnalysisAccepted: {
             task_id: string;
@@ -2408,6 +2466,17 @@ export interface components {
             content: {
                 "application/json": components["schemas"]["Envelope"] & {
                     data?: components["schemas"]["UpdateReleaseCatalog"];
+                };
+            };
+        };
+        /** @description Local update snapshots */
+        UpdaterSnapshotList: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Envelope"] & {
+                    data?: components["schemas"]["UpdaterSnapshotList"];
                 };
             };
         };
@@ -4360,6 +4429,37 @@ export interface operations {
             200: components["responses"]["UpdateReleaseCatalog"];
             400: components["responses"]["Error"];
             502: components["responses"]["Error"];
+        };
+    };
+    listUpdaterSnapshots: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["UpdaterSnapshotList"];
+        };
+    };
+    restoreUpdaterSnapshot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdaterRollbackInput"];
+            };
+        };
+        responses: {
+            200: components["responses"]["Success"];
+            202: components["responses"]["Success"];
+            400: components["responses"]["Error"];
+            409: components["responses"]["Error"];
         };
     };
     runUpdaterAction: {

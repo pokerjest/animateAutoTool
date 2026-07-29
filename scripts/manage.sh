@@ -104,16 +104,12 @@ function build() {
     npm --prefix web/frontend ci
     npm --prefix web/frontend run build
 
-    # Check if we should tidy first (optional, but good for stability)
-    go mod tidy
-    
-    # Added CGO_ENABLED=0 based on control.sh logic for better portability
     BUILD_VERSION="dev"
     if [ -f "$VERSION_FILE" ]; then
         BUILD_VERSION=$(tr -d '[:space:]' < "$VERSION_FILE")
     fi
     LD_FLAGS="-s -w -X github.com/pokerjest/animateAutoTool/internal/version.AppVersion=${BUILD_VERSION}"
-    CGO_ENABLED=1 go build -ldflags="$LD_FLAGS" -o $BIN_PATH $SRC_PATH
+    CGO_ENABLED=0 go build -ldflags="$LD_FLAGS" -o "$BIN_PATH" "$SRC_PATH"
     
     if [ $? -eq 0 ]; then
         echo -e "${GREEN}Build successful.${NC}"

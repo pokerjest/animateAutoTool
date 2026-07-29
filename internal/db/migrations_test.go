@@ -4,11 +4,74 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/glebarez/sqlite"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"gorm.io/gorm"
 )
+
+func TestValidateMigrationOrderRejectsDuplicateAndOutOfOrderIDs(t *testing.T) {
+	original := append([]migration(nil), migrations...)
+	t.Cleanup(func() { migrations = original })
+
+	migrations = []migration{{ID: "001_first"}, {ID: "001_duplicate"}}
+	if err := validateMigrationOrder(); err == nil || !strings.Contains(err.Error(), "strictly increasing") {
+		t.Fatalf("expected duplicate numeric order failure, got %v", err)
+	}
+
+	migrations = []migration{{ID: "002_second"}, {ID: "001_first"}}
+	if err := validateMigrationOrder(); err == nil || !strings.Contains(err.Error(), "strictly increasing") {
+		t.Fatalf("expected out-of-order failure, got %v", err)
+	}
+
+	migrations = []migration{{ID: "001_same"}, {ID: "002_same"}, {ID: "002_same"}}
+	if err := validateMigrationOrder(); err == nil || !strings.Contains(err.Error(), "duplicate migration id") {
+		t.Fatalf("expected duplicate id failure, got %v", err)
+	}
+}
+
+func TestSchemaSequenceMigrationBackfillsHistoricalRows(t *testing.T) {
+	target, err := gorm.Open(sqlite.Open(sqliteMemoryPath), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite db: %v", err)
+	}
+	t.Cleanup(func() { closeTestDB(t, target) })
+
+	if err := target.AutoMigrate(&SchemaMigration{}); err != nil {
+		t.Fatalf("create schema history: %v", err)
+	}
+	for index, item := range migrations[:len(migrations)-1] {
+		appliedAt := time.Date(2026, 1, 1, 0, len(migrations)-index, 0, 0, time.UTC)
+		if err := target.Create(&SchemaMigration{
+			ID:          item.ID,
+			Description: item.Description,
+			AppliedAt:   appliedAt,
+		}).Error; err != nil {
+			t.Fatalf("seed migration %s: %v", item.ID, err)
+		}
+	}
+
+	if err := RunMigrations(target); err != nil {
+		t.Fatalf("run sequence migration: %v", err)
+	}
+
+	var rows []SchemaMigration
+	if err := target.Order("sequence").Find(&rows).Error; err != nil {
+		t.Fatalf("load migration history: %v", err)
+	}
+	if len(rows) != len(migrations) {
+		t.Fatalf("expected %d migrations, got %d", len(migrations), len(rows))
+	}
+	for index, row := range rows {
+		if row.Sequence != index+1 {
+			t.Fatalf("migration %s has sequence %d, expected %d", row.ID, row.Sequence, index+1)
+		}
+	}
+	if got := CurrentSchemaVersion(target); got != migrations[len(migrations)-1].ID {
+		t.Fatalf("expected latest schema %q, got %q", migrations[len(migrations)-1].ID, got)
+	}
+}
 
 func closeTestDB(t *testing.T, target *gorm.DB) {
 	t.Helper()

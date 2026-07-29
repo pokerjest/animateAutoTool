@@ -319,7 +319,7 @@ func TestRenderBackupAnalyzeTemplateIncludesModeSpecificWarning(t *testing.T) {
 		t.Fatalf("expected backup analyze template to render, got error: %v", err)
 	}
 
-	assert.Contains(t, html, "Cloudflare 云存档凭据")
+	assert.Contains(t, html, "Cloudflare 云存档设置")
 	assert.Contains(t, html, "合并")
 	assert.Contains(t, html, "4 项设置")
 	assert.Contains(t, html, `name="restore_configs" checked`)

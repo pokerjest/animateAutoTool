@@ -1,7 +1,10 @@
 package service
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +14,7 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/safeio"
+	appversion "github.com/pokerjest/animateAutoTool/internal/version"
 	"gorm.io/gorm"
 )
 
@@ -26,33 +30,49 @@ const (
 )
 
 type BackupDescriptor struct {
-	Mode               string
-	ModeLabel          string
-	Description        string
-	ConfigStrategy     string
-	SubscriptionCount  int64
-	SubscriptionTitles []string
-	DownloadLogCount   int64
-	LocalAnimeCount    int64
-	UserCount          int64
-	GlobalConfigCount  int64
-	DatabaseSize       string
-	LastModified       string
-	HasConfigs         bool
-	HasMetadata        bool
-	HasSubscriptions   bool
-	HasLogs            bool
-	HasLocal           bool
-	HasUsers           bool
+	Mode                string
+	ModeLabel           string
+	Description         string
+	ConfigStrategy      string
+	SubscriptionCount   int64
+	SubscriptionTitles  []string
+	DownloadLogCount    int64
+	LocalAnimeCount     int64
+	UserCount           int64
+	GlobalConfigCount   int64
+	DatabaseSize        string
+	LastModified        string
+	HasConfigs          bool
+	HasMetadata         bool
+	HasSubscriptions    bool
+	HasLogs             bool
+	HasLocal            bool
+	HasUsers            bool
+	HasDownloadLogs     bool
+	HasRunLogs          bool
+	HasLocalDirectories bool
+	HasLocalAnime       bool
+	HasLocalEpisodes    bool
+	HasPlaybackHistory  bool
+	FormatVersion       int
+	AppVersion          string
+	SchemaVersion       string
+	ContainsSecrets     bool
+	DatabaseSHA256      string
 }
 
 type backupManifest struct {
-	ID             uint `gorm:"primaryKey"`
-	Mode           string
-	Label          string
-	Description    string
-	ConfigStrategy string
-	CreatedAt      time.Time
+	ID              uint `gorm:"primaryKey"`
+	FormatVersion   int
+	Mode            string
+	Label           string
+	Description     string
+	ConfigStrategy  string
+	AppVersion      string
+	SchemaVersion   string
+	ContainsSecrets bool
+	DatabaseSHA256  string
+	CreatedAt       time.Time
 }
 
 func NormalizeBackupMode(mode string) string {
@@ -71,7 +91,7 @@ func BackupModeLabel(mode string) string {
 	case BackupModeSettings:
 		return "系统设置备份"
 	case BackupModeCloudflare:
-		return "Cloudflare 云存档凭据"
+		return "Cloudflare 云存档设置"
 	default:
 		return "全量备份"
 	}
@@ -80,11 +100,11 @@ func BackupModeLabel(mode string) string {
 func BackupModeDescription(mode string) string {
 	switch NormalizeBackupMode(mode) {
 	case BackupModeSettings:
-		return "只包含系统设置中的配置数据，适合迁移下载器、媒体库、代理和第三方服务配置。"
+		return "包含系统设置中的非敏感配置；密码、Token、API Key 等凭据不会写入备份，恢复时保留当前设备凭据。"
 	case BackupModeCloudflare:
-		return "只包含 Cloudflare R2 云备份连接配置。恢复时会合并到当前设置，不会清空其他系统配置。"
+		return "包含 Cloudflare R2 的 Endpoint 和 Bucket；访问密钥不会写入备份，恢复时保留当前设备凭据。"
 	default:
-		return "包含当前数据库中的全部业务数据，适合完整迁移和灾难恢复。"
+		return "包含当前数据库中的全部业务数据和已保存凭据，适合完整迁移和灾难恢复；请妥善保管备份文件。"
 	}
 }
 
@@ -147,11 +167,15 @@ func InspectBackup(path string) (BackupDescriptor, error) {
 	desc.HasConfigs = targetDB.Migrator().HasTable(&model.GlobalConfig{})
 	desc.HasMetadata = targetDB.Migrator().HasTable(&model.AnimeMetadata{})
 	desc.HasSubscriptions = targetDB.Migrator().HasTable(&model.Subscription{})
-	desc.HasLogs = targetDB.Migrator().HasTable(&model.DownloadLog{}) || targetDB.Migrator().HasTable(&model.SubscriptionRunLog{})
+	desc.HasDownloadLogs = targetDB.Migrator().HasTable(&model.DownloadLog{})
+	desc.HasRunLogs = targetDB.Migrator().HasTable(&model.SubscriptionRunLog{})
+	desc.HasLogs = desc.HasDownloadLogs || desc.HasRunLogs
 	desc.HasUsers = targetDB.Migrator().HasTable(&model.User{})
-	desc.HasLocal = targetDB.Migrator().HasTable(&model.LocalAnime{}) ||
-		targetDB.Migrator().HasTable(&model.LocalAnimeDirectory{}) ||
-		targetDB.Migrator().HasTable(&model.LocalEpisode{})
+	desc.HasLocalDirectories = targetDB.Migrator().HasTable(&model.LocalAnimeDirectory{})
+	desc.HasLocalAnime = targetDB.Migrator().HasTable(&model.LocalAnime{})
+	desc.HasLocalEpisodes = targetDB.Migrator().HasTable(&model.LocalEpisode{})
+	desc.HasPlaybackHistory = targetDB.Migrator().HasTable(&model.PlaybackHistory{})
+	desc.HasLocal = desc.HasLocalDirectories || desc.HasLocalAnime || desc.HasLocalEpisodes || desc.HasPlaybackHistory
 
 	if desc.HasConfigs {
 		targetDB.Model(&model.GlobalConfig{}).Count(&desc.GlobalConfigCount)
@@ -161,14 +185,16 @@ func InspectBackup(path string) (BackupDescriptor, error) {
 		targetDB.Model(&model.Subscription{}).Pluck("title", &desc.SubscriptionTitles)
 	}
 	if desc.HasLogs {
-		targetDB.Model(&model.DownloadLog{}).Count(&desc.DownloadLogCount)
-		if targetDB.Migrator().HasTable(&model.SubscriptionRunLog{}) {
+		if desc.HasDownloadLogs {
+			targetDB.Model(&model.DownloadLog{}).Count(&desc.DownloadLogCount)
+		}
+		if desc.HasRunLogs {
 			var runLogCount int64
 			targetDB.Model(&model.SubscriptionRunLog{}).Count(&runLogCount)
 			desc.DownloadLogCount += runLogCount
 		}
 	}
-	if desc.HasLocal {
+	if desc.HasLocalAnime {
 		targetDB.Model(&model.LocalAnime{}).Count(&desc.LocalAnimeCount)
 	}
 	if desc.HasUsers {
@@ -186,10 +212,24 @@ func InspectBackup(path string) (BackupDescriptor, error) {
 	if targetDB.Migrator().HasTable(&backupManifest{}) {
 		var manifest backupManifest
 		if err := targetDB.Order("id desc").First(&manifest).Error; err == nil {
+			if manifest.FormatVersion > 1 {
+				return BackupDescriptor{}, fmt.Errorf("backup format version %d is newer than this application supports", manifest.FormatVersion)
+			}
 			desc.Mode = NormalizeBackupMode(manifest.Mode)
 			desc.ModeLabel = manifest.Label
 			desc.Description = manifest.Description
 			desc.ConfigStrategy = manifest.ConfigStrategy
+			desc.FormatVersion = manifest.FormatVersion
+			desc.AppVersion = manifest.AppVersion
+			desc.SchemaVersion = manifest.SchemaVersion
+			desc.ContainsSecrets = manifest.ContainsSecrets
+			desc.DatabaseSHA256 = manifest.DatabaseSHA256
+			if desc.FormatVersion == 0 {
+				desc.FormatVersion = 1
+			}
+			if manifest.SchemaVersion != "" && backupSchemaNumber(manifest.SchemaVersion) < 0 {
+				return BackupDescriptor{}, fmt.Errorf("backup schema version %q is invalid", manifest.SchemaVersion)
+			}
 			return desc, nil
 		}
 	}
@@ -198,7 +238,26 @@ func InspectBackup(path string) (BackupDescriptor, error) {
 	desc.ModeLabel = BackupModeLabel(desc.Mode)
 	desc.Description = BackupModeDescription(desc.Mode)
 	desc.ConfigStrategy = backupConfigStrategyForMode(desc.Mode)
+	desc.ContainsSecrets = backupContainsSensitiveConfigs(path)
 	return desc, nil
+}
+
+func backupSchemaNumber(value string) int {
+	value = strings.TrimSpace(value)
+	if index := strings.IndexByte(value, '_'); index >= 0 {
+		value = value[:index]
+	}
+	if value == "" {
+		return -1
+	}
+	number := 0
+	for _, r := range value {
+		if r < '0' || r > '9' {
+			return -1
+		}
+		number = number*10 + int(r-'0')
+	}
+	return number
 }
 
 func isSQLiteBackupFile(path string) bool {
@@ -254,11 +313,16 @@ func annotateBackupFile(destPath string, mode string) error {
 		return err
 	}
 	return destDB.Create(&backupManifest{
-		Mode:           mode,
-		Label:          BackupModeLabel(mode),
-		Description:    BackupModeDescription(mode),
-		ConfigStrategy: backupConfigStrategyForMode(mode),
-		CreatedAt:      time.Now(),
+		FormatVersion:   1,
+		Mode:            mode,
+		Label:           BackupModeLabel(mode),
+		Description:     BackupModeDescription(mode),
+		ConfigStrategy:  backupConfigStrategyForMode(mode),
+		AppVersion:      appversion.AppVersion,
+		SchemaVersion:   db.CurrentSchemaVersion(db.DB),
+		ContainsSecrets: mode == BackupModeFull,
+		DatabaseSHA256:  sha256File(destPath),
+		CreatedAt:       time.Now().UTC(),
 	}).Error
 }
 
@@ -284,11 +348,16 @@ func createSelectiveBackupFile(destPath string, mode string) error {
 	}
 
 	return destDB.Create(&backupManifest{
-		Mode:           mode,
-		Label:          BackupModeLabel(mode),
-		Description:    BackupModeDescription(mode),
-		ConfigStrategy: backupConfigStrategyForMode(mode),
-		CreatedAt:      time.Now(),
+		FormatVersion:   1,
+		Mode:            mode,
+		Label:           BackupModeLabel(mode),
+		Description:     BackupModeDescription(mode),
+		ConfigStrategy:  backupConfigStrategyForMode(mode),
+		AppVersion:      appversion.AppVersion,
+		SchemaVersion:   db.CurrentSchemaVersion(db.DB),
+		ContainsSecrets: false,
+		DatabaseSHA256:  sha256File(destPath),
+		CreatedAt:       time.Now().UTC(),
 	}).Error
 }
 
@@ -315,17 +384,57 @@ func writeSelectiveBackupData(destDB *gorm.DB, mode string) error {
 		return err
 	}
 
-	// Desensitize sensitive credentials before writing to backup DB
-	for i := range configs {
-		if IsSensitiveConfigKey(configs[i].Key) {
-			configs[i].Value = ""
+	// Selective backups intentionally omit sensitive credentials rather than
+	// writing empty values. Restore can therefore preserve the current device's
+	// credentials instead of clearing them.
+	filtered := configs[:0]
+	for _, cfg := range configs {
+		if !IsSensitiveConfigKey(cfg.Key) {
+			filtered = append(filtered, cfg)
 		}
 	}
+	configs = filtered
 
 	if len(configs) > 0 {
 		return destDB.CreateInBatches(&configs, 500).Error
 	}
 	return nil
+}
+
+func sha256File(path string) string {
+	file, err := os.Open(filepath.Clean(path))
+	if err != nil {
+		return ""
+	}
+	defer safeio.Close(file)
+	hash := sha256.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return ""
+	}
+	return hex.EncodeToString(hash.Sum(nil))
+}
+
+func backupContainsSensitiveConfigs(path string) bool {
+	targetDB, err := gorm.Open(sqlite.Open(path), &gorm.Config{})
+	if err != nil {
+		return false
+	}
+	if sqlDB, err := targetDB.DB(); err == nil {
+		defer safeio.Close(sqlDB)
+	}
+	if !targetDB.Migrator().HasTable(&model.GlobalConfig{}) {
+		return false
+	}
+	var keys []string
+	if err := targetDB.Model(&model.GlobalConfig{}).Pluck("key", &keys).Error; err != nil {
+		return false
+	}
+	for _, key := range keys {
+		if IsSensitiveConfigKey(key) {
+			return true
+		}
+	}
+	return false
 }
 
 func inferLegacyBackupMode(targetDB *gorm.DB, desc BackupDescriptor) string {

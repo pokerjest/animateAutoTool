@@ -2,7 +2,11 @@ openapi: 3.1.0
 info:
   title: Animate Auto Tool API
   version: 1.0.0
-  description: JSON contract consumed by the embedded Vue application.
+  description: >-
+    JSON contract consumed by the embedded Vue application. The legacy /api/*
+    routes remain available during the 1.x compatibility window and return
+    "Deprecation: true" with /api/v1 as their successor; new clients must use
+    this /api/v1 contract.
 servers:
   - url: /api/v1
 security:
@@ -716,6 +720,26 @@ paths:
         "200": { $ref: "#/components/responses/UpdateReleaseCatalog" }
         "400": { $ref: "#/components/responses/Error" }
         "502": { $ref: "#/components/responses/Error" }
+  /settings/updater/snapshots:
+    get:
+      operationId: listUpdaterSnapshots
+      description: Lists local update snapshots without exposing filesystem paths.
+      responses:
+        "200": { $ref: "#/components/responses/UpdaterSnapshotList" }
+  /settings/updater/rollback:
+    post:
+      operationId: restoreUpdaterSnapshot
+      description: Restores a locally stored database and configuration snapshot. If a previous binary is available, the service exits and a local helper replaces the executable before readiness-checking the restored version.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdaterRollbackInput" }
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+        "202": { $ref: "#/components/responses/Success" }
+        "400": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
   /settings/updater/{action}:
     post:
       operationId: runUpdaterAction
@@ -898,6 +922,16 @@ components:
               - type: object
                 properties:
                   data: { $ref: "#/components/schemas/UpdateReleaseCatalog" }
+    UpdaterSnapshotList:
+      description: Local update snapshots
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/Envelope"
+              - type: object
+                properties:
+                  data: { $ref: "#/components/schemas/UpdaterSnapshotList" }
     AIAnalysisAccepted:
       description: AI analysis task accepted
       content:
@@ -1439,7 +1473,7 @@ components:
     UpdateRelease:
       type: object
       additionalProperties: false
-      required: [version, prerelease, release_url, asset_available, newer_than_current]
+      required: [version, prerelease, release_url, asset_available, newer_than_current, installable, switchable]
       properties:
         version: { type: string }
         prerelease: { type: boolean }
@@ -1448,6 +1482,14 @@ components:
         asset_name: { type: string }
         asset_available: { type: boolean }
         newer_than_current: { type: boolean }
+        installable: { type: boolean }
+        switchable: { type: boolean }
+        blocked_reason: { type: string }
+        manifest_available: { type: boolean }
+        schema_version: { type: string }
+        min_readable_schema: { type: string }
+        max_readable_schema: { type: string }
+        rollback_supported: { type: boolean }
     UpdateReleaseCatalog:
       type: object
       additionalProperties: false
@@ -1459,6 +1501,32 @@ components:
         items:
           type: array
           items: { $ref: "#/components/schemas/UpdateRelease" }
+    UpdaterSnapshot:
+      type: object
+      additionalProperties: false
+      required: [id, reason, app_version, schema_version, created_at, rollback_supported]
+      properties:
+        id: { type: string }
+        reason: { type: string }
+        operation_type: { type: string }
+        app_version: { type: string }
+        schema_version: { type: string }
+        created_at: { type: string, format: date-time }
+        rollback_supported: { type: boolean }
+    UpdaterSnapshotList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/UpdaterSnapshot" }
+    UpdaterRollbackInput:
+      type: object
+      additionalProperties: false
+      required: [id]
+      properties:
+        id: { type: string, minLength: 1 }
     AIAnalysisAccepted:
       type: object
       required: [task_id, proposal_id, status]

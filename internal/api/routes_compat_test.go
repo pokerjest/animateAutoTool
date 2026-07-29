@@ -78,7 +78,6 @@ func initLegacyAPICompat(r *gin.Engine) {
 			api.GET("/preview", PreviewRSSHandler)
 			api.GET("/mikan/dashboard", GetMikanDashboardHandler)
 			api.GET("/mikan/episodes", GetMikanEpisodesHandler)
-			api.POST("/play/magnet", PlayMagnetHandler)
 			api.POST("/subscriptions/refresh", RefreshSubscriptionsHandler)
 			api.GET("/subscriptions/scheduler-status", GetSchedulerStatusHandler)
 			api.POST("/settings", UpdateSettingsHandler)

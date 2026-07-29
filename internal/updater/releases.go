@@ -28,13 +28,21 @@ const (
 )
 
 type ReleaseInfo struct {
-	Version          string     `json:"version"`
-	Prerelease       bool       `json:"prerelease"`
-	PublishedAt      *time.Time `json:"published_at,omitempty"`
-	ReleaseURL       string     `json:"release_url"`
-	AssetName        string     `json:"asset_name,omitempty"`
-	AssetAvailable   bool       `json:"asset_available"`
-	NewerThanCurrent bool       `json:"newer_than_current"`
+	Version           string     `json:"version"`
+	Prerelease        bool       `json:"prerelease"`
+	PublishedAt       *time.Time `json:"published_at,omitempty"`
+	ReleaseURL        string     `json:"release_url"`
+	AssetName         string     `json:"asset_name,omitempty"`
+	AssetAvailable    bool       `json:"asset_available"`
+	NewerThanCurrent  bool       `json:"newer_than_current"`
+	Installable       bool       `json:"installable"`
+	Switchable        bool       `json:"switchable"`
+	BlockedReason     string     `json:"blocked_reason,omitempty"`
+	ManifestAvailable bool       `json:"manifest_available"`
+	SchemaVersion     string     `json:"schema_version,omitempty"`
+	MinReadableSchema string     `json:"min_readable_schema,omitempty"`
+	MaxReadableSchema string     `json:"max_readable_schema,omitempty"`
+	RollbackSupported bool       `json:"rollback_supported"`
 }
 
 type ReleaseCatalog struct {
@@ -131,7 +139,8 @@ func ListReleases(channel ReleaseChannel) (ReleaseCatalog, error) {
 	if err != nil {
 		return ReleaseCatalog{}, err
 	}
-	return buildReleaseCatalog(releases, channel, normalizeVersion(currentVersion())), nil
+	catalog := buildReleaseCatalog(releases, channel, normalizeVersion(currentVersion()))
+	return enrichReleaseCatalog(catalog, releases), nil
 }
 
 func buildReleaseCatalog(releases []githubRelease, channel ReleaseChannel, current string) ReleaseCatalog {
@@ -174,10 +183,41 @@ func buildReleaseCatalog(releases []githubRelease, channel ReleaseChannel, curre
 			info.AssetAvailable = true
 			info.AssetName = asset.Name
 		}
+		info.Installable = info.AssetAvailable && info.NewerThanCurrent
 		if catalog.LatestVersion == "" && info.AssetAvailable && info.NewerThanCurrent {
 			catalog.LatestVersion = info.Version
 		}
 		catalog.Items = append(catalog.Items, info)
+	}
+	return catalog
+}
+
+func enrichReleaseCatalog(catalog ReleaseCatalog, releases []githubRelease) ReleaseCatalog {
+	catalog.LatestVersion = ""
+	for index := range catalog.Items {
+		item := &catalog.Items[index]
+		release, err := findPublishedReleaseByVersion(releases, item.Version)
+		if err != nil || release == nil {
+			item.Installable = false
+			item.BlockedReason = "找不到对应 Release"
+			continue
+		}
+		manifest, allowed, reason := compatibilityForRelease(*release, catalog.CurrentVersion)
+		if manifest.FormatVersion > 0 {
+			item.ManifestAvailable = true
+			item.SchemaVersion = manifest.SchemaVersion
+			item.MinReadableSchema = manifest.MinReadableSchema
+			item.MaxReadableSchema = manifest.MaxReadableSchema
+			item.RollbackSupported = manifest.RollbackSupported
+		}
+		item.Switchable = item.AssetAvailable && allowed && !item.NewerThanCurrent
+		item.Installable = item.AssetAvailable && allowed
+		if !allowed && reason != "" {
+			item.BlockedReason = reason
+		}
+		if catalog.LatestVersion == "" && item.Installable && item.NewerThanCurrent {
+			catalog.LatestVersion = item.Version
+		}
 	}
 	return catalog
 }

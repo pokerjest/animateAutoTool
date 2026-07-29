@@ -8,8 +8,7 @@
 cmd/
 ├── server/           # 主服务
 ├── doctor/           # 离线体检 CLI（只读）
-├── repair/           # 离线修复 CLI（写库，支持 --dry-run）
-├── debug_metadata, debug_rss, fix_orphans, fix_duplicates, migrate_metadata
+└── repair/           # 离线修复 CLI（写库，支持 --dry-run）
 internal/
 ├── api/              # Gin handler + 中间件 + view layer
 ├── service/          # 业务逻辑 + worker 入口 + access helper
@@ -25,7 +24,6 @@ internal/
 ├── scheduler, worker, event/                  # 定时任务 + 事件总线
 ├── config, security, safeio, bootstrap, version, tray, renamer/
 └── ...
-pkg/rss/              # 对外可复用的 RSS 包
 web/                  # Vue 前端源码 + Vite 产物 + embed.go
 scripts/              # 部署/打包脚本
 docs/                 # MkDocs 文档源文件（配置、API、公网访问、QA 清单）

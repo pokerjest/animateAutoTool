@@ -42,7 +42,11 @@ func InitRoutes(r *gin.Engine) {
 	// Image proxy is intentionally public so cached posters can render before
 	// the SPA has completed session discovery.
 	r.GET("/api/tmdb/image", ProxyTMDBImageHandler)
+	r.GET("/healthz/ready", DirectLocalOnlyMiddleware(), ReadinessHandler)
 	initV1Routes(r)
+	if gin.Mode() != gin.TestMode {
+		initLegacyAPICompatProduction(r)
+	}
 
 	index, err := webassets.SPAIndex()
 	if err != nil {
@@ -85,7 +89,9 @@ func InitRoutes(r *gin.Engine) {
 	pages.GET("/local-anime", spaOrLegacy(LocalAnimePageHandler))
 	pages.GET("/calendar", spaOrLegacy(GetCalendarHandler))
 	pages.GET("/backup", spaOrLegacy(BackupPageHandler))
-	pages.GET("/player", spaOrLegacy(GetPlayerHandler))
+	// Keep the old path as a SPA compatibility entry point. The former
+	// server-rendered AList/PikPak player has been removed.
+	pages.GET("/player", serveSPA)
 	pages.GET("/health", spaOrLegacy(HealthPageHandler))
 	pages.GET("/assistant", serveSPA)
 	r.NoRoute(serveSPA)

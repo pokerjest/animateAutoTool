@@ -1,7 +1,7 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-set "PID_FILE=%CD%\logs\animate-server.pid"
+set "PID_FILE=%CD%\bin\server.pid"
 
 if exist "%PID_FILE%" (
     set /p APP_PID=<"%PID_FILE%"
@@ -21,11 +21,6 @@ if exist "%PID_FILE%" (
     )
 )
 
-echo No PID file found. Falling back to image-name stop...
-taskkill /F /IM animate-server.exe >nul 2>nul
-if %ERRORLEVEL% EQU 0 (
-    echo Server stopped.
-) else (
-    echo No running animate-server.exe process was found.
-)
-pause
+echo No running Animate Auto Tool process was found from %PID_FILE%.
+echo If the server was started outside start.bat, stop that process manually.
+exit /b 0
