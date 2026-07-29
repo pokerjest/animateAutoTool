@@ -19,6 +19,7 @@ func TestSelectMetadataSourcePrefersHigherPriorityOnTie(t *testing.T) {
 	selected := selectMetadataSource("Spy x Family", metadata)
 	if selected == nil {
 		t.Fatal("expected a selected source")
+		return
 	}
 	if selected.name != "tmdb" {
 		t.Fatalf("expected tmdb to win tie-breaker, got %s", selected.name)
