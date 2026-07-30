@@ -49,6 +49,7 @@ func (f fakeRSSParser) GetDashboard(year, season string) (*parser.MikanDashboard
 type fakeDownloader struct {
 	addErr    error
 	added     []string
+	attempts  int
 	savePaths []string
 	torrents  []downloader.TorrentInfo
 	listErr   error
@@ -56,6 +57,7 @@ type fakeDownloader struct {
 
 func (f *fakeDownloader) Login(username, password string) error { return nil }
 func (f *fakeDownloader) AddTorrent(url, savePath, category string, paused bool) error {
+	f.attempts++
 	if f.addErr != nil {
 		return f.addErr
 	}

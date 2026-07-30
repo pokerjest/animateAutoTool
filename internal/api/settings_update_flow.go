@@ -17,6 +17,11 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/updater"
 )
 
+const (
+	mediaNamingPresetJellyfinEmby = "jellyfin-emby"
+	metadataOverwriteFieldLayered = "field-layered"
+)
+
 type settingsScopeSpec struct {
 	keys       []string
 	checkboxes []string
@@ -33,8 +38,12 @@ func resolveSettingsScopeSpec(scope string) settingsScopeSpec {
 				model.ConfigKeyQBPassword,
 				model.ConfigKeyBaseDir,
 				model.ConfigKeyAutoRenameEnabled,
+				model.ConfigKeyMediaNamingPreset,
 				model.ConfigKeyAutoRenameSeriesTemplate,
 				model.ConfigKeyAutoRenameEpisodeTemplate,
+				model.ConfigKeyIncrementalScanEnabled,
+				model.ConfigKeyWriteNFOEnabled,
+				model.ConfigKeyWriteImagesEnabled,
 			},
 		}
 	case "data-sources":
@@ -46,6 +55,8 @@ func resolveSettingsScopeSpec(scope string) settingsScopeSpec {
 				model.ConfigKeyBangumiAppSecret,
 				model.ConfigKeyTMDBToken,
 				model.ConfigKeyAniListToken,
+				model.ConfigKeyMetadataSourceOrder,
+				model.ConfigKeyMetadataOverwritePolicy,
 			},
 		}
 	case "network":
@@ -98,12 +109,18 @@ func resolveSettingsScopeSpec(scope string) settingsScopeSpec {
 				model.ConfigKeyQBPassword,
 				model.ConfigKeyBaseDir,
 				model.ConfigKeyAutoRenameEnabled,
+				model.ConfigKeyMediaNamingPreset,
 				model.ConfigKeyAutoRenameSeriesTemplate,
 				model.ConfigKeyAutoRenameEpisodeTemplate,
+				model.ConfigKeyIncrementalScanEnabled,
+				model.ConfigKeyWriteNFOEnabled,
+				model.ConfigKeyWriteImagesEnabled,
 				model.ConfigKeyBangumiRefreshToken,
 				model.ConfigKeyBangumiAccessToken,
 				model.ConfigKeyTMDBToken,
 				model.ConfigKeyAniListToken,
+				model.ConfigKeyMetadataSourceOrder,
+				model.ConfigKeyMetadataOverwritePolicy,
 				model.ConfigKeyProxyURL,
 				model.ConfigKeyProxyBangumi,
 				model.ConfigKeyProxyMikan,
@@ -332,11 +349,25 @@ func loadSettingsViewData() (map[string]string, string, any) {
 	if strings.TrimSpace(configMap[model.ConfigKeyAutoRenameEnabled]) == "" {
 		configMap[model.ConfigKeyAutoRenameEnabled] = model.ConfigValueTrue
 	}
+	if strings.TrimSpace(configMap[model.ConfigKeyMediaNamingPreset]) == "" {
+		configMap[model.ConfigKeyMediaNamingPreset] = mediaNamingPresetJellyfinEmby
+	}
 	if strings.TrimSpace(configMap[model.ConfigKeyAutoRenameSeriesTemplate]) == "" {
 		configMap[model.ConfigKeyAutoRenameSeriesTemplate] = renamer.DefaultSeriesTemplate
 	}
 	if strings.TrimSpace(configMap[model.ConfigKeyAutoRenameEpisodeTemplate]) == "" {
 		configMap[model.ConfigKeyAutoRenameEpisodeTemplate] = renamer.DefaultEpisodeTemplate
+	}
+	if strings.TrimSpace(configMap[model.ConfigKeyMetadataSourceOrder]) == "" {
+		configMap[model.ConfigKeyMetadataSourceOrder] = "bangumi,tmdb,anilist"
+	}
+	if strings.TrimSpace(configMap[model.ConfigKeyMetadataOverwritePolicy]) == "" {
+		configMap[model.ConfigKeyMetadataOverwritePolicy] = metadataOverwriteFieldLayered
+	}
+	for _, key := range []string{model.ConfigKeyIncrementalScanEnabled, model.ConfigKeyWriteNFOEnabled, model.ConfigKeyWriteImagesEnabled} {
+		if strings.TrimSpace(configMap[key]) == "" {
+			configMap[key] = model.ConfigValueTrue
+		}
 	}
 	if strings.TrimSpace(configMap[model.ConfigKeyAIProvider]) == "" {
 		configMap[model.ConfigKeyAIProvider] = "openai"

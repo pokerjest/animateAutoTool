@@ -16,6 +16,7 @@ import (
 const (
 	LibraryIssueTypeScan   = "scan"
 	LibraryIssueTypeScrape = "scrape"
+	LibraryIssueTypeParse  = "parse"
 
 	LibraryIssueStatusOpen     = "open"
 	LibraryIssueStatusResolved = "resolved"

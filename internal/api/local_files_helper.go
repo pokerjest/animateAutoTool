@@ -188,7 +188,7 @@ func fetchBangumiProgress(anime *model.LocalAnime, effectiveSource string) (int,
 func fetchAniListProgress(anime *model.LocalAnime, effectiveSource string) (int, string) {
 	anilistWatchedCount := -1
 	anilistStatus := ""
-	if anime.Metadata != nil && effectiveSource == "anilist" && anime.Metadata.AniListID != 0 {
+	if anime.Metadata != nil && effectiveSource == SourceAniList && anime.Metadata.AniListID != 0 {
 		log.Printf("DEBUG: Attempting to fetch AniList progress for AniListID=%d", anime.Metadata.AniListID)
 		alToken := configValue(model.ConfigKeyAniListToken)
 		if alToken != "" {

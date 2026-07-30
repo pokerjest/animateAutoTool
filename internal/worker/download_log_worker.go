@@ -83,21 +83,10 @@ func syncDownloadLogStatuses(ctx context.Context) {
 		log.Printf("Worker: repaired %d stale download logs from local library matches (scanned=%d matched=%d)",
 			repairResult.Repaired, repairResult.Scanned, repairResult.Matched)
 	}
-	if archiveResult, err := service.ArchiveStaleDownloadLogs(client, 30*24*time.Hour); err != nil {
-		log.Printf("Worker: stale download log archive failed: %v", err)
-	} else if archiveResult.Archived > 0 {
-		log.Printf("Worker: archived %d stale download logs (scanned=%d protected=%d)",
-			archiveResult.Archived, archiveResult.Scanned, archiveResult.Protected)
-		if len(archiveResult.AffectedSubscriptionIDs) > 0 {
-			if err := service.RetrySubscriptionsByID(ctx, client, archiveResult.AffectedSubscriptionIDs, "manual"); err != nil {
-				log.Printf("Worker: auto retry after archive failed: %v", err)
-			}
-		}
-	}
-	if retried, err := service.RetryStaleSubscriptions(ctx, client, 6*time.Hour, "auto_recovery"); err != nil {
-		log.Printf("Worker: stale subscription retry failed: %v", err)
-	} else if retried > 0 {
-		log.Printf("Worker: retried %d stale subscriptions", retried)
+	if updated, err := service.ReconcileSubscriptionResourcesFromDownloadLogs(); err != nil {
+		log.Printf("Worker: subscription resource reconciliation failed: %v", err)
+	} else if updated > 0 {
+		log.Printf("Worker: reconciled %d subscription resource records", updated)
 	}
 
 	scheduleCompletedDownloadRescan(ctx, result.CompletedTargets)
@@ -114,6 +103,9 @@ func scheduleCompletedDownloadRescan(ctx context.Context, targets []string) {
 		select {
 		case <-timer.C:
 			autoScanCompletedDownloads(queued)
+			if _, err := service.ReconcileSubscriptionResourcesFromDownloadLogs(); err != nil {
+				log.Printf("Worker: resource reconciliation after delayed scan failed: %v", err)
+			}
 			// The second scan runs after qBittorrent has settled renamed/moved
 			// files. Enriching metadata here writes provider IDs to tvshow.nfo,
 			// then Jellyfin can scan and be reconciled without a user opening the
@@ -168,7 +160,7 @@ func syncCompletedDownloadsToJellyfin(ctx context.Context) {
 }
 
 func autoScanCompletedDownloads(targets []string) {
-	if len(targets) == 0 || db.DB == nil {
+	if len(targets) == 0 || db.DB == nil || !service.IncrementalScanEnabled() {
 		return
 	}
 

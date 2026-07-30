@@ -129,6 +129,45 @@ func TestLocalOrganizerRepairsStaleEpisodeNumbersFromExplicitFilenames(t *testin
 	require.Equal(t, 2, episodes[1].EpisodeNum)
 }
 
+func TestLocalOrganizerPreservesRichFilenameEvidenceForLegacyRows(t *testing.T) {
+	withServiceTestDB(t)
+	root := t.TempDir()
+	sourceDir := filepath.Join(root, "Range Show")
+	require.NoError(t, os.MkdirAll(sourceDir, 0o755))
+	video := filepath.Join(sourceDir, "[Group] Range Show 1x03-04v2 [1080p][CHS].mkv")
+	require.NoError(t, os.WriteFile(video, []byte("video"), 0o600))
+	directory := model.LocalAnimeDirectory{Path: root}
+	require.NoError(t, db.DB.Create(&directory).Error)
+	metadata := model.AnimeMetadata{Title: "Range Show"}
+	require.NoError(t, db.DB.Create(&metadata).Error)
+	anime := model.LocalAnime{DirectoryID: directory.ID, Title: "Range Show", Path: sourceDir, Season: 1, MetadataID: &metadata.ID}
+	require.NoError(t, db.DB.Create(&anime).Error)
+	// Simulate a row created before the rich parsing columns existed.
+	episode := model.LocalEpisode{LocalAnimeID: anime.ID, EpisodeNum: 3, SeasonNum: 1, Path: video}
+	require.NoError(t, db.DB.Create(&episode).Error)
+
+	organizer := NewLocalOrganizer(db.DB, nil)
+	preview, err := organizer.Preview("user", LocalOrganizePreviewRequest{
+		Selection: LocalOrganizeSelection{Mode: OrganizeSelectionIDs, AnimeIDs: []uint{anime.ID}},
+	})
+	require.NoError(t, err)
+	require.Len(t, preview.Items, 1)
+	require.Len(t, preview.Items[0].Changes, 1)
+	change := preview.Items[0].Changes[0]
+	require.Contains(t, change.Target, "S01E03-E04.mkv")
+	require.Equal(t, 4, change.EpisodeEnd)
+	require.Equal(t, "filename:season-x-episode", change.ParseSource)
+
+	result, err := organizer.Execute(t.Context(), preview, nil, nil)
+	require.NoError(t, err)
+	require.Equal(t, 1, result.Moved)
+	require.NoError(t, db.DB.First(&episode, episode.ID).Error)
+	require.Equal(t, 4, episode.EpisodeEndNum)
+	require.Equal(t, "v2", episode.VersionTag)
+	require.Equal(t, "chs", episode.LanguageTag)
+	require.Equal(t, "filename:season-x-episode", episode.ParseSource)
+}
+
 func TestLocalOrganizerProtectsConflictsAndMultiFileTorrents(t *testing.T) {
 	withServiceTestDB(t)
 	root := t.TempDir()

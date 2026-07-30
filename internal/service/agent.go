@@ -2,11 +2,13 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -103,7 +105,9 @@ func (s *AgentService) RunAgentForLibraryWithRepair(report MetadataIssueRepairPr
 	return s.RepairDatabaseMetadataIssues(context.Background(), report)
 }
 
-// scanLocalAssets looks for NFOs and local images
+// scanLocalAssets looks for NFOs and local images.
+//
+//nolint:gocyclo // Asset ingestion keeps field-level precedence in one transaction.
 func (s *AgentService) scanLocalAssets(anime *model.LocalAnime) {
 	// 1. Check NFO
 	nfoPath := filepath.Join(anime.Path, "tvshow.nfo")
@@ -117,17 +121,81 @@ func (s *AgentService) scanLocalAssets(anime *model.LocalAnime) {
 				anime.Metadata = m
 			}
 
-			// Fill Data from NFO
-			anime.Metadata.Title = nfo.Title
-			anime.Metadata.TitleCN = nfo.Title // Assumption
-			anime.Metadata.Summary = nfo.Plot
+			// Local NFO is authoritative for identifiers and the primary title,
+			// while descriptive network fields only fill gaps by default.
+			localSources := map[string]string{}
+			if strings.TrimSpace(nfo.Title) != "" {
+				anime.Metadata.Title = strings.TrimSpace(nfo.Title)
+				localSources["title"] = metadataSourceLocalNFO
+			}
+			if strings.TrimSpace(nfo.Original) != "" {
+				anime.Metadata.OriginalTitle = strings.TrimSpace(nfo.Original)
+				localSources["original_title"] = metadataSourceLocalNFO
+			}
+			if anime.Metadata.TitleJP == "" {
+				anime.Metadata.TitleJP = strings.TrimSpace(nfo.Original)
+			}
+			if strings.TrimSpace(nfo.SortTitle) != "" {
+				anime.Metadata.SortTitle = strings.TrimSpace(nfo.SortTitle)
+				localSources["sort_title"] = metadataSourceLocalNFO
+			}
+			if strings.TrimSpace(nfo.Plot) != "" {
+				anime.Metadata.Summary = nfo.Plot
+				localSources["summary"] = metadataSourceLocalNFO
+			}
+			if strings.TrimSpace(nfo.Premiered) != "" {
+				anime.Metadata.AirDate = nfo.Premiered
+				localSources["air_date"] = metadataSourceLocalNFO
+			}
+			if len(nfo.Genre) > 0 {
+				anime.Metadata.Genres = encodeStringList(nfo.Genre)
+				localSources["genres"] = metadataSourceLocalNFO
+			}
+			if len(nfo.Studio) > 0 {
+				anime.Metadata.Studios = encodeStringList(nfo.Studio)
+				localSources["studios"] = metadataSourceLocalNFO
+			}
+			if len(nfo.Actor) > 0 {
+				names := make([]string, 0, len(nfo.Actor))
+				for _, actor := range nfo.Actor {
+					if strings.TrimSpace(actor.Name) != "" {
+						names = append(names, strings.TrimSpace(actor.Name))
+					}
+				}
+				anime.Metadata.Actors = encodeStringList(names)
+				localSources["actors"] = metadataSourceLocalNFO
+			}
 
+			hasLocalProviderID := false
 			if nfo.BangumiID != 0 {
 				anime.Metadata.BangumiID = nfo.BangumiID
+				hasLocalProviderID = true
 			}
 			if nfo.TMDBID != 0 {
 				anime.Metadata.TMDBID = nfo.TMDBID
+				hasLocalProviderID = true
 			}
+			for _, uniqueID := range nfo.UniqueIDs {
+				id, convErr := strconv.Atoi(strings.TrimSpace(uniqueID.Value))
+				if convErr != nil || id <= 0 {
+					continue
+				}
+				switch strings.ToLower(strings.TrimSpace(uniqueID.Type)) {
+				case metadataSourceBangumi:
+					anime.Metadata.BangumiID = id
+					hasLocalProviderID = true
+				case metadataSourceTMDB:
+					anime.Metadata.TMDBID = id
+					hasLocalProviderID = true
+				case metadataSourceAniList:
+					anime.Metadata.AniListID = id
+					hasLocalProviderID = true
+				}
+			}
+			if hasLocalProviderID {
+				localSources["provider_ids"] = metadataSourceLocalNFO
+			}
+			anime.Metadata.FieldSources = mergeFieldSources(anime.Metadata.FieldSources, localSources)
 
 			if err := s.persistLocalAssetMetadata(anime); err != nil {
 				log.Printf("Agent: Failed to persist local NFO metadata for %s: %v", anime.Title, err)
@@ -170,6 +238,30 @@ func (s *AgentService) scanLocalAssets(anime *model.LocalAnime) {
 			}
 		}
 	}
+}
+
+func encodeStringList(values []string) string {
+	filtered := make([]string, 0, len(values))
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			filtered = append(filtered, strings.TrimSpace(value))
+		}
+	}
+	if len(filtered) == 0 {
+		return ""
+	}
+	encoded, _ := json.Marshal(filtered)
+	return string(encoded)
+}
+
+func mergeFieldSources(raw string, updates map[string]string) string {
+	sources := map[string]string{}
+	_ = json.Unmarshal([]byte(raw), &sources)
+	for field, source := range updates {
+		sources[field] = source
+	}
+	encoded, _ := json.Marshal(sources)
+	return string(encoded)
 }
 
 func (s *AgentService) persistLocalAssetMetadata(anime *model.LocalAnime) error {

@@ -212,6 +212,13 @@ func SyncDownloadLogStatuses(source TorrentStatusSource) (DownloadLogStatusSyncR
 		}
 	}
 
+	// Keep the durable resource ledger in sync with the compatibility log
+	// projection. A reconciliation failure is surfaced to the caller rather
+	// than silently leaving the two sources of truth divergent.
+	if _, err := ReconcileSubscriptionResourcesFromDownloadLogs(); err != nil {
+		return result, err
+	}
+
 	return result, nil
 }
 

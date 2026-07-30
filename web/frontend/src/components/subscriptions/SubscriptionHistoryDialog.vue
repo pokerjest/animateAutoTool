@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { Clock3, PlayCircle } from '@lucide/vue'
+import { computed } from 'vue'
+import { ArrowUpCircle, Clock3, PlayCircle, RotateCw } from '@lucide/vue'
 import { handlePosterError, posterURL } from '../../api/client'
-import type { Subscription } from '../../api/types'
+import type { Subscription, SubscriptionResource } from '../../api/types'
 import AppDialog from '../AppDialog.vue'
+import AsyncButton from '../AsyncButton.vue'
 import StateBlock from '../StateBlock.vue'
 
-defineProps<{
+const props = defineProps<{
   open: boolean
   title: string
   loading: boolean
@@ -14,13 +16,29 @@ defineProps<{
   item?: Subscription | null
   runs: Array<Record<string, unknown>>
   logs: Array<Record<string, unknown>>
+  resources: SubscriptionResource[]
+  isBusy: (...keys: string[]) => boolean
 }>()
 
 const emit = defineEmits<{
   'update:open': [value: boolean]
   retry: []
   play: [item: Subscription]
+  resourceAction: [resource: SubscriptionResource, action: 'retry' | 'upgrade']
 }>()
+
+const groupedResources = computed(() => {
+  const groups = new Map<string, { label: string; items: SubscriptionResource[] }>()
+  for (const resource of props.resources) {
+    const key = resource.canonical_key || `resource:${resource.ID}`
+    const season = resource.season_val || 'S?'
+    const episode = resource.episode || '?'
+    const current = groups.get(key) || { label: `${season} · 第 ${episode} 集`, items: [] }
+    current.items.push(resource)
+    groups.set(key, current)
+  }
+  return [...groups.values()]
+})
 
 function field(row: Record<string, unknown>, primary: string, fallback: string) {
   return String(row[primary] ?? row[fallback] ?? '')
@@ -38,6 +56,18 @@ function statusLabel(value: string) {
       return '失败'
     case 'archived':
       return '已归档'
+    case 'seen':
+      return '已发现'
+    case 'filtered':
+      return '已过滤'
+    case 'pending':
+      return '待提交'
+    case 'unknown':
+      return '待核对'
+    case 'unresolved':
+      return '无法识别'
+    case 'superseded':
+      return '候选版本'
     case 'success':
       return '成功'
     case 'warning':
@@ -49,6 +79,21 @@ function statusLabel(value: string) {
     default:
       return value
   }
+}
+
+function resourceTone(state: SubscriptionResource['state']) {
+  if (state === 'completed') return 'badge-success'
+  if (state === 'failed' || state === 'unknown' || state === 'unresolved') return 'badge-danger'
+  if (state === 'downloading' || state === 'pending') return 'badge-warning'
+  return ''
+}
+
+function canRetry(resource: SubscriptionResource) {
+  return ['failed', 'unknown', 'unresolved'].includes(resource.state)
+}
+
+function canUpgrade(resource: SubscriptionResource) {
+  return resource.state === 'superseded' && Number(resource.version_tag?.replace(/^V/i, '') || 1) > 1
 }
 
 function numberField(row: Record<string, unknown>, primary: string, fallback: string) {
@@ -165,6 +210,59 @@ function formatSpeed(value: number) {
         </div>
       </section>
       </div>
+
+      <section v-if="groupedResources.length">
+        <div class="flex flex-wrap items-end justify-between gap-2">
+          <div>
+            <h3 class="font-black">资源对账</h3>
+            <p class="muted mt-1 text-xs">V2/V3 默认仅保留为候选，不会自动替换已下载或下载中的版本。</p>
+          </div>
+          <span class="badge">RSS {{ resources.length }} 条</span>
+        </div>
+        <div class="mt-3 grid gap-3">
+          <article v-for="group in groupedResources" :key="group.label" class="panel-muted overflow-hidden">
+            <header class="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--line)] px-4 py-3">
+              <strong>{{ group.label }}</strong>
+              <span class="muted text-xs">{{ group.items.length }} 个候选</span>
+            </header>
+            <div class="divide-y divide-[var(--line)]">
+              <div v-for="resource in group.items" :key="resource.ID" class="grid gap-3 px-4 py-3 md:grid-cols-[1fr_auto] md:items-center">
+                <div class="min-w-0">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <span class="badge">{{ resource.version_tag || 'V1' }}</span>
+                    <span class="badge" :class="resourceTone(resource.state)">{{ statusLabel(resource.state) }}</span>
+                    <span v-if="resource.selected" class="badge badge-success">当前选择</span>
+                  </div>
+                  <p class="mt-2 line-clamp-2 text-sm font-semibold">{{ resource.title }}</p>
+                  <p v-if="resource.state_reason || resource.last_error" class="muted mt-1 text-xs">
+                    {{ resource.last_error || resource.state_reason }}
+                  </p>
+                </div>
+                <div v-if="canRetry(resource) || canUpgrade(resource)" class="flex flex-wrap gap-2 md:justify-end">
+                  <AsyncButton
+                    v-if="canRetry(resource)"
+                    class="btn btn-secondary"
+                    :loading="isBusy(`resource-retry-${resource.ID}`)"
+                    loading-label="重试中…"
+                    @click="emit('resourceAction', resource, 'retry')"
+                  >
+                    <RotateCw :size="16" />重试
+                  </AsyncButton>
+                  <AsyncButton
+                    v-if="canUpgrade(resource)"
+                    class="btn btn-secondary"
+                    :loading="isBusy(`resource-upgrade-${resource.ID}`)"
+                    loading-label="切换中…"
+                    @click="emit('resourceAction', resource, 'upgrade')"
+                  >
+                    <ArrowUpCircle :size="16" />使用此版本
+                  </AsyncButton>
+                </div>
+              </div>
+            </div>
+          </article>
+        </div>
+      </section>
     </div>
   </AppDialog>
 </template>

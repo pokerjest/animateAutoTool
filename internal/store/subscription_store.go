@@ -139,6 +139,9 @@ func (s *SubscriptionStore) DeleteCascade(id uint) error {
 			if err := tx.Unscoped().Where("subscription_id = ?", id).Delete(&model.DownloadLog{}).Error; err != nil {
 				return err
 			}
+			if err := tx.Unscoped().Where("subscription_id = ?", id).Delete(&model.SubscriptionResource{}).Error; err != nil {
+				return err
+			}
 			return tx.Unscoped().Delete(&model.Subscription{}, id).Error
 		})
 	})

@@ -43,14 +43,25 @@ type TVShowNFO struct {
 
 // EpisodeNFO represents tiny nfo for episodes
 type EpisodeNFO struct {
-	XMLName   xml.Name   `xml:"episodedetails"`
-	Title     string     `xml:"title"`
-	Season    int        `xml:"season"`
-	Episode   int        `xml:"episode"`
-	Plot      string     `xml:"plot,omitempty"`
-	Thumb     string     `xml:"thumb,omitempty"`
-	Aired     string     `xml:"aired,omitempty"` // YYYY-MM-DD
-	UniqueIDs []UniqueID `xml:"uniqueid"`
+	XMLName    xml.Name   `xml:"episodedetails"`
+	Title      string     `xml:"title"`
+	Original   string     `xml:"originaltitle,omitempty"`
+	Season     int        `xml:"season"`
+	Episode    int        `xml:"episode"`
+	EpisodeEnd int        `xml:"episodeend,omitempty"`
+	Type       string     `xml:"episodetype,omitempty"`
+	Plot       string     `xml:"plot,omitempty"`
+	Thumb      string     `xml:"thumb,omitempty"`
+	Aired      string     `xml:"aired,omitempty"` // YYYY-MM-DD
+	UniqueIDs  []UniqueID `xml:"uniqueid"`
+	seasonSet  bool
+}
+
+// HasSeason reports whether the source NFO explicitly contained a <season>
+// element. Zero is a valid season for specials, so presence cannot be inferred
+// from the decoded integer value alone.
+func (n *EpisodeNFO) HasSeason() bool {
+	return n != nil && n.seasonSet
 }
 
 func ParseTVShowNFO(path string) (*TVShowNFO, error) {
@@ -75,6 +86,12 @@ func ParseEpisodeNFO(path string) (*EpisodeNFO, error) {
 	var nfo EpisodeNFO
 	if err := xml.Unmarshal(data, &nfo); err != nil {
 		return nil, err
+	}
+	var presence struct {
+		Season *int `xml:"season"`
+	}
+	if err := xml.Unmarshal(data, &presence); err == nil {
+		nfo.seasonSet = presence.Season != nil
 	}
 	return &nfo, nil
 }

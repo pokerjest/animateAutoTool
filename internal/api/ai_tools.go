@@ -113,14 +113,17 @@ func registerTools() {
 	GlobalAIRegistry.RegisterProposal("preview_filename_resolution",
 		"根据识别出的季度和集数创建一个待确认的文件整理提案，不执行文件修改。",
 		ai.JSONSchemaObject(map[string]any{
-			"local_anime_id": ai.JSONSchemaProperty("integer", "本地番剧 ID"),
-			"path":           ai.JSONSchemaProperty("string", "视频路径"),
-			"season":         ai.JSONSchemaProperty("integer", "季度号"),
-			"episode":        ai.JSONSchemaProperty("integer", "集数"),
-			"confidence":     map[string]any{"type": "number", "minimum": 0, "maximum": 1, "description": "0 到 1 的置信度"},
-			"summary":        ai.JSONSchemaProperty("string", "简短说明"),
-			"evidence":       map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "分析依据"},
-			"warnings":       map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "风险提示"},
+			"local_anime_id":   ai.JSONSchemaProperty("integer", "本地番剧 ID"),
+			"path":             ai.JSONSchemaProperty("string", "视频路径"),
+			"season":           ai.JSONSchemaProperty("integer", "季度号"),
+			"episode":          ai.JSONSchemaProperty("integer", "集数"),
+			"episode_end":      ai.JSONSchemaProperty("integer", "多集文件的结束集数，可选"),
+			"episode_type":     ai.JSONSchemaProperty("string", "episode、special、ova、opening、ending、trailer 或 collection"),
+			"absolute_episode": ai.JSONSchemaProperty("integer", "可选绝对集数"),
+			"confidence":       map[string]any{"type": "number", "minimum": 0, "maximum": 1, "description": "0 到 1 的置信度"},
+			"summary":          ai.JSONSchemaProperty("string", "简短说明"),
+			"evidence":         map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "分析依据"},
+			"warnings":         map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "风险提示"},
 		}, []string{"local_anime_id", "path", "season", "episode", "confidence", "summary"}),
 		previewFilenameResolutionTool)
 
@@ -477,17 +480,35 @@ func proposalExpiry(kind string) time.Time {
 
 func previewFilenameResolutionTool(ctx context.Context, raw string) (string, error) {
 	var req struct {
-		LocalAnimeID uint     `json:"local_anime_id"`
-		Path         string   `json:"path"`
-		Season       int      `json:"season"`
-		Episode      int      `json:"episode"`
-		Confidence   float64  `json:"confidence"`
-		Summary      string   `json:"summary"`
-		Evidence     []string `json:"evidence"`
-		Warnings     []string `json:"warnings"`
+		LocalAnimeID    uint     `json:"local_anime_id"`
+		Path            string   `json:"path"`
+		Season          int      `json:"season"`
+		Episode         int      `json:"episode"`
+		EpisodeEnd      int      `json:"episode_end"`
+		EpisodeType     string   `json:"episode_type"`
+		AbsoluteEpisode int      `json:"absolute_episode"`
+		Confidence      float64  `json:"confidence"`
+		Summary         string   `json:"summary"`
+		Evidence        []string `json:"evidence"`
+		Warnings        []string `json:"warnings"`
 	}
 	if err := decodeToolArgs(raw, &req); err != nil || req.LocalAnimeID == 0 || req.Episode <= 0 {
 		return "", errors.New("文件识别提案参数无效")
+	}
+	req.EpisodeType = strings.ToLower(strings.TrimSpace(req.EpisodeType))
+	if req.EpisodeType == "" {
+		req.EpisodeType = "episode"
+	}
+	switch req.EpisodeType {
+	case "episode", "special", "ova", "opening", "ending", "trailer", "collection":
+	default:
+		return "", errors.New("文件识别提案包含不支持的剧集类型")
+	}
+	if req.EpisodeEnd == 0 {
+		req.EpisodeEnd = req.Episode
+	}
+	if req.EpisodeEnd < req.Episode {
+		return "", errors.New("文件识别提案的结束集数不能小于开始集数")
 	}
 	meta := currentAIToolMeta(ctx)
 	fingerprint, err := filenameProposalFingerprint(req.LocalAnimeID, req.Path)
@@ -499,14 +520,18 @@ func previewFilenameResolutionTool(ctx context.Context, raw string) (string, err
 		return "", err
 	}
 	preview, err := organizer.Preview(strconv.FormatUint(uint64(meta.UserID), 10), service.LocalOrganizePreviewRequest{
-		Selection:        service.LocalOrganizeSelection{Mode: service.OrganizeSelectionIDs, AnimeIDs: []uint{req.LocalAnimeID}},
-		EpisodeOverrides: []service.LocalOrganizeEpisodeOverride{{Path: req.Path, Season: req.Season, Episode: req.Episode}},
+		Selection: service.LocalOrganizeSelection{Mode: service.OrganizeSelectionIDs, AnimeIDs: []uint{req.LocalAnimeID}},
+		EpisodeOverrides: []service.LocalOrganizeEpisodeOverride{{
+			Path: req.Path, Season: req.Season, Episode: req.Episode, EpisodeEnd: req.EpisodeEnd,
+			EpisodeType: req.EpisodeType, AbsoluteEpisode: req.AbsoluteEpisode,
+		}},
 	})
 	if err != nil {
 		return "", err
 	}
 	payload := map[string]any{
 		"local_anime_id": req.LocalAnimeID, "path": req.Path, "season": req.Season, "episode": req.Episode,
+		"episode_end": req.EpisodeEnd, "episode_type": req.EpisodeType, "absolute_episode": req.AbsoluteEpisode,
 		"organize_plan_id": preview.PlanID, "include_anime_ids": []uint{req.LocalAnimeID}, "preview": preview,
 	}
 	input := service.AIProposalInput{

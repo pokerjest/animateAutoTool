@@ -96,7 +96,7 @@ paths:
   /subscriptions/refresh:
     post:
       operationId: refreshAndRepairSubscriptions
-      description: Reconcile qBittorrent progress and local-library download history, archive stale records, then recheck every active subscription.
+      description: Reconcile qBittorrent progress, local-library history and durable RSS candidates, then submit only genuinely missing canonical episodes. Existing failed tasks and V2/V3 candidates are not retried or upgraded automatically, and records are never deleted or archived by this action.
       responses:
         "202": { $ref: "#/components/responses/TaskAccepted" }
         "409": { $ref: "#/components/responses/Error" }
@@ -169,6 +169,48 @@ paths:
     post: { operationId: switchSubscriptionSource, parameters: [{ $ref: "#/components/parameters/Id" }], responses: { "200": { $ref: "#/components/responses/Success" } } }
   /subscriptions/{id}/history:
     get: { operationId: getSubscriptionHistory, parameters: [{ $ref: "#/components/parameters/Id" }], responses: { "200": { $ref: "#/components/responses/Success" } } }
+  /subscriptions/{id}/resources:
+    get:
+      operationId: listSubscriptionResources
+      description: Lists the durable RSS/qB/local-library reconciliation ledger for one subscription.
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200":
+          description: Resource candidates and reconciliation summary
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [items, summary]
+                        properties:
+                          items: { type: array, items: { $ref: "#/components/schemas/SubscriptionResource" } }
+                          summary: { $ref: "#/components/schemas/SubscriptionResourceSummary" }
+        "404": { $ref: "#/components/responses/Error" }
+  /subscriptions/{id}/resources/{resource_id}/retry:
+    post:
+      operationId: retrySubscriptionResource
+      description: Explicitly retries one failed, unknown or unresolved candidate. The server reuses the stored validated URL and does not accept an arbitrary download URL.
+      parameters:
+        - { $ref: "#/components/parameters/Id" }
+        - { name: resource_id, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+        "409": { $ref: "#/components/responses/Error" }
+  /subscriptions/{id}/resources/{resource_id}/upgrade:
+    post:
+      operationId: upgradeSubscriptionResource
+      description: Explicitly selects a stored V2/V3 candidate for one canonical episode. Automatic refresh never performs this switch.
+      parameters:
+        - { $ref: "#/components/parameters/Id" }
+        - { name: resource_id, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+        "409": { $ref: "#/components/responses/Error" }
   /calendar:
     get: { operationId: getCalendar, responses: { "200": { $ref: "#/components/responses/Success" } } }
   /calendar/posters/{id}:
@@ -1139,6 +1181,50 @@ components:
         allow_multi_subgroup: { type: boolean }
         auto_disable_on_done: { type: boolean }
         stale_after_hours: { type: integer, minimum: 1 }
+    SubscriptionResource:
+      type: object
+      required: [ID, subscription_id, canonical_key, fingerprint, title, episode, season_val, version_tag, state, selected, current]
+      properties:
+        ID: { type: integer, minimum: 1 }
+        subscription_id: { type: integer, minimum: 1 }
+        canonical_key: { type: string }
+        fingerprint: { type: string, pattern: "^[a-f0-9]{64}$" }
+        title: { type: string }
+        episode: { type: string }
+        season_val: { type: string }
+        subgroup: { type: string }
+        version_tag: { type: string }
+        torrent_url: { type: string }
+        rss_url: { type: string }
+        info_hash: { type: string }
+        source: { type: string }
+        state:
+          type: string
+          enum: [seen, filtered, unresolved, pending, downloading, completed, failed, unknown, superseded, archived]
+        state_reason: { type: string }
+        last_error: { type: string }
+        task_hash: { type: string }
+        target_file: { type: string }
+        attempt_count: { type: integer, minimum: 0 }
+        candidate_rank: { type: integer, minimum: 0 }
+        selected: { type: boolean }
+        current: { type: boolean }
+        last_seen_at: { type: string, format: date-time, nullable: true }
+        last_attempt_at: { type: string, format: date-time, nullable: true }
+        submitted_at: { type: string, format: date-time, nullable: true }
+        completed_at: { type: string, format: date-time, nullable: true }
+    SubscriptionResourceSummary:
+      type: object
+      required: [rss_count, canonical_episode_count, confirmed_count, downloading_count, completed_count, failed_count, unresolved_count, needs_attention]
+      properties:
+        rss_count: { type: integer, format: int64, minimum: 0 }
+        canonical_episode_count: { type: integer, format: int64, minimum: 0 }
+        confirmed_count: { type: integer, format: int64, minimum: 0 }
+        downloading_count: { type: integer, format: int64, minimum: 0 }
+        completed_count: { type: integer, format: int64, minimum: 0 }
+        failed_count: { type: integer, format: int64, minimum: 0 }
+        unresolved_count: { type: integer, format: int64, minimum: 0 }
+        needs_attention: { type: boolean }
     MikanDiscoveryItem:
       type: object
       required: [mikan_id, bangumi_subject_id, title, image]
@@ -1271,6 +1357,20 @@ components:
         selection: { $ref: "#/components/schemas/LocalOrganizeSelection" }
         series_template: { type: string }
         episode_template: { type: string }
+        episode_overrides:
+          type: array
+          items: { $ref: "#/components/schemas/LocalOrganizeEpisodeOverride" }
+    LocalOrganizeEpisodeOverride:
+      type: object
+      required: [path, season, episode]
+      additionalProperties: false
+      properties:
+        path: { type: string }
+        season: { type: integer, minimum: 0 }
+        episode: { type: integer, minimum: 1 }
+        episode_end: { type: integer, minimum: 1 }
+        episode_type: { type: string, enum: [episode, special, ova, opening, ending, trailer, collection] }
+        absolute_episode: { type: integer, minimum: 0 }
     LocalOrganizeApplyInput:
       type: object
       required: [plan_id]
@@ -1287,6 +1387,10 @@ components:
         status: { type: string, enum: [ready, unchanged, conflict, skipped] }
         reason: { type: string }
         managed_by_qb: { type: boolean }
+        parse_source: { type: string }
+        parse_confidence: { type: number, minimum: 0, maximum: 1 }
+        episode_type: { type: string }
+        episode_end: { type: integer, minimum: 0 }
     LocalOrganizeAnimePreview:
       type: object
       required: [anime_id, title, source_path, target_path, metadata_matched, warnings, changes]

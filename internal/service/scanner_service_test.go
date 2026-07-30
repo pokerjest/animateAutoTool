@@ -242,3 +242,63 @@ func TestScannerKeepsExistingRecordWhenSeasonFolderIsRenamed(t *testing.T) {
 	require.Len(t, animes[0].Episodes, 1)
 	require.Contains(t, animes[0].Episodes[0].Path, "Renamed Show S01")
 }
+
+func TestScannerStoresRichParseEvidenceAndFingerprint(t *testing.T) {
+	withServiceTestDB(t)
+	root := t.TempDir()
+	video := filepath.Join(root, "Evidence Show", "Season 02", "[Group] Evidence Show 2x03-04v2 [1080p][CHS].mkv")
+	writeScannerFixture(t, video)
+	directory := createScannerDirectory(t, root)
+	scanner := NewScannerService()
+
+	_, err := scanner.ScanDirectory(&directory)
+	require.NoError(t, err)
+	var episode model.LocalEpisode
+	require.NoError(t, db.DB.First(&episode).Error)
+	require.Equal(t, 2, episode.SeasonNum)
+	require.Equal(t, 3, episode.EpisodeNum)
+	require.Equal(t, 4, episode.EpisodeEndNum)
+	require.Equal(t, "v2", episode.VersionTag)
+	require.Equal(t, "chs", episode.LanguageTag)
+	require.Equal(t, "filename:season-x-episode", episode.ParseSource)
+	require.Greater(t, episode.ParseConfidence, 0.9)
+	require.Len(t, episode.ScanFingerprint, 64)
+	firstFingerprint := episode.ScanFingerprint
+
+	require.NoError(t, os.WriteFile(video, []byte("replacement release"), 0o600))
+	_, err = scanner.ScanDirectory(&directory)
+	require.NoError(t, err)
+	require.NoError(t, db.DB.First(&episode, episode.ID).Error)
+	require.NotEqual(t, firstFingerprint, episode.ScanFingerprint)
+}
+
+func TestScannerKeepsSpecialsInSeasonZero(t *testing.T) {
+	withServiceTestDB(t)
+	root := t.TempDir()
+	video := filepath.Join(root, "Special Show", "Specials", "Special Show OVA - 01.mkv")
+	writeScannerFixture(t, video)
+	directory := createScannerDirectory(t, root)
+
+	_, err := NewScannerService().ScanDirectory(&directory)
+	require.NoError(t, err)
+	var episode model.LocalEpisode
+	require.NoError(t, db.DB.First(&episode).Error)
+	require.Equal(t, 0, episode.SeasonNum)
+	require.Equal(t, "special", episode.EpisodeType)
+}
+
+func TestScannerUsesSpecialDirectoryEvidenceForPlainEpisodeNames(t *testing.T) {
+	withServiceTestDB(t)
+	root := t.TempDir()
+	video := filepath.Join(root, "Folder Special Show", "Specials", "Folder Special Show - 01.mkv")
+	writeScannerFixture(t, video)
+	directory := createScannerDirectory(t, root)
+
+	_, err := NewScannerService().ScanDirectory(&directory)
+	require.NoError(t, err)
+	var episode model.LocalEpisode
+	require.NoError(t, db.DB.First(&episode).Error)
+	require.Equal(t, 0, episode.SeasonNum)
+	require.Equal(t, "special", episode.EpisodeType)
+	require.Equal(t, "directory:special", episode.ParseSource)
+}

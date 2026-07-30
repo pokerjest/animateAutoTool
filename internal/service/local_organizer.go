@@ -54,18 +54,25 @@ type LocalOrganizePreviewRequest struct {
 }
 
 type LocalOrganizeEpisodeOverride struct {
-	Path    string `json:"path"`
-	Season  int    `json:"season"`
-	Episode int    `json:"episode"`
+	Path            string `json:"path"`
+	Season          int    `json:"season"`
+	Episode         int    `json:"episode"`
+	EpisodeEnd      int    `json:"episode_end,omitempty"`
+	EpisodeType     string `json:"episode_type,omitempty"`
+	AbsoluteEpisode int    `json:"absolute_episode,omitempty"`
 }
 
 type LocalOrganizeChange struct {
-	Kind        string `json:"kind"`
-	Original    string `json:"original"`
-	Target      string `json:"target"`
-	Status      string `json:"status"`
-	Reason      string `json:"reason,omitempty"`
-	ManagedByQB bool   `json:"managed_by_qb"`
+	Kind            string  `json:"kind"`
+	Original        string  `json:"original"`
+	Target          string  `json:"target"`
+	Status          string  `json:"status"`
+	Reason          string  `json:"reason,omitempty"`
+	ManagedByQB     bool    `json:"managed_by_qb"`
+	ParseSource     string  `json:"parse_source,omitempty"`
+	ParseConfidence float64 `json:"parse_confidence,omitempty"`
+	EpisodeType     string  `json:"episode_type,omitempty"`
+	EpisodeEnd      int     `json:"episode_end,omitempty"`
 
 	sourceSize    int64
 	sourceModTime int64
@@ -78,6 +85,11 @@ type LocalOrganizeChange struct {
 	qbTargetDir   string
 	targetSeason  int
 	targetEpisode int
+	targetEnd     int
+	targetType    string
+	targetAbs     int
+	targetVersion string
+	targetLang    string
 }
 
 type LocalOrganizeAnimePreview struct {
@@ -266,6 +278,7 @@ func (o *LocalOrganizer) directoryMap(items []model.LocalAnime) (map[uint]model.
 	return result, nil
 }
 
+//nolint:gocyclo // Preview generation evaluates parsing, overrides, conflicts, and seed protection together.
 func (o *LocalOrganizer) previewAnime(anime model.LocalAnime, directory model.LocalAnimeDirectory, seriesTemplate, episodeTemplate string, overrides map[string]LocalOrganizeEpisodeOverride) (LocalOrganizeAnimePreview, error) {
 	title, year, matched := organizerAnimeIdentity(anime)
 	seriesName, err := renamer.FormatTemplate(seriesTemplate, renamer.TemplateData{Title: title, Year: year})
@@ -319,33 +332,94 @@ func (o *LocalOrganizer) previewAnime(anime model.LocalAnime, directory model.Lo
 				episodeNumber = parsed.Episode
 			}
 		}
+		episodeEnd := parsed.EpisodeEnd
+		episodeType := parsed.EpisodeType
+		absoluteEpisode := parsed.AbsoluteEpisode
+		versionTag := parsed.Version
+		languageTag := parsed.Language
+		if found {
+			if episode.EpisodeEndNum > 0 {
+				episodeEnd = episode.EpisodeEndNum
+			}
+			// Historical LocalEpisode rows predate the richer parser fields and
+			// therefore contain empty/zero values. Only let persisted values
+			// override a fresh filename parse when they are actually present;
+			// otherwise old records would erase special types, versions,
+			// languages, or absolute episode evidence discovered during preview.
+			if strings.TrimSpace(episode.EpisodeType) != "" {
+				episodeType = episode.EpisodeType
+			}
+			if episode.AbsoluteEpisodeNum > 0 {
+				absoluteEpisode = episode.AbsoluteEpisodeNum
+			}
+			if strings.TrimSpace(episode.VersionTag) != "" {
+				versionTag = episode.VersionTag
+			}
+			if strings.TrimSpace(episode.LanguageTag) != "" {
+				languageTag = episode.LanguageTag
+			}
+		}
 		if override, ok := overrides[filepath.Clean(source)]; ok {
 			season = override.Season
 			episodeNumber = override.Episode
+			if override.EpisodeEnd > 0 {
+				episodeEnd = override.EpisodeEnd
+			}
+			if strings.TrimSpace(override.EpisodeType) != "" {
+				episodeType = strings.TrimSpace(strings.ToLower(override.EpisodeType))
+			}
+			if override.AbsoluteEpisode > 0 {
+				absoluteEpisode = override.AbsoluteEpisode
+			}
 		}
-		if season <= 0 {
+		isSpecial := episodeType != "" && episodeType != "episode"
+		if season < 0 || (season == 0 && !isSpecial) {
 			season = max(1, anime.Season)
 		}
 		if episodeNumber <= 0 {
-			result.Changes = append(result.Changes, o.newChange(organizeKindVideo, source, source, 0, source, OrganizeStatusSkipped, "无法识别剧集编号"))
+			change := o.newChange(organizeKindVideo, source, source, 0, source, OrganizeStatusSkipped, "无法识别剧集编号")
+			change.ParseSource = parsed.ParseSource
+			change.ParseConfidence = parsed.Confidence
+			change.EpisodeType = episodeType
+			change.EpisodeEnd = episodeEnd
+			result.Changes = append(result.Changes, change)
 			continue
 		}
 		ext := strings.ToLower(filepath.Ext(source))
 		filename, formatErr := renamer.FormatTemplate(episodeTemplate, renamer.TemplateData{
 			Title: title, Year: year, Season: strconv.Itoa(season), Episode: strconv.Itoa(episodeNumber),
+			EpisodeEnd: strconv.Itoa(episodeEnd), EpisodeType: episodeType,
+			AbsoluteEpisode: strconv.Itoa(absoluteEpisode), Group: parsed.Group,
+			Resolution: parsed.Resolution, Version: versionTag, Language: languageTag,
 			Ext: ext, Original: strings.TrimSuffix(filepath.Base(source), filepath.Ext(source)),
 		})
 		if formatErr != nil {
 			return result, formatErr
 		}
-		target, joinErr := organizerSafeJoin(directory.Path, filepath.Join(seriesName, fmt.Sprintf("Season %02d", season), filename))
+		if episodeEnd > episodeNumber && !strings.Contains(episodeTemplate, "{episode_end}") {
+			filename = strings.TrimSuffix(filename, ext) + fmt.Sprintf("-E%02d", episodeEnd) + ext
+		}
+		seasonDirectory := fmt.Sprintf("Season %02d", season)
+		if isSpecial {
+			seasonDirectory = "Specials"
+		}
+		target, joinErr := organizerSafeJoin(directory.Path, filepath.Join(seriesName, seasonDirectory, filename))
 		if joinErr != nil {
 			return result, joinErr
 		}
 		groupKey := filepath.Clean(source)
 		change := o.newChange(organizeKindVideo, source, target, episode.ID, groupKey, "", "")
+		change.ParseSource = parsed.ParseSource
+		change.ParseConfidence = parsed.Confidence
+		change.EpisodeType = episodeType
+		change.EpisodeEnd = episodeEnd
 		change.targetSeason = season
 		change.targetEpisode = episodeNumber
+		change.targetEnd = episodeEnd
+		change.targetType = episodeType
+		change.targetAbs = absoluteEpisode
+		change.targetVersion = versionTag
+		change.targetLang = languageTag
 		o.classifyQB(&change)
 		result.Changes = append(result.Changes, change)
 		for _, sidecar := range organizerSidecars(source) {
@@ -582,9 +656,16 @@ func (o *LocalOrganizer) persistMovedChanges(changes []LocalOrganizeChange) erro
 	return o.db.Transaction(func(tx *gorm.DB) error {
 		for _, change := range changes {
 			if change.Kind == organizeKindVideo {
-				updates := map[string]any{"path": change.Target}
-				if change.targetSeason > 0 {
-					updates["season_num"] = change.targetSeason
+				updates := map[string]any{
+					"path":                 change.Target,
+					"season_num":           change.targetSeason,
+					"episode_end_num":      change.targetEnd,
+					"episode_type":         change.targetType,
+					"absolute_episode_num": change.targetAbs,
+					"version_tag":          change.targetVersion,
+					"language_tag":         change.targetLang,
+					"parse_source":         change.ParseSource,
+					"parse_confidence":     change.ParseConfidence,
 				}
 				if change.targetEpisode > 0 {
 					updates["episode_num"] = change.targetEpisode

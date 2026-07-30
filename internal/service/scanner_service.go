@@ -1,8 +1,11 @@
 package service
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -23,6 +26,7 @@ import (
 const (
 	scanSpecialDirectoryName  = "special"
 	scanSpecialsDirectoryName = "specials"
+	scanEpisodeTypeEpisode    = "episode"
 )
 
 var (
@@ -58,6 +62,11 @@ func NewScannerService() *ScannerService {
 	return &ScannerService{}
 }
 
+func IncrementalScanEnabled() bool {
+	value := strings.ToLower(strings.TrimSpace(configValue(model.ConfigKeyIncrementalScanEnabled)))
+	return value == "" || value == model.ConfigValueTrue
+}
+
 // ScanResult 代表扫描结果 stats
 type ScanResult struct {
 	DirectoryID     uint
@@ -67,6 +76,8 @@ type ScanResult struct {
 	Added           int
 	Updated         int
 	Deleted         int
+	ParseFailures   int
+	ParseConflicts  int
 }
 
 // ScanProgress describes the current phase of a full local-library scan.
@@ -83,17 +94,19 @@ type ScanProgress struct {
 type ScanProgressFunc func(ScanProgress)
 
 type scannedMediaFile struct {
-	Path         string
-	Size         int64
-	Parsed       parser.ParsedInfo
-	Title        string
-	Season       int
-	Episode      int
-	SeriesPath   string
-	SeriesTitle  string
-	SeriesKey    string
-	Loose        bool
-	ParsedSeason string
+	Path          string
+	Size          int64
+	Fingerprint   string
+	Parsed        parser.ParsedInfo
+	Title         string
+	Season        int
+	Episode       int
+	SeriesPath    string
+	SeriesTitle   string
+	SeriesKey     string
+	Loose         bool
+	ParsedSeason  string
+	ParseConflict string
 }
 
 type scanCandidate struct {
@@ -259,6 +272,14 @@ func (s *ScannerService) scanDirectory(dir *model.LocalAnimeDirectory, claimedFi
 		CandidateSeries: len(candidates),
 		WalkErrors:      len(walkErrors),
 	}
+	for _, media := range mediaFiles {
+		if media.Episode <= 0 {
+			res.ParseFailures++
+		}
+		if media.ParseConflict != "" {
+			res.ParseConflicts++
+		}
+	}
 	usedAnimeIDs := make(map[uint]struct{})
 	for i := range candidates {
 		candidate := &candidates[i]
@@ -291,6 +312,7 @@ func (s *ScannerService) scanDirectory(dir *model.LocalAnimeDirectory, claimedFi
 		usedAnimeIDs[anime.ID] = struct{}{}
 
 		episodeChanged := s.syncCandidateEpisodes(st, anime, candidate)
+		s.syncCandidateParseIssues(anime, candidate)
 		if complete {
 			paths := make([]string, 0, len(candidate.Files))
 			for _, media := range candidate.Files {
@@ -503,13 +525,26 @@ func shouldSkipScanEntry(name string, isDir bool) bool {
 
 func inspectMediaFile(root, path string, size int64) scannedMediaFile {
 	parsed := parser.ParseFilename(path)
+	fingerprint := fingerprintFile(path, size)
 	seriesPath, loose := inferSeriesPath(root, path)
 	season := parsed.Season
 	if hint, ok := explicitSeasonFromAncestors(seriesPath, path); ok {
 		season = hint
+		// A file in a Specials/OVA directory is a special even when its
+		// filename only contains a normal numeric marker (for example
+		// "Show - 01.mkv"). Preserve that directory-level evidence so the
+		// organizer keeps it under Specials instead of promoting it to S01.
+		if hint == 0 && parsed.EpisodeType == scanEpisodeTypeEpisode {
+			parsed.EpisodeType = scanSpecialDirectoryName
+			parsed.ParseSource = "directory:special"
+			if parsed.Confidence < 0.9 {
+				parsed.Confidence = 0.9
+			}
+		}
 	}
 	episode := parsed.Episode
 	title := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+	parseConflict := ""
 
 	nfoPath := strings.TrimSuffix(path, filepath.Ext(path)) + ".nfo"
 	if nfo, err := parser.ParseEpisodeNFO(nfoPath); err == nil {
@@ -520,7 +555,21 @@ func inspectMediaFile(root, path string, size int64) scannedMediaFile {
 			if !parsed.HasExplicitEpisode() {
 				season = nfo.Season
 				episode = nfo.Episode
+				parsed.ParseSource = "episode-nfo"
+				parsed.Confidence = 0.94
 			}
+			if parsed.HasExplicitEpisode() && (parsed.Episode != nfo.Episode || (parsed.HasExplicitSeason() && parsed.Season != nfo.Season)) {
+				parseConflict = fmt.Sprintf(
+					"文件名编号 S%02dE%02d 与 NFO 编号 S%02dE%02d 不一致；当前按明确文件名编号处理",
+					parsed.Season, parsed.Episode, nfo.Season, nfo.Episode,
+				)
+			}
+			if nfo.EpisodeEnd > 0 {
+				parsed.EpisodeEnd = nfo.EpisodeEnd
+			}
+		}
+		if strings.TrimSpace(nfo.Type) != "" {
+			parsed.EpisodeType = strings.TrimSpace(strings.ToLower(nfo.Type))
 		}
 		if strings.TrimSpace(nfo.Title) != "" {
 			title = strings.TrimSpace(nfo.Title)
@@ -547,11 +596,69 @@ func inspectMediaFile(root, path string, size int64) scannedMediaFile {
 			}
 		}
 	}
-	return scannedMediaFile{
-		Path: path, Size: size, Parsed: parsed, Title: title, Season: season, Episode: episode,
-		SeriesPath: seriesPath, SeriesTitle: seriesTitle, SeriesKey: canonicalSeriesKey(seriesTitle),
-		Loose: loose, ParsedSeason: fmt.Sprintf("S%02d", season),
+	if parsed.EpisodeEnd == 0 {
+		parsed.EpisodeEnd = episode
 	}
+	return scannedMediaFile{
+		Path: path, Size: size, Fingerprint: fingerprint, Parsed: parsed, Title: title, Season: season, Episode: episode,
+		SeriesPath: seriesPath, SeriesTitle: seriesTitle, SeriesKey: canonicalSeriesKey(seriesTitle),
+		Loose: loose, ParsedSeason: fmt.Sprintf("S%02d", season), ParseConflict: parseConflict,
+	}
+}
+
+func (s *ScannerService) syncCandidateParseIssues(anime *model.LocalAnime, candidate *scanCandidate) {
+	if anime == nil || candidate == nil {
+		return
+	}
+	for _, media := range candidate.Files {
+		sum := sha256.Sum256([]byte(canonicalComparisonPath(media.Path)))
+		issueKey := "parse:" + hex.EncodeToString(sum[:])
+		switch {
+		case media.Episode <= 0:
+			_ = ReportLibraryIssue(LibraryIssueInput{
+				IssueKey: issueKey, IssueType: LibraryIssueTypeParse, Title: filepath.Base(media.Path),
+				DirectoryPath: media.Path, LocalAnimeID: &anime.ID,
+				Message: "无法从目录、NFO 或文件名中稳定识别剧集编号。",
+				Hint:    "在整理预览中使用“AI 协助识别”，或补充与视频同名的 episode NFO；确认前不会移动文件。",
+			})
+		case media.ParseConflict != "":
+			_ = ReportLibraryIssue(LibraryIssueInput{
+				IssueKey: issueKey, IssueType: LibraryIssueTypeParse, Title: filepath.Base(media.Path),
+				DirectoryPath: media.Path, LocalAnimeID: &anime.ID,
+				Message: media.ParseConflict,
+				Hint:    "请在整理预览中核对解析证据；修改文件名或 NFO 后重新扫描即可消除提示。",
+			})
+		default:
+			_ = ResolveLibraryIssue(issueKey)
+		}
+	}
+}
+
+// fingerprintFile hashes the beginning and end of a file together with its
+// size. This catches the common "same path, replaced release" case without
+// reading large media files in full during every library scan.
+func fingerprintFile(path string, size int64) string {
+	file, err := os.Open(path) //nolint:gosec // path is discovered below a configured local library root.
+	if err != nil {
+		return ""
+	}
+	defer func() { _ = file.Close() }()
+	hash := sha256.New()
+	_, _ = io.WriteString(hash, fmt.Sprintf("%d:", size))
+	const sampleSize int64 = 64 * 1024
+	head := make([]byte, sampleSize)
+	if n, readErr := io.ReadFull(file, head); readErr == nil || readErr == io.ErrUnexpectedEOF {
+		_, _ = hash.Write(head[:n])
+	}
+	if size > sampleSize {
+		if _, seekErr := file.Seek(-sampleSize, io.SeekEnd); seekErr == nil {
+			tail := make([]byte, sampleSize)
+			if n, readErr := io.ReadFull(file, tail); readErr == nil || readErr == io.ErrUnexpectedEOF {
+				_, _ = hash.Write(tail[:n])
+			}
+		}
+	}
+	return hex.EncodeToString(hash.Sum(nil))
 }
 
 func inferSeriesPath(root, mediaPath string) (string, bool) {
@@ -831,6 +938,10 @@ func episodeFromMedia(animeID uint, media scannedMediaFile) *model.LocalEpisode 
 		LocalAnimeID: animeID, Title: media.Title, EpisodeNum: media.Episode, SeasonNum: media.Season,
 		Path: media.Path, FileSize: media.Size, Container: media.Parsed.Extension,
 		ParsedTitle: media.Parsed.Title, ParsedSeason: media.ParsedSeason,
+		EpisodeEndNum: media.Parsed.EpisodeEnd, EpisodeType: media.Parsed.EpisodeType,
+		AbsoluteEpisodeNum: media.Parsed.AbsoluteEpisode, VersionTag: media.Parsed.Version,
+		LanguageTag: media.Parsed.Language, ParseSource: media.Parsed.ParseSource,
+		ParseConfidence: media.Parsed.Confidence, ScanFingerprint: media.Fingerprint,
 		Resolution: media.Parsed.Resolution, SubGroup: media.Parsed.Group,
 		VideoCodec: media.Parsed.VideoCodec, AudioCodec: media.Parsed.AudioCodec,
 		BitDepth: media.Parsed.BitDepth, Source: media.Parsed.Source,
@@ -840,6 +951,10 @@ func episodeFromMedia(animeID uint, media scannedMediaFile) *model.LocalEpisode 
 func updateEpisodeFromMedia(episode *model.LocalEpisode, animeID uint, media scannedMediaFile) bool {
 	changed := episode.DeletedAt.Valid || episode.LocalAnimeID != animeID || episode.Title != media.Title ||
 		episode.EpisodeNum != media.Episode || episode.SeasonNum != media.Season || episode.FileSize != media.Size ||
+		episode.EpisodeEndNum != media.Parsed.EpisodeEnd || episode.EpisodeType != media.Parsed.EpisodeType ||
+		episode.AbsoluteEpisodeNum != media.Parsed.AbsoluteEpisode || episode.VersionTag != media.Parsed.Version ||
+		episode.LanguageTag != media.Parsed.Language || episode.ParseSource != media.Parsed.ParseSource ||
+		episode.ParseConfidence != media.Parsed.Confidence || episode.ScanFingerprint != media.Fingerprint ||
 		episode.Container != media.Parsed.Extension || episode.ParsedTitle != media.Parsed.Title ||
 		episode.ParsedSeason != media.ParsedSeason || episode.Resolution != media.Parsed.Resolution ||
 		episode.SubGroup != media.Parsed.Group || episode.VideoCodec != media.Parsed.VideoCodec ||
@@ -854,6 +969,14 @@ func updateEpisodeFromMedia(episode *model.LocalEpisode, animeID uint, media sca
 	episode.EpisodeNum = media.Episode
 	episode.SeasonNum = media.Season
 	episode.FileSize = media.Size
+	episode.EpisodeEndNum = media.Parsed.EpisodeEnd
+	episode.EpisodeType = media.Parsed.EpisodeType
+	episode.AbsoluteEpisodeNum = media.Parsed.AbsoluteEpisode
+	episode.VersionTag = media.Parsed.Version
+	episode.LanguageTag = media.Parsed.Language
+	episode.ParseSource = media.Parsed.ParseSource
+	episode.ParseConfidence = media.Parsed.Confidence
+	episode.ScanFingerprint = media.Fingerprint
 	episode.Container = media.Parsed.Extension
 	episode.ParsedTitle = media.Parsed.Title
 	episode.ParsedSeason = media.ParsedSeason

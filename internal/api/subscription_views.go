@@ -157,6 +157,24 @@ func populateSubscriptionStat(sub *model.Subscription) {
 
 	count, _ := logStore.CountDistinctEpisodesBySubscription(sub.ID, []string{"downloading", "completed", "renamed"})
 	sub.DownloadedCount = count
+	if db.DB != nil {
+		var resources []model.SubscriptionResource
+		if err := db.DB.Where("subscription_id = ?", sub.ID).Find(&resources).Error; err == nil {
+			sub.RSSCount,
+				sub.CanonicalEpisodeCount,
+				sub.ConfirmedCount,
+				sub.DownloadingCount,
+				sub.CompletedCount,
+				sub.FailedCount,
+				sub.UnresolvedCount = service.ResourceSummary(resources)
+			for _, resource := range resources {
+				if service.ResourceNeedsAttention(resource) {
+					sub.NeedsAttention = true
+					break
+				}
+			}
+		}
+	}
 	populateSubscriptionActionHints(sub)
 }
 
@@ -796,11 +814,19 @@ func loadSubscriptionHistory(id uint) (SubscriptionHistoryData, error) {
 		Find(&runs).Error; err != nil {
 		return SubscriptionHistoryData{}, err
 	}
+	var resources []model.SubscriptionResource
+	if err := db.DB.Where("subscription_id = ?", sub.ID).
+		Order("season_val ASC, episode ASC, selected DESC, candidate_rank ASC, id ASC").
+		Limit(200).
+		Find(&resources).Error; err != nil {
+		return SubscriptionHistoryData{}, err
+	}
 
 	return SubscriptionHistoryData{
 		Subscription: sub,
 		Runs:         runs,
 		Logs:         logs,
+		Resources:    resources,
 	}, nil
 }
 

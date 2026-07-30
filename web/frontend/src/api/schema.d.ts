@@ -254,7 +254,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description Reconcile qBittorrent progress and local-library download history, archive stale records, then recheck every active subscription. */
+        /** @description Reconcile qBittorrent progress, local-library history and durable RSS candidates, then submit only genuinely missing canonical episodes. Existing failed tasks and V2/V3 candidates are not retried or upgraded automatically, and records are never deleted or archived by this action. */
         post: operations["refreshAndRepairSubscriptions"];
         delete?: never;
         options?: never;
@@ -531,6 +531,57 @@ export interface paths {
         get: operations["getSubscriptionHistory"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/subscriptions/{id}/resources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Lists the durable RSS/qB/local-library reconciliation ledger for one subscription. */
+        get: operations["listSubscriptionResources"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/subscriptions/{id}/resources/{resource_id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Explicitly retries one failed, unknown or unresolved candidate. The server reuses the stored validated URL and does not accept an arbitrary download URL. */
+        post: operations["retrySubscriptionResource"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/subscriptions/{id}/resources/{resource_id}/upgrade": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Explicitly selects a stored V2/V3 candidate for one canonical episode. Automatic refresh never performs this switch. */
+        post: operations["upgradeSubscriptionResource"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1971,6 +2022,56 @@ export interface components {
             auto_disable_on_done?: boolean;
             stale_after_hours?: number;
         };
+        SubscriptionResource: {
+            ID: number;
+            subscription_id: number;
+            canonical_key: string;
+            fingerprint: string;
+            title: string;
+            episode: string;
+            season_val: string;
+            subgroup?: string;
+            version_tag: string;
+            torrent_url?: string;
+            rss_url?: string;
+            info_hash?: string;
+            source?: string;
+            /** @enum {string} */
+            state: "seen" | "filtered" | "unresolved" | "pending" | "downloading" | "completed" | "failed" | "unknown" | "superseded" | "archived";
+            state_reason?: string;
+            last_error?: string;
+            task_hash?: string;
+            target_file?: string;
+            attempt_count?: number;
+            candidate_rank?: number;
+            selected: boolean;
+            current: boolean;
+            /** Format: date-time */
+            last_seen_at?: string | null;
+            /** Format: date-time */
+            last_attempt_at?: string | null;
+            /** Format: date-time */
+            submitted_at?: string | null;
+            /** Format: date-time */
+            completed_at?: string | null;
+        };
+        SubscriptionResourceSummary: {
+            /** Format: int64 */
+            rss_count: number;
+            /** Format: int64 */
+            canonical_episode_count: number;
+            /** Format: int64 */
+            confirmed_count: number;
+            /** Format: int64 */
+            downloading_count: number;
+            /** Format: int64 */
+            completed_count: number;
+            /** Format: int64 */
+            failed_count: number;
+            /** Format: int64 */
+            unresolved_count: number;
+            needs_attention: boolean;
+        };
         MikanDiscoveryItem: {
             /** @description Mikan's own bangumi identifier used by Mikan RSS URLs. */
             mikan_id: string;
@@ -2073,6 +2174,16 @@ export interface components {
             selection: components["schemas"]["LocalOrganizeSelection"];
             series_template?: string;
             episode_template?: string;
+            episode_overrides?: components["schemas"]["LocalOrganizeEpisodeOverride"][];
+        };
+        LocalOrganizeEpisodeOverride: {
+            path: string;
+            season: number;
+            episode: number;
+            episode_end?: number;
+            /** @enum {string} */
+            episode_type?: "episode" | "special" | "ova" | "opening" | "ending" | "trailer" | "collection";
+            absolute_episode?: number;
         };
         LocalOrganizeApplyInput: {
             plan_id: string;
@@ -2087,6 +2198,10 @@ export interface components {
             status: "ready" | "unchanged" | "conflict" | "skipped";
             reason?: string;
             managed_by_qb: boolean;
+            parse_source?: string;
+            parse_confidence?: number;
+            episode_type?: string;
+            episode_end?: number;
         };
         LocalOrganizeAnimePreview: {
             anime_id: number;
@@ -3179,6 +3294,66 @@ export interface operations {
         requestBody?: never;
         responses: {
             200: components["responses"]["Success"];
+        };
+    };
+    listSubscriptionResources: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Resource candidates and reconciliation summary */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: {
+                            items: components["schemas"]["SubscriptionResource"][];
+                            summary: components["schemas"]["SubscriptionResourceSummary"];
+                        };
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+        };
+    };
+    retrySubscriptionResource: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+                resource_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["Success"];
+            409: components["responses"]["Error"];
+        };
+    };
+    upgradeSubscriptionResource: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+                resource_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["Success"];
+            409: components["responses"]["Error"];
         };
     };
     getCalendar: {

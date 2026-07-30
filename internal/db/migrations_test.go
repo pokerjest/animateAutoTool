@@ -134,6 +134,62 @@ func TestRunMigrationsRecordsCurrentVersionAndIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestSubscriptionResourceMigrationBackfillsLegacyLogsIdempotently(t *testing.T) {
+	target, err := gorm.Open(sqlite.Open(sqliteMemoryPath), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite db: %v", err)
+	}
+	t.Cleanup(func() { closeTestDB(t, target) })
+	if err := target.AutoMigrate(&model.Subscription{}, &model.DownloadLog{}); err != nil {
+		t.Fatalf("migrate legacy tables: %v", err)
+	}
+	sub := model.Subscription{Title: "Legacy Resource Show", RSSUrl: "https://example.test/legacy-resource"}
+	if err := target.Create(&sub).Error; err != nil {
+		t.Fatalf("create subscription: %v", err)
+	}
+	entry := model.DownloadLog{
+		SubscriptionID: sub.ID,
+		Title:          "[Group] Legacy Resource Show - 01",
+		Magnet:         "magnet:?xt=urn:btih:legacy-resource-hash",
+		Episode:        "01",
+		SeasonVal:      "S01",
+		Status:         completedResourceState,
+		InfoHash:       "legacy-resource-hash",
+		TargetFile:     "/media/legacy/01.mkv",
+	}
+	if err := target.Create(&entry).Error; err != nil {
+		t.Fatalf("create legacy log: %v", err)
+	}
+
+	if err := backfillSubscriptionResources(target); err != nil {
+		t.Fatalf("first resource backfill: %v", err)
+	}
+	if err := backfillSubscriptionResources(target); err != nil {
+		t.Fatalf("second resource backfill: %v", err)
+	}
+
+	var resources []model.SubscriptionResource
+	if err := target.Find(&resources).Error; err != nil {
+		t.Fatalf("load resources: %v", err)
+	}
+	if len(resources) != 1 {
+		t.Fatalf("expected one idempotent resource row, got %d", len(resources))
+	}
+	if resources[0].State != completedResourceState || resources[0].TargetFile != entry.TargetFile {
+		t.Fatalf("unexpected resource backfill: %+v", resources[0])
+	}
+	if resources[0].CanonicalKey != "episode:1:1" {
+		t.Fatalf("expected normalized canonical key, got %q", resources[0].CanonicalKey)
+	}
+	var updated model.DownloadLog
+	if err := target.First(&updated, entry.ID).Error; err != nil {
+		t.Fatalf("reload legacy log: %v", err)
+	}
+	if updated.ResourceID == nil || *updated.ResourceID != resources[0].ID {
+		t.Fatalf("expected legacy log resource link, got %+v", updated.ResourceID)
+	}
+}
+
 func TestRunMigrationsUpgradesLegacySubscriptionSchema(t *testing.T) {
 	tempPath := filepath.Join(t.TempDir(), "legacy.db")
 

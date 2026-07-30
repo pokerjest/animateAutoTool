@@ -30,35 +30,36 @@ const (
 )
 
 type BackupDescriptor struct {
-	Mode                string
-	ModeLabel           string
-	Description         string
-	ConfigStrategy      string
-	SubscriptionCount   int64
-	SubscriptionTitles  []string
-	DownloadLogCount    int64
-	LocalAnimeCount     int64
-	UserCount           int64
-	GlobalConfigCount   int64
-	DatabaseSize        string
-	LastModified        string
-	HasConfigs          bool
-	HasMetadata         bool
-	HasSubscriptions    bool
-	HasLogs             bool
-	HasLocal            bool
-	HasUsers            bool
-	HasDownloadLogs     bool
-	HasRunLogs          bool
-	HasLocalDirectories bool
-	HasLocalAnime       bool
-	HasLocalEpisodes    bool
-	HasPlaybackHistory  bool
-	FormatVersion       int
-	AppVersion          string
-	SchemaVersion       string
-	ContainsSecrets     bool
-	DatabaseSHA256      string
+	Mode                     string
+	ModeLabel                string
+	Description              string
+	ConfigStrategy           string
+	SubscriptionCount        int64
+	SubscriptionTitles       []string
+	DownloadLogCount         int64
+	LocalAnimeCount          int64
+	UserCount                int64
+	GlobalConfigCount        int64
+	DatabaseSize             string
+	LastModified             string
+	HasConfigs               bool
+	HasMetadata              bool
+	HasSubscriptions         bool
+	HasLogs                  bool
+	HasLocal                 bool
+	HasUsers                 bool
+	HasDownloadLogs          bool
+	HasSubscriptionResources bool
+	HasRunLogs               bool
+	HasLocalDirectories      bool
+	HasLocalAnime            bool
+	HasLocalEpisodes         bool
+	HasPlaybackHistory       bool
+	FormatVersion            int
+	AppVersion               string
+	SchemaVersion            string
+	ContainsSecrets          bool
+	DatabaseSHA256           string
 }
 
 type backupManifest struct {
@@ -168,8 +169,9 @@ func InspectBackup(path string) (BackupDescriptor, error) {
 	desc.HasMetadata = targetDB.Migrator().HasTable(&model.AnimeMetadata{})
 	desc.HasSubscriptions = targetDB.Migrator().HasTable(&model.Subscription{})
 	desc.HasDownloadLogs = targetDB.Migrator().HasTable(&model.DownloadLog{})
+	desc.HasSubscriptionResources = targetDB.Migrator().HasTable(&model.SubscriptionResource{})
 	desc.HasRunLogs = targetDB.Migrator().HasTable(&model.SubscriptionRunLog{})
-	desc.HasLogs = desc.HasDownloadLogs || desc.HasRunLogs
+	desc.HasLogs = desc.HasDownloadLogs || desc.HasSubscriptionResources || desc.HasRunLogs
 	desc.HasUsers = targetDB.Migrator().HasTable(&model.User{})
 	desc.HasLocalDirectories = targetDB.Migrator().HasTable(&model.LocalAnimeDirectory{})
 	desc.HasLocalAnime = targetDB.Migrator().HasTable(&model.LocalAnime{})
@@ -192,6 +194,11 @@ func InspectBackup(path string) (BackupDescriptor, error) {
 			var runLogCount int64
 			targetDB.Model(&model.SubscriptionRunLog{}).Count(&runLogCount)
 			desc.DownloadLogCount += runLogCount
+		}
+		if desc.HasSubscriptionResources {
+			var resourceCount int64
+			targetDB.Model(&model.SubscriptionResource{}).Count(&resourceCount)
+			desc.DownloadLogCount += resourceCount
 		}
 	}
 	if desc.HasLocalAnime {

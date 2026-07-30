@@ -22,12 +22,19 @@ var templateTokenPattern = regexp.MustCompile(`\{[a-z_]+\}`)
 // TemplateData contains the stable values available to an automatic rename
 // template. Ext includes the leading dot.
 type TemplateData struct {
-	Title    string
-	Season   string
-	Episode  string
-	Year     string
-	Ext      string
-	Original string
+	Title           string
+	Season          string
+	Episode         string
+	EpisodeEnd      string
+	EpisodeType     string
+	AbsoluteEpisode string
+	Year            string
+	Ext             string
+	Original        string
+	Group           string
+	Resolution      string
+	Version         string
+	Language        string
 }
 
 // FormatTemplate renders a safe qBittorrent-relative media path. It rejects
@@ -40,12 +47,19 @@ func FormatTemplate(pattern string, data TemplateData) (string, error) {
 	}
 
 	values := map[string]string{
-		"{title}":    sanitizeSegment(data.Title),
-		"{season}":   normalizeNumber(data.Season, "01"),
-		"{episode}":  normalizeEpisode(data.Episode),
-		"{year}":     sanitizeSegment(data.Year),
-		"{ext}":      normalizeExtension(data.Ext),
-		"{original}": sanitizeSegment(data.Original),
+		"{title}":            sanitizeSegment(data.Title),
+		"{season}":           normalizeNumber(data.Season, "01"),
+		"{episode}":          normalizeEpisode(data.Episode),
+		"{episode_end}":      normalizeEpisode(data.EpisodeEnd),
+		"{episode_type}":     sanitizeSegment(data.EpisodeType),
+		"{absolute_episode}": normalizeEpisode(data.AbsoluteEpisode),
+		"{year}":             sanitizeSegment(data.Year),
+		"{ext}":              normalizeExtension(data.Ext),
+		"{original}":         sanitizeSegment(data.Original),
+		"{group}":            sanitizeSegment(data.Group),
+		"{resolution}":       sanitizeSegment(data.Resolution),
+		"{version}":          sanitizeSegment(data.Version),
+		"{language}":         sanitizeSegment(data.Language),
 	}
 	if values["{title}"] == "" {
 		return "", errors.New("rename title is empty")
@@ -102,12 +116,19 @@ func FormatTemplate(pattern string, data TemplateData) (string, error) {
 // ValidateTemplate checks custom input using representative media metadata.
 func ValidateTemplate(pattern string) error {
 	_, err := FormatTemplate(pattern, TemplateData{
-		Title:    "示例番剧",
-		Season:   "1",
-		Episode:  "2",
-		Year:     "2026",
-		Ext:      ".mkv",
-		Original: "[Group] Example - 02",
+		Title:           "示例番剧",
+		Season:          "1",
+		Episode:         "2",
+		Year:            "2026",
+		Ext:             ".mkv",
+		Original:        "[Group] Example - 02",
+		EpisodeEnd:      "3",
+		EpisodeType:     "episode",
+		AbsoluteEpisode: "14",
+		Group:           "Group",
+		Resolution:      "1080p",
+		Version:         "v2",
+		Language:        "chs",
 	})
 	return err
 }

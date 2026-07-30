@@ -21,7 +21,8 @@ import { localPlayerLocation } from '../utils/playerRoutes'
 
 interface Directory { ID:number; path:string; description:string }
 interface Issue { ID:number; Title?:string; title?:string; Message?:string; message?:string; Hint?:string; hint?:string }
-interface Payload { directories:Directory[]; items:LocalAnime[]; scan_status:Record<string,unknown>; diagnostics:Issue[] }
+interface ScanStatus { IsRunning?:boolean; LastSummary?:string; LastFinishedAt?:string; LastDuration?:string; ParseFailureCount?:number; ParseConflictCount?:number; DiscoveredFiles?:number; CandidateSeries?:number }
+interface Payload { directories:Directory[]; items:LocalAnime[]; scan_status:ScanStatus; diagnostics:Issue[] }
 const router=useRouter(),ui=useUIStore(),tasks=useTaskStore(),qc=useQueryClient(),actions=useAsyncActions(),search=ref(''),adding=ref(false),dirPath=ref(''),deleteDir=ref<Directory|null>(null),selected=ref<LocalAnime|null>(null),matchQuery=ref(''),matchSource=ref('bangumi'),matchResults=ref<MetadataMatchCandidate[]>([]),matchStatus=ref<MetadataMatchSearchResult['source_status']>({}),metadataAIProposalID=ref(''),healthAIProposalID=ref('')
 const batchMode=ref(false),selectedIDs=ref(new Set<number>()),allMatching=ref(false),excludedIDs=ref(new Set<number>()),organizeOpen=ref(false),organizeSelection=ref<LocalOrganizeSelection|null>(null)
 const debouncedSearch=ref('')
@@ -50,6 +51,7 @@ const remainingItems=computed(()=>Math.max(0,totalItems.value-items.value.length
 const selectedCount=computed(()=>allMatching.value?Math.max(0,totalItems.value-excludedIDs.value.size):selectedIDs.value.size)
 const scanTask=computed(()=>tasks.taskByID('local-scan'))
 const scanPercent=computed(()=>scanTask.value?.total?Math.min(100,Math.round((scanTask.value.current||0)/scanTask.value.total*100)):0)
+const scanStatus=computed(()=>firstPage.value?.scan_status)
 async function loadMore(){if(query.hasNextPage.value&&!query.isFetchingNextPage.value)await query.fetchNextPage()}
 async function scan(){try{await actions.runTask('scan',()=>api<TaskAccepted>('/local-anime/scan',{method:'POST'}),'本地扫描','scan','正在扫描本地媒体目录');ui.toast('本地扫描已经启动')}catch(e){ui.toast(e instanceof Error?e.message:'扫描失败','error')}}
 async function chooseDir(){try{await actions.run('choose-dir',async()=>{const result=await api<{path:string}>('/system/pick-directory',{method:'POST',body:JSON.stringify({title:'选择媒体目录',default_path:dirPath.value}),headers:{'Content-Type':'application/json'}});if(result.path)dirPath.value=result.path})}catch(e){ui.toast(e instanceof Error?e.message:'目录选择不可用','error')}}
@@ -90,6 +92,12 @@ const sourceLabel=(source:string)=>source==='bangumi'?'Bangumi':source==='tmdb'?
       <div class="flex flex-wrap items-center justify-between gap-3"><div><p class="eyebrow">LOCAL SCAN</p><strong class="mt-1 block">{{ scanTask.detail }}</strong></div><span class="badge">{{ scanTask.total ? `${scanPercent}%` : '正在统计' }}</span></div>
       <div class="mt-3 h-2 overflow-hidden rounded-full bg-[var(--surface-muted)]"><div v-if="scanTask.total" class="h-full rounded-full bg-[var(--brand)] transition-[width]" :style="{width:`${scanPercent}%`}"></div><div v-else class="h-full w-1/3 animate-pulse rounded-full bg-[var(--brand)]"></div></div>
       <p v-if="scanTask.total" class="muted mt-2 text-xs">{{ scanTask.current||0 }} / {{ scanTask.total }} 个扫描步骤</p>
+    </section>
+    <section v-else-if="scanStatus?.LastSummary" class="panel-muted flex flex-wrap items-center gap-3 p-4 text-sm">
+      <div class="min-w-0 flex-1"><strong>最近扫描</strong><p class="muted mt-1">{{ scanStatus.LastSummary }}</p></div>
+      <span v-if="scanStatus.LastDuration" class="badge">{{ scanStatus.LastDuration }}</span>
+      <span v-if="scanStatus.ParseFailureCount" class="badge border-amber-300 text-amber-700 dark:text-amber-300">无法识别 {{ scanStatus.ParseFailureCount }}</span>
+      <span v-if="scanStatus.ParseConflictCount" class="badge border-amber-300 text-amber-700 dark:text-amber-300">编号冲突 {{ scanStatus.ParseConflictCount }}</span>
     </section>
     <section v-if="firstPage?.diagnostics.length" class="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200"><div class="flex flex-wrap items-start gap-3"><CircleAlert class="shrink-0"/><div class="min-w-0 flex-1"><strong>媒体库有 {{ firstPage.diagnostics.length }} 项需要关注</strong><p class="mt-1 text-sm">{{ firstPage.diagnostics[0].Title||firstPage.diagnostics[0].title }}：{{ firstPage.diagnostics[0].Message||firstPage.diagnostics[0].message }}</p></div><AsyncButton v-if="firstPage.diagnostics[0].ID" class="btn btn-secondary shrink-0" :loading="actions.isBusy(`ai-issue-${firstPage.diagnostics[0].ID}`)" loading-label="分析中…" @click="analyzeIssue(firstPage.diagnostics[0])"><Sparkles :size="15"/>AI 分析</AsyncButton></div></section>
     <AIProposalPanel v-if="healthAIProposalID" :proposal-id="healthAIProposalID" @applied="healthAIProposalID=''" @dismissed="healthAIProposalID=''"/>

@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/pokerjest/animateAutoTool/internal/db"
@@ -30,7 +31,20 @@ const (
 	SubscriptionRunStatusWarning = "warning"
 	SubscriptionRunStatusError   = "error"
 	SubscriptionRunStatusIdle    = "idle"
+	subscriptionRunSourceManual  = "manual"
 )
+
+var subscriptionRunLocks sync.Map
+
+func lockSubscriptionRun(subscriptionID uint) func() {
+	if subscriptionID == 0 {
+		return func() {}
+	}
+	lockValue, _ := subscriptionRunLocks.LoadOrStore(subscriptionID, &sync.Mutex{})
+	lock := lockValue.(*sync.Mutex)
+	lock.Lock()
+	return lock.Unlock
+}
 
 func NewSubscriptionManager(down downloader.Downloader) *SubscriptionManager {
 	rssParser := parser.NewMikanParser()
@@ -132,7 +146,7 @@ func (m *SubscriptionManager) CheckUpdateContext(ctx context.Context) {
 }
 
 func (m *SubscriptionManager) ProcessSubscription(sub *model.Subscription) {
-	m.ProcessSubscriptionWithSourceContext(context.Background(), sub, "manual")
+	m.ProcessSubscriptionWithSourceContext(context.Background(), sub, subscriptionRunSourceManual)
 }
 
 func (m *SubscriptionManager) ProcessSubscriptionWithSource(sub *model.Subscription, source string) {
@@ -141,6 +155,11 @@ func (m *SubscriptionManager) ProcessSubscriptionWithSource(sub *model.Subscript
 
 //nolint:gocyclo // The branches mirror the subscription run-state audit trail and are kept together intentionally.
 func (m *SubscriptionManager) ProcessSubscriptionWithSourceContext(ctx context.Context, sub *model.Subscription, source string) {
+	if sub == nil {
+		return
+	}
+	unlock := lockSubscriptionRun(sub.ID)
+	defer unlock()
 	log.Printf("DEBUG: Processing subscription %s (URL: %s)", sub.Title, sub.RSSUrl)
 	checkedAt := time.Now()
 
@@ -160,6 +179,7 @@ func (m *SubscriptionManager) ProcessSubscriptionWithSourceContext(ctx context.C
 	log.Printf("DEBUG: Fetched %d episodes from RSS", len(episodes))
 
 	rules := buildSubscriptionRuleSet(sub)
+	episodes = orderSubscriptionEpisodesConservatively(episodes, sub)
 
 	addedCount := 0
 	recoveredCount := 0
@@ -169,6 +189,16 @@ func (m *SubscriptionManager) ProcessSubscriptionWithSourceContext(ctx context.C
 	duplicateCount := 0
 	latestTitle := ""
 	lastError := ""
+	var resourceStore *store.SubscriptionResourceStore
+	var knownResources []model.SubscriptionResource
+	if m.DB != nil && sub.ID != 0 {
+		resourceStore = store.NewSubscriptionResourceStore(m.DB)
+		knownResources, err = resourceStore.ListBySubscription(sub.ID)
+		if err != nil {
+			log.Printf("SubscriptionManager: failed to load durable resources for %s: %v", sub.Title, err)
+		}
+		_ = resourceStore.MarkAllNotCurrent(sub.ID)
+	}
 
 	// Build a canonical identity index once per run. Matching by full release
 	// title is too strict for RSS feeds because a replacement such as [V2] can
@@ -189,6 +219,30 @@ func (m *SubscriptionManager) ProcessSubscriptionWithSourceContext(ctx context.C
 	seenKeys := make(map[string]struct{}, len(episodes))
 
 	for _, ep := range episodes {
+		episodeNum := strings.TrimSpace(ep.EpisodeNum)
+		if episodeNum == "" {
+			episodeNum = parser.EpisodeNumberFromTitle(ep.Title)
+		}
+		seasonVal := fmt.Sprintf("S%s", mediaSeasonValue(sub, ep.Season))
+		identityKey := subscriptionEpisodeIdentity(seasonVal, episodeNum, ep.Title, sub.AllowMultiSubgroup)
+
+		// Every RSS candidate is persisted before any action is taken. This
+		// makes a later refresh an accounting pass rather than a blind retry.
+		resourceState := SubscriptionResourceStateSeen
+		resourceReason := ""
+		selected := true
+		if !rules.allows(ep) {
+			resourceState = SubscriptionResourceStateFiltered
+			resourceReason = "未通过订阅过滤规则"
+			selected = false
+		}
+		resource, resourceErr := m.upsertEpisodeResource(
+			sub, ep, seasonVal, episodeNum, activeRSS, resourceState, resourceReason, selected, 0,
+		)
+		if resourceErr != nil {
+			log.Printf("SubscriptionManager: failed to persist RSS resource %s: %v", ep.Title, resourceErr)
+		}
+
 		// 1. 规则过滤
 		if !rules.allows(ep) {
 			log.Printf("DEBUG: Rule skipped: %s (Filter: %s Exclude: %s SubGroup: %s)", ep.Title, sub.FilterRule, sub.ExcludeRule, ep.SubGroup)
@@ -198,20 +252,67 @@ func (m *SubscriptionManager) ProcessSubscriptionWithSourceContext(ctx context.C
 
 		// 2. 解析集数并按季/集去重。保留原始值写入日志，身份比较使用
 		// 规范化值，因此 "01"、"1" 和带 [V2] 的同集资源会归为一类。
-		episodeNum := strings.TrimSpace(ep.EpisodeNum)
-		if episodeNum == "" {
-			episodeNum = parser.EpisodeNumberFromTitle(ep.Title)
+		if resource != nil {
+			if !resource.Selected {
+				// A resource can remain in the ledger as an unselected
+				// candidate after a user explicitly chose another release.
+				// Never let a later RSS refresh turn that candidate back into
+				// an implicit download just because its state is still "seen".
+				duplicateCount++
+				continue
+			}
+			if existing, found := resourceStateForCanonical(knownResources, identityKey); found &&
+				existing.Fingerprint != resource.Fingerprint &&
+				(existing.State == SubscriptionResourceStateCompleted ||
+					existing.State == SubscriptionResourceStateDownloading ||
+					existing.State == SubscriptionResourceStatePending ||
+					existing.State == SubscriptionResourceStateFailed) {
+				_ = resourceStore.UpdateByID(resource.ID, map[string]any{
+					"state":        SubscriptionResourceStateSuperseded,
+					"state_reason": "同季同集已有已选资源，V2/V3 仅保留为候选",
+					"selected":     false,
+				})
+				duplicateCount++
+				continue
+			}
+			switch resource.State {
+			case SubscriptionResourceStateCompleted, SubscriptionResourceStateDownloading,
+				SubscriptionResourceStatePending, SubscriptionResourceStateFailed:
+				// Existing durable state is authoritative. A user-triggered
+				// retry/upgrade endpoint can explicitly clear it later.
+				if _, seen := seenKeys[identityKey]; !seen {
+					seenKeys[identityKey] = struct{}{}
+					duplicateCount++
+				}
+				continue
+			case SubscriptionResourceStateFiltered, SubscriptionResourceStateSuperseded,
+				SubscriptionResourceStateArchived, SubscriptionResourceStateUnresolved:
+				duplicateCount++
+				continue
+			}
 		}
-		seasonVal := fmt.Sprintf("S%s", mediaSeasonValue(sub, ep.Season))
-		identityKey := subscriptionEpisodeIdentity(seasonVal, episodeNum, ep.Title, sub.AllowMultiSubgroup)
 		if identityKey != "" {
 			if _, exists := existingKeys[identityKey]; exists {
 				log.Printf("DEBUG: Duplicate check skipped: %s (same canonical episode already exists)", ep.Title)
+				if resource != nil && resourceStore != nil {
+					_ = resourceStore.UpdateByID(resource.ID, map[string]any{
+						"state":        SubscriptionResourceStateSuperseded,
+						"state_reason": "兼容下载历史已存在",
+						"selected":     false,
+					})
+				}
 				duplicateCount++
 				continue
 			}
 			if _, exists := seenKeys[identityKey]; exists {
 				log.Printf("DEBUG: Duplicate check skipped: %s (same canonical episode already returned by RSS)", ep.Title)
+				if resource != nil && resourceStore != nil {
+					_ = resourceStore.UpdateByID(resource.ID, map[string]any{
+						"state":        SubscriptionResourceStateSuperseded,
+						"state_reason": "RSS 中同集重复候选",
+						"selected":     false,
+					})
+				}
 				duplicateCount++
 				continue
 			}
@@ -220,13 +321,57 @@ func (m *SubscriptionManager) ProcessSubscriptionWithSourceContext(ctx context.C
 		// 3. 添加下载
 		savePath := m.resolveSavePath(sub, seasonVal)
 
-		log.Printf("DEBUG: Adding torrent to QB: %s -> %s", ep.Title, savePath)
-		addErr := m.addTorrent(ctx, ep.TorrentURL, savePath, "Anime", false)
 		var matchedTorrent downloader.TorrentInfo
 		recoveredExisting := false
 		recoveredLocal := false
+		torrentURL := strings.TrimSpace(ep.TorrentURL)
+		if torrentURL == "" {
+			torrentURL = strings.TrimSpace(ep.Magnet)
+		}
+
+		// Preflight qB and the local library before submitting. This avoids the
+		// old "send first, recover after Fails." loop when history was missing.
+		existingTorrent, found, lookupErr := m.findExistingTorrent(ctx, sub, ep.Title, seasonVal, episodeNum, identityKey, torrentURL)
+		if lookupErr != nil {
+			log.Printf("SubscriptionManager: qB preflight failed for %s - %s: %v", sub.Title, ep.Title, lookupErr)
+		} else if found {
+			matchedTorrent = existingTorrent
+			recoveredExisting = true
+			log.Printf("SubscriptionManager: qB preflight found %s (hash=%s); rebuilding download history without resubmitting", existingTorrent.Name, existingTorrent.Hash)
+		}
+		if !recoveredExisting {
+			if targetFile, matched := resolveLogTargetFromLibrary(model.DownloadLog{
+				SubscriptionID: sub.ID,
+				Episode:        episodeNum,
+			}, *sub); matched && targetFile != "" {
+				matchedTorrent = downloader.TorrentInfo{
+					Name:        ep.Title,
+					State:       "uploading",
+					ContentPath: targetFile,
+				}
+				recoveredExisting = true
+				recoveredLocal = true
+				log.Printf("SubscriptionManager: local library already contains episode %s for %s; rebuilding download history from %s", episodeNum, sub.Title, targetFile)
+			}
+		}
+
+		var addErr error
+		if !recoveredExisting {
+			if resource != nil && resourceStore != nil {
+				now := time.Now().UTC()
+				_ = resourceStore.UpdateByID(resource.ID, map[string]any{
+					"state":           SubscriptionResourceStatePending,
+					"state_reason":    "等待提交到 qBittorrent",
+					"attempt_count":   resource.AttemptCount + 1,
+					"last_attempt_at": &now,
+					"submitted_at":    &now,
+				})
+			}
+			log.Printf("DEBUG: Adding torrent to QB: %s -> %s", ep.Title, savePath)
+			addErr = m.addTorrent(ctx, torrentURL, savePath, "Anime", false)
+		}
 		if isTorrentRejectedError(addErr) {
-			existingTorrent, found, lookupErr := m.findExistingTorrent(ctx, sub, ep.Title, seasonVal, episodeNum, identityKey, ep.TorrentURL)
+			existingTorrent, found, lookupErr := m.findExistingTorrent(ctx, sub, ep.Title, seasonVal, episodeNum, identityKey, torrentURL)
 			if lookupErr != nil {
 				log.Printf("SubscriptionManager: failed to verify rejected qB task for %s - %s: %v", sub.Title, ep.Title, lookupErr)
 			} else if found {
@@ -258,11 +403,32 @@ func (m *SubscriptionManager) ProcessSubscriptionWithSourceContext(ctx context.C
 		}
 		if addErr != nil {
 			log.Printf("Failed to add torrent for %s - %s: %v", sub.Title, ep.Title, addErr)
+			if resource != nil && resourceStore != nil {
+				_ = resourceStore.UpdateByID(resource.ID, map[string]any{
+					"state":        SubscriptionResourceStateFailed,
+					"state_reason": "qBittorrent 拒绝或提交失败",
+					"last_error":   addErr.Error(),
+				})
+			}
 			failedCount++
 			if lastError == "" {
 				lastError = fmt.Sprintf("%s: %v", ep.Title, addErr)
 			}
+			if identityKey != "" {
+				// A failed V1 attempt still owns the canonical slot. V2/V3 is
+				// retained as a candidate and requires an explicit upgrade.
+				seenKeys[identityKey] = struct{}{}
+			}
 			continue
+		}
+		confirmedAdded := false
+		if !recoveredExisting {
+			if confirmed, found, confirmErr := m.findExistingTorrent(ctx, sub, ep.Title, seasonVal, episodeNum, identityKey, torrentURL); confirmErr != nil {
+				log.Printf("SubscriptionManager: qB confirmation failed for %s - %s: %v", sub.Title, ep.Title, confirmErr)
+			} else if found {
+				matchedTorrent = confirmed
+				confirmedAdded = true
+			}
 		}
 
 		if identityKey != "" {
@@ -281,19 +447,41 @@ func (m *SubscriptionManager) ProcessSubscriptionWithSourceContext(ctx context.C
 
 		// 4. 记录日志
 		status := downloadLogStatusDownloading
-		infoHash := ""
+		infoHash := torrentInfoHashFromURL(torrentURL)
 		targetFile := ""
-		if recoveredExisting {
+		if recoveredExisting || confirmedAdded {
 			if mapped := mapTorrentStateToLogStatus(matchedTorrent.State); mapped != "" {
 				status = mapped
 			}
-			infoHash = strings.TrimSpace(matchedTorrent.Hash)
+			if matchedHash := strings.TrimSpace(matchedTorrent.Hash); matchedHash != "" {
+				infoHash = matchedHash
+			}
 			targetFile = deriveTargetFile(matchedTorrent)
+		}
+		if resource != nil && resourceStore != nil {
+			now := time.Now().UTC()
+			updates := map[string]any{
+				"state":        resourceStateFromDownloadLog(status),
+				"state_reason": "已在 qBittorrent/本地媒体中确认",
+				"last_seen_at": &now,
+			}
+			if infoHash != "" {
+				updates["info_hash"] = infoHash
+				updates["task_hash"] = infoHash
+			}
+			if targetFile != "" {
+				updates["target_file"] = targetFile
+			}
+			if status == downloadLogStatusCompleted || status == downloadLogStatusRenamed {
+				updates["completed_at"] = &now
+			}
+			_ = resourceStore.UpdateByID(resource.ID, updates)
 		}
 		logEntry := model.DownloadLog{
 			SubscriptionID: sub.ID,
+			ResourceID:     resourceIDPointer(resource),
 			Title:          ep.Title,
-			Magnet:         ep.TorrentURL,
+			Magnet:         torrentURL,
 			Episode:        episodeNum,
 			SeasonVal:      seasonVal,
 			Status:         status,
@@ -457,13 +645,13 @@ func (m *SubscriptionManager) findExistingTorrent(
 	case downloader.TorrentLister:
 		torrents, err = source.ListTorrents()
 	default:
-		log.Printf("SubscriptionManager: downloader %T cannot list qB tasks while verifying a rejected torrent", m.Downloader)
+		log.Printf("SubscriptionManager: downloader %T cannot list qB tasks during reconciliation", m.Downloader)
 		return downloader.TorrentInfo{}, false, nil
 	}
 	if err != nil {
 		return downloader.TorrentInfo{}, false, err
 	}
-	log.Printf("SubscriptionManager: checking %d qB tasks after rejected torrent", len(torrents))
+	log.Printf("SubscriptionManager: checking %d qB tasks during reconciliation", len(torrents))
 
 	matchCtx := existingTorrentMatchContext{
 		releaseTitle:       strings.TrimSpace(releaseTitle),
@@ -804,7 +992,7 @@ func normalizeRunSource(source string) string {
 	case "auto", "create":
 		return source
 	default:
-		return "manual"
+		return subscriptionRunSourceManual
 	}
 }
 
