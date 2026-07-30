@@ -2,6 +2,8 @@
 
 <div align="center">
 
+<img src="docs/assets/mascot-icon.png" alt="AnimateTool" width="148">
+
 ![Go Version](https://img.shields.io/badge/Go-1.25-00ADD8?style=for-the-badge&logo=go)
 ![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)
 ![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/pokerjest/animateAutoTool/go.yml?style=for-the-badge)
@@ -16,20 +18,33 @@
 
 ## 项目简介
 
-Animate Auto Tool 是运行在个人电脑、NAS 或服务器上的动漫自动化工具，把订阅、下载、整理和播放串成一条流程：
+Animate Auto Tool 是运行在个人电脑、NAS 或服务器上的动漫媒体工作台。它把追番订阅、本地媒体整理、元数据匹配和播放串成一条可检查、可修复的流程：
 
 ```text
-Mikan RSS → 筛选订阅 → qBittorrent 下载 → 自动整理 → Jellyfin 播放
+Mikan RSS
+→ 资源筛选与持久化对账
+→ qBittorrent 下载
+→ 下载后安全整理
+→ 目标目录增量扫描
+→ Bangumi / TMDB / AniList 元数据匹配
+→ 本地播放或 Jellyfin 媒体模式
 ```
 
 ## 核心能力
 
-- 订阅 Mikan RSS，按字幕组、清晰度、语言和规则筛选资源
-- 调用 qBittorrent 下载、去重、移动并自动重命名文件
-- 聚合 Bangumi、TMDB 和 AniList 元数据，构建本地媒体库
-- 接入 Jellyfin 与 AList，支持多播放线路、继续观看和进度同步
-- 提供 SQLite 存储、备份恢复、Cloudflare R2 云备份、日志与诊断
-- 提供响应式 Web 界面，适合个人长期运行和家庭媒体库管理
+- **追番与下载**：订阅 Mikan RSS，按字幕组、清晰度、语言和规则筛选；同步 qBittorrent 进度，并通过资源对账补交真正缺失的集数。
+- **本地媒体整理**：识别季度、集数、多集范围和 SP/OVA 等特殊条目；下载完成后通过 qBittorrent 安全移动、重命名并定向增量扫描。
+- **三源元数据**：并行查询 Bangumi、TMDB 和 AniList，保留真实来源 ID、字段来源和匹配证据。
+- **双工作区播放**：管理模式维护订阅与媒体，媒体模式浏览 Jellyfin；支持 AnimateTool 代理、Jellyfin 直连、继续观看和进度同步。
+- **可确认的 AI 协助**：支持 OpenAI、Gemini 和 Claude。AI 可以读取白名单内的诊断上下文并创建修复提案，写操作仍需在业务页面预览和确认。
+- **运维与恢复**：提供健康监测、审计日志、诊断包、AES-256 加密 ZIP 备份、Cloudflare R2 云备份以及带兼容校验和失败恢复的更新器。
+- **响应式 Web 界面**：适合个人长期运行，也可通过 HTTPS 反向代理、Cloudflare Access 或 VPN 安全访问。
+
+## 适用范围
+
+AnimateTool 适合已经使用或愿意使用 qBittorrent、希望长期维护动漫媒体库的自托管用户。Jellyfin、Cloudflare R2 和 AI 服务都是可选集成。
+
+它不是 BT 客户端本身，也不是 Jellyfin 的完整替代品；当前本地扫描与整理重点面向番剧和电视剧。AI 不会仅凭聊天中的一句“处理一下”直接改数据库或移动文件。
 
 ## 快速启动
 
@@ -37,7 +52,7 @@ Mikan RSS → 筛选订阅 → qBittorrent 下载 → 自动整理 → Jellyfin 
 2. 解压后复制 `config.yaml.example` 为 `config.yaml`。
 3. Windows 双击 `start.bat`；macOS/Linux 执行 `./start.sh`。
 4. 浏览器打开 `http://localhost:8306`，完成首次初始化。
-5. 在设置页配置 qBittorrent，再添加第一条订阅。
+5. 在设置页配置 qBittorrent，再添加第一条订阅。需要媒体模式时，再配置 Jellyfin 地址和 API Key。
 
 Docker、源码构建、目录权限和升级方式请查看[安装与部署文档](https://pokerjest.github.io/animateAutoTool/installation/)。
 
@@ -48,6 +63,8 @@ Docker、源码构建、目录权限和升级方式请查看[安装与部署文�
 ### [打开 Animate Auto Tool 在线文档](https://pokerjest.github.io/animateAutoTool/)
 
 - [配置与外部 API](https://pokerjest.github.io/animateAutoTool/configuration/)
+- [订阅、下载与资源对账](https://pokerjest.github.io/animateAutoTool/usage/subscriptions/)
+- [本地媒体扫描与整理](https://pokerjest.github.io/animateAutoTool/usage/library/)
 - [公网访问、DDNS 与反向代理](https://pokerjest.github.io/animateAutoTool/remote-access/)
 - [故障排查](https://pokerjest.github.io/animateAutoTool/troubleshooting/)
 - [REST API 与 OpenAPI](https://pokerjest.github.io/animateAutoTool/api/)

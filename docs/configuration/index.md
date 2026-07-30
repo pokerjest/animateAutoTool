@@ -16,7 +16,7 @@ AnimateTool 的设置页会把业务配置保存到数据库，并同步镜像�
 | 分类 | 代表字段 | 文档 |
 | --- | --- | --- |
 | 下载器 | `qb_url`、`qb_username`、`qb_password` | [qBittorrent 与自动整理](downloader.md) |
-| 媒体服务 | `jellyfin_url`、`jellyfin_api_key`、`alist_token` | [媒体服务](media-services.md) |
+| 媒体服务 | `jellyfin_url`、`jellyfin_direct_url`、`jellyfin_api_key`、`jellyfin_library_ids` | [媒体服务](media-services.md) |
 | 元数据 | `tmdb_token`、`anilist_token`、`bangumi_access_token` | [元数据 API](metadata-apis.md) |
 | AI | `ai_provider`、供应商 API Key、模型、Base URL 与 API 格式 | [AI](ai.md) |
 | 备份 | `r2_endpoint`、`r2_bucket`、`r2_access_key`、`r2_secret_key` | [R2](r2-backup.md) |
@@ -24,4 +24,4 @@ AnimateTool 的设置页会把业务配置保存到数据库，并同步镜像�
 
 ## 配置备份注意事项
 
-系统设置备份可能包含外部服务凭据。分享诊断信息时使用“健康诊断导出”或脱敏后的配置片段，不要直接上传完整数据库和 `config.yaml`。
+完整备份可能包含外部服务凭据，但新导出的文件会压缩为 AES-256 加密 ZIP。分享问题信息时仍应使用“健康诊断导出”或脱敏后的配置片段，不要把数据库、`config.yaml` 或备份密码发布到公开位置。

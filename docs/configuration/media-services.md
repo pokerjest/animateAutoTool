@@ -1,4 +1,6 @@
-# Jellyfin、AList 与播放线路
+# Jellyfin 与播放线路
+
+当前媒体模式只实现 Jellyfin。设置页为未来的 Plex、Emby 等提供商保留扩展位置，但这些卡片还不是可用适配器；旧版本遗留的 AList/PikPak 兼容字段也不属于当前前端支持范围。
 
 ## Jellyfin
 
@@ -29,38 +31,12 @@
 
 媒体库范围也在 Jellyfin 设置卡片中选择。默认展示全部影视媒体库；保存为 `[]` 时同样代表全部，避免升级后因为没有显式选择而显示空库。
 
-## AList
-
-[打开 AList 官网][alist]{ .md-button .md-button--primary }
-[打开 AList 认证 API 文档][alist-auth]{ .md-button }
-
-填写：
-
-```text
-alist_url   = https://files.example.com
-alist_token = <AList 管理后台生成的 Token>
-```
-
-按 [AList 认证 API][alist-auth] 使用管理员或专用账号登录：
-
-```bash
-curl -X POST "https://files.example.com/api/auth/login" \
-  -H "Content-Type: application/json" \
-  -d '{"username":"<ALIST_USERNAME>","password":"<ALIST_PASSWORD>"}'
-```
-
-复制响应中的 `data.token` 填入 `alist_token`。AList 文档说明登录 Token 有有效期；外部 AList 的 Token 过期后，需要重新登录生成并更新。AnimateTool 当前会调用存储列表等管理端接口，因此该 Token 必须具备相应管理员权限；请通过局域网、VPN 或访问控制限制 AList 后台，不要把管理员 Token 暴露给浏览器端。
-
 ## 连接验证
 
 1. 先用浏览器或 `curl -I` 验证服务 URL；
-2. Jellyfin 在 AnimateTool 设置页点击连接测试；
-3. AList 使用下面的请求验证 Token：
-
-```bash
-curl "https://files.example.com/api/me" \
-  -H "Authorization: <ALIST_TOKEN>"
-```
-
+2. 在 AnimateTool 设置页根据当前浏览器保存的播放线路测试 Jellyfin；
+3. 代理测试使用后端 `jellyfin_url`，直连测试使用浏览器可访问的 `jellyfin_direct_url`；
 4. 进入播放器或媒体库确认返回的是正确实例，而不是旧地址；
 5. 若经过反向代理，检查 `X-Forwarded-Proto` 和 `public_url`。
+
+只有 `jellyfin_url` 和 `jellyfin_api_key` 都已保存时，Jellyfin 媒体模式入口才会启用。服务暂时不可达不会禁用入口，媒体页会显示连接错误和设置入口。本地番剧播放器不依赖 Jellyfin 配置。

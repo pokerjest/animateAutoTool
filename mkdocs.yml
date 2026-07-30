@@ -1,4 +1,4 @@
-site_name: Animate Auto Tool
+site_name: AnimateTool
 site_description: 自托管动漫订阅、下载、整理与播放工作台
 site_url: https://pokerjest.github.io/animateAutoTool/
 repo_url: https://github.com/pokerjest/animateAutoTool
@@ -8,8 +8,8 @@ edit_uri: edit/main/docs/
 theme:
   name: material
   language: zh
-  favicon: assets/favicon.svg
-  logo: assets/logo.svg
+  favicon: assets/favicon.png
+  logo: assets/logo.png
   font: false
   features:
     - navigation.instant
@@ -88,9 +88,9 @@ nav:
   - 配置指南:
       - 配置总览: configuration/index.md
       - qBittorrent 与自动整理: configuration/downloader.md
-      - Jellyfin、AList 与播放线路: configuration/media-services.md
+      - Jellyfin 与播放线路: configuration/media-services.md
       - 元数据 API: configuration/metadata-apis.md
-      - AI 与 OpenAI-compatible 服务: configuration/ai.md
+      - AI：OpenAI、Gemini 与 Claude: configuration/ai.md
       - Cloudflare R2 备份: configuration/r2-backup.md
       - 网络代理: configuration/proxy.md
   - 日常使用:
@@ -99,6 +99,7 @@ nav:
       - 管理模式与媒体模式: usage/media-workspaces.md
       - 播放器与继续观看: usage/player.md
       - 备份、恢复与诊断: usage/backup-diagnostics.md
+      - 版本通道、更新与回切: usage/updater.md
   - 公网访问:
       - 方案决策树: remote-access/index.md
       - DDNS 与动态公网地址: remote-access/ddns.md

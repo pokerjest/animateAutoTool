@@ -81,3 +81,12 @@ internal/api/data/
 
 # MkDocs documentation build output
 /build/docs-site/
+
+# Local image-processing environment
+/.venv/
+
+# Local-only brand and character source artwork
+/private-assets/
+
+# Local design drafts and generated previews
+/tmp/

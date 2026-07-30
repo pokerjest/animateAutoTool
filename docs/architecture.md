@@ -18,8 +18,9 @@ internal/
 ├── httpx/            # 统一的 HTTP client 工厂
 ├── parser/           # RSS / 文件名 / 标题解析
 ├── downloader/       # qBittorrent 适配
-├── alist, anilist, bangumi, jellyfin, tmdb/   # 外部服务适配
-├── launcher/         # 子进程托管（qB / Alist / Jellyfin）
+├── anilist, bangumi, jellyfin, tmdb/          # 当前外部服务适配
+├── alist/            # 旧 AList 兼容适配，不属于当前前端能力
+├── launcher/         # 外部服务子进程托管与兼容入口
 ├── updater/          # 应用自更新（GitHub Release）
 ├── scheduler, worker, event/                  # 定时任务 + 事件总线
 ├── config, security, safeio, bootstrap, version, tray, renamer/
@@ -94,7 +95,7 @@ func configValue(key string) string {
 
 ## HTTP 客户端：`internal/httpx`
 
-**所有外部 HTTP 调用**（Bangumi / TMDB / AniList / Jellyfin / AList / qBittorrent / Mikan）统一通过 `httpx.NewRestyClient` 创建：
+**所有外部 HTTP 调用**（Bangumi / TMDB / AniList / Jellyfin / qBittorrent / Mikan，以及仍保留的兼容适配器）统一通过 `httpx.NewRestyClient` 或同一包提供的标准客户端创建：
 
 ```go
 client := httpx.NewRestyClient(timeout, proxyURL, headers)
@@ -107,30 +108,55 @@ resp, err := httpx.NewRequest(ctx, client).Get(url)
 - proxy / UA / headers 通过参数注入；代理地址统一由 `httpx.NormalizeProxyURL` 校验和规范化，业务入口按服务开关注入，不读取系统环境代理。
 - `httpx.NewHTTPClient` / `NewHTTPClientWithProxy` 同样基于 `newHTTPTransport`，**显式禁用环境变量代理**并强制 30s connect / 30s keep-alive，避免被系统 `HTTP_PROXY` 影响。
 
-## AI 能力：`internal/ai`
+## AI 能力：`internal/ai` 与工具执行器
 
-`internal/ai` 提供与 OpenAI 兼容（`/v1/chat/completions` + `/v1/models`）的最小客户端 + 工具注册机制，给后续在番剧匹配 / 元数据归类 / 自动诊断等场景调用 LLM 用。
+AI 层支持三类提供商：
+
+- OpenAI Chat Completions；
+- Gemini 原生 `generateContent` 或 OpenAI-compatible；
+- Claude 原生 Messages API 或 OpenAI-compatible。
+
+各供应商通过 `CompletionClient` 归一化聊天、模型列表、工具调用和错误信息。原生客户端负责协议转换，OpenAI-compatible 网关复用标准客户端；业务层不应自行拼供应商 HTTP 请求。
+
+内部工具注册表把能力分为：
 
 ```go
-client := ai.NewClient(baseURL, apiKey, model)
-resp, err := client.CreateChatCompletion(ctx, ai.ChatCompletionRequest{
-    Messages: []ai.ChatMessage{{Role: "user", Content: "..."}},
-    Tools:    registry.GetToolDefinitions(),
-})
+const (
+    ToolRiskRead    ToolRisk = "read"
+    ToolRiskPropose ToolRisk = "propose"
+    ToolRiskWrite   ToolRisk = "write"
+)
 ```
 
-约定：
-- `NewClient(baseURL, apiKey, model)`：`baseURL` 留空回退到官方 `https://api.openai.com/v1`，自动剥末尾 `/`。
-- HTTP 走 `httpx.NewHTTPClient(60s)` —— **复用统一 Transport**，自动禁用环境代理；不要直接 `http.DefaultClient`。
-- 请求体走 OpenAI 兼容 schema（`ChatMessage`/`Tool`/`ToolCall`），换其他模型供应商时**只改 baseURL/apiKey/model**，不改类型。
-- 工具调用用 `Registry`：`Register(name, description, params, handler)` → 模型回 `tool_calls` 时调 `ExecuteTool(ctx, name, args)` 执行。
-- `JSONSchemaObject` / `JSONSchemaProperty` 是参数 schema 的便捷构造，避免每个工具自己拼 map。
-- **凭据存哪**：运行时查询走 `global_configs`（参考 bangumi/tmdb token 的存储位置），用 `configValue(key)` 读取；保存时同步镜像到本机 `config.yaml` 的 `system_settings`，Unix 文件权限必须保持为 `0600`，Windows 依赖安装目录 ACL。
+- `read` 只读取健康、订阅、日志、本地库和真实元数据候选；
+- `propose` 生成结构化预览或持久化提案，不直接修改业务数据；
+- `write` 应用固定提案，必须要求确认。
 
-何时引入 AI 调用：
-- ✅ 番剧标题归一化（中英日多语对齐）、元数据冲突仲裁、订阅疑似缺集的自然语言总结
-- ❌ 不要把 AI 用在**正确性敏感**的链路（重命名规则、文件移动、数据库 schema 演进）—— 这些场景模型幻觉成本太高
-- 调用都要带超时与降级：LLM 不可用时退到现有的 deterministic 路径
+只有 `read` 和 `propose` 会出现在模型可见的工具定义中。`write` 工具由后端在用户完成业务页预览和确认后调用，不能让模型在第二轮重新生成执行参数。
+
+写操作链路固定为：
+
+```text
+只读工具收集上下文
+→ AI 生成提案
+→ JSON Schema、权限和目标状态校验
+→ 页面展示差异
+→ 用户确认并获取一次性令牌
+→ 使用服务器保存的 apply_tool 与参数执行
+→ 记录 AIToolRun 和业务审计日志
+```
+
+确认令牌绑定用户、提案、目标、输入指纹、执行工具、有效期和 nonce。跨用户、跨提案、重复使用、文件或数据库状态变化都必须拒绝。
+
+约定：
+
+- 所有工具参数拒绝未知字段，不允许客户端覆盖用户 ID；
+- AI 不直接执行 SQL、Shell、任意 URL 或任意文件系统操作；
+- 元数据匹配只能选择确定性搜索真实返回的候选 ID；
+- 文件整理仍经过目录边界、冲突、指纹和 qBittorrent 做种保护；
+- 日志记录脱敏后的参数摘要和哈希，不记录 API Key、Cookie、认证头或完整模型原始响应；
+- LLM 不可用、超时或限流时，确定性订阅、扫描、匹配、健康和备份功能必须继续工作；
+- 数据库 schema 迁移永远不由 AI 决策或执行。
 
 ## 数据库迁移：`internal/db/migrations.go`
 
@@ -138,16 +164,20 @@ resp, err := client.CreateChatCompletion(ctx, ai.ChatCompletionRequest{
 
 ```go
 var migrations = []migration{
-    {ID: "001_initial_schema",            Apply: ...},
-    {ID: "002_subscription_run_log",      Apply: ...},
-    {ID: "003_subscription_strategy_fields", Apply: ...},
+    {ID: "001_initial_schema", Apply: ...},
+    // ...
+    {ID: "014_anime_metadata_extended_fields", Apply: ...},
 }
 ```
 
 规则：
+
+- migration ID 必须以稳定三位数序号开头，启动时验证顺序和重复；
 - **新增字段 / 新表** → `tx.AutoMigrate(&model.X{})` 即可
 - **改列名 / 改类型 / 收紧约束 / 数据搬迁** → 必须**新写一条 migration**，不要修改老的
-- 启动时 `schema_migrations` 表追踪已应用版本，启动日志会打印当前版本号
+- 启动时 `schema_migrations` 表记录 ID、数值序号、描述和应用时间，`CurrentSchemaVersion` 按数值序号确定当前版本；
+- 文件数据库迁移使用跨进程锁，阻止两个服务同时修改 schema；
+- migration 前创建安全快照；历史数据库 fixture 覆盖 v0.6、v0.7、v0.8、v0.9 到当前 schema；
 - 数据修复脚本也**走 migration**，不要散落进业务启动代码
 
 ## HTTP 路由与中间件
@@ -183,9 +213,14 @@ var migrations = []migration{
 ## 自更新（`internal/updater`）
 
 - 拆分为 `manager.go` / `manager_apply.go` / `manager_release_assets.go` / `manager_versions.go`
-- macOS DMG 路径：mount point 由 Go 侧 `os.MkdirTemp` 创建并作为 `$6` 参数传入 bash，**不在 shell 里 mktemp**
-- Release asset 命名 `<binary>_<version>_<goos>_<goarch>.<ext>`，配合 `SHA256SUMS.txt`
-- 校验流程：拉 release → 选 asset → 找 checksum 文件 → 下载 → 比对 SHA256 → 应用
+- Release asset 命名 `<binary>_<version>_<goos>_<goarch>.<ext>`，配合 `SHA256SUMS.txt` 和 `animate-release-manifest.json`
+- 兼容清单声明版本通道、目标 schema、最低升级版本、可读 schema 范围、测试版回切和回滚能力
+- 自动更新只向前；手动回切只允许从测试版进入清单明确支持的稳定版
+- 校验流程：拉 release → 读取兼容清单 → 判断版本/schema → 选择平台资产 → 下载 → 比对 SHA256 → 应用
+- 应用前通过 SQLite `VACUUM INTO` 创建数据库快照，并复制 `config.yaml`、记录 SHA256 和 manifest
+- 新版本启动后必须通过仅本机 readiness 检查；失败时辅助进程恢复旧程序、数据库和配置
+- 快照默认保留最近 5 份或 30 天内的有效项，取更严格的清理结果
+- macOS DMG mount point 由 Go 侧 `os.MkdirTemp` 创建并传给辅助脚本，不在 shell 中生成不受控路径
 
 ## Windows 部署
 

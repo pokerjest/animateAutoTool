@@ -48,7 +48,7 @@ cd animateAutoTool
 - 不要把真实 `config.yaml` 提交到 Git；
 - Unix 下配置镜像会收紧为 `0600`；
 - Windows 下请确保运行用户对配置和 `data/` 有读写权限；
-- 备份文件可能包含服务地址、Token 和 API Key，应按密码保存。
+- 新备份是 AES-256 加密 ZIP，但完整备份仍可能包含服务地址、Token 和 API Key；请使用强密码，并把文件副本保存在应用数据目录之外。
 
 ## 管理命令
 

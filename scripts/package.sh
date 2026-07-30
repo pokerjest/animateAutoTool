@@ -7,9 +7,9 @@ APP_DISPLAY_NAME="Animate Auto Tool"
 APP_BUNDLE_NAME="${APP_DISPLAY_NAME}.app"
 APP_IDENTIFIER="com.pokerjest.animateautotool"
 VERSION_FILE="./VERSION"
-DEFAULT_VERSION="v0.9.9-beta.15"
+DEFAULT_VERSION="v0.9.9"
 DIST_DIR="${DIST_DIR:-./dist}"
-SRC_PATH="cmd/server/main.go"
+SRC_PATH="./cmd/server"
 
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -170,6 +170,9 @@ package_macos_dmg() {
     if [ -f "internal/tray/icon.png" ]; then
         cp internal/tray/icon.png "$resources_dir/app_icon.png"
     fi
+    if [ -f "internal/tray/icon.icns" ]; then
+        cp internal/tray/icon.icns "$resources_dir/app_icon.icns"
+    fi
 
     cat > "$contents_dir/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -184,6 +187,8 @@ package_macos_dmg() {
     <string>${APP_IDENTIFIER}</string>
     <key>CFBundleName</key>
     <string>${APP_DISPLAY_NAME}</string>
+    <key>CFBundleIconFile</key>
+    <string>app_icon</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>

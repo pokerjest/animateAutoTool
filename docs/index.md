@@ -1,8 +1,30 @@
-# Animate Auto Tool
+<div class="aat-home-hero" markdown>
+
+<div class="aat-home-copy" markdown>
+
+<p class="aat-home-kicker">SELF-HOSTED ANIME AUTOMATION</p>
+
+# AnimateTool
 
 <p class="page-lead">
-一个面向自托管用户的动漫订阅、下载、整理、元数据聚合与播放工作台。先用最短路径完成部署，再按需接入媒体服务、外部 API、备份和公网访问。
+把追番、下载、整理、刮削和播放收进一个自托管工作台。规则负责稳定执行，AI 负责协助判断，关键修改始终由你确认。
 </p>
+
+<div class="aat-home-actions">
+
+[开始快速安装](getting-started.md){ .md-button .md-button--primary }
+[浏览日常使用](usage/subscriptions.md){ .md-button }
+
+</div>
+
+</div>
+
+<div class="aat-home-visual">
+  <img src="assets/mascot-icon.png" alt="AnimateTool Q 版角色图标">
+  <span>ORGANIZE · AUTOMATE · PLAY</span>
+</div>
+
+</div>
 
 <div class="quick-facts">
   <span>单机 / NAS / 小型服务器</span>
@@ -24,7 +46,7 @@
 
     ---
 
-    订阅 Mikan RSS，自动下载、重命名、扫描媒体库并同步 Jellyfin。
+    订阅 Mikan RSS，持久化对账缺集，下载后安全整理并增量扫描。
 
     [查看日常使用](usage/subscriptions.md){ .md-button }
 
@@ -54,8 +76,14 @@ Animate Auto Tool 是一个适合长期运行在个人电脑、NAS 或小型服�
 - 将任务交给 [qBittorrent][qbittorrent]，自动去重、整理和重命名；
 - 从 [Bangumi][bangumi-api]、[TMDB][tmdb-docs] 和 [AniList][anilist-docs] 聚合番剧元数据；
 - 扫描本地媒体并与 [Jellyfin][jellyfin] 同步播放、收藏和观看进度；
-- 将数据库、设置和诊断包备份到本地或 Cloudflare R2；
+- 在管理模式维护订阅与媒体，在媒体模式中浏览 Jellyfin 内容；
+- 使用 OpenAI、Gemini 或 Claude 分析问题并创建需要人工确认的修复提案；
+- 将 AES-256 加密备份保存到本地或 Cloudflare R2；
 - 使用本机 Cookie 会话、同源校验、审计日志和受信任代理边界保护管理界面。
+
+## 自动化边界
+
+AnimateTool 优先使用确定性规则处理订阅、集数识别、文件路径和数据库迁移。AI 只能调用注册的内部工具读取上下文或生成提案，不能直接执行 SQL、Shell、任意网络请求或文件操作。涉及匹配、重命名、规则修改和修复时，应用会先展示真实候选与变更预览，再由用户确认。
 
 ## 推荐阅读顺序
 
@@ -64,7 +92,8 @@ Animate Auto Tool 是一个适合长期运行在个人电脑、NAS 或小型服�
 3. [qBittorrent 与自动整理](configuration/downloader.md)
 4. [媒体服务配置](configuration/media-services.md)
 5. [元数据 API 获取与验证](configuration/metadata-apis.md)
-6. [公网访问方案决策树](remote-access/index.md)
+6. [备份、恢复与版本回切](usage/backup-diagnostics.md)
+7. [公网访问方案决策树](remote-access/index.md)
 
 ## 重要链接
 

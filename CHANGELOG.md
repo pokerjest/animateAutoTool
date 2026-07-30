@@ -8,6 +8,24 @@
 
 ## [Unreleased]
 
+## [0.9.9] - 2026-07-31
+
+### Added
+- 引入全局悬浮 AI 助手、可确认的内部 AI 工具提案，以及 OpenAI、Gemini、Claude 三类提供商配置。
+- 新增订阅资源持久化对账、本地媒体增量扫描、三源元数据匹配和更安全的文件整理流程。
+- 新增兼容清单、更新前快照、启动健康检查、失败自动恢复，以及测试版安全切换回稳定版的规则。
+- 统一 Q 版角色品牌图标，为文档、浏览器、系统托盘、Windows 可执行文件和 macOS 应用包提供对应资源。
+
+### Changed
+- 播放系统拆分为管理与媒体工作区；媒体内容统一通过 Jellyfin 提供商接口浏览和播放。
+- 下载完成后按受影响番剧目录批量执行安全整理、增量扫描、资源对账和 Jellyfin 刷新。
+- 文档站改为与 Q 版角色一致的深墨蓝、电蓝机能风，并补充当前订阅、扫描、备份、AI 和更新器行为说明。
+
+### Fixed
+- 修复同时完成多个订阅时漏扫先完成资源、跨番剧错误映射、修正版标记丢失和 100% 下载仍显示进行中的问题。
+- 修复番剧图鉴统计和分页不完整、本地番剧慢速自动加载提前结束，以及旧数据库缺失扩展字段的问题。
+- 修复选择性备份恢复清空当前设备凭据、云备份列表删除后消失和更新失败恢复不完整的问题。
+
 ## [0.9.9-beta.15] - 2026-07-30
 
 ### Changed
@@ -476,7 +494,8 @@
 
 ---
 
-[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v0.9.4...HEAD
+[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v0.9.9...HEAD
+[0.9.9]: https://github.com/pokerjest/animateAutoTool/compare/v0.9.8...v0.9.9
 [0.9.4]: https://github.com/pokerjest/animateAutoTool/compare/v0.9.3...v0.9.4
 [0.9.2.1]: https://github.com/pokerjest/animateAutoTool/compare/v0.9.2...v0.9.2.1
 [0.9.2]: https://github.com/pokerjest/animateAutoTool/compare/v0.9.1...v0.9.2

@@ -8,9 +8,6 @@
 [qbittorrent-webui]: https://github.com/qbittorrent/qBittorrent/wiki/WebUI-API-Documentation
 [jellyfin]: https://jellyfin.org/
 [jellyfin-docs]: https://jellyfin.org/docs/
-[alist]: https://alistgo.com/
-[alist-guide]: https://alistgo.com/zh/guide/
-[alist-auth]: https://alistgo.com/zh/guide/api/auth.html
 [mikan]: https://mikanani.me/
 
 [tmdb-api]: https://www.themoviedb.org/settings/api
