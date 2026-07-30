@@ -8,6 +8,18 @@ func TestTitlesLookRelatedMatchesLocalizedVariants(t *testing.T) {
 	}
 }
 
+func TestTitlesStronglyRelatedRejectsSharedGenreWord(t *testing.T) {
+	if titlesStronglyRelated(
+		"遭到流放的转生重骑士凭借游戏知识大开无双",
+		"转生成猫的大叔",
+	) {
+		t.Fatal("a shared genre word must not prove series identity")
+	}
+	if !titlesStronglyRelated("Repair Show Season 1", "Repair Show") {
+		t.Fatal("season suffix should preserve a strong identity match")
+	}
+}
+
 func TestNormalizedRuleTitleRemovesSeasonNoise(t *testing.T) {
 	got := normalizedRuleTitle("[ANi] Candy Caries / CANDY CARIES 蛀在糖糖里 Season 1")
 	if got == "" {

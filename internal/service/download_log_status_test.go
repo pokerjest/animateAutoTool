@@ -350,6 +350,109 @@ func TestRepairDownloadLogsFromLocalLibraryRepairsStaleDownloadingLog(t *testing
 	}
 }
 
+func TestResolveLogTargetRejectsUnrelatedSeriesSharingMetadata(t *testing.T) {
+	withServiceTestDB(t)
+
+	meta := model.AnimeMetadata{Title: "转生成猫的大叔", TitleCN: "转生成猫的大叔"}
+	if err := db.DB.Create(&meta).Error; err != nil {
+		t.Fatalf("create metadata: %v", err)
+	}
+	sub := model.Subscription{
+		Title:      "遭到流放的转生重骑士凭借游戏知识大开无双",
+		RSSUrl:     "https://example.test/heavy-knight",
+		MetadataID: &meta.ID,
+		Metadata:   &meta,
+	}
+	if err := db.DB.Create(&sub).Error; err != nil {
+		t.Fatalf("create subscription: %v", err)
+	}
+	anime := model.LocalAnime{
+		Title:      "转生成猫的大叔",
+		Path:       filepath.Join(t.TempDir(), "转生成猫的大叔 (2024) [tmdbid=248707]"),
+		MetadataID: &meta.ID,
+	}
+	if err := db.DB.Create(&anime).Error; err != nil {
+		t.Fatalf("create local anime: %v", err)
+	}
+	targetFile := filepath.Join(anime.Path, "转生成猫的大叔 - S01E04.mp4")
+	if err := os.MkdirAll(anime.Path, 0o700); err != nil {
+		t.Fatalf("create anime path: %v", err)
+	}
+	if err := os.WriteFile(targetFile, []byte("cat"), 0o600); err != nil {
+		t.Fatalf("create target: %v", err)
+	}
+	if err := db.DB.Create(&model.LocalEpisode{
+		LocalAnimeID: anime.ID,
+		EpisodeNum:   4,
+		SeasonNum:    1,
+		Path:         targetFile,
+	}).Error; err != nil {
+		t.Fatalf("create episode: %v", err)
+	}
+
+	if target, matched := resolveLogTargetFromLibrary(model.DownloadLog{
+		SubscriptionID: sub.ID,
+		Title:          "[ANi] 遭到流放的转生重骑士凭借游戏知识大开无双 - 04",
+		Episode:        "04",
+	}, sub); matched || target != "" {
+		t.Fatalf("unrelated series sharing metadata must not match, got target=%q matched=%v", target, matched)
+	}
+}
+
+func TestResolveLogTargetAllowsLocalizedAliasesWithVerifiedMetadata(t *testing.T) {
+	withServiceTestDB(t)
+
+	meta := model.AnimeMetadata{
+		Title:   "间谍过家家",
+		TitleCN: "间谍过家家",
+		TitleJP: "SPY x FAMILY",
+	}
+	if err := db.DB.Create(&meta).Error; err != nil {
+		t.Fatalf("create metadata: %v", err)
+	}
+	sub := model.Subscription{
+		Title:      "间谍过家家",
+		RSSUrl:     "https://example.test/spy-family",
+		MetadataID: &meta.ID,
+		Metadata:   &meta,
+	}
+	if err := db.DB.Create(&sub).Error; err != nil {
+		t.Fatalf("create subscription: %v", err)
+	}
+	anime := model.LocalAnime{
+		Title:      "SPY x FAMILY",
+		Path:       filepath.Join(t.TempDir(), "SPY x FAMILY"),
+		MetadataID: &meta.ID,
+	}
+	if err := db.DB.Create(&anime).Error; err != nil {
+		t.Fatalf("create local anime: %v", err)
+	}
+	targetFile := filepath.Join(anime.Path, "SPY x FAMILY - S01E01.mkv")
+	if err := os.MkdirAll(anime.Path, 0o700); err != nil {
+		t.Fatalf("create anime path: %v", err)
+	}
+	if err := os.WriteFile(targetFile, []byte("spy"), 0o600); err != nil {
+		t.Fatalf("create target: %v", err)
+	}
+	if err := db.DB.Create(&model.LocalEpisode{
+		LocalAnimeID: anime.ID,
+		EpisodeNum:   1,
+		SeasonNum:    1,
+		Path:         targetFile,
+	}).Error; err != nil {
+		t.Fatalf("create episode: %v", err)
+	}
+
+	target, matched := resolveLogTargetFromLibrary(model.DownloadLog{
+		SubscriptionID: sub.ID,
+		Title:          "[Group] 间谍过家家 - 01",
+		Episode:        "01",
+	}, sub)
+	if !matched || target != targetFile {
+		t.Fatalf("verified localized aliases should match, got target=%q matched=%v", target, matched)
+	}
+}
+
 func TestRepairDownloadLogsFromLocalLibrarySkipsRecentDownloadingLog(t *testing.T) {
 	withServiceTestDB(t)
 

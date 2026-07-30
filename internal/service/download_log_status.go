@@ -103,9 +103,10 @@ func (t *downloadLogSyncTracker) Reset() {
 var GlobalDownloadLogSyncStatus = &downloadLogSyncTracker{}
 
 type DownloadLogRepairResult struct {
-	Scanned  int
-	Matched  int
-	Repaired int
+	Scanned     int
+	Matched     int
+	Repaired    int
+	Invalidated int
 }
 
 type DownloadLogArchiveResult struct {
@@ -365,21 +366,28 @@ func RepairDownloadLogsFromLocalLibrary(_ time.Duration) (DownloadLogRepairResul
 		return DownloadLogRepairResult{}, nil
 	}
 
-	logs, err := logStore.ListByStatuses([]string{downloadLogStatusDownloading, downloadLogStatusFailed, downloadLogStatusCompleted})
-	if err != nil {
-		return DownloadLogRepairResult{}, err
-	}
-
 	subs, err := loadAllSubscriptions()
 	if err != nil {
 		return DownloadLogRepairResult{}, err
 	}
 	subscriptions := make(map[uint]model.Subscription, len(subs))
+	result := DownloadLogRepairResult{}
 	for _, sub := range subs {
 		subscriptions[sub.ID] = sub
+		invalidated, invalidateErr := invalidateMismatchedLocalDownloadLogs(sub)
+		if invalidateErr != nil {
+			return result, invalidateErr
+		}
+		result.Invalidated += invalidated
 	}
 
-	result := DownloadLogRepairResult{}
+	// Reload after invalidation so archived false-completion rows cannot be
+	// immediately considered for a normal local-library repair.
+	logs, err := logStore.ListByStatuses([]string{downloadLogStatusDownloading, downloadLogStatusFailed, downloadLogStatusCompleted})
+	if err != nil {
+		return result, err
+	}
+
 	for _, logEntry := range logs {
 		if !shouldAttemptLibraryRepair(logEntry) {
 			continue
@@ -414,7 +422,7 @@ func RepairDownloadLogsFromLocalLibrary(_ time.Duration) (DownloadLogRepairResul
 		result.Repaired++
 	}
 
-	GlobalDownloadLogSyncStatus.RecordLibraryRepair(result.Repaired, result.Scanned)
+	GlobalDownloadLogSyncStatus.RecordLibraryRepair(result.Repaired+result.Invalidated, result.Scanned)
 	return result, nil
 }
 
@@ -443,7 +451,7 @@ func resolveLogTargetFromLibrary(logEntry model.DownloadLog, sub model.Subscript
 	}
 
 	if sub.MetadataID != nil && *sub.MetadataID != 0 {
-		if path, ok := findEpisodePathByMetadata(*sub.MetadataID, epNum); ok {
+		if path, ok := findEpisodePathByMetadata(*sub.MetadataID, epNum, logEntry.Title, sub); ok {
 			return path, true
 		}
 	}
@@ -451,7 +459,12 @@ func resolveLogTargetFromLibrary(logEntry model.DownloadLog, sub model.Subscript
 	return findEpisodePathByTitle(sub.Title, epNum)
 }
 
-func findEpisodePathByMetadata(metadataID uint, episodeNum int) (string, bool) {
+func findEpisodePathByMetadata(
+	metadataID uint,
+	episodeNum int,
+	releaseTitle string,
+	sub model.Subscription,
+) (string, bool) {
 	st := localAnimeStore()
 	if st == nil {
 		return "", false
@@ -461,9 +474,22 @@ func findEpisodePathByMetadata(metadataID uint, episodeNum int) (string, bool) {
 		return "", false
 	}
 	for _, candidate := range rows {
-		if fileExists(candidate.Path) {
-			return filepath.Clean(candidate.Path), true
+		if !fileExists(candidate.Path) {
+			continue
 		}
+		if !localEpisodeCandidateMatchesSubscription(sub, releaseTitle, candidate) {
+			log.Printf(
+				"WARN: rejected local episode candidate %q for subscription %q episode %d: shared metadata_id=%d but local series identity is %q (%s)",
+				candidate.Path,
+				sub.Title,
+				episodeNum,
+				metadataID,
+				candidate.AnimeTitle,
+				candidate.AnimePath,
+			)
+			continue
+		}
+		return filepath.Clean(candidate.Path), true
 	}
 	return "", false
 }
@@ -487,7 +513,7 @@ func findEpisodePathByTitle(title string, episodeNum int) (string, bool) {
 		if candidateTitle == "" {
 			continue
 		}
-		if candidateTitle != cleanTitle && !titlesLookRelated(candidate.AnimeTitle, title) {
+		if candidateTitle != cleanTitle && !titlesStronglyRelated(candidate.AnimeTitle, title) {
 			continue
 		}
 		if fileExists(candidate.Path) {

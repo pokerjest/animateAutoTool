@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 
@@ -106,6 +108,115 @@ func TestProcessSubscriptionPreflightAvoidsDuplicateSubmit(t *testing.T) {
 	}
 	if logEntry.InfoHash != "existing-task-hash" {
 		t.Fatalf("expected existing qB hash, got %q", logEntry.InfoHash)
+	}
+}
+
+func TestProcessSubscriptionRetractsCrossSeriesFalseCompletionAndSubmits(t *testing.T) {
+	withServiceTestDB(t)
+
+	meta := model.AnimeMetadata{Title: "转生成猫的大叔", TitleCN: "转生成猫的大叔"}
+	if err := db.DB.Create(&meta).Error; err != nil {
+		t.Fatalf("create metadata: %v", err)
+	}
+	sub := model.Subscription{
+		Title:      "遭到流放的转生重骑士凭借游戏知识大开无双",
+		RSSUrl:     "https://example.test/heavy-knight",
+		IsActive:   true,
+		MetadataID: &meta.ID,
+		Metadata:   &meta,
+	}
+	if err := db.DB.Create(&sub).Error; err != nil {
+		t.Fatalf("create subscription: %v", err)
+	}
+	anime := model.LocalAnime{
+		Title:      "转生成猫的大叔",
+		Path:       filepath.Join(t.TempDir(), "转生成猫的大叔 (2024)"),
+		MetadataID: &meta.ID,
+	}
+	if err := db.DB.Create(&anime).Error; err != nil {
+		t.Fatalf("create local anime: %v", err)
+	}
+	if err := os.MkdirAll(anime.Path, 0o700); err != nil {
+		t.Fatalf("create anime path: %v", err)
+	}
+	targetFile := filepath.Join(anime.Path, "转生成猫的大叔 - S01E04.mp4")
+	if err := os.WriteFile(targetFile, []byte("cat episode"), 0o600); err != nil {
+		t.Fatalf("create target: %v", err)
+	}
+	if err := db.DB.Create(&model.LocalEpisode{
+		LocalAnimeID: anime.ID,
+		EpisodeNum:   4,
+		SeasonNum:    1,
+		Path:         targetFile,
+	}).Error; err != nil {
+		t.Fatalf("create local episode: %v", err)
+	}
+
+	torrentURL := "magnet:?xt=urn:btih:heavy-knight-4"
+	resource := model.SubscriptionResource{
+		SubscriptionID: sub.ID,
+		CanonicalKey:   "episode:01:4",
+		Fingerprint:    resourceFingerprint(parser.Episode{Title: "[ANi] 遭到流放的转生重骑士凭借游戏知识大开无双 - 04", TorrentURL: torrentURL}),
+		Title:          "[ANi] 遭到流放的转生重骑士凭借游戏知识大开无双 - 04",
+		Episode:        "04",
+		SeasonVal:      "S01",
+		TorrentURL:     torrentURL,
+		State:          SubscriptionResourceStateCompleted,
+		TargetFile:     targetFile,
+		Selected:       true,
+		Current:        true,
+	}
+	if err := db.DB.Create(&resource).Error; err != nil {
+		t.Fatalf("create false completed resource: %v", err)
+	}
+	falseLog := model.DownloadLog{
+		SubscriptionID: sub.ID,
+		ResourceID:     &resource.ID,
+		Title:          resource.Title,
+		Magnet:         torrentURL,
+		Episode:        "04",
+		SeasonVal:      "S01",
+		Status:         downloadLogStatusCompleted,
+		InfoHash:       "heavy-knight-4",
+		TargetFile:     targetFile,
+	}
+	if err := db.DB.Create(&falseLog).Error; err != nil {
+		t.Fatalf("create false completed log: %v", err)
+	}
+
+	down := &fakeDownloader{}
+	manager := &SubscriptionManager{
+		RSSParser: fakeRSSParser{episodes: []parser.Episode{{
+			Title:      resource.Title,
+			EpisodeNum: "04",
+			TorrentURL: torrentURL,
+		}}},
+		Downloader: down,
+		DB:         db.DB,
+	}
+	manager.ProcessSubscription(&sub)
+
+	if len(down.added) != 1 || down.added[0] != torrentURL {
+		t.Fatalf("expected the genuinely missing episode to be submitted, got %v", down.added)
+	}
+	var archived model.DownloadLog
+	if err := db.DB.First(&archived, falseLog.ID).Error; err != nil {
+		t.Fatalf("reload false log: %v", err)
+	}
+	if archived.Status != downloadLogStatusArchived || archived.TargetFile != "" {
+		t.Fatalf("false completion was not retracted: %+v", archived)
+	}
+	var activeLogs int64
+	if err := db.DB.Model(&model.DownloadLog{}).
+		Where("subscription_id = ? AND status = ?", sub.ID, downloadLogStatusDownloading).
+		Count(&activeLogs).Error; err != nil {
+		t.Fatalf("count active logs: %v", err)
+	}
+	if activeLogs != 1 {
+		t.Fatalf("expected one real downloading log, got %d", activeLogs)
+	}
+	if _, err := os.Stat(targetFile); err != nil {
+		t.Fatalf("repair must not delete the unrelated media file: %v", err)
 	}
 }
 
@@ -308,6 +419,107 @@ func TestRefreshAndRepairSubmitsOnlyMissingCanonicalEpisodes(t *testing.T) {
 	}
 	if !completed || !candidate || !submitted {
 		t.Fatalf("unexpected resource reconciliation result: %+v", resources)
+	}
+}
+
+func TestRefreshAndRepairRetractsCrossSeriesHistoryBeforeBackfill(t *testing.T) {
+	withServiceTestDB(t)
+
+	metadata := model.AnimeMetadata{Title: "转生成猫的大叔", TitleCN: "转生成猫的大叔"}
+	if err := db.DB.Create(&metadata).Error; err != nil {
+		t.Fatalf("create metadata: %v", err)
+	}
+	sub := model.Subscription{
+		Title:      "遭到流放的转生重骑士凭借游戏知识大开无双",
+		RSSUrl:     "https://example.test/heavy-knight-refresh",
+		IsActive:   true,
+		MetadataID: &metadata.ID,
+	}
+	if err := db.DB.Create(&sub).Error; err != nil {
+		t.Fatalf("create subscription: %v", err)
+	}
+	anime := model.LocalAnime{
+		Title:      "转生成猫的大叔",
+		Path:       filepath.Join(t.TempDir(), "转生成猫的大叔"),
+		MetadataID: &metadata.ID,
+	}
+	if err := db.DB.Create(&anime).Error; err != nil {
+		t.Fatalf("create local anime: %v", err)
+	}
+	if err := os.MkdirAll(anime.Path, 0o700); err != nil {
+		t.Fatalf("create anime path: %v", err)
+	}
+	targetFile := filepath.Join(anime.Path, "转生成猫的大叔 - S01E01.mkv")
+	if err := os.WriteFile(targetFile, []byte("cat"), 0o600); err != nil {
+		t.Fatalf("create target: %v", err)
+	}
+	if err := db.DB.Create(&model.LocalEpisode{
+		LocalAnimeID: anime.ID,
+		EpisodeNum:   1,
+		SeasonNum:    1,
+		Path:         targetFile,
+	}).Error; err != nil {
+		t.Fatalf("create local episode: %v", err)
+	}
+
+	release := parser.Episode{
+		Title:      "[ANi] 遭到流放的转生重骑士凭借游戏知识大开无双 - 01",
+		EpisodeNum: "01",
+		TorrentURL: "magnet:?xt=urn:btih:heavy-knight-refresh-1",
+	}
+	resource := model.SubscriptionResource{
+		SubscriptionID: sub.ID,
+		CanonicalKey:   resourceCanonicalKey("S01", "01", release.Title, false),
+		Fingerprint:    resourceFingerprint(release),
+		Title:          release.Title,
+		Episode:        "01",
+		SeasonVal:      "S01",
+		TorrentURL:     release.TorrentURL,
+		State:          SubscriptionResourceStateCompleted,
+		TargetFile:     targetFile,
+		Selected:       true,
+		Current:        true,
+	}
+	if err := db.DB.Create(&resource).Error; err != nil {
+		t.Fatalf("create resource: %v", err)
+	}
+	falseLog := model.DownloadLog{
+		SubscriptionID: sub.ID,
+		ResourceID:     &resource.ID,
+		Title:          release.Title,
+		Magnet:         release.TorrentURL,
+		Episode:        "01",
+		SeasonVal:      "S01",
+		Status:         downloadLogStatusCompleted,
+		TargetFile:     targetFile,
+	}
+	if err := db.DB.Create(&falseLog).Error; err != nil {
+		t.Fatalf("create false history: %v", err)
+	}
+
+	source := &refreshTestDownloader{
+		fakeDownloader: fakeDownloader{},
+		episodes:       []parser.Episode{release},
+	}
+	originalFactory := newSubscriptionManagerForRefresh
+	newSubscriptionManagerForRefresh = func(downloader.Downloader) *SubscriptionManager {
+		return &SubscriptionManager{
+			RSSParser:  fakeRSSParser{episodes: source.episodes},
+			Downloader: source,
+			DB:         db.DB,
+		}
+	}
+	t.Cleanup(func() { newSubscriptionManagerForRefresh = originalFactory })
+
+	result, err := RefreshAndRepairSubscriptions(context.Background(), source, nil)
+	if err != nil {
+		t.Fatalf("refresh and repair: %v", err)
+	}
+	if result.InvalidMappings != 1 || result.AutoSubmitted != 1 {
+		t.Fatalf("expected one invalid mapping and one backfill, got %+v", result)
+	}
+	if len(source.added) != 1 || source.added[0] != release.TorrentURL {
+		t.Fatalf("missing episode was not submitted after reconciliation: %v", source.added)
 	}
 }
 

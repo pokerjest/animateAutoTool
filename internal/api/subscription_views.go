@@ -370,16 +370,26 @@ type subscriptionLocalMatch struct {
 func findSubscriptionLocalAnimes(sub *model.Subscription) ([]model.LocalAnime, error) {
 	var localAnimes []model.LocalAnime
 	if sub.MetadataID != nil && *sub.MetadataID != 0 {
-		if err := db.DB.Where("metadata_id = ?", *sub.MetadataID).Order("local_animes.id ASC").Find(&localAnimes).Error; err != nil || len(localAnimes) > 0 {
-			return localAnimes, err
+		if err := db.DB.Where("metadata_id = ?", *sub.MetadataID).Order("local_animes.id ASC").Find(&localAnimes).Error; err != nil {
+			return nil, err
+		}
+		if matched := filterSubscriptionLocalAnimes(sub, localAnimes); len(matched) > 0 {
+			return matched, nil
+		}
+		if len(localAnimes) > 0 {
+			log.Printf("WARN: subscription %q shares metadata_id=%d with %d unrelated local series; ignoring metadata-only library match",
+				sub.Title, *sub.MetadataID, len(localAnimes))
 		}
 	}
 	if sub.Metadata != nil && sub.Metadata.BangumiID != 0 {
 		if err := db.DB.Model(&model.LocalAnime{}).
 			Joins("JOIN anime_metadata ON anime_metadata.id = local_animes.metadata_id").
 			Where("anime_metadata.bangumi_id = ?", sub.Metadata.BangumiID).
-			Order("local_animes.id ASC").Find(&localAnimes).Error; err != nil || len(localAnimes) > 0 {
-			return localAnimes, err
+			Order("local_animes.id ASC").Find(&localAnimes).Error; err != nil {
+			return nil, err
+		}
+		if matched := filterSubscriptionLocalAnimes(sub, localAnimes); len(matched) > 0 {
+			return matched, nil
 		}
 	}
 
@@ -390,6 +400,7 @@ func findSubscriptionLocalAnimes(sub *model.Subscription) ([]model.LocalAnime, e
 	if err := db.DB.Where("title IN ?", titles).Order("local_animes.id ASC").Find(&localAnimes).Error; err != nil {
 		return nil, err
 	}
+	localAnimes = filterSubscriptionLocalAnimes(sub, localAnimes)
 	// Files organized from a subscription use the subscription metadata title.
 	// Link a single unambiguous fallback match so later Jellyfin reconciliation
 	// can use provider IDs without requiring a manual local-library visit.
@@ -401,6 +412,16 @@ func findSubscriptionLocalAnimes(sub *model.Subscription) ([]model.LocalAnime, e
 		}
 	}
 	return localAnimes, nil
+}
+
+func filterSubscriptionLocalAnimes(sub *model.Subscription, candidates []model.LocalAnime) []model.LocalAnime {
+	matched := make([]model.LocalAnime, 0, len(candidates))
+	for i := range candidates {
+		if service.LocalAnimeMatchesSubscription(sub, &candidates[i]) {
+			matched = append(matched, candidates[i])
+		}
+	}
+	return matched
 }
 
 func subscriptionLocalTitleCandidates(sub *model.Subscription) []string {

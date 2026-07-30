@@ -32,6 +32,7 @@ type SubscriptionRefreshResult struct {
 	SyncedLogs       int
 	CompletedLogs    int
 	LibraryRepairs   int
+	InvalidMappings  int
 	ArchivedLogs     int
 	ProgressUpdated  int
 	Checked          int
@@ -51,7 +52,8 @@ type SubscriptionRefreshResult struct {
 // RefreshAndRepairSubscriptions is non-destructive but complete: it first
 // reconciles qB, local media, compatibility logs and RSS candidates, then
 // submits only canonical episodes that have no qB task, local file, durable
-// failed state or prior download history. It never archives/deletes records
+// failed state or prior valid download history. It archives only completed
+// records proven to point at a different indexed series, never deletes media,
 // and never performs an implicit V2/V3 upgrade.
 func RefreshAndRepairSubscriptions(
 	ctx context.Context,
@@ -103,6 +105,7 @@ func RefreshAndRepairSubscriptions(
 		result.NeedsAttention++
 	} else {
 		result.LibraryRepairs = repairResult.Repaired
+		result.InvalidMappings = repairResult.Invalidated
 	}
 	progress("本地记录已核对，正在同步资源对账表", 2)
 	resourceUpdates, err := ReconcileSubscriptionResourcesFromDownloadLogs()
@@ -217,17 +220,18 @@ func recalculateSubscriptionProgress(subs []model.Subscription) (int, error) {
 
 func (r SubscriptionRefreshResult) Summary() string {
 	summary := fmt.Sprintf(
-		"对账完成：检查 %d 条订阅，发现 %d 条 RSS 候选（%d 个规范集数），修复 %d 条下载记录，补交 %d 集下载",
+		"对账完成：检查 %d 条订阅，发现 %d 条 RSS 候选（%d 个规范集数），修复 %d 条下载记录，撤销 %d 条错误映射，补交 %d 集下载",
 		r.Checked,
 		r.Discovered,
 		r.CanonicalCount,
 		r.SyncedLogs+r.LibraryRepairs,
+		r.InvalidMappings,
 		r.AutoSubmitted,
 	)
 	if r.Unresolved > 0 || r.FailedChecks > 0 {
 		summary += fmt.Sprintf("；%d 条未解析，%d 条订阅对账失败", r.Unresolved, r.FailedChecks)
 	}
-	summary += "；未自动删除或归档记录，V2/V3 仍需手动升级"
+	summary += "；未删除任何媒体文件，V2/V3 仍需手动升级"
 	return summary
 }
 

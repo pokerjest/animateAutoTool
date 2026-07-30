@@ -189,6 +189,17 @@ func (m *SubscriptionManager) ProcessSubscriptionWithSourceContext(ctx context.C
 	duplicateCount := 0
 	latestTitle := ""
 	lastError := ""
+	if invalidated, invalidateErr := invalidateMismatchedLocalDownloadLogs(*sub); invalidateErr != nil {
+		log.Printf("SubscriptionManager: failed to validate existing local download mappings for %s: %v", sub.Title, invalidateErr)
+	} else if invalidated > 0 {
+		log.Printf("SubscriptionManager: retracted %d cross-series local mappings for %s before RSS reconciliation", invalidated, sub.Title)
+		progressSubs := []model.Subscription{*sub}
+		if _, progressErr := recalculateSubscriptionProgress(progressSubs); progressErr != nil {
+			log.Printf("SubscriptionManager: failed to recalculate progress after retracting mappings for %s: %v", sub.Title, progressErr)
+		} else {
+			sub.LastEp = progressSubs[0].LastEp
+		}
+	}
 	var resourceStore *store.SubscriptionResourceStore
 	var knownResources []model.SubscriptionResource
 	if m.DB != nil && sub.ID != 0 {
@@ -342,6 +353,7 @@ func (m *SubscriptionManager) ProcessSubscriptionWithSourceContext(ctx context.C
 		if !recoveredExisting {
 			if targetFile, matched := resolveLogTargetFromLibrary(model.DownloadLog{
 				SubscriptionID: sub.ID,
+				Title:          ep.Title,
 				Episode:        episodeNum,
 			}, *sub); matched && targetFile != "" {
 				matchedTorrent = downloader.TorrentInfo{
@@ -387,6 +399,7 @@ func (m *SubscriptionManager) ProcessSubscriptionWithSourceContext(ctx context.C
 			if addErr != nil {
 				if targetFile, matched := resolveLogTargetFromLibrary(model.DownloadLog{
 					SubscriptionID: sub.ID,
+					Title:          ep.Title,
 					Episode:        episodeNum,
 				}, *sub); matched && targetFile != "" {
 					matchedTorrent = downloader.TorrentInfo{

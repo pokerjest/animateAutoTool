@@ -6,6 +6,7 @@ import (
 
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/model"
+	"github.com/pokerjest/animateAutoTool/internal/service"
 )
 
 type HealthReport struct {
@@ -72,23 +73,46 @@ func buildHealthReport() HealthReport {
 	report.JellyfinSeriesCount, _ = laStore.CountAnimesWithJellyfin()
 	report.JellyfinEpisodeCount, _ = laStore.CountEpisodesWithJellyfin()
 	report.StaleSubscriptions72H, _ = subStore.CountStaleSince(time.Now().Add(-72 * time.Hour))
-	db.DB.Raw(`
-		SELECT COUNT(DISTINCT subscriptions.id)
-		FROM subscriptions
-		JOIN local_animes ON (local_animes.metadata_id = subscriptions.metadata_id OR local_animes.title = subscriptions.title)
-		WHERE local_animes.jellyfin_series_id <> ''
-	`).Scan(&report.SubscriptionsPlayable)
-	db.DB.Raw(`
-		SELECT COUNT(DISTINCT subscriptions.id)
-		FROM subscriptions
-		JOIN local_animes ON (local_animes.metadata_id = subscriptions.metadata_id OR local_animes.title = subscriptions.title)
-		WHERE (local_animes.jellyfin_series_id = '' OR local_animes.jellyfin_series_id IS NULL)
-	`).Scan(&report.SubscriptionsPendingSync)
+	populateSubscriptionMediaHealth(&report)
 
 	report.Recommendations = buildRecommendations(report)
 	report.Summary = buildHealthSummary(report)
 	report.HealthTone = determineHealthTone(report)
 	return report
+}
+
+func populateSubscriptionMediaHealth(report *HealthReport) {
+	if report == nil || db.DB == nil {
+		return
+	}
+	var subscriptions []model.Subscription
+	if err := db.DB.Preload("Metadata").Find(&subscriptions).Error; err != nil {
+		return
+	}
+	var localAnimes []model.LocalAnime
+	if err := db.DB.Find(&localAnimes).Error; err != nil {
+		return
+	}
+
+	for i := range subscriptions {
+		hasLocalMatch := false
+		hasPlayableMatch := false
+		for j := range localAnimes {
+			if !service.LocalAnimeMatchesSubscription(&subscriptions[i], &localAnimes[j]) {
+				continue
+			}
+			hasLocalMatch = true
+			if strings.TrimSpace(localAnimes[j].JellyfinSeriesID) != "" {
+				hasPlayableMatch = true
+			}
+		}
+		if hasPlayableMatch {
+			report.SubscriptionsPlayable++
+		}
+		if hasLocalMatch && !hasPlayableMatch {
+			report.SubscriptionsPendingSync++
+		}
+	}
 }
 
 func buildRecommendations(report HealthReport) []string {
