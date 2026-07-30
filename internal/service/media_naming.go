@@ -85,14 +85,26 @@ func mediaEpisodeFilename(sub *model.Subscription, season, episode, ext, origina
 	if pattern == "" {
 		pattern = renamer.DefaultEpisodeTemplate
 	}
-	return renamer.FormatTemplate(pattern, renamer.TemplateData{
-		Title:    mediaSeriesTitle(sub),
-		Season:   mediaSeasonValue(sub, season),
-		Episode:  episode,
-		Year:     mediaSeriesYear(sub),
-		Ext:      ext,
-		Original: original,
+	parsed := parser.ParseFilename(original + ext)
+	filename, err := renamer.FormatTemplate(pattern, renamer.TemplateData{
+		Title:      mediaSeriesTitle(sub),
+		Season:     mediaSeasonValue(sub, season),
+		Episode:    episode,
+		Year:       mediaSeriesYear(sub),
+		Ext:        ext,
+		Original:   original,
+		Group:      parsed.Group,
+		Resolution: parsed.Resolution,
+		Version:    parsed.Version,
+		Language:   parsed.Language,
 	})
+	if err != nil {
+		return "", err
+	}
+	if parsed.Version != "" && !strings.Contains(pattern, "{version}") {
+		filename = renamer.PreserveVersionSuffix(filename, parsed.Version)
+	}
+	return filename, nil
 }
 
 func mediaSeasonDirectory(sub *model.Subscription, season string) string {

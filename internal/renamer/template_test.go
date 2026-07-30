@@ -65,3 +65,17 @@ func TestMediaTemplatesRequireRecognizableSingleSegmentNames(t *testing.T) {
 		t.Fatal("expected episode template without season token to be rejected")
 	}
 }
+
+func TestPreserveVersionSuffixOnlyAddsMissingReleaseVersion(t *testing.T) {
+	t.Parallel()
+
+	if got := PreserveVersionSuffix("Example - S01E01.mp4", "V2"); got != "Example - S01E01 v2.mp4" {
+		t.Fatalf("PreserveVersionSuffix = %q", got)
+	}
+	if got := PreserveVersionSuffix("Example - S01E01 [V2].mp4", "v2"); got != "Example - S01E01 [V2].mp4" {
+		t.Fatalf("existing version was duplicated: %q", got)
+	}
+	if got := PreserveVersionSuffix("Example - S01E01.mp4", ""); got != "Example - S01E01.mp4" {
+		t.Fatalf("empty version changed filename: %q", got)
+	}
+}

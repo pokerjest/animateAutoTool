@@ -172,6 +172,24 @@ func ValidateEpisodeTemplate(pattern string) error {
 	return nil
 }
 
+// PreserveVersionSuffix keeps corrected releases such as V2/V3 distinct when
+// a legacy or default template does not include {version}. If the rendered
+// name already contains the version marker (for example through {original}),
+// it is returned unchanged.
+func PreserveVersionSuffix(filename, version string) string {
+	version = sanitizeSegment(strings.ToLower(strings.TrimSpace(version)))
+	if filename == "" || version == "" {
+		return filename
+	}
+	ext := path.Ext(filename)
+	stem := strings.TrimSuffix(filename, ext)
+	versionPattern := regexp.MustCompile(`(?i)(?:^|[\s._\-\[(])` + regexp.QuoteMeta(version) + `(?:$|[\s._\-\])])`)
+	if versionPattern.MatchString(stem) {
+		return filename
+	}
+	return strings.TrimSpace(stem) + " " + version + ext
+}
+
 func normalizeNumber(value, fallback string) string {
 	value = strings.TrimSpace(strings.TrimPrefix(strings.ToUpper(value), "S"))
 	if value == "" {

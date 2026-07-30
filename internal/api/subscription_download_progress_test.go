@@ -43,7 +43,7 @@ func TestLiveTorrentForLogDoesNotEnrichArchivedHistory(t *testing.T) {
 func TestLiveTorrentForLogMatchesVersionedTitleAndEpisode(t *testing.T) {
 	byHash := map[string]downloader.TorrentInfo{}
 	byName := map[string]downloader.TorrentInfo{
-		"normalized:[ani] show - 01 [1080p] [mp4]": {
+		"normalized:[ani] show - 01 [1080p]": {
 			Name:     "[ANi] Show - 01 [1080P][V2][MP4]",
 			Progress: .37,
 		},
@@ -61,7 +61,7 @@ func TestLiveTorrentForLogMatchesVersionedTitleAndEpisode(t *testing.T) {
 	byName = map[string]downloader.TorrentInfo{}
 	byEpisode := map[string][]downloader.TorrentInfo{
 		"1:1": {
-			{Name: "Show - 01", Progress: 42},
+			{Name: "Show - 01", Hash: "show-01", Progress: 42},
 		},
 	}
 	matched, ok = liveTorrentForLogWithEpisodes(
@@ -72,6 +72,43 @@ func TestLiveTorrentForLogMatchesVersionedTitleAndEpisode(t *testing.T) {
 	)
 	if !ok || matched.Progress != 42 {
 		t.Fatalf("episode match = %#v, ok=%v", matched, ok)
+	}
+}
+
+func TestLiveTorrentForLogDoesNotGuessAnotherSeriesWithSameEpisode(t *testing.T) {
+	byEpisode := map[string][]downloader.TorrentInfo{
+		"1:1": {
+			{Name: "Other Show - 01.mkv", Hash: "other-01", Progress: 1},
+		},
+	}
+	if matched, ok := liveTorrentForLogWithEpisodes(
+		model.DownloadLog{Title: "[Group] Target Show - 01", Episode: "01", SeasonVal: "S01"},
+		nil,
+		nil,
+		byEpisode,
+	); ok {
+		t.Fatalf("same-number torrent from another series was attached: %+v", matched)
+	}
+}
+
+func TestLiveTorrentForLogUsesSeasonDirectoryAndMultiEpisodeRange(t *testing.T) {
+	torrent := downloader.TorrentInfo{
+		Name:        "Multi Show S02E03-E05.mkv",
+		Hash:        "multi-show",
+		ContentPath: `/downloads/Multi Show/Season 02/Multi Show S02E03-E05.mkv`,
+		Progress:    .72,
+	}
+	byEpisode := map[string][]downloader.TorrentInfo{}
+	addLiveTorrentEpisodeIdentities(byEpisode, torrent)
+
+	matched, ok := liveTorrentForLogWithEpisodes(
+		model.DownloadLog{Title: "[Group] Multi Show - 04", Episode: "04", SeasonVal: "S02"},
+		nil,
+		nil,
+		byEpisode,
+	)
+	if !ok || matched.Hash != "multi-show" {
+		t.Fatalf("multi-episode live progress match = %+v, ok=%v", matched, ok)
 	}
 }
 

@@ -18,7 +18,7 @@ describe('LocalOrganizeDialog', () => {
         plan_id: 'plan-1', expires_at: '2026-07-27T12:15:00Z', series_template: '{title}', episode_template: '{title} - S{season}E{episode}{ext}',
         selected_count: 2, change_count: 2, unchanged_count: 0, conflict_count: 0, skipped_count: 0,
         items: [
-          { anime_id: 1, title: '番剧 A', source_path: '/old/a', target_path: '/new/a', metadata_matched: true, warnings: [], changes: [{ kind: 'video', original: '/old/a/1.mkv', target: '/new/a/Season 01/a.mkv', status: 'ready', managed_by_qb: true }] },
+          { anime_id: 1, title: '番剧 A', source_path: '/old/a', target_path: '/new/a', metadata_matched: true, warnings: [], changes: [{ kind: 'video', original: '/old/a/1.mkv', target: '/new/a/Season 01/a v2.mkv', status: 'ready', managed_by_qb: true, parse_source: 'filename:dash', parse_confidence: 0.98, version: 'v2' }] },
           { anime_id: 2, title: '番剧 B', source_path: '/old/b', target_path: '/new/b', metadata_matched: false, warnings: ['未匹配规范元数据'], changes: [{ kind: 'video', original: '/old/b/1.mkv', target: '/new/b/Season 01/b.mkv', status: 'ready', managed_by_qb: false }] },
         ],
       })
@@ -39,6 +39,7 @@ describe('LocalOrganizeDialog', () => {
     await vi.waitFor(() => expect(wrapper.text()).toContain('番剧 B'))
     expect(wrapper.text()).toContain('qB 安全移动')
     expect(wrapper.text()).toContain('未匹配规范元数据')
+    expect(wrapper.text()).toContain('版本 v2')
 
     const checkboxes = wrapper.findAll('input[type="checkbox"]')
     await checkboxes[1].setValue(false)

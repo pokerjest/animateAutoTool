@@ -3,6 +3,7 @@ package service
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -194,6 +195,220 @@ func TestSyncDownloadLogStatusesMatchesVersionedReleaseTitle(t *testing.T) {
 	}
 	if updated.Status != downloadLogStatusCompleted {
 		t.Fatalf("expected completed status after V2 match, got %q", updated.Status)
+	}
+}
+
+func TestSyncDownloadLogStatusesMatchesRSSTitleToQBMaterializedFilename(t *testing.T) {
+	withServiceTestDB(t)
+
+	subscription := model.Subscription{
+		Title:    "才女的侍从 在满是高岭之花的贵族学校暗中照顾（毫无生活自理能力的）学院第一大小姐",
+		RSSUrl:   "https://example.test/ani-rss",
+		SavePath: `E:\Bangumi\才女的侍从 在满是高岭之花的贵族学校暗中照顾（毫无生活自理能力的）学院第一大小姐`,
+	}
+	if err := db.DB.Create(&subscription).Error; err != nil {
+		t.Fatalf("create subscription: %v", err)
+	}
+	logEntry := model.DownloadLog{
+		SubscriptionID: subscription.ID,
+		Title:          "[ANi]  才女的侍从 在满是高岭之花的贵族学校暗中照顾（毫无生活自理能力的）学院第一大小姐 - 04 [1080P][Baha][WEB-DL][AAC AVC][CHT][MP4]",
+		Episode:        "04",
+		SeasonVal:      "S01",
+		Status:         downloadLogStatusDownloading,
+	}
+	if err := db.DB.Create(&logEntry).Error; err != nil {
+		t.Fatalf("create download log: %v", err)
+	}
+
+	target := `E:\Bangumi\才女的侍从 在满是高岭之花的贵族学校暗中照顾（毫无生活自理能力的）学院第一大小姐\Season 01\[ANi]  才女的侍从 在满是高岭之花的贵族学校暗中照顾（毫无生活自理能力的）学院第一大小姐 - 04 [1080P][Baha][WEB-DL][AAC AVC][CHT].mp4`
+	result, err := SyncDownloadLogStatuses(fakeTorrentStatusSource{torrents: []downloader.TorrentInfo{{
+		Hash:        "materialized-04",
+		Name:        strings.TrimSuffix(filepath.Base(target), ".mp4") + ".mp4",
+		State:       "downloading",
+		Progress:    1,
+		SavePath:    `E:\Bangumi\才女的侍从 在满是高岭之花的贵族学校暗中照顾（毫无生活自理能力的）学院第一大小姐\Season 01`,
+		ContentPath: target,
+	}}})
+	if err != nil {
+		t.Fatalf("sync statuses: %v", err)
+	}
+	if result.Completed != 1 || len(result.CompletedTargets) != 1 || result.CompletedTargets[0] != target {
+		t.Fatalf("expected completed materialized torrent to be queued for scanning, got %#v", result)
+	}
+
+	var updated model.DownloadLog
+	if err := db.DB.First(&updated, logEntry.ID).Error; err != nil {
+		t.Fatalf("reload download log: %v", err)
+	}
+	if updated.Status != downloadLogStatusCompleted || updated.InfoHash != "materialized-04" || updated.TargetFile != target {
+		t.Fatalf("unexpected synchronized log: %+v", updated)
+	}
+}
+
+func TestSyncDownloadLogStatusesDoesNotMatchSameEpisodeFromAnotherSeries(t *testing.T) {
+	withServiceTestDB(t)
+
+	subscription := model.Subscription{
+		Title:    "Target Show",
+		RSSUrl:   "https://example.test/target-show",
+		SavePath: `/downloads/Target Show`,
+	}
+	if err := db.DB.Create(&subscription).Error; err != nil {
+		t.Fatalf("create subscription: %v", err)
+	}
+	logEntry := model.DownloadLog{
+		SubscriptionID: subscription.ID,
+		Title:          "[Group] Target Show - 01 [MP4]",
+		Episode:        "01",
+		SeasonVal:      "S01",
+		Status:         downloadLogStatusDownloading,
+	}
+	if err := db.DB.Create(&logEntry).Error; err != nil {
+		t.Fatalf("create download log: %v", err)
+	}
+
+	result, err := SyncDownloadLogStatuses(fakeTorrentStatusSource{torrents: []downloader.TorrentInfo{{
+		Hash:        "wrong-show",
+		Name:        "[Other] Other Show - 01 [1080P].mp4",
+		State:       "uploading",
+		Progress:    1,
+		SavePath:    `/downloads/Other Show/Season 01`,
+		ContentPath: `/downloads/Other Show/Season 01/Other Show - 01.mp4`,
+	}}})
+	if err != nil {
+		t.Fatalf("sync statuses: %v", err)
+	}
+	if result.Completed != 0 || len(result.CompletedTargets) != 0 || result.Unmatched != 1 {
+		t.Fatalf("same-episode torrent from another series was matched: %#v", result)
+	}
+}
+
+func TestSyncDownloadLogStatusesUsesSeasonDirectoryWhenTaskNameOmitsSeason(t *testing.T) {
+	withServiceTestDB(t)
+
+	subscription := model.Subscription{
+		Title:    "Seasoned Show",
+		Season:   "S02",
+		RSSUrl:   "https://example.test/seasoned-show",
+		SavePath: `/downloads/Seasoned Show`,
+	}
+	if err := db.DB.Create(&subscription).Error; err != nil {
+		t.Fatalf("create subscription: %v", err)
+	}
+	logEntry := model.DownloadLog{
+		SubscriptionID: subscription.ID,
+		Title:          "[Group] Seasoned Show - 03 [MP4]",
+		Episode:        "03",
+		SeasonVal:      "S02",
+		Status:         downloadLogStatusDownloading,
+	}
+	if err := db.DB.Create(&logEntry).Error; err != nil {
+		t.Fatalf("create download log: %v", err)
+	}
+
+	target := `/downloads/Seasoned Show/Season 02/Seasoned Show - 03.mkv`
+	result, err := SyncDownloadLogStatuses(fakeTorrentStatusSource{torrents: []downloader.TorrentInfo{{
+		Hash:        "season-directory",
+		Name:        "Seasoned Show - 03.mkv",
+		State:       "uploading",
+		SavePath:    `/downloads/Seasoned Show/Season 02`,
+		ContentPath: target,
+		Progress:    1,
+	}}})
+	if err != nil {
+		t.Fatalf("sync statuses: %v", err)
+	}
+	if result.Completed != 1 || len(result.CompletedTargets) != 1 || result.CompletedTargets[0] != target {
+		t.Fatalf("expected season-directory match, got %#v", result)
+	}
+}
+
+func TestSyncDownloadLogStatusesMatchesEpisodeInsideMultiEpisodeTorrent(t *testing.T) {
+	withServiceTestDB(t)
+
+	subscription := model.Subscription{
+		Title:    "Multi Show",
+		Season:   "S01",
+		RSSUrl:   "https://example.test/multi-show",
+		SavePath: `/downloads/Multi Show`,
+	}
+	if err := db.DB.Create(&subscription).Error; err != nil {
+		t.Fatalf("create subscription: %v", err)
+	}
+	logEntry := model.DownloadLog{
+		SubscriptionID: subscription.ID,
+		Title:          "[Group] Multi Show - 04",
+		Episode:        "04",
+		SeasonVal:      "S01",
+		Status:         downloadLogStatusDownloading,
+	}
+	if err := db.DB.Create(&logEntry).Error; err != nil {
+		t.Fatalf("create download log: %v", err)
+	}
+
+	target := `/downloads/Multi Show/Season 01/Multi Show S01E03-E05.mkv`
+	result, err := SyncDownloadLogStatuses(fakeTorrentStatusSource{torrents: []downloader.TorrentInfo{{
+		Hash:        "multi-episode",
+		Name:        "Multi Show S01E03-E05.mkv",
+		State:       "uploading",
+		SavePath:    `/downloads/Multi Show/Season 01`,
+		ContentPath: target,
+		Progress:    1,
+	}}})
+	if err != nil {
+		t.Fatalf("sync statuses: %v", err)
+	}
+	if result.Completed != 1 || len(result.CompletedTargets) != 1 || result.CompletedTargets[0] != target {
+		t.Fatalf("expected multi-episode match, got %#v", result)
+	}
+}
+
+func TestSyncDownloadLogStatusesRefusesAmbiguousPathFallback(t *testing.T) {
+	withServiceTestDB(t)
+
+	subscription := model.Subscription{
+		Title:    "Target Show",
+		Season:   "S01",
+		RSSUrl:   "https://example.test/target-show-ambiguous",
+		SavePath: `/downloads/shared`,
+	}
+	if err := db.DB.Create(&subscription).Error; err != nil {
+		t.Fatalf("create subscription: %v", err)
+	}
+	logEntry := model.DownloadLog{
+		SubscriptionID: subscription.ID,
+		Title:          "[Group] Target Show - 01",
+		Episode:        "01",
+		SeasonVal:      "S01",
+		Status:         downloadLogStatusDownloading,
+	}
+	if err := db.DB.Create(&logEntry).Error; err != nil {
+		t.Fatalf("create download log: %v", err)
+	}
+
+	result, err := SyncDownloadLogStatuses(fakeTorrentStatusSource{torrents: []downloader.TorrentInfo{
+		{
+			Hash:        "ambiguous-a",
+			Name:        "a.mkv",
+			State:       "downloading",
+			SavePath:    `/downloads/shared/Season 01`,
+			ContentPath: `/downloads/shared/Season 01/01.mkv`,
+			Progress:    .35,
+		},
+		{
+			Hash:        "ambiguous-b",
+			Name:        "b.mkv",
+			State:       "uploading",
+			SavePath:    `/downloads/shared/Season 01`,
+			ContentPath: `/downloads/shared/Season 01/Episode 01.mkv`,
+			Progress:    1,
+		},
+	}})
+	if err != nil {
+		t.Fatalf("sync statuses: %v", err)
+	}
+	if result.Completed != 0 || result.Unmatched != 1 || len(result.CompletedTargets) != 0 {
+		t.Fatalf("ambiguous candidates must not be guessed: %#v", result)
 	}
 }
 

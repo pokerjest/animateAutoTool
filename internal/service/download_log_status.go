@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/downloader"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/parser"
@@ -147,6 +148,7 @@ func SyncDownloadLogStatuses(source TorrentStatusSource) (DownloadLogStatusSyncR
 	byHash := make(map[string]downloader.TorrentInfo, len(torrents))
 	byName := make(map[string]downloader.TorrentInfo, len(torrents))
 	byNormalizedName := make(map[string]downloader.TorrentInfo, len(torrents))
+	byEpisode := make(map[string][]downloader.TorrentInfo)
 	for _, torrent := range torrents {
 		if torrent.Hash != "" {
 			addPreferredTorrent(byHash, strings.ToLower(strings.TrimSpace(torrent.Hash)), torrent)
@@ -157,12 +159,23 @@ func SyncDownloadLogStatuses(source TorrentStatusSource) (DownloadLogStatusSyncR
 				addPreferredTorrent(byNormalizedName, normalized, torrent)
 			}
 		}
+		addTorrentEpisodeIdentities(byEpisode, torrent)
 	}
 
+	subscriptions := loadSubscriptionsForDownloadLogMatching()
 	result := DownloadLogStatusSyncResult{}
 	completedTargetSet := make(map[string]struct{})
 	for _, logEntry := range logs {
 		torrent, ok := matchTorrentForLogWithNormalized(logEntry, byHash, byName, byNormalizedName)
+		if !ok {
+			var matchedByFallback bool
+			torrent, matchedByFallback = matchTorrentForLogByEpisode(logEntry, subscriptions[logEntry.SubscriptionID], byEpisode)
+			ok = matchedByFallback
+			if ok {
+				log.Printf("Worker: matched download log by episode/title/path fallback (subscription=%d episode=%s target=%s)",
+					logEntry.SubscriptionID, strings.TrimSpace(logEntry.Episode), strings.TrimSpace(torrentContentPath(torrent)))
+			}
+		}
 		if !ok {
 			result.Unmatched++
 			continue
@@ -221,6 +234,202 @@ func SyncDownloadLogStatuses(source TorrentStatusSource) (DownloadLogStatusSyncR
 	}
 
 	return result, nil
+}
+
+func loadSubscriptionsForDownloadLogMatching() map[uint]model.Subscription {
+	result := make(map[uint]model.Subscription)
+	if db.DB == nil {
+		return result
+	}
+	var subscriptions []model.Subscription
+	if err := db.DB.Find(&subscriptions).Error; err != nil {
+		log.Printf("Worker: failed to load subscriptions for download-log matching: %v", err)
+		return result
+	}
+	for _, subscription := range subscriptions {
+		result[subscription.ID] = subscription
+	}
+	return result
+}
+
+func torrentEpisodeKey(season, episode string) string {
+	return parser.NormalizeSeasonNumber(season) + ":" + parser.NormalizeEpisodeNumber(episode)
+}
+
+func addTorrentEpisodeIdentities(index map[string][]downloader.TorrentInfo, torrent downloader.TorrentInfo) {
+	if index == nil {
+		return
+	}
+	seen := make(map[string]struct{})
+	add := func(season, episode string) {
+		season = parser.NormalizeSeasonNumber(season)
+		episode = parser.NormalizeEpisodeNumber(episode)
+		if episode == "" {
+			return
+		}
+		key := torrentEpisodeKey(season, episode)
+		identity := key + "\x00" + strings.ToLower(strings.TrimSpace(torrent.Hash)) + "\x00" + normalizeTorrentPath(torrentContentPath(torrent))
+		if _, exists := seen[identity]; exists {
+			return
+		}
+		seen[identity] = struct{}{}
+		index[key] = append(index[key], torrent)
+	}
+
+	if season, episode := parser.EpisodeIdentityFromTitle(torrent.Name); episode != "" {
+		add(season, episode)
+	}
+	if season, episodes := parser.EpisodeIdentitiesFromPath(torrentContentPath(torrent)); len(episodes) > 0 {
+		for _, episode := range episodes {
+			add(season, episode)
+		}
+	}
+}
+
+// matchTorrentForLogByEpisode is the conservative fallback used when a
+// qBittorrent task has a localized/normalized title or the RSS title differs
+// by transport markers such as an extension. It requires the same episode,
+// related series title, and—when available—the subscription's save directory.
+// This mirrors the directory-first matching used by Jellyfin/Emby while
+// retaining AniRSS-style episode identity as the final deterministic key.
+func matchTorrentForLogByEpisode(logEntry model.DownloadLog, subscription model.Subscription, byEpisode map[string][]downloader.TorrentInfo) (downloader.TorrentInfo, bool) {
+	season, episode := parser.EpisodeIdentityFromTitle(logEntry.Title)
+	if episode == "" {
+		episode = parser.NormalizeEpisodeNumber(logEntry.Episode)
+	}
+	if value := parser.NormalizeSeasonNumber(logEntry.SeasonVal); value != "" {
+		season = value
+	} else if season == "" {
+		season = parser.NormalizeSeasonNumber(logEntry.SeasonVal)
+	}
+	key := torrentEpisodeKey(season, episode)
+	if key == ":" {
+		return downloader.TorrentInfo{}, false
+	}
+
+	expectedPath := ""
+	if subscription.ID != 0 {
+		expectedPath = normalizeTorrentPath(NewSubscriptionManager(nil).resolveSavePath(&subscription, logEntry.SeasonVal))
+	}
+	if target := strings.TrimSpace(logEntry.TargetFile); target != "" {
+		target = filepath.Dir(filepath.Clean(target))
+		if expectedPath == "" {
+			expectedPath = normalizeTorrentPath(target)
+		}
+	}
+
+	var best downloader.TorrentInfo
+	bestScore := 0
+	bestIdentity := ""
+	ambiguous := false
+	for _, torrent := range byEpisode[key] {
+		score, identity, eligible := torrentFallbackEvidence(torrent, logEntry, subscription, expectedPath, season, episode)
+		if !eligible {
+			continue
+		}
+		switch {
+		case score > bestScore:
+			bestScore = score
+			best = torrent
+			bestIdentity = identity
+			ambiguous = false
+		case score == bestScore && sameTorrentIdentity(identity, bestIdentity):
+			if preferredTorrent(torrent, best) {
+				best = torrent
+			}
+		case score == bestScore:
+			// Progress and state are snapshot quality, not identity evidence.
+			// Never use a completed candidate to break a tie between distinct
+			// torrents that otherwise look equally plausible.
+			ambiguous = true
+		}
+	}
+	if ambiguous {
+		log.Printf("Worker: refusing ambiguous episode fallback match (subscription=%d season=%s episode=%s path=%s)",
+			logEntry.SubscriptionID, season, episode, expectedPath)
+		return downloader.TorrentInfo{}, false
+	}
+	return best, bestScore > 0
+}
+
+func torrentFallbackEvidence(
+	torrent downloader.TorrentInfo,
+	logEntry model.DownloadLog,
+	subscription model.Subscription,
+	expectedPath string,
+	season string,
+	episode string,
+) (score int, identity string, eligible bool) {
+	if !torrentHasEpisodeIdentity(torrent, season, episode) {
+		return 0, "", false
+	}
+	titleRelated := titlesLookRelated(torrent.Name, logEntry.Title) ||
+		titlesLookRelated(torrentContentPath(torrent), logEntry.Title)
+	if !titleRelated && subscription.Title != "" {
+		titleRelated = titlesLookRelated(torrent.Name, subscription.Title) ||
+			titlesLookRelated(torrentContentPath(torrent), subscription.Title)
+	}
+	pathMatch := expectedPath != "" &&
+		(torrentPathMatches(torrent.SavePath, expectedPath) || torrentPathMatches(torrent.ContentPath, expectedPath))
+	score = torrentFallbackMatchScore(titleRelated, pathMatch, expectedPath != "")
+	if score == 0 {
+		return 0, "", false
+	}
+	if pathMatch {
+		score += 10
+	}
+	identity = strings.ToLower(strings.TrimSpace(torrent.Hash))
+	if identity == "" {
+		identity = normalizeTorrentPath(torrentContentPath(torrent))
+	}
+	return score, identity, true
+}
+
+func torrentFallbackMatchScore(titleRelated, pathMatch, hasExpectedPath bool) int {
+	switch {
+	case titleRelated && pathMatch:
+		return 100
+	case titleRelated && !hasExpectedPath:
+		return 82
+	case !titleRelated && pathMatch:
+		// A qB task can be renamed to a hash or a localized title. A
+		// configured subscription directory plus exact season/episode is
+		// enough to recover it, but it is deliberately weaker than a title
+		// match and participates in ambiguity checks in the caller.
+		return 72
+	default:
+		return 0
+	}
+}
+
+func sameTorrentIdentity(a, b string) bool {
+	a = strings.TrimSpace(a)
+	b = strings.TrimSpace(b)
+	return a != "" && b != "" && a == b
+}
+
+func torrentHasEpisodeIdentity(torrent downloader.TorrentInfo, season, episode string) bool {
+	targetSeason := parser.NormalizeSeasonNumber(season)
+	targetEpisode := parser.NormalizeEpisodeNumber(episode)
+	if targetEpisode == "" {
+		return false
+	}
+	if candidateSeason, candidateEpisode := parser.EpisodeIdentityFromTitle(torrent.Name); candidateEpisode != "" &&
+		parser.NormalizeEpisodeNumber(candidateEpisode) == targetEpisode &&
+		(targetSeason == "" || candidateSeason == "" || parser.NormalizeSeasonNumber(candidateSeason) == targetSeason) {
+		return true
+	}
+	if candidateSeason, episodes := parser.EpisodeIdentitiesFromPath(torrentContentPath(torrent)); len(episodes) > 0 {
+		if parser.NormalizeSeasonNumber(candidateSeason) != targetSeason {
+			return false
+		}
+		for _, candidateEpisode := range episodes {
+			if parser.NormalizeEpisodeNumber(candidateEpisode) == targetEpisode {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func matchTorrentForLog(logEntry model.DownloadLog, byHash map[string]downloader.TorrentInfo, byName map[string]downloader.TorrentInfo) (downloader.TorrentInfo, bool) {

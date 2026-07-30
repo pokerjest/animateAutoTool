@@ -68,4 +68,39 @@ describe('management workspace navigation', () => {
 
     wrapper.unmount()
   })
+
+  it('lets desktop users collapse and restore the sidebar from the header', async () => {
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: '/', component: Page }],
+    })
+    await router.push('/')
+    await router.isReady()
+
+    const pinia = createPinia()
+    const wrapper = mount(AppShell, {
+      global: {
+        plugins: [pinia, router],
+        stubs: {
+          AppBackground: true,
+          PlaybackHost: true,
+          AssistantWidget: true,
+          TaskCenter: true,
+        },
+      },
+    })
+
+    const ui = pinia.state.value.ui as { desktopSidebarCollapsed: boolean }
+    const toggle = wrapper.get('button[aria-label="收起侧边栏"]')
+    await toggle.trigger('click')
+    expect(ui.desktopSidebarCollapsed).toBe(true)
+    expect(wrapper.find('button[aria-label="展开侧边栏"]').exists()).toBe(true)
+    expect(localStorage.getItem('animate-desktop-sidebar-collapsed')).toBe('true')
+
+    await wrapper.get('button[aria-label="展开侧边栏"]').trigger('click')
+    expect(ui.desktopSidebarCollapsed).toBe(false)
+    expect(localStorage.getItem('animate-desktop-sidebar-collapsed')).toBe('false')
+
+    wrapper.unmount()
+  })
 })

@@ -1391,6 +1391,7 @@ components:
         parse_confidence: { type: number, minimum: 0, maximum: 1 }
         episode_type: { type: string }
         episode_end: { type: integer, minimum: 0 }
+        version: { type: string }
     LocalOrganizeAnimePreview:
       type: object
       required: [anime_id, title, source_path, target_path, metadata_matched, warnings, changes]

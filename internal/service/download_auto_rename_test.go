@@ -118,6 +118,48 @@ func TestAutoRenameCompletedDownloadsDefaultsOnAndSupportsWindowsPaths(t *testin
 	}
 }
 
+func TestAutoRenameCompletedDownloadsPreservesCorrectedReleaseVersion(t *testing.T) {
+	withServiceTestDB(t)
+	if err := store.NewConfigStore(db.DB).SetMany(map[string]string{model.ConfigKeyBaseDir: "/downloads"}); err != nil {
+		t.Fatalf("set base dir: %v", err)
+	}
+
+	sub := model.Subscription{Title: "Corrected Show", RSSUrl: "https://example.com/corrected"}
+	if err := db.DB.Create(&sub).Error; err != nil {
+		t.Fatalf("create subscription: %v", err)
+	}
+	entry := model.DownloadLog{
+		SubscriptionID: sub.ID,
+		Title:          "[ANi] Corrected Show - 01 [1080P][V2]",
+		Episode:        "01",
+		SeasonVal:      "S01",
+		Status:         downloadLogStatusCompleted,
+		InfoHash:       "corrected",
+		TargetFile:     "/downloads/Corrected Show/[ANi] Corrected Show - 01 [1080P][V2].mp4",
+	}
+	if err := db.DB.Create(&entry).Error; err != nil {
+		t.Fatalf("create download log: %v", err)
+	}
+	source := &fakeTorrentRenameSource{torrents: []downloader.TorrentInfo{{
+		Hash:        "corrected",
+		Name:        entry.Title,
+		State:       "uploading",
+		SavePath:    "/downloads/Corrected Show",
+		ContentPath: entry.TargetFile,
+	}}}
+
+	result, err := AutoRenameCompletedDownloads(source)
+	if err != nil {
+		t.Fatalf("AutoRenameCompletedDownloads: %v", err)
+	}
+	if result.Renamed != 1 || len(source.renamed) != 1 {
+		t.Fatalf("unexpected result=%#v calls=%#v", result, source.renamed)
+	}
+	if got, want := source.renamed[0][2], "Corrected Show - S01E01 v2.mp4"; got != want {
+		t.Fatalf("corrected release target = %q, want %q", got, want)
+	}
+}
+
 func TestAutoRenameCompletedDownloadsCanBeDisabledAndSkipsMultiFileRoot(t *testing.T) {
 	withServiceTestDB(t)
 	if err := store.NewConfigStore(db.DB).SetMany(map[string]string{model.ConfigKeyAutoRenameEnabled: "false"}); err != nil {

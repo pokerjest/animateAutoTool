@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/pokerjest/animateAutoTool/internal/config"
 	"github.com/pokerjest/animateAutoTool/internal/downloader"
@@ -57,11 +58,8 @@ func enrichSubscriptionDownloadProgress(ctx context.Context, logs []model.Downlo
 				normalizedKey := normalizedTorrentNameKey(normalized)
 				byName[normalizedKey] = preferTorrent(byName[normalizedKey], torrent)
 			}
-			if season, episode := parser.EpisodeIdentityFromTitle(name); episode != "" {
-				episodeKey := torrentEpisodeKey(season, episode)
-				byEpisode[episodeKey] = append(byEpisode[episodeKey], torrent)
-			}
 		}
+		addLiveTorrentEpisodeIdentities(byEpisode, torrent)
 	}
 
 	for index := range logs {
@@ -125,7 +123,10 @@ func liveTorrentForLogWithEpisodes(logEntry model.DownloadLog, byHash map[string
 			if season == "" {
 				season = parser.NormalizeSeasonNumber(logEntry.SeasonVal)
 			}
-			if torrent, ok := bestTorrent(byEpisode[torrentEpisodeKey(season, episode)]); ok {
+			if value := parser.NormalizeSeasonNumber(logEntry.SeasonVal); value != "" {
+				season = value
+			}
+			if torrent, ok := uniqueRelatedLiveTorrent(logEntry, byEpisode[torrentEpisodeKey(season, episode)]); ok {
 				return torrent, true
 			}
 		}
@@ -139,6 +140,120 @@ func normalizedTorrentNameKey(name string) string {
 
 func torrentEpisodeKey(season, episode string) string {
 	return fmt.Sprintf("%s:%s", parser.NormalizeSeasonNumber(season), parser.NormalizeEpisodeNumber(episode))
+}
+
+func addLiveTorrentEpisodeIdentities(index map[string][]downloader.TorrentInfo, torrent downloader.TorrentInfo) {
+	if index == nil {
+		return
+	}
+	seen := make(map[string]struct{})
+	add := func(season, episode string) {
+		episode = parser.NormalizeEpisodeNumber(episode)
+		if episode == "" {
+			return
+		}
+		key := torrentEpisodeKey(season, episode)
+		identity := key + "\x00" + liveTorrentIdentity(torrent)
+		if _, exists := seen[identity]; exists {
+			return
+		}
+		seen[identity] = struct{}{}
+		index[key] = append(index[key], torrent)
+	}
+	if season, episode := parser.EpisodeIdentityFromTitle(torrent.Name); episode != "" {
+		add(season, episode)
+	}
+	if season, episodes := parser.EpisodeIdentitiesFromPath(subscriptionTorrentContentPath(torrent)); len(episodes) > 0 {
+		for _, episode := range episodes {
+			add(season, episode)
+		}
+	}
+}
+
+func uniqueRelatedLiveTorrent(logEntry model.DownloadLog, candidates []downloader.TorrentInfo) (downloader.TorrentInfo, bool) {
+	var best downloader.TorrentInfo
+	identity := ""
+	found := false
+	for _, candidate := range candidates {
+		if !liveProgressTitlesRelated(logEntry.Title, candidate) {
+			continue
+		}
+		candidateIdentity := liveTorrentIdentity(candidate)
+		if !found {
+			best = candidate
+			identity = candidateIdentity
+			found = true
+			continue
+		}
+		if candidateIdentity == "" || identity == "" || candidateIdentity != identity {
+			// Showing no live progress is preferable to displaying another
+			// series' same-number episode. The background synchronizer has
+			// subscription paths available and can resolve the safe match.
+			return downloader.TorrentInfo{}, false
+		}
+		best = preferTorrent(best, candidate)
+	}
+	return best, found
+}
+
+func liveProgressTitlesRelated(logTitle string, torrent downloader.TorrentInfo) bool {
+	expected := compactProgressSeriesTitle(logTitle)
+	if expected == "" {
+		return false
+	}
+	for _, candidate := range []string{torrent.Name, subscriptionTorrentContentPath(torrent)} {
+		actual := compactProgressSeriesTitle(candidate)
+		if actual == "" {
+			continue
+		}
+		if actual == expected || (len([]rune(actual)) >= 4 && len([]rune(expected)) >= 4 &&
+			(strings.Contains(actual, expected) || strings.Contains(expected, actual))) {
+			return true
+		}
+	}
+	return false
+}
+
+func compactProgressSeriesTitle(raw string) string {
+	raw = strings.ReplaceAll(strings.TrimSpace(raw), `\`, "/")
+	parsed := parser.ParseFilename(raw)
+	title := strings.TrimSpace(parsed.Title)
+	if title == "" {
+		title = parser.CleanTitle(raw)
+	}
+	var builder strings.Builder
+	for _, r := range strings.ToLower(title) {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			builder.WriteRune(r)
+		}
+	}
+	return builder.String()
+}
+
+func liveTorrentIdentity(torrent downloader.TorrentInfo) string {
+	if hash := strings.ToLower(strings.TrimSpace(torrent.Hash)); hash != "" {
+		return "hash:" + hash
+	}
+	return "path:" + strings.ToLower(strings.ReplaceAll(strings.TrimSpace(subscriptionTorrentContentPath(torrent)), `\`, "/"))
+}
+
+func subscriptionTorrentContentPath(torrent downloader.TorrentInfo) string {
+	if value := strings.TrimSpace(torrent.ContentPath); value != "" {
+		return value
+	}
+	savePath := strings.TrimRight(strings.TrimSpace(torrent.SavePath), `/\`)
+	name := strings.TrimLeft(strings.TrimSpace(torrent.Name), `/\`)
+	if savePath == "" {
+		return name
+	}
+	if name == "" {
+		return savePath
+	}
+	separator := "/"
+	if strings.Contains(savePath, `\`) && !strings.Contains(savePath, "/") {
+		separator = `\`
+	}
+	return savePath + separator + name
 }
 
 func normalizeTorrentProgress(progress float64) float64 {
@@ -188,15 +303,4 @@ func liveTorrentStatusRank(torrent downloader.TorrentInfo) int {
 	default:
 		return 0
 	}
-}
-
-func bestTorrent(candidates []downloader.TorrentInfo) (downloader.TorrentInfo, bool) {
-	if len(candidates) == 0 {
-		return downloader.TorrentInfo{}, false
-	}
-	best := candidates[0]
-	for _, candidate := range candidates[1:] {
-		best = preferTorrent(best, candidate)
-	}
-	return best, true
 }

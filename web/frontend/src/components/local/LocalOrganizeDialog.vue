@@ -161,6 +161,7 @@ function statusLabel(status: string) {
                 <span class="badge">{{ Math.round((change.parse_confidence||0)*100) }}% 置信度</span>
                 <span v-if="change.episode_type&&change.episode_type!=='episode'" class="badge">{{ change.episode_type }}</span>
                 <span v-if="change.episode_end" class="badge">结束集 {{ change.episode_end }}</span>
+                <span v-if="change.version" class="badge">版本 {{ change.version }}</span>
               </div>
               <p v-if="change.reason" class="mt-1 font-bold text-amber-700 dark:text-amber-300">{{ change.reason }}</p>
               <AsyncButton

@@ -73,6 +73,7 @@ type LocalOrganizeChange struct {
 	ParseConfidence float64 `json:"parse_confidence,omitempty"`
 	EpisodeType     string  `json:"episode_type,omitempty"`
 	EpisodeEnd      int     `json:"episode_end,omitempty"`
+	Version         string  `json:"version,omitempty"`
 
 	sourceSize    int64
 	sourceModTime int64
@@ -399,6 +400,9 @@ func (o *LocalOrganizer) previewAnime(anime model.LocalAnime, directory model.Lo
 		if episodeEnd > episodeNumber && !strings.Contains(episodeTemplate, "{episode_end}") {
 			filename = strings.TrimSuffix(filename, ext) + fmt.Sprintf("-E%02d", episodeEnd) + ext
 		}
+		if strings.TrimSpace(versionTag) != "" && !strings.Contains(episodeTemplate, "{version}") {
+			filename = renamer.PreserveVersionSuffix(filename, versionTag)
+		}
 		seasonDirectory := fmt.Sprintf("Season %02d", season)
 		if isSpecial {
 			seasonDirectory = "Specials"
@@ -413,6 +417,7 @@ func (o *LocalOrganizer) previewAnime(anime model.LocalAnime, directory model.Lo
 		change.ParseConfidence = parsed.Confidence
 		change.EpisodeType = episodeType
 		change.EpisodeEnd = episodeEnd
+		change.Version = versionTag
 		change.targetSeason = season
 		change.targetEpisode = episodeNumber
 		change.targetEnd = episodeEnd

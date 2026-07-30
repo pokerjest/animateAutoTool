@@ -2202,6 +2202,7 @@ export interface components {
             parse_confidence?: number;
             episode_type?: string;
             episode_end?: number;
+            version?: string;
         };
         LocalOrganizeAnimePreview: {
             anime_id: number;
