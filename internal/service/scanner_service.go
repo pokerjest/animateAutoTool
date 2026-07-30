@@ -80,6 +80,17 @@ type ScanResult struct {
 	ParseConflicts  int
 }
 
+// TargetScanResult describes an incremental scan limited to the series
+// directories inferred from completed download targets.
+type TargetScanResult struct {
+	DirectoryID      uint
+	ScannedScopes    []string
+	AffectedAnimeIDs []uint
+	ScanResult       ScanResult
+}
+
+var errTargetScanNeedsFullRoot = errors.New("target scan overlaps media outside the inferred series scope")
+
 // ScanProgress describes the current phase of a full local-library scan.
 // Current and Total are monotonic work units: readable folders plus one
 // finalization unit for each configured library root.
@@ -235,11 +246,95 @@ func (s *ScannerService) ScanDirectory(dir *model.LocalAnimeDirectory) (*ScanRes
 }
 
 func (s *ScannerService) scanDirectory(dir *model.LocalAnimeDirectory, claimedFiles map[string]struct{}, onDirectory func(string)) (*ScanResult, error) {
+	if dir == nil {
+		return nil, errors.New("scan directory path is empty")
+	}
+	result, _, err := s.scanScope(dir, filepath.Clean(dir.Path), claimedFiles, onDirectory, true)
+	return result, err
+}
+
+// ScanTargets incrementally scans only the series directories affected by the
+// supplied download targets. It falls back to a full root scan when an
+// existing database row spans files outside an inferred scope, because
+// shrinking such a row would otherwise discard valid episodes.
+func (s *ScannerService) ScanTargets(dir *model.LocalAnimeDirectory, targets []string) (*TargetScanResult, error) {
+	scanRunMu.Lock()
+	defer scanRunMu.Unlock()
+
 	if dir == nil || strings.TrimSpace(dir.Path) == "" {
 		return nil, errors.New("scan directory path is empty")
 	}
 
 	root := filepath.Clean(dir.Path)
+	scopes, err := inferTargetScanScopes(root, targets)
+	if err != nil {
+		return nil, err
+	}
+	result := &TargetScanResult{
+		DirectoryID:   dir.ID,
+		ScannedScopes: make([]string, 0, len(scopes)),
+		ScanResult:    ScanResult{DirectoryID: dir.ID},
+	}
+	affected := make(map[uint]struct{})
+	for _, scope := range scopes {
+		if _, statErr := os.Stat(scope); statErr != nil {
+			if os.IsNotExist(statErr) {
+				// qBittorrent can report completion just before a moved file is
+				// visible. The delayed pass will retry this scope.
+				continue
+			}
+			return result, statErr
+		}
+		scopeResult, scopeIDs, scanErr := s.scanScope(dir, scope, nil, nil, false)
+		if errors.Is(scanErr, errTargetScanNeedsFullRoot) {
+			fullResult, _, fullErr := s.scanScope(dir, root, nil, nil, true)
+			if fullResult != nil {
+				result.ScanResult = *fullResult
+			}
+			result.ScannedScopes = []string{root}
+			result.AffectedAnimeIDs = s.affectedAnimeIDsForTargets(dir.ID, root, targets, scopes)
+			return result, fullErr
+		}
+		if scopeResult != nil {
+			mergeScanResult(&result.ScanResult, scopeResult)
+		}
+		result.ScannedScopes = append(result.ScannedScopes, scope)
+		idsForScope := scopeIDs
+		if sameComparisonPath(scope, root) {
+			// A loose file in the library root necessarily scans the whole
+			// root, but metadata work should still be limited to the completed
+			// target rather than every series discovered during that scan.
+			idsForScope = s.affectedAnimeIDsForTargets(dir.ID, root, targets, scopes)
+		}
+		for _, id := range idsForScope {
+			affected[id] = struct{}{}
+		}
+		if scanErr != nil {
+			result.AffectedAnimeIDs = sortedUintKeys(affected)
+			return result, scanErr
+		}
+	}
+	result.AffectedAnimeIDs = sortedUintKeys(affected)
+	return result, nil
+}
+
+//nolint:gocyclo // Scan scope preserves the existing safe scan/update/cleanup phases.
+func (s *ScannerService) scanScope(
+	dir *model.LocalAnimeDirectory,
+	scanRoot string,
+	claimedFiles map[string]struct{},
+	onDirectory func(string),
+	cleanupWholeDirectory bool,
+) (*ScanResult, []uint, error) {
+	if dir == nil || strings.TrimSpace(dir.Path) == "" {
+		return nil, nil, errors.New("scan directory path is empty")
+	}
+
+	root := filepath.Clean(scanRoot)
+	libraryRoot := filepath.Clean(dir.Path)
+	if !pathWithinRoot(libraryRoot, root) {
+		return nil, nil, fmt.Errorf("target scan scope %s is outside library root %s", root, libraryRoot)
+	}
 	issueKey := "scan:" + root
 	log.Printf("ScannerService: Starting scan for %s", root)
 	event.GlobalBus.Publish(event.EventScanProgress, map[string]interface{}{"type": "start", "dir": root})
@@ -247,7 +342,7 @@ func (s *ScannerService) scanDirectory(dir *model.LocalAnimeDirectory, claimedFi
 	mediaFiles, walkErrors, fatalErr := discoverMediaFiles(root, claimedFiles, onDirectory)
 	if fatalErr != nil {
 		_ = reportScanIssue(issueKey, root, fatalErr)
-		return nil, fatalErr
+		return nil, nil, fatalErr
 	}
 	complete := len(walkErrors) == 0
 	if complete {
@@ -259,11 +354,11 @@ func (s *ScannerService) scanDirectory(dir *model.LocalAnimeDirectory, claimedFi
 	candidates := buildScanCandidates(root, mediaFiles)
 	st := localAnimeStore()
 	if st == nil {
-		return nil, gorm.ErrInvalidDB
+		return nil, nil, gorm.ErrInvalidDB
 	}
 	existing, err := st.ListAnimesByDirectoryWithEpisodes(dir.ID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	res := &ScanResult{
@@ -281,12 +376,25 @@ func (s *ScannerService) scanDirectory(dir *model.LocalAnimeDirectory, claimedFi
 		}
 	}
 	usedAnimeIDs := make(map[uint]struct{})
+	selectedAnimes := make([]*model.LocalAnime, len(candidates))
+	for i := range candidates {
+		selected := selectExistingAnime(&candidates[i], existing, usedAnimeIDs)
+		if selected != nil {
+			if !cleanupWholeDirectory && animeHasEpisodeOutsideScope(selected, root) {
+				return res, nil, errTargetScanNeedsFullRoot
+			}
+			usedAnimeIDs[selected.ID] = struct{}{}
+		}
+		selectedAnimes[i] = selected
+	}
+	usedAnimeIDs = make(map[uint]struct{})
+	affectedAnimeIDs := make([]uint, 0, len(candidates))
 	for i := range candidates {
 		candidate := &candidates[i]
 		event.GlobalBus.Publish(event.EventScanProgress, map[string]interface{}{
 			"type": "progress", "current": i + 1, "total": len(candidates), "dir": root,
 		})
-		anime := selectExistingAnime(candidate, existing, usedAnimeIDs)
+		anime := selectedAnimes[i]
 		created := anime == nil
 		animeRecordUpdated := false
 		if created {
@@ -310,6 +418,7 @@ func (s *ScannerService) scanDirectory(dir *model.LocalAnimeDirectory, claimedFi
 			animeRecordUpdated = true
 		}
 		usedAnimeIDs[anime.ID] = struct{}{}
+		affectedAnimeIDs = append(affectedAnimeIDs, anime.ID)
 
 		episodeChanged := s.syncCandidateEpisodes(st, anime, candidate)
 		s.syncCandidateParseIssues(anime, candidate)
@@ -333,7 +442,7 @@ func (s *ScannerService) scanDirectory(dir *model.LocalAnimeDirectory, claimedFi
 		}
 	}
 
-	if complete {
+	if complete && cleanupWholeDirectory {
 		for i := range existing {
 			if _, used := usedAnimeIDs[existing[i].ID]; used {
 				continue
@@ -353,16 +462,168 @@ func (s *ScannerService) scanDirectory(dir *model.LocalAnimeDirectory, claimedFi
 		"ScannerService: Scan complete for %s. Media files: %d, candidate series: %d, added: %d, updated: %d, removed: %d, walk errors: %d",
 		root, res.DiscoveredFiles, res.CandidateSeries, res.Added, res.Updated, res.Deleted, res.WalkErrors,
 	)
+	eventScope := "target"
+	if cleanupWholeDirectory {
+		eventScope = "directory"
+	}
 	event.GlobalBus.Publish(event.EventScanComplete, map[string]interface{}{
-		"scope": "directory", "directory_id": dir.ID, "directory": root,
+		"scope": eventScope, "directory_id": dir.ID, "directory": root,
 		"discovered_files": res.DiscoveredFiles, "candidate_series": res.CandidateSeries, "walk_errors": res.WalkErrors,
 		"added": res.Added, "updated": res.Updated, "deleted": res.Deleted,
 	})
 
 	if !complete {
-		return res, errors.Join(walkErrors...)
+		return res, affectedAnimeIDs, errors.Join(walkErrors...)
 	}
-	return res, nil
+	return res, affectedAnimeIDs, nil
+}
+
+func inferTargetScanScopes(root string, targets []string) ([]string, error) {
+	root = filepath.Clean(root)
+	scopes := make([]string, 0, len(targets))
+	for _, rawTarget := range targets {
+		target := filepath.Clean(strings.TrimSpace(rawTarget))
+		if strings.TrimSpace(rawTarget) == "" {
+			continue
+		}
+		if !pathWithinRoot(root, target) {
+			return nil, fmt.Errorf("download target %s is outside library root %s", target, root)
+		}
+
+		scope := target
+		info, statErr := os.Stat(target)
+		switch {
+		case statErr == nil && info.IsDir():
+			for !sameComparisonPath(scope, root) && isSeriesContainerDirectory(filepath.Base(scope)) {
+				scope = filepath.Dir(scope)
+			}
+		case statErr == nil:
+			seriesPath, loose := inferSeriesPath(root, target)
+			if loose {
+				scope = root
+			} else {
+				scope = seriesPath
+			}
+		case os.IsNotExist(statErr) && parser.IsVideoFile(target):
+			seriesPath, loose := inferSeriesPath(root, target)
+			if loose {
+				scope = root
+			} else {
+				scope = seriesPath
+			}
+		case os.IsNotExist(statErr):
+			for !sameComparisonPath(scope, root) && isSeriesContainerDirectory(filepath.Base(scope)) {
+				scope = filepath.Dir(scope)
+			}
+		default:
+			return nil, statErr
+		}
+		scope = filepath.Clean(scope)
+
+		covered := false
+		for i := 0; i < len(scopes); {
+			switch {
+			case pathWithinRoot(scopes[i], scope):
+				covered = true
+				i = len(scopes)
+			case pathWithinRoot(scope, scopes[i]):
+				scopes = append(scopes[:i], scopes[i+1:]...)
+			default:
+				i++
+			}
+		}
+		if !covered {
+			scopes = append(scopes, scope)
+		}
+	}
+	sort.Strings(scopes)
+	return scopes, nil
+}
+
+func animeHasEpisodeOutsideScope(anime *model.LocalAnime, scope string) bool {
+	if anime == nil {
+		return false
+	}
+	for _, episode := range anime.Episodes {
+		if !pathWithinRoot(scope, episode.Path) {
+			return true
+		}
+	}
+	return false
+}
+
+func mergeScanResult(dst *ScanResult, src *ScanResult) {
+	if dst == nil || src == nil {
+		return
+	}
+	if dst.DirectoryID == 0 {
+		dst.DirectoryID = src.DirectoryID
+	}
+	dst.DiscoveredFiles += src.DiscoveredFiles
+	dst.CandidateSeries += src.CandidateSeries
+	dst.WalkErrors += src.WalkErrors
+	dst.Added += src.Added
+	dst.Updated += src.Updated
+	dst.Deleted += src.Deleted
+	dst.ParseFailures += src.ParseFailures
+	dst.ParseConflicts += src.ParseConflicts
+}
+
+func sortedUintKeys(values map[uint]struct{}) []uint {
+	result := make([]uint, 0, len(values))
+	for value := range values {
+		result = append(result, value)
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i] < result[j] })
+	return result
+}
+
+func (s *ScannerService) affectedAnimeIDsForTargets(directoryID uint, root string, targets, scopes []string) []uint {
+	st := localAnimeStore()
+	if st == nil {
+		return nil
+	}
+	animes, err := st.ListAnimesByDirectoryWithEpisodes(directoryID)
+	if err != nil {
+		return nil
+	}
+
+	affected := make(map[uint]struct{})
+	for i := range animes {
+		anime := &animes[i]
+		for _, episode := range anime.Episodes {
+			for _, rawTarget := range targets {
+				target := filepath.Clean(strings.TrimSpace(rawTarget))
+				if strings.TrimSpace(rawTarget) == "" {
+					continue
+				}
+				if sameComparisonPath(target, episode.Path) {
+					affected[anime.ID] = struct{}{}
+					break
+				}
+				if info, statErr := os.Stat(target); statErr == nil && info.IsDir() && pathWithinRoot(target, episode.Path) {
+					affected[anime.ID] = struct{}{}
+					break
+				}
+			}
+			if _, ok := affected[anime.ID]; ok {
+				break
+			}
+		}
+		if _, ok := affected[anime.ID]; ok {
+			continue
+		}
+		for _, scope := range scopes {
+			if sameComparisonPath(scope, root) {
+				continue
+			}
+			if sameComparisonPath(anime.Path, scope) || pathWithinRoot(scope, anime.Path) {
+				affected[anime.ID] = struct{}{}
+				break
+			}
+		}
+	}
+	return sortedUintKeys(affected)
 }
 
 func reportScanIssue(issueKey, root string, scanErr error) error {

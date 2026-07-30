@@ -272,6 +272,104 @@ func TestScannerStoresRichParseEvidenceAndFingerprint(t *testing.T) {
 	require.NotEqual(t, firstFingerprint, episode.ScanFingerprint)
 }
 
+func TestScannerTargetScanOnlyUpdatesAffectedSeries(t *testing.T) {
+	withServiceTestDB(t)
+	root := t.TempDir()
+	showA := filepath.Join(root, "Target Show A", "Season 01")
+	showB := filepath.Join(root, "Target Show B", "Season 01")
+	writeScannerFixture(t, filepath.Join(showA, "Target Show A - 01.mkv"))
+	writeScannerFixture(t, filepath.Join(showB, "Target Show B - 01.mkv"))
+	directory := createScannerDirectory(t, root)
+	scanner := NewScannerService()
+	_, err := scanner.ScanDirectory(&directory)
+	require.NoError(t, err)
+
+	var before []model.LocalAnime
+	require.NoError(t, db.DB.Preload("Episodes").Order("title").Find(&before).Error)
+	require.Len(t, before, 2)
+	showBID := before[1].ID
+	showBEpisodes := len(before[1].Episodes)
+
+	target := filepath.Join(showA, "Target Show A - 02.mkv")
+	writeScannerFixture(t, target)
+	result, err := scanner.ScanTargets(&directory, []string{target})
+	require.NoError(t, err)
+	require.Len(t, result.AffectedAnimeIDs, 1)
+
+	var after []model.LocalAnime
+	require.NoError(t, db.DB.Preload("Episodes").Order("title").Find(&after).Error)
+	require.Len(t, after, 2)
+	require.Len(t, after[0].Episodes, 2)
+	require.Equal(t, showBID, after[1].ID)
+	require.Len(t, after[1].Episodes, showBEpisodes)
+}
+
+func TestScannerTargetScanPreservesOtherSeasons(t *testing.T) {
+	withServiceTestDB(t)
+	root := t.TempDir()
+	showPath := filepath.Join(root, "Seasoned Show")
+	writeScannerFixture(t, filepath.Join(showPath, "Season 01", "Seasoned Show - 01.mkv"))
+	directory := createScannerDirectory(t, root)
+	scanner := NewScannerService()
+	_, err := scanner.ScanDirectory(&directory)
+	require.NoError(t, err)
+
+	target := filepath.Join(showPath, "Season 02", "Seasoned Show - 01.mkv")
+	writeScannerFixture(t, target)
+	result, err := scanner.ScanTargets(&directory, []string{target})
+	require.NoError(t, err)
+	require.Len(t, result.AffectedAnimeIDs, 1)
+
+	var anime model.LocalAnime
+	require.NoError(t, db.DB.Preload("Episodes").First(&anime).Error)
+	require.Len(t, anime.Episodes, 2)
+	seasons := map[int]bool{}
+	for _, episode := range anime.Episodes {
+		seasons[episode.SeasonNum] = true
+	}
+	require.True(t, seasons[1])
+	require.True(t, seasons[2])
+}
+
+func TestScannerTargetScanFallsBackForLooseRootFiles(t *testing.T) {
+	withServiceTestDB(t)
+	root := t.TempDir()
+	looseTarget := filepath.Join(root, "Loose Root Show - 02.mkv")
+	writeScannerFixture(t, filepath.Join(root, "Loose Root Show - 01.mkv"))
+	writeScannerFixture(t, looseTarget)
+	writeScannerFixture(t, filepath.Join(root, "Other Show", "Other Show - 01.mkv"))
+	directory := createScannerDirectory(t, root)
+	scanner := NewScannerService()
+	_, err := scanner.ScanDirectory(&directory)
+	require.NoError(t, err)
+
+	result, err := scanner.ScanTargets(&directory, []string{looseTarget})
+	require.NoError(t, err)
+	require.Contains(t, result.ScannedScopes, root)
+	require.Len(t, result.AffectedAnimeIDs, 1)
+}
+
+func TestScannerTargetScanFallsBackWhenExistingSeriesSpansScope(t *testing.T) {
+	withServiceTestDB(t)
+	root := t.TempDir()
+	first := filepath.Join(root, "Group A", "Same Scope Show", "Same Scope Show - 01.mkv")
+	second := filepath.Join(root, "Group B", "Same Scope Show", "Same Scope Show - 02.mkv")
+	writeScannerFixture(t, first)
+	writeScannerFixture(t, second)
+	directory := createScannerDirectory(t, root)
+	scanner := NewScannerService()
+	_, err := scanner.ScanDirectory(&directory)
+	require.NoError(t, err)
+
+	result, err := scanner.ScanTargets(&directory, []string{first})
+	require.NoError(t, err)
+	require.Contains(t, result.ScannedScopes, root)
+
+	var anime model.LocalAnime
+	require.NoError(t, db.DB.Preload("Episodes").First(&anime).Error)
+	require.Len(t, anime.Episodes, 2)
+}
+
 func TestScannerKeepsSpecialsInSeasonZero(t *testing.T) {
 	withServiceTestDB(t)
 	root := t.TempDir()

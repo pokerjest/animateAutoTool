@@ -42,6 +42,38 @@ func (s *AgentService) RunAgentForLibrary() {
 	}
 }
 
+// RunAgentForAnimeIDs performs the metadata phase only for the supplied local
+// series. Download completion uses this targeted entry point so an episode
+// arriving for one show does not trigger a full-library scrape.
+func (s *AgentService) RunAgentForAnimeIDs(ids []uint) {
+	if db.DB == nil || len(ids) == 0 {
+		return
+	}
+	unique := make(map[uint]struct{}, len(ids))
+	for _, id := range ids {
+		if id != 0 {
+			unique[id] = struct{}{}
+		}
+	}
+	if len(unique) == 0 {
+		return
+	}
+
+	networkQueue := make(chan uint, len(unique))
+	for id := range unique {
+		var anime model.LocalAnime
+		if err := db.DB.Preload("Metadata").First(&anime, id).Error; err != nil {
+			continue
+		}
+		s.scanLocalAssets(&anime)
+		if s.animeNeedsNetwork(&anime) {
+			networkQueue <- anime.ID
+		}
+	}
+	close(networkQueue)
+	s.runNetworkWorkers(networkQueue)
+}
+
 // RunAgentForLibraryWithRepair performs the normal enrichment phase and then
 // serially retries historical scrape failures caused by SQLite write
 // contention. The serial pass is intentionally last: it runs after the normal
@@ -71,24 +103,7 @@ func (s *AgentService) RunAgentForLibraryWithRepair(report MetadataIssueRepairPr
 				s.scanLocalAssets(&anime)
 
 				// 2. Decide if Network Needed
-				// If missing IDs or Summary, queue it
-				needsNetwork := false
-				if anime.MetadataID == nil || *anime.MetadataID == 0 {
-					needsNetwork = true
-				} else {
-					if anime.Metadata.BangumiID == 0 && anime.Metadata.TMDBID == 0 {
-						needsNetwork = true
-					} else if anime.Metadata.TMDBID != 0 {
-						// Check if any episode is missing metadata (handle NULL or empty)
-						var count int64
-						db.DB.Model(&model.LocalEpisode{}).Where("local_anime_id = ? AND (image IS NULL OR image = '')", anime.ID).Count(&count)
-						if count > 0 {
-							needsNetwork = true
-						}
-					}
-				}
-
-				if needsNetwork {
+				if s.animeNeedsNetwork(&anime) {
 					networkQueue <- anime.ID
 				}
 			}
@@ -103,6 +118,24 @@ func (s *AgentService) RunAgentForLibraryWithRepair(report MetadataIssueRepairPr
 	wg.Wait()
 	log.Println("Agent: Metadata enrichment completed.")
 	return s.RepairDatabaseMetadataIssues(context.Background(), report)
+}
+
+func (s *AgentService) animeNeedsNetwork(anime *model.LocalAnime) bool {
+	if anime == nil || anime.MetadataID == nil || *anime.MetadataID == 0 || anime.Metadata == nil {
+		return true
+	}
+	if anime.Metadata.BangumiID == 0 && anime.Metadata.TMDBID == 0 && anime.Metadata.AniListID == 0 {
+		return true
+	}
+	if anime.Metadata.TMDBID != 0 && db.DB != nil {
+		var count int64
+		if err := db.DB.Model(&model.LocalEpisode{}).
+			Where("local_anime_id = ? AND (image IS NULL OR image = '')", anime.ID).
+			Count(&count).Error; err == nil && count > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // scanLocalAssets looks for NFOs and local images.
@@ -328,20 +361,43 @@ func (s *AgentService) networkWorker(queue <-chan uint) {
 		// The metadata clients already enforce request timeouts. Run enrichment
 		// synchronously inside the worker so wg.Wait truly means every database
 		// writer has stopped before the serial repair pass begins.
-		log.Printf("Agent: Network enriching %s", anime.Title)
-		if err := s.enrich(&anime); err != nil {
-			log.Printf("Agent: Failed to enrich anime %s: %v", anime.Title, err)
-			_ = ReportLibraryIssue(LibraryIssueInput{
-				IssueKey:      "scrape:" + strconv.FormatUint(uint64(anime.ID), 10),
-				IssueType:     LibraryIssueTypeScrape,
-				Title:         anime.Title,
-				DirectoryPath: anime.Path,
-				LocalAnimeID:  &anime.ID,
-				Message:       err.Error(),
-				Hint:          MetadataIssueHint(err),
-			})
-		} else {
-			_ = ResolveLibraryIssue("scrape:" + strconv.FormatUint(uint64(anime.ID), 10))
-		}
+		s.enrichAndReport(&anime)
+	}
+}
+
+func (s *AgentService) runNetworkWorkers(queue <-chan uint) {
+	workerCount := s.NetworkWorkerCount
+	if workerCount <= 0 {
+		workerCount = 1
+	}
+	var wg sync.WaitGroup
+	for i := 0; i < workerCount; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			s.networkWorker(queue)
+		}()
+	}
+	wg.Wait()
+}
+
+func (s *AgentService) enrichAndReport(anime *model.LocalAnime) {
+	if anime == nil {
+		return
+	}
+	log.Printf("Agent: Network enriching %s", anime.Title)
+	if err := s.enrich(anime); err != nil {
+		log.Printf("Agent: Failed to enrich anime %s: %v", anime.Title, err)
+		_ = ReportLibraryIssue(LibraryIssueInput{
+			IssueKey:      "scrape:" + strconv.FormatUint(uint64(anime.ID), 10),
+			IssueType:     LibraryIssueTypeScrape,
+			Title:         anime.Title,
+			DirectoryPath: anime.Path,
+			LocalAnimeID:  &anime.ID,
+			Message:       err.Error(),
+			Hint:          MetadataIssueHint(err),
+		})
+	} else {
+		_ = ResolveLibraryIssue("scrape:" + strconv.FormatUint(uint64(anime.ID), 10))
 	}
 }

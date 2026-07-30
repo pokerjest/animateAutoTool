@@ -1,6 +1,8 @@
 package worker
 
 import (
+	"context"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -9,6 +11,7 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/event"
 	"github.com/pokerjest/animateAutoTool/internal/model"
+	"github.com/pokerjest/animateAutoTool/internal/service"
 )
 
 func TestPathWithinRoot(t *testing.T) {
@@ -126,5 +129,83 @@ drain:
 	}
 	if got[0]["target_file"] != target {
 		t.Fatalf("expected target_file %q, got %v", target, got[0]["target_file"])
+	}
+}
+
+func TestAutoScanCompletedDownloadsReturnsOnlyAffectedAnime(t *testing.T) {
+	db.InitDB(":memory:")
+	t.Cleanup(func() {
+		_ = db.CloseDB()
+		db.DB = nil
+	})
+
+	tmp := t.TempDir()
+	root := filepath.Join(tmp, "library")
+	showA := filepath.Join(root, "Show A", "Season 01")
+	showB := filepath.Join(root, "Show B", "Season 01")
+	writeWorkerFixture(t, filepath.Join(showA, "Show A - 01.mkv"))
+	writeWorkerFixture(t, filepath.Join(showB, "Show B - 01.mkv"))
+	directory := model.LocalAnimeDirectory{Path: root}
+	if err := db.DB.Create(&directory).Error; err != nil {
+		t.Fatalf("create directory: %v", err)
+	}
+	scanner := service.NewScannerService()
+	if _, err := scanner.ScanDirectory(&directory); err != nil {
+		t.Fatalf("initial scan: %v", err)
+	}
+
+	target := filepath.Join(showA, "Show A - 02.mkv")
+	writeWorkerFixture(t, target)
+	affected := autoScanCompletedDownloads([]string{target})
+	if len(affected) != 1 {
+		t.Fatalf("expected one affected anime, got %v", affected)
+	}
+	var animes []model.LocalAnime
+	if err := db.DB.Preload("Episodes").Order("title").Find(&animes).Error; err != nil {
+		t.Fatalf("load animes: %v", err)
+	}
+	if len(animes) != 2 || len(animes[0].Episodes) != 2 || len(animes[1].Episodes) != 1 {
+		t.Fatalf("unexpected targeted scan result: %+v", animes)
+	}
+}
+
+func TestCompletedDownloadRescanCoordinatorMergesBatches(t *testing.T) {
+	var (
+		mu       sync.Mutex
+		runCount int
+		got      []string
+		gotIDs   []uint
+		done     = make(chan struct{}, 1)
+	)
+	coordinator := newCompletedDownloadRescanCoordinator(20*time.Millisecond, func(_ context.Context, targets []string, ids []uint) {
+		mu.Lock()
+		runCount++
+		got = append(got, targets...)
+		gotIDs = append(gotIDs, ids...)
+		mu.Unlock()
+		done <- struct{}{}
+	})
+	coordinator.schedule(context.Background(), []string{"a", "a"}, []uint{1})
+	coordinator.schedule(context.Background(), []string{"b"}, []uint{2})
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for merged coordinator run")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if runCount != 1 || len(got) != 2 || len(gotIDs) != 2 {
+		t.Fatalf("expected one merged run, count=%d targets=%v ids=%v", runCount, got, gotIDs)
+	}
+}
+
+func writeWorkerFixture(t *testing.T, path string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir fixture: %v", err)
+	}
+	if err := os.WriteFile(path, []byte("video"), 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
 	}
 }
