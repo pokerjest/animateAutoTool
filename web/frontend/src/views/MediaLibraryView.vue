@@ -93,7 +93,7 @@ async function loadMore() {
     <section v-else class="poster-grid">
       <PosterCard v-for="item in items" :key="`${item.provider}:${item.id}`" openable :title="item.name" :image="item.poster_url" :meta="item.production_year ? String(item.production_year) : item.type" :badges="[item.favorite ? '收藏' : '', item.played ? '已看' : ''].filter(Boolean)" @open="router.push(`/media/item/${item.provider}/${encodeURIComponent(item.id)}`)" />
     </section>
-    <AutoLoadSentinel v-if="query.hasNextPage.value" :remaining="remaining" @load="loadMore" />
+    <AutoLoadSentinel v-if="query.hasNextPage.value" :remaining="remaining" :loading="query.isFetchingNextPage.value" :paused="query.isError.value" @load="loadMore" />
     <p v-if="query.isFetchingNextPage.value" class="muted py-3 text-center text-sm" role="status" aria-live="polite">正在加载更多媒体…</p>
   </div>
 </template>

@@ -3,11 +3,10 @@ package api
 import (
 	"context"
 	"errors"
-	"io"
+	"fmt"
 	"log"
 	"net/http"
 	"net/url"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -132,6 +131,7 @@ func initV1Routes(r *gin.Engine) {
 		protected.GET("/subscriptions/mikan/poster", V1MikanPosterHandler)
 		protected.GET("/subscriptions/mikan/resolve", V1MikanResolveHandler)
 		protected.GET("/subscriptions/mikan/subgroups", V1MikanSubgroupsHandler)
+		protected.POST("/subscriptions/refresh", V1RefreshSubscriptionsHandler)
 		protected.PUT("/subscriptions/:id", V1UpdateSubscriptionHandler)
 		protected.POST("/subscriptions/:id/toggle", V1SubscriptionActionHandler("toggle"))
 		protected.POST("/subscriptions/:id/run", V1SubscriptionActionHandler("run"))
@@ -140,6 +140,8 @@ func initV1Routes(r *gin.Engine) {
 		protected.POST("/subscriptions/:id/source", V1SubscriptionSourceHandler)
 		protected.DELETE("/subscriptions/:id", V1DeleteSubscriptionHandler)
 		protected.GET("/subscriptions/:id/history", V1SubscriptionHistoryHandler)
+		protected.GET("/subscriptions/:id/resources", V1SubscriptionResourcesHandler)
+		protected.POST("/subscriptions/:id/resources/:resource_id/:action", V1SubscriptionResourceActionHandler)
 
 		protected.GET("/calendar", V1CalendarHandler)
 		protected.GET("/calendar/posters/:id", V1CalendarPosterHandler)
@@ -186,7 +188,7 @@ func initV1Routes(r *gin.Engine) {
 		protected.POST("/bangumi/subject/:id/progress", V1BangumiProgressHandler)
 
 		protected.GET("/backup", V1BackupHandler)
-		protected.GET("/backup/export", ExportBackupHandler)
+		protected.POST("/backup/export", ExportBackupHandler)
 		protected.POST("/backup/analyze", V1AnalyzeBackupHandler)
 		protected.POST("/backup/restore", V1RestoreBackupHandler)
 		protected.GET("/backup/r2/list", V1R2ListHandler)
@@ -406,10 +408,16 @@ func V1DashboardHandler(c *gin.Context) {
 	db.DB.Model(&model.Subscription{}).Where("is_active = ?", true).Count(&active)
 	db.DB.Model(&model.DownloadLog{}).Count(&downloads)
 	db.DB.Model(&model.AnimeMetadata{}).Count(&libraryItems)
+	var metadata []model.AnimeMetadata
+	if err := db.DB.Select("bangumi_id, title").Find(&metadata).Error; err != nil {
+		log.Printf("dashboard library count failed: %v", err)
+	} else {
+		libraryItems = int64(len(deduplicateLibraryMetadata(metadata)))
+	}
 	db.DB.Model(&model.LocalAnime{}).Count(&localSeries)
 	db.DB.Model(&model.LibraryIssue{}).Where("status = ?", service.LibraryIssueStatusOpen).Count(&openIssues)
 	var recent []model.DownloadLog
-	db.DB.Order("created_at DESC").Limit(8).Find(&recent)
+	db.DB.Where("status <> ?", "archived").Order("created_at DESC, id DESC").Limit(8).Find(&recent)
 	taskData := TaskOverviewData{Scheduler: buildSchedulerTaskCard(), Scanner: buildScannerTaskCard(), Metadata: buildMetadataTaskCard(), Downloads: buildDownloadSyncTaskCard()}
 	tasks := []TaskOverviewCard{taskData.Scheduler, taskData.Scanner, taskData.Metadata, taskData.Downloads}
 	taskPayload := make([]gin.H, 0, len(tasks))
@@ -559,6 +567,7 @@ func V1SubscriptionHistoryHandler(c *gin.Context) {
 		v1Error(c, http.StatusNotFound, "subscription_not_found", "未找到对应订阅")
 		return
 	}
+	enrichSubscriptionDownloadProgress(c.Request.Context(), data.Logs)
 	v1Data(c, http.StatusOK, data)
 }
 
@@ -581,6 +590,7 @@ func V1LibraryHandler(c *gin.Context) {
 		v1Error(c, http.StatusInternalServerError, "library_unavailable", "无法读取番剧图鉴")
 		return
 	}
+	metadata = deduplicateLibraryMetadata(metadata)
 	var subs []model.Subscription
 	var locals []model.LocalAnime
 	db.DB.Select("metadata_id").Where("metadata_id IS NOT NULL").Find(&subs)
@@ -597,25 +607,44 @@ func V1LibraryHandler(c *gin.Context) {
 		}
 	}
 	items := make([]LibraryItem, 0, len(metadata))
-	seenIDs, seenTitles := map[int]bool{}, map[string]bool{}
+	search := strings.ToLower(strings.TrimSpace(c.Query("q")))
+	status := strings.ToLower(strings.TrimSpace(c.Query("status")))
 	for _, item := range metadata {
-		if item.BangumiID > 0 && seenIDs[item.BangumiID] {
+		libraryItem := LibraryItem{AnimeMetadata: item, IsSubscribed: subMap[item.ID], IsLocal: localMap[item.ID] > 0, LocalAnimeID: localMap[item.ID]}
+		if status == libraryStatusSubscribed && !libraryItem.IsSubscribed {
 			continue
 		}
-		if seenTitles[item.Title] {
+		if status == libraryStatusLocal && !libraryItem.IsLocal {
 			continue
 		}
-		if item.BangumiID > 0 {
-			seenIDs[item.BangumiID] = true
+		if search != "" && !libraryItemMatchesSearch(libraryItem, search) {
+			continue
 		}
-		seenTitles[item.Title] = true
-		items = append(items, LibraryItem{AnimeMetadata: item, IsSubscribed: subMap[item.ID], IsLocal: localMap[item.ID] > 0, LocalAnimeID: localMap[item.ID]})
+		items = append(items, libraryItem)
 	}
 	page, pageSize := v1Pagination(c, 100)
 	total := len(items)
 	start := min((page-1)*pageSize, total)
 	end := min(start+pageSize, total)
 	v1Page(c, items[start:end], page, pageSize, int64(total))
+}
+
+func libraryItemMatchesSearch(item LibraryItem, search string) bool {
+	for _, value := range []string{
+		item.Title,
+		item.TitleCN,
+		item.TitleJP,
+		item.TitleEN,
+		item.OriginalTitle,
+		item.BangumiTitle,
+		item.TMDBTitle,
+		item.AniListTitle,
+	} {
+		if strings.Contains(strings.ToLower(value), search) {
+			return true
+		}
+	}
+	return false
 }
 
 func V1RefreshLibraryHandler(c *gin.Context) {
@@ -693,13 +722,18 @@ func V1LocalScanHandler(c *gin.Context) {
 			return
 		}
 		current, _ := taskstate.Global.Get(taskID)
-		taskstate.Global.Progress(taskID, "文件扫描完成，正在整理元数据并通知 Jellyfin", current.Current, current.Total)
-		service.NewAgentService().RunAgentForLibrary()
+		taskstate.Global.Progress(taskID, "文件扫描完成，正在整理元数据并修复历史数据库冲突", current.Current, current.Total)
+		repairResult, repairErr := runLocalMetadataPhase(taskID)
+		if repairErr != nil {
+			taskstate.Global.Fail(taskID, repairErr)
+			return
+		}
 		triggerJellyfinLibraryRefresh(context.Background())
 		summary := service.GlobalScanStatus.Snapshot().LastSummary
 		if summary == "" {
 			summary = "本地扫描完成"
 		}
+		summary = appendMetadataRepairSummary(summary, repairResult)
 		taskstate.Global.Complete(taskID, summary)
 	}()
 	v1Message(c, http.StatusAccepted, "本地扫描已经启动", gin.H{"task_id": taskID, "status": "running"})
@@ -727,20 +761,58 @@ func V1AddLocalDirectoryHandler(c *gin.Context) {
 			return
 		}
 		current, _ := taskstate.Global.Get(taskID)
-		taskstate.Global.Progress(taskID, "文件扫描完成，正在整理元数据并通知 Jellyfin", current.Current, current.Total)
-		service.NewAgentService().RunAgentForLibrary()
+		taskstate.Global.Progress(taskID, "文件扫描完成，正在整理元数据并修复历史数据库冲突", current.Current, current.Total)
+		repairResult, repairErr := runLocalMetadataPhase(taskID)
+		if repairErr != nil {
+			taskstate.Global.Fail(taskID, repairErr)
+			return
+		}
 		triggerJellyfinLibraryRefresh(context.Background())
-		taskstate.Global.Complete(taskID, "目录已添加，本地扫描完成")
+		taskstate.Global.Complete(taskID, appendMetadataRepairSummary("目录已添加，本地扫描完成", repairResult))
 	}()
 	v1Message(c, http.StatusAccepted, "目录已添加，扫描任务已经启动", gin.H{"task_id": taskID, "status": "running"})
+}
+
+func runLocalMetadataPhase(taskID string) (service.MetadataIssueRepairResult, error) {
+	task, _ := taskstate.Global.Get(taskID)
+	baseCurrent := task.Current
+	baseTotal := task.Total
+	return service.NewAgentService().RunAgentForLibraryWithRepair(func(progress service.MetadataIssueRepairProgress) {
+		total := baseTotal + progress.Total
+		if total <= 0 {
+			total = progress.Total
+		}
+		taskstate.Global.Progress(taskID, progress.Message, baseCurrent+progress.Current, total)
+	})
+}
+
+func appendMetadataRepairSummary(summary string, result service.MetadataIssueRepairResult) string {
+	if result.Scanned == 0 {
+		return summary
+	}
+	if result.Failed > 0 {
+		return fmt.Sprintf("%s；历史数据库冲突修复 %d 条，仍有 %d 条待处理", summary, result.Repaired, result.Failed)
+	}
+	return fmt.Sprintf("%s；已修复 %d 条历史数据库冲突", summary, result.Repaired)
 }
 
 func V1BackupHandler(c *gin.Context) {
 	stats := getDBStats(db.DB, db.CurrentDBPath)
 	configured := configValue(model.ConfigKeyR2Endpoint) != "" && configValue(model.ConfigKeyR2Bucket) != ""
-	r2BackupCacheLock.RLock()
-	files := append([]R2BackupFile(nil), r2BackupCache...)
-	r2BackupCacheLock.RUnlock()
+	files := []R2BackupFile{}
+	if configured {
+		// The overview is also the first request after an upload/delete. Use
+		// the shared cache loader so an invalidated cache is repopulated from
+		// R2 instead of making the cloud section appear to lose all backups.
+		if loaded, err := listR2Backups(c.Request.Context(), false); err == nil {
+			files = loaded
+		} else {
+			debugLog("DEBUG: V1BackupHandler - Unable to refresh R2 list: %v", err)
+			r2BackupCacheLock.RLock()
+			files = append(files, r2BackupCache...)
+			r2BackupCacheLock.RUnlock()
+		}
+	}
 	v1Data(c, http.StatusOK, gin.H{
 		"stats": gin.H{"subscription_count": stats.SubscriptionCount, "download_log_count": stats.DownloadLogCount, "local_anime_count": stats.LocalAnimeCount, "user_count": stats.UserCount, "global_config_count": stats.GlobalConfigCount, "database_size": stats.DatabaseSize, "last_modified": stats.LastModified},
 		"r2":    gin.H{"configured": configured, "files": files},
@@ -753,32 +825,31 @@ func V1AnalyzeBackupHandler(c *gin.Context) {
 		v1Error(c, http.StatusBadRequest, "backup_file_missing", "请选择一个备份文件")
 		return
 	}
-	tempFile, err := os.CreateTemp("", "restore_analyze_*.db")
+	sourcePath, err := saveUploadedBackup(file)
 	if err != nil {
-		v1Error(c, http.StatusInternalServerError, "temp_file_failed", "无法创建临时文件")
+		v1Error(c, http.StatusInternalServerError, "temp_file_failed", "无法保存上传的备份文件")
 		return
 	}
-	src, err := file.Open()
+
+	password := ""
+	if service.IsBackupArchive(sourcePath) {
+		password, err = resolveBackupRestorePassword(backupPasswordRequestFromForm(c))
+		if err != nil {
+			safeio.Remove(sourcePath)
+			v1Error(c, http.StatusBadRequest, "backup_password_required", err.Error())
+			return
+		}
+	}
+	stats, databasePath, err := inspectBackupForRestore(sourcePath, password)
 	if err != nil {
-		safeio.Remove(tempFile.Name())
-		v1Error(c, http.StatusBadRequest, "backup_open_failed", "无法打开备份文件")
+		code := "invalid_backup"
+		if errors.Is(err, service.ErrBackupArchivePassword) {
+			code = "backup_password_invalid"
+		}
+		v1Error(c, http.StatusBadRequest, code, backupArchiveErrorMessage(err))
 		return
 	}
-	_, copyErr := io.Copy(tempFile, src)
-	safeio.Close(src)
-	safeio.Close(tempFile)
-	if copyErr != nil || !isValidSQLite(tempFile.Name()) {
-		safeio.Remove(tempFile.Name())
-		v1Error(c, http.StatusBadRequest, "invalid_backup", "无效的数据库备份文件")
-		return
-	}
-	stats, err := service.InspectBackup(tempFile.Name())
-	if err != nil {
-		safeio.Remove(tempFile.Name())
-		v1Error(c, http.StatusBadRequest, "invalid_backup", "无法分析备份内容")
-		return
-	}
-	token := registerRestoreArtifact(tempFile.Name())
+	token := registerRestoreArtifact(databasePath)
 	v1Data(c, http.StatusOK, gin.H{"stats": stats, "restore_token": token})
 }
 
@@ -886,6 +957,35 @@ var v1SettingNormalizers = map[string]v1URLSettingNormalizer{
 			return normalized, nil
 		},
 	},
+	model.ConfigKeyMetadataSourceOrder: {
+		errorCode: "invalid_metadata_source_order",
+		normalize: func(value string) (string, error) {
+			seen := map[string]bool{}
+			order := make([]string, 0, 3)
+			for _, item := range strings.Split(strings.ToLower(value), ",") {
+				source := strings.TrimSpace(item)
+				if source == "" {
+					continue
+				}
+				if source != "bangumi" && source != "tmdb" && source != "anilist" {
+					return "", errors.New("元数据来源只支持 bangumi、tmdb、anilist")
+				}
+				if !seen[source] {
+					seen[source] = true
+					order = append(order, source)
+				}
+			}
+			if len(order) == 0 {
+				return "bangumi,tmdb,anilist", nil
+			}
+			for _, source := range []string{"bangumi", "tmdb", "anilist"} {
+				if !seen[source] {
+					order = append(order, source)
+				}
+			}
+			return strings.Join(order, ","), nil
+		},
+	},
 }
 
 func V1SettingsHandler(c *gin.Context) {
@@ -903,6 +1003,7 @@ func V1SettingsHandler(c *gin.Context) {
 	})
 }
 
+//nolint:gocyclo // This handler intentionally centralizes strict per-setting validation.
 func V1UpdateSettingsHandler(c *gin.Context) {
 	var req struct {
 		Values map[string]string `json:"values"`
@@ -912,7 +1013,7 @@ func V1UpdateSettingsHandler(c *gin.Context) {
 		return
 	}
 	allowed := map[string]bool{}
-	for _, key := range []string{model.ConfigKeyQBMode, model.ConfigKeyQBUrl, model.ConfigKeyQBUsername, model.ConfigKeyQBPassword, model.ConfigKeyBaseDir, model.ConfigKeyAutoRenameEnabled, model.ConfigKeyAutoRenameSeriesTemplate, model.ConfigKeyAutoRenameEpisodeTemplate, model.ConfigKeyBangumiAppID, model.ConfigKeyBangumiAppSecret, model.ConfigKeyBangumiAccessToken, model.ConfigKeyBangumiRefreshToken, model.ConfigKeyTMDBToken, model.ConfigKeyAniListToken, model.ConfigKeyProxyURL, model.ConfigKeyProxyBangumi, model.ConfigKeyProxyMikan, model.ConfigKeyProxyTMDB, model.ConfigKeyProxyAniList, model.ConfigKeyProxyJellyfin, model.ConfigKeyProxyAI, model.ConfigKeyProxyUpdater, model.ConfigKeyAuthIPAllowlistEnabled, model.ConfigKeyAuthIPAllowlist, model.ConfigKeyJellyfinUrl, model.ConfigKeyJellyfinDirectUrl, model.ConfigKeyNetBirdProxyURL, model.ConfigKeyJellyfinLibraryIDs, model.ConfigKeyJellyfinUsername, model.ConfigKeyJellyfinPassword, model.ConfigKeyJellyfinApiKey, model.ConfigKeyAListUrl, model.ConfigKeyAListToken, model.ConfigKeyPikPakUsername, model.ConfigKeyPikPakPassword, model.ConfigKeyPikPakRefreshToken, model.ConfigKeyAIProvider, model.ConfigKeyAIBaseURL, model.ConfigKeyAIModel, model.ConfigKeyAIApiKey, model.ConfigKeyAIOpenAIBaseURL, model.ConfigKeyAIOpenAIModel, model.ConfigKeyAIOpenAIAPIKey, model.ConfigKeyAIGeminiBaseURL, model.ConfigKeyAIGeminiModel, model.ConfigKeyAIGeminiAPIKey, model.ConfigKeyAIGeminiFormat, model.ConfigKeyAIClaudeBaseURL, model.ConfigKeyAIClaudeModel, model.ConfigKeyAIClaudeAPIKey, model.ConfigKeyAIClaudeFormat, model.ConfigKeyR2Endpoint, model.ConfigKeyR2Bucket, model.ConfigKeyR2AccessKey, model.ConfigKeyR2SecretKey, model.ConfigKeyRepoUpdateEnabled, model.ConfigKeyRepoAutoPullEnabled, model.ConfigKeyRepoUpdateIntervalMinutes, model.ConfigKeyRepoUpdateOwner, model.ConfigKeyRepoUpdateName, model.ConfigKeyRepoRequireChecksum} {
+	for _, key := range []string{model.ConfigKeyQBMode, model.ConfigKeyQBUrl, model.ConfigKeyQBUsername, model.ConfigKeyQBPassword, model.ConfigKeyBaseDir, model.ConfigKeyAutoRenameEnabled, model.ConfigKeyMediaNamingPreset, model.ConfigKeyAutoRenameSeriesTemplate, model.ConfigKeyAutoRenameEpisodeTemplate, model.ConfigKeyMetadataSourceOrder, model.ConfigKeyMetadataOverwritePolicy, model.ConfigKeyWriteNFOEnabled, model.ConfigKeyWriteImagesEnabled, model.ConfigKeyIncrementalScanEnabled, model.ConfigKeyBangumiAppID, model.ConfigKeyBangumiAppSecret, model.ConfigKeyBangumiAccessToken, model.ConfigKeyBangumiRefreshToken, model.ConfigKeyTMDBToken, model.ConfigKeyAniListToken, model.ConfigKeyProxyURL, model.ConfigKeyProxyBangumi, model.ConfigKeyProxyMikan, model.ConfigKeyProxyTMDB, model.ConfigKeyProxyAniList, model.ConfigKeyProxyJellyfin, model.ConfigKeyProxyAI, model.ConfigKeyProxyUpdater, model.ConfigKeyAuthIPAllowlistEnabled, model.ConfigKeyAuthIPAllowlist, model.ConfigKeyJellyfinUrl, model.ConfigKeyJellyfinDirectUrl, model.ConfigKeyNetBirdProxyURL, model.ConfigKeyJellyfinLibraryIDs, model.ConfigKeyJellyfinUsername, model.ConfigKeyJellyfinPassword, model.ConfigKeyJellyfinApiKey, model.ConfigKeyAListUrl, model.ConfigKeyAListToken, model.ConfigKeyPikPakUsername, model.ConfigKeyPikPakPassword, model.ConfigKeyPikPakRefreshToken, model.ConfigKeyAIProvider, model.ConfigKeyAIBaseURL, model.ConfigKeyAIModel, model.ConfigKeyAIApiKey, model.ConfigKeyAIOpenAIBaseURL, model.ConfigKeyAIOpenAIModel, model.ConfigKeyAIOpenAIAPIKey, model.ConfigKeyAIGeminiBaseURL, model.ConfigKeyAIGeminiModel, model.ConfigKeyAIGeminiAPIKey, model.ConfigKeyAIGeminiFormat, model.ConfigKeyAIClaudeBaseURL, model.ConfigKeyAIClaudeModel, model.ConfigKeyAIClaudeAPIKey, model.ConfigKeyAIClaudeFormat, model.ConfigKeyR2Endpoint, model.ConfigKeyR2Bucket, model.ConfigKeyR2AccessKey, model.ConfigKeyR2SecretKey, model.ConfigKeyRepoUpdateEnabled, model.ConfigKeyRepoAutoPullEnabled, model.ConfigKeyRepoUpdateIntervalMinutes, model.ConfigKeyRepoUpdateOwner, model.ConfigKeyRepoUpdateName, model.ConfigKeyRepoRequireChecksum} {
 		allowed[key] = true
 	}
 	updates := map[string]string{}
@@ -942,7 +1043,7 @@ func V1UpdateSettingsHandler(c *gin.Context) {
 		}
 		if key == model.ConfigKeyAuthIPAllowlistEnabled {
 			value = strings.ToLower(value)
-			if value != ValueTrue && value != "false" {
+			if value != ValueTrue && value != ValueFalse {
 				v1Error(c, http.StatusBadRequest, "invalid_auth_ip_allowlist", "IP 白名单开关必须为 true 或 false")
 				return
 			}
@@ -957,10 +1058,25 @@ func V1UpdateSettingsHandler(c *gin.Context) {
 		}
 		if key == model.ConfigKeyAutoRenameEnabled {
 			value = strings.ToLower(value)
-			if value != model.ConfigValueTrue && value != "false" {
+			if value != model.ConfigValueTrue && value != ValueFalse {
 				v1Error(c, http.StatusBadRequest, "invalid_auto_rename", "自动重命名开关必须为 true 或 false")
 				return
 			}
+		}
+		if key == model.ConfigKeyMediaNamingPreset && value != "" && value != mediaNamingPresetJellyfinEmby && value != "custom" {
+			v1Error(c, http.StatusBadRequest, "invalid_media_naming_preset", "媒体命名预设只支持 jellyfin-emby 或 custom")
+			return
+		}
+		if key == model.ConfigKeyWriteNFOEnabled || key == model.ConfigKeyWriteImagesEnabled || key == model.ConfigKeyIncrementalScanEnabled {
+			value = strings.ToLower(value)
+			if value != model.ConfigValueTrue && value != ValueFalse {
+				v1Error(c, http.StatusBadRequest, "invalid_media_setting", "媒体写入和增量扫描开关必须为 true 或 false")
+				return
+			}
+		}
+		if key == model.ConfigKeyMetadataOverwritePolicy && value != "" && value != metadataOverwriteFieldLayered && value != "local-only" && value != "network-first" {
+			v1Error(c, http.StatusBadRequest, "invalid_metadata_overwrite_policy", "元数据覆盖策略不受支持")
+			return
 		}
 		if key == model.ConfigKeyAutoRenameSeriesTemplate {
 			if value == "" {
@@ -981,6 +1097,10 @@ func V1UpdateSettingsHandler(c *gin.Context) {
 			}
 		}
 		updates[key] = value
+	}
+	if updates[model.ConfigKeyMediaNamingPreset] == mediaNamingPresetJellyfinEmby {
+		updates[model.ConfigKeyAutoRenameSeriesTemplate] = renamer.DefaultSeriesTemplate
+		updates[model.ConfigKeyAutoRenameEpisodeTemplate] = renamer.DefaultEpisodeTemplate
 	}
 	enabled := authIPAllowlistEnabled()
 	if value, ok := updates[model.ConfigKeyAuthIPAllowlistEnabled]; ok {

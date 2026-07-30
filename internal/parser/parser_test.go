@@ -146,3 +146,65 @@ func TestParseFilenameUsesBracketEpisodeBeforeTechnicalTags(t *testing.T) {
 		t.Fatalf("technical tag must not become an episode, got %d", technicalOnly.Episode)
 	}
 }
+
+func TestParseFilenameSupportsSeasonXEpisodeAndRanges(t *testing.T) {
+	info := ParseFilename(`[Group] Range Show 2x03-04 [1080p][CHS].mkv`)
+	if info.Season != 2 || info.Episode != 3 || info.EpisodeEnd != 4 {
+		t.Fatalf("expected S02E03-E04, got season=%d episode=%d end=%d", info.Season, info.Episode, info.EpisodeEnd)
+	}
+	if info.ParseSource != "filename:season-x-episode" || info.Confidence < 0.9 {
+		t.Fatalf("expected high-confidence season-x parser evidence, got %q %.2f", info.ParseSource, info.Confidence)
+	}
+	if info.Language != "chs" {
+		t.Fatalf("expected CHS language tag, got %q", info.Language)
+	}
+}
+
+func TestParseFilenameSupportsSxxExxRangesAndChineseEpisodeMarkers(t *testing.T) {
+	info := ParseFilename(`[Group] Range Show S01E03-E04 [1080p].mkv`)
+	if info.Season != 1 || info.Episode != 3 || info.EpisodeEnd != 4 {
+		t.Fatalf("expected S01E03-E04, got season=%d episode=%d end=%d", info.Season, info.Episode, info.EpisodeEnd)
+	}
+
+	chinese := ParseFilename(`示例番剧 第二季 第07-08集 [CHS].mkv`)
+	if chinese.Season != 2 || chinese.Episode != 7 || chinese.EpisodeEnd != 8 {
+		t.Fatalf("expected season 2 episode range 7-8, got season=%d episode=%d end=%d", chinese.Season, chinese.Episode, chinese.EpisodeEnd)
+	}
+	if chinese.ParseSource != "filename:chinese-episode" {
+		t.Fatalf("expected chinese episode parser evidence, got %q", chinese.ParseSource)
+	}
+}
+
+func TestParseFilenameSupportsSpecialKindsAbsoluteAndVersion(t *testing.T) {
+	special := ParseFilename(`[Group] Example OVA - 01v2 [1080p].mkv`)
+	if special.EpisodeType != "special" || special.Episode != 1 || special.Version != "v2" {
+		t.Fatalf("unexpected special parse: %#v", special)
+	}
+
+	sp := ParseFilename(`[Group] Example SP01.mkv`)
+	if sp.EpisodeType != "special" {
+		t.Fatalf("expected SP01 to be treated as a special, got %q", sp.EpisodeType)
+	}
+
+	titleWithSpecialWord := ParseFilename(`[Group] Special Show - 01.mkv`)
+	if titleWithSpecialWord.EpisodeType != "episode" {
+		t.Fatalf("a title containing the word Special must remain a normal episode, got %q", titleWithSpecialWord.EpisodeType)
+	}
+
+	absolute := ParseFilename(`Long Show Absolute 143 [WEB-DL].mkv`)
+	if absolute.AbsoluteEpisode != 143 {
+		t.Fatalf("expected absolute episode 143, got %d", absolute.AbsoluteEpisode)
+	}
+}
+
+func TestParseFilenameRejectsTechnicalNumbersAsEpisodes(t *testing.T) {
+	for _, name := range []string{
+		`Show (2026) [1080p][x265].mkv`,
+		`Show [2160p][H264].mkv`,
+	} {
+		info := ParseFilename(name)
+		if info.Episode != 0 {
+			t.Fatalf("%s: technical/year number became episode %d", name, info.Episode)
+		}
+	}
+}

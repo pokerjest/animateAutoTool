@@ -73,6 +73,7 @@ type SubscriptionHistoryData struct {
 	Subscription model.Subscription
 	Runs         []model.SubscriptionRunLog
 	Logs         []model.DownloadLog
+	Resources    []model.SubscriptionResource
 }
 
 type SubscriptionTrendReport struct {

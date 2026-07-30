@@ -104,6 +104,7 @@ type restoreData struct {
 	metas            []model.AnimeMetadata
 	subs             []model.Subscription
 	logs             []model.DownloadLog
+	resources        []model.SubscriptionResource
 	runLogs          []model.SubscriptionRunLog
 	dirs             []model.LocalAnimeDirectory
 	animes           []model.LocalAnime
@@ -114,6 +115,7 @@ type restoreData struct {
 	hasMetadata      bool
 	hasSubscriptions bool
 	hasDownloadLogs  bool
+	hasResources     bool
 	hasRunLogs       bool
 	hasDirs          bool
 	hasAnimes        bool
@@ -148,6 +150,10 @@ func (s *RestoreService) readBackupData(srcDB *gorm.DB, options RestoreOptions) 
 		if srcDB.Migrator().HasTable(&model.DownloadLog{}) {
 			d.hasDownloadLogs = true
 			eg.Go(func() error { return srcDB.Find(&d.logs).Error })
+		}
+		if srcDB.Migrator().HasTable(&model.SubscriptionResource{}) {
+			d.hasResources = true
+			eg.Go(func() error { return srcDB.Find(&d.resources).Error })
 		}
 		eg.Go(func() error {
 			if !srcDB.Migrator().HasTable(&model.SubscriptionRunLog{}) {
@@ -325,10 +331,24 @@ func replaceRestoreRows(hasTable bool, rowCount int, deleteRows func() error, da
 }
 
 func writeRestoreLogs(tx *gorm.DB, d *restoreData, createBatch restoreBatchWriter) error {
+	if d.hasDownloadLogs {
+		if err := tx.Exec("DELETE FROM download_logs").Error; err != nil {
+			return err
+		}
+	}
+	if err := replaceRestoreRows(
+		d.hasResources,
+		len(d.resources),
+		func() error { return tx.Exec("DELETE FROM subscription_resources").Error },
+		&d.resources,
+		createBatch,
+	); err != nil {
+		return err
+	}
 	if err := replaceRestoreRows(
 		d.hasDownloadLogs,
 		len(d.logs),
-		func() error { return tx.Exec("DELETE FROM download_logs").Error },
+		func() error { return nil },
 		&d.logs,
 		createBatch,
 	); err != nil {

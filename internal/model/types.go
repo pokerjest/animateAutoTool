@@ -9,54 +9,62 @@ import (
 // Subscription 代表一个番剧订阅
 type Subscription struct {
 	gorm.Model
-	MikanID             string     `json:"mikan_id"`                                  // 蜜柑计划的 RSS ID 或 Group ID
-	Title               string     `json:"title" form:"Title"`                        // 番剧名称 (RSS 原始标题)
-	RSSUrl              string     `json:"rss_url" form:"RSSUrl" gorm:"uniqueIndex"`  // 具体的 RSS 链接
-	Image               string     `json:"image" form:"Image"`                        // 番剧封面图片 (RSS 原始封面)
-	SubtitleGroup       string     `json:"subtitle_group" form:"SubtitleGroup"`       // 字幕组名称
-	Season              string     `json:"season" form:"season"`                      // 季度
-	FilterRule          string     `json:"filter_rule" form:"FilterRule"`             // 必须命中的资源标题正则
-	ExcludeRule         string     `json:"exclude_rule" form:"ExcludeRule"`           // 命中后排除的资源标题正则
-	ResolutionFilter    string     `json:"resolution_filter" form:"ResolutionFilter"` // 清晰度过滤 (2160p/1080p/720p)
-	SubtitleLanguage    string     `json:"subtitle_language" form:"SubtitleLanguage"` // 字幕语言过滤 (chs/cht/chs_cht)
-	BackupRSSUrl        string     `json:"backup_rss_url" form:"BackupRSSUrl"`        // 备用 RSS
-	ExpectedEpisodes    int        `json:"expected_episodes" form:"ExpectedEpisodes"` // 预期总集数
-	AutoDisableOnDone   bool       `json:"auto_disable_on_done" form:"AutoDisableOnDone"`
-	AllowMultiSubgroup  bool       `json:"allow_multi_subgroup" form:"AllowMultiSubgroup"`
-	StaleAfterHours     int        `json:"stale_after_hours" form:"StaleAfterHours"` // 超过多少小时无更新后提示
-	SavePath            string     `json:"save_path"`                                // 保存路径
-	RenameEnabled       bool       `json:"rename_enabled"`                           // 是否启用重命名
-	Offset              int        `json:"offset"`                                   // 偏移
-	LastEp              int        `json:"last_ep"`                                  // 最后集数
-	IsActive            bool       `json:"is_active"`                                // 激活状态
-	Summary             string     `json:"summary"`                                  // 简介
-	DownloadedCount     int64      `json:"downloaded_count" gorm:"-"`                // 已加入下载且未归档的去重集数 (动态计算)
-	LastCheckAt         *time.Time `json:"last_check_at"`
-	LastSuccessAt       *time.Time `json:"last_success_at"`
-	LastRunStatus       string     `json:"last_run_status"`
-	LastRunSummary      string     `json:"last_run_summary"`
-	LastError           string     `json:"last_error"`
-	LastErrorDisplay    string     `json:"last_error_display" gorm:"-"`
-	LastNewDownloads    int        `json:"last_new_downloads"`
-	LastDownloadedTitle string     `json:"last_downloaded_title"`
-	CanUseBaseRSS       bool       `json:"can_use_base_rss" gorm:"-"`
-	BaseRSSURL          string     `json:"base_rss_url" gorm:"-"`
-	CanClearFilter      bool       `json:"can_clear_filter" gorm:"-"`
-	CanResetStaleLogs   bool       `json:"can_reset_stale_logs" gorm:"-"`
-	CanRetryMissing     bool       `json:"can_retry_missing" gorm:"-"`
-	CanRetryStale       bool       `json:"can_retry_stale" gorm:"-"`
-	CanRetryUpgrade     bool       `json:"can_retry_upgrade" gorm:"-"`
-	CanRefreshLibrary   bool       `json:"can_refresh_library" gorm:"-"`
-	HasRepairActions    bool       `json:"has_repair_actions" gorm:"-"`
-	StrategyHint        string     `json:"strategy_hint" gorm:"-"`
-	LifecycleStage      string     `json:"lifecycle_stage" gorm:"-"`
-	LifecycleTone       string     `json:"lifecycle_tone" gorm:"-"`
-	LibraryStage        string     `json:"library_stage" gorm:"-"`
-	LibraryTone         string     `json:"library_tone" gorm:"-"`
-	LibraryHint         string     `json:"library_hint" gorm:"-"`
-	LocalAnimeID        uint       `json:"local_anime_id" gorm:"-"`
-	LibraryEpisodeCount int64      `json:"library_episode_count" gorm:"-"`
-	Playable            bool       `json:"playable" gorm:"-"`
+	MikanID               string     `json:"mikan_id"`                                  // 蜜柑计划的 RSS ID 或 Group ID
+	Title                 string     `json:"title" form:"Title"`                        // 番剧名称 (RSS 原始标题)
+	RSSUrl                string     `json:"rss_url" form:"RSSUrl" gorm:"uniqueIndex"`  // 具体的 RSS 链接
+	Image                 string     `json:"image" form:"Image"`                        // 番剧封面图片 (RSS 原始封面)
+	SubtitleGroup         string     `json:"subtitle_group" form:"SubtitleGroup"`       // 字幕组名称
+	Season                string     `json:"season" form:"season"`                      // 季度
+	FilterRule            string     `json:"filter_rule" form:"FilterRule"`             // 必须命中的资源标题正则
+	ExcludeRule           string     `json:"exclude_rule" form:"ExcludeRule"`           // 命中后排除的资源标题正则
+	ResolutionFilter      string     `json:"resolution_filter" form:"ResolutionFilter"` // 清晰度过滤 (2160p/1080p/720p)
+	SubtitleLanguage      string     `json:"subtitle_language" form:"SubtitleLanguage"` // 字幕语言过滤 (chs/cht/chs_cht)
+	BackupRSSUrl          string     `json:"backup_rss_url" form:"BackupRSSUrl"`        // 备用 RSS
+	ExpectedEpisodes      int        `json:"expected_episodes" form:"ExpectedEpisodes"` // 预期总集数
+	AutoDisableOnDone     bool       `json:"auto_disable_on_done" form:"AutoDisableOnDone"`
+	AllowMultiSubgroup    bool       `json:"allow_multi_subgroup" form:"AllowMultiSubgroup"`
+	StaleAfterHours       int        `json:"stale_after_hours" form:"StaleAfterHours"` // 超过多少小时无更新后提示
+	SavePath              string     `json:"save_path"`                                // 保存路径
+	RenameEnabled         bool       `json:"rename_enabled"`                           // 是否启用重命名
+	Offset                int        `json:"offset"`                                   // 偏移
+	LastEp                int        `json:"last_ep"`                                  // 最后集数
+	IsActive              bool       `json:"is_active"`                                // 激活状态
+	Summary               string     `json:"summary"`                                  // 简介
+	DownloadedCount       int64      `json:"downloaded_count" gorm:"-"`                // 已加入下载且未归档的去重集数 (动态计算)
+	RSSCount              int64      `json:"rss_count" gorm:"-"`
+	CanonicalEpisodeCount int64      `json:"canonical_episode_count" gorm:"-"`
+	ConfirmedCount        int64      `json:"confirmed_count" gorm:"-"`
+	DownloadingCount      int64      `json:"downloading_count" gorm:"-"`
+	CompletedCount        int64      `json:"completed_count" gorm:"-"`
+	FailedCount           int64      `json:"failed_count" gorm:"-"`
+	UnresolvedCount       int64      `json:"unresolved_count" gorm:"-"`
+	NeedsAttention        bool       `json:"needs_attention" gorm:"-"`
+	LastCheckAt           *time.Time `json:"last_check_at"`
+	LastSuccessAt         *time.Time `json:"last_success_at"`
+	LastRunStatus         string     `json:"last_run_status"`
+	LastRunSummary        string     `json:"last_run_summary"`
+	LastError             string     `json:"last_error"`
+	LastErrorDisplay      string     `json:"last_error_display" gorm:"-"`
+	LastNewDownloads      int        `json:"last_new_downloads"`
+	LastDownloadedTitle   string     `json:"last_downloaded_title"`
+	CanUseBaseRSS         bool       `json:"can_use_base_rss" gorm:"-"`
+	BaseRSSURL            string     `json:"base_rss_url" gorm:"-"`
+	CanClearFilter        bool       `json:"can_clear_filter" gorm:"-"`
+	CanResetStaleLogs     bool       `json:"can_reset_stale_logs" gorm:"-"`
+	CanRetryMissing       bool       `json:"can_retry_missing" gorm:"-"`
+	CanRetryStale         bool       `json:"can_retry_stale" gorm:"-"`
+	CanRetryUpgrade       bool       `json:"can_retry_upgrade" gorm:"-"`
+	CanRefreshLibrary     bool       `json:"can_refresh_library" gorm:"-"`
+	HasRepairActions      bool       `json:"has_repair_actions" gorm:"-"`
+	StrategyHint          string     `json:"strategy_hint" gorm:"-"`
+	LifecycleStage        string     `json:"lifecycle_stage" gorm:"-"`
+	LifecycleTone         string     `json:"lifecycle_tone" gorm:"-"`
+	LibraryStage          string     `json:"library_stage" gorm:"-"`
+	LibraryTone           string     `json:"library_tone" gorm:"-"`
+	LibraryHint           string     `json:"library_hint" gorm:"-"`
+	LocalAnimeID          uint       `json:"local_anime_id" gorm:"-"`
+	LibraryEpisodeCount   int64      `json:"library_episode_count" gorm:"-"`
+	Playable              bool       `json:"playable" gorm:"-"`
 
 	// Refactored Metadata
 	MetadataID *uint          `json:"metadata_id"`
@@ -169,9 +177,19 @@ type AnimeMetadata struct {
 	AirDate string `json:"air_date"`
 
 	// Multi-language titles
-	TitleCN string `json:"title_cn"`
-	TitleEN string `json:"title_en"`
-	TitleJP string `json:"title_jp"`
+	TitleCN         string `json:"title_cn"`
+	TitleEN         string `json:"title_en"`
+	TitleJP         string `json:"title_jp"`
+	SortTitle       string `json:"sort_title"`
+	OriginalTitle   string `json:"original_title"`
+	Genres          string `json:"genres"` // JSON array, kept as text for backward-compatible SQLite migrations.
+	Studios         string `json:"studios"`
+	Tags            string `json:"tags"`
+	Actors          string `json:"actors"`
+	Directors       string `json:"directors"`
+	RuntimeMinutes  int    `json:"runtime_minutes"`
+	ContentRating   string `json:"content_rating"`
+	OriginalCountry string `json:"original_country"`
 
 	// Sources IDs
 	BangumiID int `json:"bangumi_id" gorm:"uniqueIndex:idx_anime_metadata_bangumi_id,where:bangumi_id != 0"`
@@ -185,11 +203,13 @@ type AnimeMetadata struct {
 	BangumiRating   float64 `json:"bangumi_rating"`
 	BangumiImageRaw []byte  `json:"-" gorm:"type:blob"`
 
-	TMDBTitle    string  `json:"tmdb_title"`
-	TMDBImage    string  `json:"tmdb_image"`
-	TMDBSummary  string  `json:"tmdb_summary"`
-	TMDBRating   float64 `json:"tmdb_rating"`
-	TMDBImageRaw []byte  `json:"-" gorm:"type:blob"`
+	TMDBTitle       string  `json:"tmdb_title"`
+	TMDBImage       string  `json:"tmdb_image"`
+	TMDBBackdrop    string  `json:"tmdb_backdrop"`
+	TMDBSummary     string  `json:"tmdb_summary"`
+	TMDBRating      float64 `json:"tmdb_rating"`
+	TMDBImageRaw    []byte  `json:"-" gorm:"type:blob"`
+	TMDBBackdropRaw []byte  `json:"-" gorm:"type:blob"`
 
 	AniListTitle    string  `json:"anilist_title"`
 	AniListImage    string  `json:"anilist_image"`
@@ -198,7 +218,8 @@ type AnimeMetadata struct {
 	AniListImageRaw []byte  `json:"-" gorm:"type:blob"`
 
 	// User Preference
-	DataSource string `json:"data_source" gorm:"default:'jellyfin'"` // "bangumi", "tmdb", "anilist", "jellyfin"
+	DataSource   string `json:"data_source" gorm:"default:'jellyfin'"` // "bangumi", "tmdb", "anilist", "jellyfin"
+	FieldSources string `json:"field_sources" gorm:"type:text"`        // JSON map of field -> provider/local source.
 
 	// Cached Progress
 	BangumiWatchedEps int `json:"bangumi_watched_eps"`
@@ -209,6 +230,7 @@ type AnimeMetadata struct {
 type DownloadLog struct {
 	gorm.Model
 	SubscriptionID uint   `gorm:"index"`
+	ResourceID     *uint  `gorm:"index"`
 	Title          string // 种子标题
 	Magnet         string // 磁力链
 	Episode        string // 解析出的集数 (如 "01", "12.5")
@@ -216,6 +238,47 @@ type DownloadLog struct {
 	Status         string // "downloading", "completed", "failed", "renamed"
 	InfoHash       string // 种子唯一标识 (由于RSS可能拿不到，不设唯一索引)
 	TargetFile     string // 最终重命名后的文件路径
+
+	// Live qBittorrent progress is populated only for API responses. These
+	// fields are intentionally ignored by GORM and are never persisted.
+	ProgressPercent float64 `json:"progress_percent" gorm:"-"`
+	DownloadedBytes int64   `json:"downloaded_bytes" gorm:"-"`
+	TotalBytes      int64   `json:"total_bytes" gorm:"-"`
+	DownloadSpeed   int64   `json:"download_speed" gorm:"-"`
+}
+
+// SubscriptionResource is the durable reconciliation record for one RSS
+// candidate. DownloadLog remains as a compatibility projection while this
+// table becomes the source of truth for RSS, qBittorrent and local files.
+type SubscriptionResource struct {
+	gorm.Model
+	SubscriptionID uint       `gorm:"index;not null;uniqueIndex:idx_subscription_resource_fingerprint" json:"subscription_id"`
+	CanonicalKey   string     `gorm:"size:160;index" json:"canonical_key"`
+	Fingerprint    string     `gorm:"size:64;uniqueIndex:idx_subscription_resource_fingerprint" json:"fingerprint"`
+	Title          string     `gorm:"type:text" json:"title"`
+	Episode        string     `gorm:"size:32;index" json:"episode"`
+	SeasonVal      string     `gorm:"size:32;index" json:"season_val"`
+	Subgroup       string     `gorm:"size:160" json:"subgroup"`
+	VersionTag     string     `gorm:"size:24" json:"version_tag"`
+	TorrentURL     string     `gorm:"type:text" json:"torrent_url"`
+	RSSURL         string     `gorm:"type:text" json:"rss_url"`
+	RSSGUID        string     `gorm:"size:255" json:"rss_guid"`
+	InfoHash       string     `gorm:"size:128;index" json:"info_hash"`
+	Source         string     `gorm:"size:16" json:"source"`
+	State          string     `gorm:"size:24;index" json:"state"`
+	StateReason    string     `gorm:"type:text" json:"state_reason"`
+	LastError      string     `gorm:"type:text" json:"last_error"`
+	TaskHash       string     `gorm:"size:128;index" json:"task_hash"`
+	TargetFile     string     `gorm:"type:text;index" json:"target_file"`
+	AttemptCount   int        `json:"attempt_count"`
+	CandidateRank  int        `json:"candidate_rank"`
+	Selected       bool       `gorm:"index" json:"selected"`
+	Current        bool       `gorm:"index" json:"current"`
+	LastSeenAt     *time.Time `gorm:"index" json:"last_seen_at,omitempty"`
+	LastAttemptAt  *time.Time `json:"last_attempt_at,omitempty"`
+	SubmittedAt    *time.Time `json:"submitted_at,omitempty"`
+	CompletedAt    *time.Time `json:"completed_at,omitempty"`
+	RetryAfter     *time.Time `json:"retry_after,omitempty"`
 }
 
 // SubscriptionRunLog records each subscription check as a first-class run entry
@@ -253,8 +316,14 @@ const (
 	ConfigKeyQBMode                    = "qb_mode"
 	ConfigKeyBaseDir                   = "base_download_dir"
 	ConfigKeyAutoRenameEnabled         = "auto_rename_enabled"
+	ConfigKeyMediaNamingPreset         = "media_naming_preset"
 	ConfigKeyAutoRenameSeriesTemplate  = "auto_rename_series_template"
 	ConfigKeyAutoRenameEpisodeTemplate = "auto_rename_episode_template"
+	ConfigKeyMetadataSourceOrder       = "metadata_source_order"
+	ConfigKeyMetadataOverwritePolicy   = "metadata_overwrite_policy"
+	ConfigKeyWriteNFOEnabled           = "write_nfo_enabled"
+	ConfigKeyWriteImagesEnabled        = "write_images_enabled"
+	ConfigKeyIncrementalScanEnabled    = "incremental_scan_enabled"
 	ConfigKeyBangumiAppID              = "bangumi_app_id"
 	ConfigKeyBangumiAppSecret          = "bangumi_app_secret" //nolint:gosec
 	ConfigKeyBangumiAccessToken        = "bangumi_access_token"
@@ -365,14 +434,22 @@ type LocalEpisode struct {
 	JellyfinItemID string `json:"jellyfin_item_id" gorm:"index"` // Cached Jellyfin Episode ID
 
 	// Offline Metadata / Raw Parsed Data
-	ParsedTitle  string `json:"parsed_title"`  // 从文件名解析出的原始系列标题
-	ParsedSeason string `json:"parsed_season"` // 解析出的季度字符串
-	Resolution   string `json:"resolution"`    // 解析出的分辨率
-	SubGroup     string `json:"sub_group"`     // 解析出的字幕组
-	VideoCodec   string `json:"video_codec"`   // 视频编码
-	AudioCodec   string `json:"audio_codec"`   // 音频编码
-	BitDepth     string `json:"bit_depth"`     // 位深
-	Source       string `json:"source"`        // 来源
+	ParsedTitle        string  `json:"parsed_title"`  // 从文件名解析出的原始系列标题
+	ParsedSeason       string  `json:"parsed_season"` // 解析出的季度字符串
+	EpisodeEndNum      int     `json:"episode_end_num"`
+	EpisodeType        string  `json:"episode_type"`
+	AbsoluteEpisodeNum int     `json:"absolute_episode_num"`
+	VersionTag         string  `json:"version_tag"`
+	LanguageTag        string  `json:"language_tag"`
+	ParseSource        string  `json:"parse_source"`
+	ParseConfidence    float64 `json:"parse_confidence"`
+	ScanFingerprint    string  `json:"scan_fingerprint" gorm:"size:64;index"`
+	Resolution         string  `json:"resolution"`  // 解析出的分辨率
+	SubGroup           string  `json:"sub_group"`   // 解析出的字幕组
+	VideoCodec         string  `json:"video_codec"` // 视频编码
+	AudioCodec         string  `json:"audio_codec"` // 音频编码
+	BitDepth           string  `json:"bit_depth"`   // 位深
+	Source             string  `json:"source"`      // 来源
 }
 
 type LibraryIssue struct {

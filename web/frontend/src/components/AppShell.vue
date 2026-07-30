@@ -38,6 +38,7 @@ const isActive = (to: string) => {
 }
 const themeIcon = computed(() => ui.theme === 'dark' ? Sun : MoonStar)
 const toggleTheme = () => ui.setTheme(document.documentElement.classList.contains('dark') ? 'light' : 'dark')
+const toggleDesktopSidebar = () => ui.setDesktopSidebarCollapsed(!ui.desktopSidebarCollapsed)
 async function switchWorkspace(mode: WorkspaceMode) {
   if (mode === workspace.mode) return
   if (mode === 'media') {
@@ -63,30 +64,43 @@ onMounted(() => {
 <template>
   <div class="app-backdrop min-h-screen">
     <AppBackground />
-    <aside class="glass fixed inset-y-4 left-4 z-40 hidden w-[248px] flex-col rounded-[1.7rem] p-4 lg:flex">
-      <RouterLink to="/" class="mb-6 flex items-center gap-3 rounded-2xl p-2">
+    <aside :class="['glass desktop-sidebar fixed inset-y-4 left-4 z-40 hidden flex-col rounded-[1.7rem] lg:flex', ui.desktopSidebarCollapsed ? 'w-[72px] p-3' : 'w-[248px] p-4']">
+      <RouterLink to="/" class="mb-6 flex items-center gap-3 rounded-2xl p-2" :class="ui.desktopSidebarCollapsed ? 'justify-center px-0' : ''" aria-label="返回今日概览">
         <span class="grid h-11 w-11 place-items-center rounded-2xl bg-gradient-to-br from-pink-400 to-rose-600 text-white shadow-lg"><Sparkles :size="22" /></span>
-        <span><strong class="block text-[1.05rem] tracking-tight">AnimateTool</strong><small class="muted">你的追番中枢</small></span>
+        <span v-if="!ui.desktopSidebarCollapsed"><strong class="block text-[1.05rem] tracking-tight">AnimateTool</strong><small class="muted">你的追番中枢</small></span>
       </RouterLink>
       <nav aria-label="主导航" class="min-h-0 flex-1 overflow-y-auto pr-1">
-        <section v-for="group in groups" :key="group.label" class="mb-4">
-          <h2 class="mb-1 px-3 text-[.66rem] font-extrabold uppercase tracking-[.14em] text-[var(--ink-muted)]">{{ group.label }}</h2>
-          <RouterLink v-for="link in group.links" :key="link.to" :to="link.to" class="mb-1 flex min-h-11 items-center gap-3 rounded-xl px-3 text-sm font-bold transition" :class="isActive(link.to) ? 'bg-[var(--brand-soft)] text-[var(--brand-strong)]' : 'muted hover:bg-[var(--surface-muted)] hover:text-[var(--ink)]'">
-            <component :is="link.icon" :size="18" /><span>{{ link.label }}</span><ChevronRight v-if="isActive(link.to)" :size="15" class="ml-auto" />
+        <section v-for="group in groups" :key="group.label" class="mb-4" :class="ui.desktopSidebarCollapsed ? 'mb-2' : ''">
+          <h2 v-if="!ui.desktopSidebarCollapsed" class="mb-1 px-3 text-[.66rem] font-extrabold uppercase tracking-[.14em] text-[var(--ink-muted)]">{{ group.label }}</h2>
+          <RouterLink v-for="link in group.links" :key="link.to" :to="link.to" class="mb-1 flex min-h-11 items-center gap-3 rounded-xl px-3 text-sm font-bold transition" :class="[isActive(link.to) ? 'bg-[var(--brand-soft)] text-[var(--brand-strong)]' : 'muted hover:bg-[var(--surface-muted)] hover:text-[var(--ink)]', ui.desktopSidebarCollapsed ? 'justify-center px-0' : '']" :title="ui.desktopSidebarCollapsed ? link.label : undefined">
+            <component :is="link.icon" :size="18" /><span v-if="!ui.desktopSidebarCollapsed">{{ link.label }}</span><ChevronRight v-if="isActive(link.to) && !ui.desktopSidebarCollapsed" :size="15" class="ml-auto" />
           </RouterLink>
         </section>
       </nav>
-      <div class="panel-muted mt-2 flex items-center justify-between p-2">
-        <button class="btn btn-quiet h-10 min-h-10 w-10 p-0" type="button" @click="toggleTheme" aria-label="切换明暗主题"><component :is="themeIcon" :size="18" /></button>
-        <div v-if="session.passwordless" class="min-w-0 flex-1 truncate px-2 text-left text-xs font-bold"><span class="block truncate">{{ session.state?.username || '管理员' }}</span><span class="muted">IP 白名单免密</span></div>
-        <AsyncButton v-else class="min-w-0 flex-1 truncate px-2 text-left text-xs font-bold" :loading="actions.isBusy('logout')" loading-label="退出中…" @click="logout"><span class="block truncate">{{ session.state?.username || '管理员' }}</span><span class="muted">退出登录</span></AsyncButton>
-        <span class="badge">{{ session.state?.version }}</span>
+      <div class="panel-muted sidebar-footer mt-2 p-2">
+        <div class="sidebar-account-row">
+          <button class="btn btn-quiet h-10 min-h-10 w-10 p-0" type="button" @click="toggleTheme" aria-label="切换明暗主题"><component :is="themeIcon" :size="18" /></button>
+          <div v-if="session.passwordless && !ui.desktopSidebarCollapsed" class="sidebar-account min-w-0">
+            <span class="block truncate">{{ session.state?.username || '管理员' }}</span>
+            <span class="muted block truncate">IP 白名单免密</span>
+          </div>
+          <AsyncButton v-else-if="!ui.desktopSidebarCollapsed" class="sidebar-account sidebar-logout min-w-0" :loading="actions.isBusy('logout')" loading-label="退出中…" @click="logout">
+            <span class="block truncate">{{ session.state?.username || '管理员' }}</span>
+            <span class="muted block truncate">退出登录</span>
+          </AsyncButton>
+          <button v-else class="btn btn-quiet h-10 min-h-10 w-10 p-0 text-[var(--danger)]" type="button" aria-label="退出登录" title="退出登录" @click="logout"><LogOut :size="18" /></button>
+        </div>
+        <div v-if="!ui.desktopSidebarCollapsed" class="sidebar-version-row">
+          <span class="sidebar-version-label muted">当前版本</span>
+          <span class="badge sidebar-version" :title="session.state?.version || '版本未知'">{{ session.state?.version || '未知版本' }}</span>
+        </div>
       </div>
     </aside>
 
-    <header class="glass fixed inset-x-3 top-3 z-40 flex h-16 items-center justify-between rounded-2xl px-3 lg:left-[280px] lg:right-6">
+    <header :class="['glass fixed inset-x-3 top-3 z-40 flex h-16 items-center justify-between rounded-2xl px-3', ui.desktopSidebarCollapsed ? 'lg:left-[104px]' : 'lg:left-[280px]', 'lg:right-6']">
       <div class="flex min-w-0 items-center gap-3">
         <button class="btn btn-quiet h-11 min-h-11 w-11 p-0 lg:hidden" type="button" @click="ui.mobileMore = true" aria-label="打开更多导航"><Menu :size="21" /></button>
+        <button class="btn btn-quiet hidden h-11 min-h-11 w-11 p-0 lg:inline-flex" type="button" :aria-expanded="!ui.desktopSidebarCollapsed" :aria-label="ui.desktopSidebarCollapsed ? '展开侧边栏' : '收起侧边栏'" :title="ui.desktopSidebarCollapsed ? '展开侧边栏' : '收起侧边栏'" @click="toggleDesktopSidebar"><Menu :size="21" /></button>
         <div class="min-w-0"><p class="eyebrow">Animate Auto Tool</p><h1 class="truncate text-lg font-extrabold">{{ route.meta.title }}</h1></div>
       </div>
       <div class="flex items-center gap-2">
@@ -100,7 +114,7 @@ onMounted(() => {
       </div>
     </header>
 
-    <main id="main-content" class="min-w-0 px-3 pb-28 pt-24 lg:ml-[280px] lg:px-6 lg:pb-8"><div class="mx-auto max-w-[1440px]"><PlaybackHost /><slot /></div></main>
+    <main id="main-content" :class="['min-w-0 px-3 pb-28 pt-24 lg:px-6 lg:pb-8', ui.desktopSidebarCollapsed ? 'lg:ml-[104px]' : 'lg:ml-[280px]']"><div class="mx-auto max-w-[1440px]"><PlaybackHost /><slot /></div></main>
 
     <nav aria-label="移动端主导航" class="glass fixed inset-x-3 bottom-3 z-40 grid grid-cols-5 rounded-2xl p-1.5 lg:hidden">
       <RouterLink v-for="link in bottom" :key="link.to" :to="link.to" class="flex min-h-14 flex-col items-center justify-center gap-1 rounded-xl text-[.64rem] font-bold" :class="isActive(link.to) ? 'bg-[var(--brand-soft)] text-[var(--brand-strong)]' : 'muted'"><component :is="link.icon" :size="19" /><span>{{ link.label.slice(0, 4) }}</span></RouterLink>

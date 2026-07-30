@@ -87,7 +87,7 @@ describe('background task buttons', () => {
   it('keeps metadata refresh active until its task update arrives', async () => {
     vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input)
-      if (path.endsWith('/api/v1/library')) return response({ items: [] })
+      if (path.includes('/api/v1/library?')) return response({ items: [] })
       if (path.endsWith('/api/v1/library/refresh') && init?.method === 'POST') return response({ task_id: 'metadata-refresh', status: 'running' }, 202)
       throw new Error(`unexpected request: ${path}`)
     }))
@@ -131,6 +131,31 @@ describe('background task buttons', () => {
     tasks.upsert({ id: 'subscription-1', kind: 'subscription', title: '订阅检查', detail: '检查完成', tone: 'success', updatedAt: new Date().toISOString() })
     await flushPromises()
     expect(wrapper.text()).not.toContain('检查中…')
+  })
+
+  it('keeps subscription refresh active until repair finishes', async () => {
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input)
+      if (path.endsWith('/api/v1/subscriptions') && !init?.method) return response({
+        items: [],
+        trend: { checked_count: 0, success_count: 0, warning_count: 0, error_count: 0, active_issue_count: 0 },
+        scheduler: {},
+      })
+      if (path.endsWith('/api/v1/subscriptions/refresh') && init?.method === 'POST') {
+        return response({ task_id: 'subscription-refresh', status: 'running' }, 202)
+      }
+      throw new Error(`unexpected request: ${path}`)
+    }))
+    const { wrapper, tasks } = mountView(SubscriptionsView)
+    await vi.waitFor(() => expect(wrapper.text()).toContain('刷新并修复'))
+
+    await buttonByText(wrapper, '刷新并修复').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('刷新修复中…')
+
+    tasks.upsert({ id: 'subscription-refresh', kind: 'subscription-refresh', title: '刷新并修复订阅', detail: '刷新完成', tone: 'success', updatedAt: new Date().toISOString() })
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('刷新修复中…')
   })
 
   it('shows settings save progress and sends one write request', async () => {

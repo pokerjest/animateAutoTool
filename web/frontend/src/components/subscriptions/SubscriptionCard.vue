@@ -48,6 +48,14 @@ const releaseFilterLabel = computed(() => {
 })
 
 const canPlay = computed(() => Boolean(props.item.playable && props.item.local_anime_id))
+const usesResourceLedger = computed(() => props.item.rss_count !== undefined)
+const showIssueBadge = computed(() => usesResourceLedger.value
+  ? Boolean(props.item.needs_attention)
+  : Boolean(props.item.last_error_display || props.item.has_repair_actions))
+const resourceCountLabel = computed(() => {
+  if (!usesResourceLedger.value || !props.item.rss_count) return ''
+  return `RSS ${props.item.rss_count} · 规范 ${props.item.canonical_episode_count || 0}`
+})
 
 const repairActions = computed<RepairAction[]>(() => [
   { name: 'use-base-rss', label: '改用主 RSS', visible: Boolean(props.item.can_use_base_rss) },
@@ -92,15 +100,18 @@ function isRepairBusy(name: string) {
         <span class="badge" :class="item.is_active ? 'badge-success' : ''">
           {{ item.is_active ? '运行中' : '已暂停' }}
         </span>
-        <span v-if="item.last_error_display || item.has_repair_actions" class="badge badge-danger">
+        <span v-if="showIssueBadge" class="badge badge-danger">
           <CircleAlert :size="13" />
           需处理
+        </span>
+        <span v-if="resourceCountLabel" class="badge">
+          {{ resourceCountLabel }}
         </span>
       </div>
       <p class="muted mt-1 truncate text-sm">
         {{ item.subtitle_group || '未指定字幕组' }}<template v-if="releaseFilterLabel"> · {{ releaseFilterLabel }}</template> · {{ downloadProgressLabel }}
       </p>
-      <p class="mt-2 text-xs" :class="item.last_error_display ? 'text-[var(--danger)]' : 'muted'">
+      <p class="mt-2 text-xs" :class="showIssueBadge && item.last_error_display ? 'text-[var(--danger)]' : 'muted'">
         {{ item.last_error_display || item.last_run_summary || '等待首次检查' }}
       </p>
       <p v-if="item.library_hint" class="muted mt-1 text-xs">

@@ -122,7 +122,7 @@ function statusLabel(status: string) {
         <label class="label">系列文件夹模板<input v-model="seriesTemplate" class="field font-mono" /></label>
         <label class="label">剧集文件模板<input v-model="episodeTemplate" class="field font-mono" /></label>
       </section>
-      <p class="muted mt-2 text-xs leading-5">变量：<code>{title}</code>、<code>{season}</code>、<code>{episode}</code>、<code>{year}</code>、<code>{original}</code>、<code>{ext}</code>。临时修改只作用于本次整理。</p>
+      <p class="muted mt-2 text-xs leading-5">变量：<code>{title}</code>、<code>{season}</code>、<code>{episode}</code>、<code>{episode_end}</code>、<code>{episode_type}</code>、<code>{absolute_episode}</code>、<code>{group}</code>、<code>{resolution}</code>、<code>{version}</code>、<code>{language}</code>、<code>{year}</code>、<code>{original}</code>、<code>{ext}</code>。临时修改只作用于本次整理。</p>
 
       <section class="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-4">
         <div class="panel-muted p-3"><small class="muted">选中番剧</small><strong class="mt-1 block text-xl">{{ includedCount }}</strong></div>
@@ -156,6 +156,13 @@ function statusLabel(status: string) {
               <div class="flex flex-wrap items-center justify-between gap-2"><span class="badge" :class="change.status==='ready'?'badge-success':change.status==='conflict'?'border-amber-300 text-amber-700 dark:text-amber-300':''">{{ statusLabel(change.status) }}</span><span v-if="change.managed_by_qb" class="flex items-center gap-1 font-bold text-[var(--sky)]"><ShieldCheck :size="13" />qB 安全移动</span></div>
               <p class="muted mt-2 break-all line-through">{{ change.original }}</p>
               <p v-if="change.target!==change.original" class="mt-1 break-all font-bold">{{ change.target }}</p>
+              <div v-if="change.parse_source" class="mt-2 flex flex-wrap gap-2">
+                <span class="badge">{{ change.parse_source }}</span>
+                <span class="badge">{{ Math.round((change.parse_confidence||0)*100) }}% 置信度</span>
+                <span v-if="change.episode_type&&change.episode_type!=='episode'" class="badge">{{ change.episode_type }}</span>
+                <span v-if="change.episode_end" class="badge">结束集 {{ change.episode_end }}</span>
+                <span v-if="change.version" class="badge">版本 {{ change.version }}</span>
+              </div>
               <p v-if="change.reason" class="mt-1 font-bold text-amber-700 dark:text-amber-300">{{ change.reason }}</p>
               <AsyncButton
                 v-if="change.status === 'skipped' && change.reason?.includes('无法识别剧集编号')"

@@ -1,6 +1,8 @@
 package db
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -17,6 +19,8 @@ import (
 	appversion "github.com/pokerjest/animateAutoTool/internal/version"
 	"gorm.io/gorm"
 )
+
+const completedResourceState = "completed"
 
 // SchemaMigration records each explicit schema/data migration that has been
 // applied to a database. We keep this separate from app config so future
@@ -104,6 +108,76 @@ var migrations = []migration{
 		Description: "Track stable numeric migration order for compatibility checks",
 		Apply:       backfillSchemaMigrationSequences,
 	},
+	{
+		ID:          "012_subscription_resources",
+		Description: "Create durable RSS candidate reconciliation records and backfill legacy download logs",
+		Apply:       backfillSubscriptionResources,
+	},
+	{
+		ID:          "013_local_media_parse_metadata",
+		Description: "Store rich local media parsing evidence and incremental scan fingerprints",
+		Apply: func(tx *gorm.DB) error {
+			return tx.AutoMigrate(&model.LocalEpisode{})
+		},
+	},
+	{
+		ID:          "014_anime_metadata_extended_fields",
+		Description: "Add extended metadata fields introduced by the local media scraper",
+		Apply:       migrateAnimeMetadataExtendedFields,
+	},
+}
+
+// migrateAnimeMetadataExtendedFields repairs databases created before the
+// extended AnimeMetadata fields were added to the model. Those databases can
+// legitimately have all explicit migrations through 013 recorded while still
+// missing columns such as sort_title, because the fields were introduced after
+// the original core-schema migration. Keep this migration focused on the
+// affected table so it is safe to run against every supported historical
+// database and harmless when a column already exists.
+func migrateAnimeMetadataExtendedFields(tx *gorm.DB) error {
+	if !tx.Migrator().HasTable(&model.AnimeMetadata{}) {
+		return tx.AutoMigrate(&model.AnimeMetadata{})
+	}
+
+	for _, field := range []string{
+		"SortTitle",
+		"OriginalTitle",
+		"Genres",
+		"Studios",
+		"Tags",
+		"Actors",
+		"Directors",
+		"RuntimeMinutes",
+		"ContentRating",
+		"OriginalCountry",
+		"TMDBBackdrop",
+		"TMDBBackdropRaw",
+		"FieldSources",
+	} {
+		if tx.Migrator().HasColumn(&model.AnimeMetadata{}, field) {
+			continue
+		}
+		if err := tx.Migrator().AddColumn(&model.AnimeMetadata{}, field); err != nil {
+			return fmt.Errorf("add anime_metadata.%s: %w", field, err)
+		}
+	}
+	return nil
+}
+
+// ensureAnimeMetadataExtendedFields is deliberately called on every startup,
+// not only when migration 014 is newly recorded. A previous build could have
+// recorded 014 before all of its columns were introduced, leaving an otherwise
+// "current" database without sort_title and the other scraper fields. Schema
+// history is useful for compatibility decisions, but the actual table shape
+// remains the source of truth for this idempotent repair.
+func ensureAnimeMetadataExtendedFields(target *gorm.DB) error {
+	if target == nil {
+		return nil
+	}
+	if err := migrateAnimeMetadataExtendedFields(target); err != nil {
+		return fmt.Errorf("ensure anime_metadata extended fields: %w", err)
+	}
+	return nil
 }
 
 func backfillSchemaMigrationSequences(tx *gorm.DB) error {
@@ -250,7 +324,156 @@ func autoMigrateCoreSchema(tx *gorm.DB) error {
 		&model.PlaybackHistory{},
 		&model.AIProposal{},
 		&model.AIToolRun{},
+		&model.SubscriptionResource{},
 	)
+}
+
+// backfillSubscriptionResources creates one durable candidate record for each
+// legacy download log. The migration is intentionally idempotent: a rerun
+// reuses the same subscription/fingerprint pair and only fills the missing
+// resource_id projection on the old log table.
+func backfillSubscriptionResources(tx *gorm.DB) error {
+	if err := tx.AutoMigrate(&model.SubscriptionResource{}, &model.DownloadLog{}); err != nil {
+		return err
+	}
+
+	var logs []model.DownloadLog
+	if err := tx.Find(&logs).Error; err != nil {
+		return err
+	}
+	for i := range logs {
+		entry := &logs[i]
+		fingerprint := legacyResourceFingerprint(entry)
+		if fingerprint == "" || entry.SubscriptionID == 0 {
+			continue
+		}
+		canonical := legacyResourceCanonicalKey(entry)
+		state := legacyResourceState(entry.Status)
+		var resource model.SubscriptionResource
+		err := tx.Where("subscription_id = ? AND fingerprint = ?", entry.SubscriptionID, fingerprint).
+			First(&resource).Error
+		switch err {
+		case nil:
+			updates := map[string]any{
+				"canonical_key": canonical,
+				"title":         entry.Title,
+				"episode":       entry.Episode,
+				"season_val":    entry.SeasonVal,
+				"info_hash":     entry.InfoHash,
+				"target_file":   entry.TargetFile,
+				"state":         state,
+			}
+			if err := tx.Model(&model.SubscriptionResource{}).
+				Where("id = ?", resource.ID).
+				Updates(updates).Error; err != nil {
+				return err
+			}
+		case gorm.ErrRecordNotFound:
+			resource = model.SubscriptionResource{
+				SubscriptionID: entry.SubscriptionID,
+				CanonicalKey:   canonical,
+				Fingerprint:    fingerprint,
+				Title:          entry.Title,
+				Episode:        entry.Episode,
+				SeasonVal:      entry.SeasonVal,
+				TorrentURL:     entry.Magnet,
+				InfoHash:       entry.InfoHash,
+				Source:         "legacy",
+				State:          state,
+				TargetFile:     entry.TargetFile,
+				Selected:       true,
+			}
+			if state == completedResourceState {
+				now := entry.UpdatedAt
+				if now.IsZero() {
+					now = entry.CreatedAt
+				}
+				resource.CompletedAt = &now
+			}
+			if err := tx.Create(&resource).Error; err != nil {
+				return err
+			}
+		default:
+			return err
+		}
+
+		if resource.ID == 0 {
+			if err := tx.Where("subscription_id = ? AND fingerprint = ?", entry.SubscriptionID, fingerprint).
+				First(&resource).Error; err != nil {
+				return err
+			}
+		}
+		if entry.ResourceID == nil || *entry.ResourceID != resource.ID {
+			if err := tx.Model(&model.DownloadLog{}).
+				Where("id = ?", entry.ID).
+				Update("resource_id", resource.ID).Error; err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func legacyResourceFingerprint(entry *model.DownloadLog) string {
+	if entry == nil {
+		return ""
+	}
+	raw := strings.TrimSpace(entry.InfoHash)
+	if raw == "" {
+		raw = strings.TrimSpace(entry.Magnet)
+	}
+	if raw == "" {
+		raw = strings.Join([]string{
+			strings.ToLower(strings.TrimSpace(entry.Title)),
+			strings.ToLower(strings.TrimSpace(entry.SeasonVal)),
+			strings.ToLower(strings.TrimSpace(entry.Episode)),
+		}, "|")
+	}
+	raw = strings.ToLower(strings.TrimSpace(raw))
+	if raw == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(raw))
+	return hex.EncodeToString(sum[:])
+}
+
+func legacyResourceCanonicalKey(entry *model.DownloadLog) string {
+	if entry == nil {
+		return ""
+	}
+	season := parser.NormalizeSeasonNumber(entry.SeasonVal)
+	if season == "" {
+		season = parser.SeasonNumberFromTitle(entry.Title)
+	}
+	episode := parser.NormalizeEpisodeNumber(entry.Episode)
+	if episode == "" {
+		episode = parser.EpisodeNumberFromTitle(entry.Title)
+	}
+	if season == "" {
+		season = "1"
+	}
+	if episode == "" {
+		if title := parser.NormalizeReleaseTitle(entry.Title); title != "" {
+			return "title:" + title
+		}
+		return ""
+	}
+	return fmt.Sprintf("episode:%s:%s", season, episode)
+}
+
+func legacyResourceState(status string) string {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "completed", "renamed":
+		return "completed"
+	case "downloading":
+		return "downloading"
+	case "failed":
+		return "failed"
+	case "archived":
+		return "archived"
+	default:
+		return "unknown"
+	}
 }
 
 // RunMigrations applies all known migrations in order and records each one in
@@ -273,6 +496,12 @@ func RunMigrations(target *gorm.DB) error {
 	var rows []SchemaMigration
 	if err := target.Find(&rows).Error; err != nil {
 		return fmt.Errorf("load applied schema migrations: %w", err)
+	}
+	// A sequence backfill may itself have been marked applied by an older
+	// database before this code learned to persist numeric order. Keep the
+	// compatibility column correct even when that migration is already present.
+	if err := backfillSchemaMigrationSequences(target); err != nil {
+		return fmt.Errorf("backfill schema migration sequences: %w", err)
 	}
 	for _, row := range rows {
 		applied[row.ID] = struct{}{}
@@ -309,6 +538,13 @@ func RunMigrations(target *gorm.DB) error {
 		}); err != nil {
 			return fmt.Errorf("apply migration %s: %w", m.ID, err)
 		}
+	}
+
+	// Keep this invariant check outside the "new migration" branch. It repairs
+	// databases from builds that marked 014 as applied while still missing one
+	// or more columns, without requiring users to delete migration history.
+	if err := ensureAnimeMetadataExtendedFields(target); err != nil {
+		return err
 	}
 
 	return nil

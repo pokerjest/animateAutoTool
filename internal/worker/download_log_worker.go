@@ -5,10 +5,11 @@ import (
 	"errors"
 	"log"
 	"net/url"
-	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/pokerjest/animateAutoTool/internal/config"
@@ -20,7 +21,11 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/service"
 )
 
-const downloadLogSyncInterval = 90 * time.Second
+// qBittorrent may expose a completed torrent before the file move is visible
+// to the application. Keep this short enough that a newly finished episode
+// appears in the local library promptly, while the delayed rescan below
+// handles the settling window.
+const downloadLogSyncInterval = 15 * time.Second
 
 func StartDownloadLogSyncWorker(ctx context.Context) {
 	if ctx == nil {
@@ -69,53 +74,156 @@ func syncDownloadLogStatuses(ctx context.Context) {
 		}
 	}
 
+	// Scan as soon as qBittorrent reports completion. The target may still be
+	// moving, so scheduleCompletedDownloadRescan performs a second pass after
+	// the filesystem has had time to settle.
+	initialIDs := autoScanCompletedDownloads(result.CompletedTargets)
+
 	if repairResult, err := service.RepairDownloadLogsFromLocalLibrary(6 * time.Hour); err != nil {
 		log.Printf("Worker: download log library repair failed: %v", err)
 	} else if repairResult.Repaired > 0 {
 		log.Printf("Worker: repaired %d stale download logs from local library matches (scanned=%d matched=%d)",
 			repairResult.Repaired, repairResult.Scanned, repairResult.Matched)
 	}
-	if archiveResult, err := service.ArchiveStaleDownloadLogs(client, 30*24*time.Hour); err != nil {
-		log.Printf("Worker: stale download log archive failed: %v", err)
-	} else if archiveResult.Archived > 0 {
-		log.Printf("Worker: archived %d stale download logs (scanned=%d protected=%d)",
-			archiveResult.Archived, archiveResult.Scanned, archiveResult.Protected)
-		if len(archiveResult.AffectedSubscriptionIDs) > 0 {
-			if err := service.RetrySubscriptionsByID(ctx, client, archiveResult.AffectedSubscriptionIDs, "manual"); err != nil {
-				log.Printf("Worker: auto retry after archive failed: %v", err)
-			}
-		}
-	}
-	if retried, err := service.RetryStaleSubscriptions(ctx, client, 6*time.Hour, "auto_recovery"); err != nil {
-		log.Printf("Worker: stale subscription retry failed: %v", err)
-	} else if retried > 0 {
-		log.Printf("Worker: retried %d stale subscriptions", retried)
+	if updated, err := service.ReconcileSubscriptionResourcesFromDownloadLogs(); err != nil {
+		log.Printf("Worker: subscription resource reconciliation failed: %v", err)
+	} else if updated > 0 {
+		log.Printf("Worker: reconciled %d subscription resource records", updated)
 	}
 
-	autoScanCompletedDownloads(result.CompletedTargets)
-	scheduleCompletedDownloadRescan(ctx, result.CompletedTargets)
+	scheduleCompletedDownloadRescan(ctx, result.CompletedTargets, initialIDs)
 }
 
-func scheduleCompletedDownloadRescan(ctx context.Context, targets []string) {
+func scheduleCompletedDownloadRescan(ctx context.Context, targets []string, initialIDs []uint) {
 	if len(targets) == 0 {
 		return
 	}
-	queued := append([]string(nil), targets...)
-	go func() {
-		timer := time.NewTimer(15 * time.Second)
-		defer timer.Stop()
-		select {
-		case <-timer.C:
-			autoScanCompletedDownloads(queued)
-			// The second scan runs after qBittorrent has settled renamed/moved
-			// files. Enriching metadata here writes provider IDs to tvshow.nfo,
-			// then Jellyfin can scan and be reconciled without a user opening the
-			// local-anime or player page first.
-			service.NewAgentService().RunAgentForLibrary()
-			syncCompletedDownloadsToJellyfin(ctx)
-		case <-ctx.Done():
+	completedDownloadRescan.schedule(ctx, targets, initialIDs)
+}
+
+type completedDownloadRescanCoordinator struct {
+	mu            sync.Mutex
+	timer         *time.Timer
+	running       bool
+	delay         time.Duration
+	ctx           context.Context
+	pendingTarget map[string]struct{}
+	pendingAnime  map[uint]struct{}
+	run           func(context.Context, []string, []uint)
+}
+
+func newCompletedDownloadRescanCoordinator(delay time.Duration, run func(context.Context, []string, []uint)) *completedDownloadRescanCoordinator {
+	if delay <= 0 {
+		delay = downloadLogSyncInterval
+	}
+	return &completedDownloadRescanCoordinator{
+		delay:         delay,
+		pendingTarget: make(map[string]struct{}),
+		pendingAnime:  make(map[uint]struct{}),
+		run:           run,
+	}
+}
+
+func (c *completedDownloadRescanCoordinator) schedule(ctx context.Context, targets []string, animeIDs []uint) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if ctx != nil {
+		c.ctx = ctx
+	}
+	for _, target := range targets {
+		if target = strings.TrimSpace(target); target != "" {
+			c.pendingTarget[target] = struct{}{}
 		}
-	}()
+	}
+	for _, id := range animeIDs {
+		if id != 0 {
+			c.pendingAnime[id] = struct{}{}
+		}
+	}
+	if c.running {
+		return
+	}
+	if c.timer == nil {
+		c.timer = time.AfterFunc(c.delay, c.flush)
+	} else {
+		c.timer.Reset(c.delay)
+	}
+}
+
+func (c *completedDownloadRescanCoordinator) flush() {
+	c.mu.Lock()
+	if c.running || len(c.pendingTarget) == 0 {
+		c.mu.Unlock()
+		return
+	}
+	targets := make([]string, 0, len(c.pendingTarget))
+	for target := range c.pendingTarget {
+		targets = append(targets, target)
+	}
+	animeIDs := sortedUintIDs(c.pendingAnime)
+	c.pendingTarget = make(map[string]struct{})
+	c.pendingAnime = make(map[uint]struct{})
+	c.timer = nil
+	c.running = true
+	ctx := c.ctx
+	run := c.run
+	c.mu.Unlock()
+
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if run != nil {
+		run(ctx, targets, animeIDs)
+	}
+
+	c.mu.Lock()
+	c.running = false
+	if len(c.pendingTarget) > 0 && c.timer == nil {
+		c.timer = time.AfterFunc(c.delay, c.flush)
+	}
+	c.mu.Unlock()
+}
+
+var completedDownloadRescan = newCompletedDownloadRescanCoordinator(downloadLogSyncInterval, runCompletedDownloadPostProcessing)
+
+func runCompletedDownloadPostProcessing(ctx context.Context, targets []string, initialIDs []uint) {
+	delayedIDs := autoScanCompletedDownloads(targets)
+	affected := mergeAnimeIDs(initialIDs, delayedIDs)
+	if _, err := service.ReconcileSubscriptionResourcesFromDownloadLogs(); err != nil {
+		log.Printf("Worker: resource reconciliation after delayed scan failed: %v", err)
+	}
+	// Enrich only series touched by this batch. This also avoids the global
+	// historical repair pass, which remains available from the health tools.
+	if len(affected) > 0 {
+		service.NewAgentService().RunAgentForAnimeIDs(affected)
+	}
+	// A single serialized post-processing run refreshes Jellyfin once for the
+	// whole debounce window, even when several torrents finish together.
+	syncCompletedDownloadsToJellyfin(ctx)
+}
+
+func mergeAnimeIDs(groups ...[]uint) []uint {
+	unique := make(map[uint]struct{})
+	for _, group := range groups {
+		for _, id := range group {
+			if id != 0 {
+				unique[id] = struct{}{}
+			}
+		}
+	}
+	return sortedUintIDs(unique)
+}
+
+func sortedUintIDs(values map[uint]struct{}) []uint {
+	result := make([]uint, 0, len(values))
+	for value := range values {
+		result = append(result, value)
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i] < result[j] })
+	return result
 }
 
 func syncCompletedDownloadsToJellyfin(ctx context.Context) {
@@ -160,51 +268,65 @@ func syncCompletedDownloadsToJellyfin(ctx context.Context) {
 	log.Printf("Worker: Jellyfin accepted the scan request but pending series were not visible after 30 seconds")
 }
 
-func autoScanCompletedDownloads(targets []string) {
-	if len(targets) == 0 || db.DB == nil {
-		return
+func autoScanCompletedDownloads(targets []string) []uint {
+	if len(targets) == 0 || db.DB == nil || !service.IncrementalScanEnabled() {
+		return nil
 	}
 
 	var dirs []model.LocalAnimeDirectory
 	if err := db.DB.Find(&dirs).Error; err != nil {
 		log.Printf("Worker: failed to load local anime directories for auto scan: %v", err)
-		return
+		return nil
 	}
 
 	if len(dirs) == 0 {
-		return
+		return nil
 	}
 
-	scanRoots := make(map[uint]model.LocalAnimeDirectory)
+	scanTargets := make(map[uint][]string)
 	for _, target := range targets {
 		target = strings.TrimSpace(target)
 		if target == "" {
 			continue
 		}
-		if _, err := os.Stat(target); err != nil {
-			continue
-		}
-
+		var selected *model.LocalAnimeDirectory
 		for _, dir := range dirs {
 			if pathWithinRoot(target, dir.Path) {
-				scanRoots[dir.ID] = dir
-				break
+				if selected == nil || len(filepath.Clean(dir.Path)) > len(filepath.Clean(selected.Path)) {
+					dirCopy := dir
+					selected = &dirCopy
+				}
+			}
+		}
+		if selected != nil {
+			scanTargets[selected.ID] = append(scanTargets[selected.ID], target)
+		}
+	}
+
+	if len(scanTargets) == 0 {
+		return nil
+	}
+
+	scanner := service.NewScannerService()
+	affected := make(map[uint]struct{})
+	for _, dir := range dirs {
+		targetsForDir := scanTargets[dir.ID]
+		if len(targetsForDir) == 0 {
+			continue
+		}
+		result, err := scanner.ScanTargets(&dir, targetsForDir)
+		if err != nil {
+			log.Printf("Worker: auto scan failed for %s: %v", dir.Path, err)
+		}
+		if result != nil {
+			for _, id := range result.AffectedAnimeIDs {
+				affected[id] = struct{}{}
 			}
 		}
 	}
 
-	if len(scanRoots) == 0 {
-		return
-	}
-
-	scanner := service.NewScannerService()
-	for _, dir := range scanRoots {
-		if _, err := scanner.ScanDirectory(&dir); err != nil {
-			log.Printf("Worker: auto scan failed for %s: %v", dir.Path, err)
-		}
-	}
-
 	publishCompletedDownloadEvents(targets)
+	return sortedUintIDs(affected)
 }
 
 func pathWithinRoot(path string, root string) bool {

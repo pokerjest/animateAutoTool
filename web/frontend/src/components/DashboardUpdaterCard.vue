@@ -179,7 +179,7 @@ async function restoreSnapshot() {
 
     <div v-if="channel==='beta'" class="mt-4 flex items-start gap-3 rounded-xl border border-amber-300/70 bg-amber-50 p-4 text-sm leading-6 text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
       <FlaskConical class="mt-0.5 shrink-0" :size="18" />
-      <span>测试版可能包含未完成改动。它适合快速调试，但不建议开启无人值守自动更新；需要发布测试包时使用类似 <code>v0.9.9-beta.2</code> 的标签。</span>
+      <span>测试版可能包含未完成改动。它适合快速调试，但不建议开启无人值守自动更新；需要发布测试包时使用类似 <code>v0.9.9-beta.3</code> 的标签。</span>
     </div>
     <p v-else-if="releases.isError.value" class="mt-4 text-sm text-[var(--danger)]">版本列表读取失败，请检查 GitHub 网络或更新代理设置后重试。</p>
     <p v-else class="muted mt-4 text-xs leading-5">自动更新只向前升级；手动切换到旧稳定版必须通过 Release 兼容清单、数据库 schema 和安装包校验。</p>

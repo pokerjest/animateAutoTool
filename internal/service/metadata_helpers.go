@@ -173,14 +173,12 @@ func (s *MetadataService) SyncMetadataToModels(m *model.AnimeMetadata) {
 
 	updates := map[string]interface{}{
 		"image":   m.Image,
-		"title":   m.Title,
 		"summary": m.Summary,
 	}
 	_ = mStore.PropagateToSubscriptions(m.ID, updates)
 
 	localUpdates := map[string]interface{}{
 		"image":    m.Image,
-		"title":    m.Title,
 		"summary":  m.Summary,
 		"air_date": m.AirDate,
 	}

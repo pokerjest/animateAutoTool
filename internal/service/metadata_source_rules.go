@@ -1,6 +1,12 @@
 package service
 
-import "github.com/pokerjest/animateAutoTool/internal/model"
+import (
+	"encoding/json"
+	"sort"
+	"strings"
+
+	"github.com/pokerjest/animateAutoTool/internal/model"
+)
 
 type metadataSourceChoice struct {
 	name     string
@@ -10,6 +16,13 @@ type metadataSourceChoice struct {
 	summary  string
 	priority int
 }
+
+const (
+	metadataFieldTitle     = "title"
+	metadataFieldImage     = "image"
+	metadataFieldSummary   = "summary"
+	metadataSourceLocalNFO = "local-nfo"
+)
 
 func buildMetadataSourceChoices(m *model.AnimeMetadata) []metadataSourceChoice {
 	var choices []metadataSourceChoice
@@ -46,7 +59,43 @@ func buildMetadataSourceChoices(m *model.AnimeMetadata) []metadataSourceChoice {
 			priority: 1,
 		})
 	}
+	order := configuredMetadataSourceOrder()
+	for i := range choices {
+		choices[i].priority = len(order) + 1
+		for index, source := range order {
+			if choices[i].name == source {
+				choices[i].priority = len(order) - index
+				break
+			}
+		}
+	}
+	sort.SliceStable(choices, func(i, j int) bool { return choices[i].priority > choices[j].priority })
 	return choices
+}
+
+func configuredMetadataSourceOrder() []string {
+	raw := strings.TrimSpace(configValue(model.ConfigKeyMetadataSourceOrder))
+	if raw == "" {
+		raw = "bangumi,tmdb,anilist"
+	}
+	seen := map[string]bool{}
+	order := make([]string, 0, 3)
+	for _, item := range strings.Split(raw, ",") {
+		source := strings.ToLower(strings.TrimSpace(item))
+		switch source {
+		case metadataSourceBangumi, metadataSourceTMDB, metadataSourceAniList:
+			if !seen[source] {
+				seen[source] = true
+				order = append(order, source)
+			}
+		}
+	}
+	for _, source := range []string{metadataSourceBangumi, metadataSourceTMDB, metadataSourceAniList} {
+		if !seen[source] {
+			order = append(order, source)
+		}
+	}
+	return order
 }
 
 func selectMetadataSource(rawQueryTitle string, m *model.AnimeMetadata) *metadataSourceChoice {
@@ -67,23 +116,85 @@ func fallbackSummaryForSource(source string, m *model.AnimeMetadata) string {
 	if m == nil {
 		return ""
 	}
-	switch source {
-	case metadataSourceBangumi:
-		if m.TMDBSummary != "" {
-			return m.TMDBSummary
+	for _, candidate := range orderedMetadataSources(source) {
+		if candidate == source {
+			continue
 		}
-		return m.AniListSummary
-	case metadataSourceTMDB:
-		if m.AniListSummary != "" {
-			return m.AniListSummary
+		if value := metadataSourceField(m, candidate, metadataFieldSummary); value != "" {
+			return value
 		}
-		return m.BangumiSummary
-	case metadataSourceAniList:
-		if m.TMDBSummary != "" {
-			return m.TMDBSummary
+	}
+	return ""
+}
+
+func orderedMetadataSources(preferred string) []string {
+	order := configuredMetadataSourceOrder()
+	preferred = strings.ToLower(strings.TrimSpace(preferred))
+	if preferred == "" {
+		return order
+	}
+	result := make([]string, 0, len(order))
+	result = append(result, preferred)
+	for _, source := range order {
+		if source != preferred {
+			result = append(result, source)
 		}
-		return m.BangumiSummary
-	default:
+	}
+	return result
+}
+
+func metadataSourceField(m *model.AnimeMetadata, source, field string) string {
+	if m == nil {
 		return ""
 	}
+	switch source {
+	case metadataSourceBangumi:
+		switch field {
+		case metadataFieldTitle:
+			return strings.TrimSpace(m.BangumiTitle)
+		case metadataFieldImage:
+			return strings.TrimSpace(m.BangumiImage)
+		case metadataFieldSummary:
+			return strings.TrimSpace(m.BangumiSummary)
+		}
+	case metadataSourceTMDB:
+		switch field {
+		case metadataFieldTitle:
+			return strings.TrimSpace(m.TMDBTitle)
+		case metadataFieldImage:
+			return strings.TrimSpace(m.TMDBImage)
+		case metadataFieldSummary:
+			return strings.TrimSpace(m.TMDBSummary)
+		}
+	case metadataSourceAniList:
+		switch field {
+		case metadataFieldTitle:
+			return strings.TrimSpace(m.AniListTitle)
+		case metadataFieldImage:
+			return strings.TrimSpace(m.AniListImage)
+		case metadataFieldSummary:
+			return strings.TrimSpace(m.AniListSummary)
+		}
+	}
+	return ""
+}
+
+func firstConfiguredMetadataField(m *model.AnimeMetadata, field string) (string, string) {
+	for _, source := range configuredMetadataSourceOrder() {
+		if value := metadataSourceField(m, source, field); value != "" {
+			return value, source
+		}
+	}
+	return "", ""
+}
+
+func metadataFieldSources(raw string) map[string]string {
+	result := map[string]string{}
+	_ = json.Unmarshal([]byte(raw), &result)
+	return result
+}
+
+func metadataFieldLocked(sources map[string]string, field string) bool {
+	source := strings.ToLower(strings.TrimSpace(sources[field]))
+	return source == metadataSourceLocalNFO || source == "user" || source == "manual"
 }

@@ -46,6 +46,14 @@ func titlesLookRelated(a, b string) bool {
 	return titleMatchScore(a, b) >= 45
 }
 
+// titlesStronglyRelated is reserved for identity-sensitive operations such as
+// deciding that a local file can satisfy a subscription download. Common
+// genre words (for example "转生") may help search ranking but must not be
+// sufficient evidence to skip a real download.
+func titlesStronglyRelated(a, b string) bool {
+	return titleMatchScore(a, b) >= 70
+}
+
 func titleRuleVariants(raw string) []string {
 	cleaned := strings.TrimSpace(parser.CleanTitle(raw))
 	if cleaned == "" {

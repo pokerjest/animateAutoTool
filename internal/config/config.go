@@ -397,8 +397,14 @@ managed_services:
 system_settings:
   # Jellyfin/Plex-compatible default: Series/Season 01/Series - S01E01.ext
   auto_rename_enabled: "true"
+  media_naming_preset: "jellyfin-emby"
   auto_rename_series_template: "{title}"
   auto_rename_episode_template: "{title} - S{season}E{episode}{ext}"
+  metadata_source_order: "bangumi,tmdb,anilist"
+  metadata_overwrite_policy: "field-layered"
+  write_nfo_enabled: "true"
+  write_images_enabled: "true"
+  incremental_scan_enabled: "true"
 `) + "\n"
 
 	return os.WriteFile(AppPaths.ConfigFile, []byte(content), 0600)

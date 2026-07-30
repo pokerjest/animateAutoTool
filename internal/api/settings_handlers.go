@@ -28,6 +28,7 @@ const (
 	SourceAniList        = "anilist"
 	SourceTMDB           = "tmdb"
 	ValueTrue            = "true"
+	ValueFalse           = "false"
 )
 
 // Status Caching

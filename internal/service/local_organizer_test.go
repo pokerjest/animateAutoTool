@@ -3,6 +3,7 @@ package service
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -127,6 +128,89 @@ func TestLocalOrganizerRepairsStaleEpisodeNumbersFromExplicitFilenames(t *testin
 	require.Len(t, episodes, 2)
 	require.Equal(t, 1, episodes[0].EpisodeNum)
 	require.Equal(t, 2, episodes[1].EpisodeNum)
+}
+
+func TestLocalOrganizerPreservesRichFilenameEvidenceForLegacyRows(t *testing.T) {
+	withServiceTestDB(t)
+	root := t.TempDir()
+	sourceDir := filepath.Join(root, "Range Show")
+	require.NoError(t, os.MkdirAll(sourceDir, 0o755))
+	video := filepath.Join(sourceDir, "[Group] Range Show 1x03-04v2 [1080p][CHS].mkv")
+	require.NoError(t, os.WriteFile(video, []byte("video"), 0o600))
+	directory := model.LocalAnimeDirectory{Path: root}
+	require.NoError(t, db.DB.Create(&directory).Error)
+	metadata := model.AnimeMetadata{Title: "Range Show"}
+	require.NoError(t, db.DB.Create(&metadata).Error)
+	anime := model.LocalAnime{DirectoryID: directory.ID, Title: "Range Show", Path: sourceDir, Season: 1, MetadataID: &metadata.ID}
+	require.NoError(t, db.DB.Create(&anime).Error)
+	// Simulate a row created before the rich parsing columns existed.
+	episode := model.LocalEpisode{LocalAnimeID: anime.ID, EpisodeNum: 3, SeasonNum: 1, Path: video}
+	require.NoError(t, db.DB.Create(&episode).Error)
+
+	organizer := NewLocalOrganizer(db.DB, nil)
+	preview, err := organizer.Preview("user", LocalOrganizePreviewRequest{
+		Selection: LocalOrganizeSelection{Mode: OrganizeSelectionIDs, AnimeIDs: []uint{anime.ID}},
+	})
+	require.NoError(t, err)
+	require.Len(t, preview.Items, 1)
+	require.Len(t, preview.Items[0].Changes, 1)
+	change := preview.Items[0].Changes[0]
+	require.Contains(t, change.Target, "S01E03-E04 v2.mkv")
+	require.Equal(t, 4, change.EpisodeEnd)
+	require.Equal(t, "filename:season-x-episode", change.ParseSource)
+
+	result, err := organizer.Execute(t.Context(), preview, nil, nil)
+	require.NoError(t, err)
+	require.Equal(t, 1, result.Moved)
+	require.NoError(t, db.DB.First(&episode, episode.ID).Error)
+	require.Equal(t, 4, episode.EpisodeEndNum)
+	require.Equal(t, "v2", episode.VersionTag)
+	require.Equal(t, "chs", episode.LanguageTag)
+	require.Equal(t, "filename:season-x-episode", episode.ParseSource)
+}
+
+func TestLocalOrganizerKeepsCorrectedReleaseAndSidecarTargetsDistinct(t *testing.T) {
+	withServiceTestDB(t)
+	root := t.TempDir()
+	sourceDir := filepath.Join(root, "Corrected Release Show")
+	require.NoError(t, os.MkdirAll(sourceDir, 0o755))
+	regular := filepath.Join(sourceDir, "[ANi] Corrected Release Show - 01 [1080P][WEB-DL].mp4")
+	corrected := filepath.Join(sourceDir, "[ANi] Corrected Release Show - 01 [1080P][WEB-DL][V2].mp4")
+	for _, video := range []string{regular, corrected} {
+		require.NoError(t, os.WriteFile(video, []byte(filepath.Base(video)), 0o600))
+		require.NoError(t, os.WriteFile(strings.TrimSuffix(video, filepath.Ext(video))+".nfo", []byte("nfo"), 0o600))
+	}
+	directory := model.LocalAnimeDirectory{Path: root}
+	require.NoError(t, db.DB.Create(&directory).Error)
+	metadata := model.AnimeMetadata{TitleCN: "修正版番剧"}
+	require.NoError(t, db.DB.Create(&metadata).Error)
+	anime := model.LocalAnime{DirectoryID: directory.ID, Title: "Corrected Release Show", Path: sourceDir, Season: 1, MetadataID: &metadata.ID}
+	require.NoError(t, db.DB.Create(&anime).Error)
+	require.NoError(t, db.DB.Create(&model.LocalEpisode{LocalAnimeID: anime.ID, EpisodeNum: 1, SeasonNum: 1, Path: regular}).Error)
+	require.NoError(t, db.DB.Create(&model.LocalEpisode{LocalAnimeID: anime.ID, EpisodeNum: 1, SeasonNum: 1, Path: corrected}).Error)
+
+	preview, err := NewLocalOrganizer(db.DB, nil).Preview("user", LocalOrganizePreviewRequest{
+		Selection: LocalOrganizeSelection{Mode: OrganizeSelectionIDs, AnimeIDs: []uint{anime.ID}},
+	})
+	require.NoError(t, err)
+	require.Equal(t, 0, preview.ConflictCount)
+	require.Equal(t, 4, preview.ChangeCount)
+	require.Len(t, preview.Items, 1)
+
+	targets := make(map[string]LocalOrganizeChange, len(preview.Items[0].Changes))
+	for _, change := range preview.Items[0].Changes {
+		targets[filepath.Base(change.Target)] = change
+	}
+	for _, target := range []string{
+		"修正版番剧 - S01E01.mp4",
+		"修正版番剧 - S01E01.nfo",
+		"修正版番剧 - S01E01 v2.mp4",
+		"修正版番剧 - S01E01 v2.nfo",
+	} {
+		require.Contains(t, targets, target)
+		require.Equal(t, OrganizeStatusReady, targets[target].Status)
+	}
+	require.Equal(t, "v2", targets["修正版番剧 - S01E01 v2.mp4"].Version)
 }
 
 func TestLocalOrganizerProtectsConflictsAndMultiFileTorrents(t *testing.T) {

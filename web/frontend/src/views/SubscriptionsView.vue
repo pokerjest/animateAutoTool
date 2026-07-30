@@ -1,14 +1,15 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { useRouter } from 'vue-router'
-import { Plus, Sparkles, Upload } from '@lucide/vue'
+import { Plus, RefreshCw, Sparkles, Upload } from '@lucide/vue'
 import { api } from '../api/client'
 import type {
   AIAnalysisAccepted,
   MikanSubscriptionSelection,
   ResolutionFilter,
   Subscription,
+  SubscriptionResource,
   SubtitleLanguage,
   TaskAccepted,
 } from '../api/types'
@@ -24,6 +25,7 @@ import SubscriptionCard from '../components/subscriptions/SubscriptionCard.vue'
 import SubscriptionHistoryDialog from '../components/subscriptions/SubscriptionHistoryDialog.vue'
 import SubscriptionOverview from '../components/subscriptions/SubscriptionOverview.vue'
 import { useAsyncActions } from '../composables/useAsyncActions'
+import { useTaskStore } from '../stores/tasks'
 import { useUIStore } from '../stores/ui'
 import { localPlayerLocation } from '../utils/playerRoutes'
 import { regexRuleError, switchToMikanAggregate } from '../utils/mikanSubscription'
@@ -56,6 +58,7 @@ interface HistoryData {
   Subscription: Subscription
   Runs: Array<Record<string, unknown>>
   Logs: Array<Record<string, unknown>>
+  Resources: SubscriptionResource[]
 }
 
 type ViewMode = 'form' | 'batch' | null
@@ -85,6 +88,7 @@ const ui = useUIStore()
 const router = useRouter()
 const queryClient = useQueryClient()
 const actions = useAsyncActions()
+const tasks = useTaskStore()
 const search = ref('')
 const filter = ref<SubscriptionFilter>('all')
 const mode = ref<ViewMode>(null)
@@ -98,6 +102,7 @@ const validation = ref<ValidationResult | null>(null)
 const batchText = ref('')
 const batchPreview = ref<Array<Record<string, unknown>>>([])
 const aiProposalID = ref('')
+const refreshTask = computed(() => tasks.taskByID('subscription-refresh'))
 
 const query = useQuery({
   queryKey: ['subscriptions'],
@@ -109,6 +114,8 @@ const history = useQuery({
   queryKey: computed(() => ['subscription-history', detailTarget.value?.ID]),
   queryFn: () => api<HistoryData>(`/subscriptions/${detailTarget.value!.ID}/history`),
   enabled: computed(() => Boolean(detailTarget.value)),
+  refetchInterval: computed(() => detailTarget.value ? 3000 : false),
+  refetchIntervalInBackground: false,
 })
 
 const items = computed(() => {
@@ -142,6 +149,15 @@ const deleteDescription = computed(() => `会同时删除 ${deleteTarget.value?.
 const includeRuleError = computed(() => regexRuleError(form.filter_rule))
 const excludeRuleError = computed(() => regexRuleError(form.exclude_rule))
 const hasRegexError = computed(() => Boolean(includeRuleError.value || excludeRuleError.value))
+
+watch(
+  () => refreshTask.value?.tone,
+  (tone, previous) => {
+    if (previous === 'running' && (tone === 'success' || tone === 'error')) {
+      void queryClient.invalidateQueries({ queryKey: ['subscriptions'] })
+    }
+  },
+)
 
 function resetForm() {
   Object.assign(form, createEmptyForm())
@@ -325,6 +341,21 @@ async function operate(item: Subscription, name: 'run' | 'toggle') {
   }
 }
 
+async function refreshSubscriptions() {
+  try {
+    await actions.runTask(
+      'refresh-subscriptions',
+      () => api<TaskAccepted>('/subscriptions/refresh', { method: 'POST' }),
+      '刷新并修复订阅',
+      'subscription-refresh',
+      '正在对账下载进度、修复历史记录并补交真正缺失的集数',
+    )
+    ui.toast('订阅对账已启动，确认缺失的集数会自动补交下载')
+  } catch (error) {
+    ui.toast(error instanceof Error ? error.message : '订阅刷新失败', 'error')
+  }
+}
+
 async function repair(item: Subscription, name: string) {
   try {
     const syncingJellyfin = name === 'refresh-library'
@@ -338,6 +369,22 @@ async function repair(item: Subscription, name: string) {
     ui.toast(syncingJellyfin ? '已请求 Jellyfin 扫描，识别完成后会自动更新播放状态' : '修复任务已经启动')
   } catch (error) {
     ui.toast(error instanceof Error ? error.message : '修复失败', 'error')
+  }
+}
+
+async function runResourceAction(resource: SubscriptionResource, action: 'retry' | 'upgrade') {
+  if (!detailTarget.value) return
+  try {
+    await actions.run(`resource-${action}-${resource.ID}`, () => (
+      api(`/subscriptions/${detailTarget.value!.ID}/resources/${resource.ID}/${action}`, { method: 'POST' })
+    ))
+    ui.toast(action === 'upgrade' ? '已选择该版本并重新检查' : '资源重试已经执行')
+    await Promise.all([
+      history.refetch(),
+      queryClient.invalidateQueries({ queryKey: ['subscriptions'] }),
+    ])
+  } catch (error) {
+    ui.toast(error instanceof Error ? error.message : '资源操作失败', 'error')
   }
 }
 
@@ -416,6 +463,15 @@ async function importBatch() {
       title="订阅管理"
       description="从异常和新更新开始处理，让每一条 RSS 都保持可解释、可恢复。"
     >
+      <AsyncButton
+        class="btn btn-secondary"
+        :loading="actions.isBusy('refresh-subscriptions', 'subscription-refresh')"
+        loading-label="刷新修复中…"
+        @click="refreshSubscriptions"
+      >
+        <RefreshCw :size="17" />
+        刷新并修复
+      </AsyncButton>
       <button class="btn btn-secondary" @click="openDiscovery()">
         <Sparkles :size="17" />
         发现番剧
@@ -613,9 +669,12 @@ async function importBatch() {
       :item="history.data.value?.Subscription || detailTarget"
       :runs="history.data.value?.Runs || []"
       :logs="history.data.value?.Logs || []"
+      :resources="history.data.value?.Resources || []"
+      :is-busy="actions.isBusy"
       @update:open="setHistoryOpen"
       @retry="history.refetch()"
       @play="playSubscription"
+      @resource-action="runResourceAction"
     />
 
     <ConfirmDialog

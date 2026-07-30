@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"mime/multipart"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -28,6 +30,11 @@ type BackupStats struct {
 	LastModified       string
 }
 
+type backupExportRequest struct {
+	backupPasswordRequest
+	Mode string `json:"mode" form:"mode"`
+}
+
 func getDBStats(targetDB *gorm.DB, dbPath string) BackupStats {
 	var subCount, logCount, localCount, configCount int64
 	var titles []string
@@ -44,6 +51,11 @@ func getDBStats(targetDB *gorm.DB, dbPath string) BackupStats {
 		var runLogCount int64
 		targetDB.Model(&model.SubscriptionRunLog{}).Count(&runLogCount)
 		logCount += runLogCount
+	}
+	if targetDB.Migrator().HasTable(&model.SubscriptionResource{}) {
+		var resourceCount int64
+		targetDB.Model(&model.SubscriptionResource{}).Count(&resourceCount)
+		logCount += resourceCount
 	}
 	if targetDB.Migrator().HasTable(&model.GlobalConfig{}) {
 		targetDB.Model(&model.GlobalConfig{}).Count(&configCount)
@@ -95,47 +107,29 @@ func AnalyzeBackupHandler(c *gin.Context) {
 		return
 	}
 
-	// Save to temp
-	tempFile, err := os.CreateTemp("", "restore_analyze_*.db")
+	sourcePath, err := saveUploadedBackup(file)
 	if err != nil {
-		htmlServerError(c, "创建临时备份文件", err)
-		return
-	}
-	// No defer remove, kept for Execute
-
-	src, err := file.Open()
-	if err != nil {
-		htmlServerError(c, "打开上传的备份文件", err)
-		return
-	}
-	defer safeio.Close(src)
-
-	if _, err := io.Copy(tempFile, src); err != nil {
-		safeio.Close(tempFile)
-		safeio.Remove(tempFile.Name())
-		htmlServerError(c, "写入临时备份文件", err)
-		return
-	}
-	if err := tempFile.Close(); err != nil {
-		safeio.Remove(tempFile.Name())
-		htmlServerError(c, "完成临时备份文件写入", err)
-		return
-	}
-	if !isValidSQLite(tempFile.Name()) {
-		safeio.Remove(tempFile.Name())
-		htmlBadRequest(c, "无效的数据库备份文件")
+		htmlServerError(c, "保存上传的备份文件", err)
 		return
 	}
 
-	stats, err := service.InspectBackup(tempFile.Name())
+	password := ""
+	if service.IsBackupArchive(sourcePath) {
+		password, err = resolveBackupRestorePassword(backupPasswordRequestFromForm(c))
+		if err != nil {
+			safeio.Remove(sourcePath)
+			htmlBadRequest(c, err.Error())
+			return
+		}
+	}
+	stats, databasePath, err := inspectBackupForRestore(sourcePath, password)
 	if err != nil {
-		safeio.Remove(tempFile.Name())
-		htmlBadRequest(c, "无效的数据库备份文件")
+		htmlBadRequest(c, backupArchiveErrorMessage(err))
 		return
 	}
 
 	// Return HTML Fragment
-	restoreToken := registerRestoreArtifact(tempFile.Name())
+	restoreToken := registerRestoreArtifact(databasePath)
 	c.HTML(http.StatusOK, "backup_analyze.html", gin.H{
 		"Stats":    stats,
 		"TempFile": restoreToken,
@@ -235,29 +229,99 @@ func isValidSQLite(path string) bool {
 }
 
 func ExportBackupHandler(c *gin.Context) {
-	mode := service.NormalizeBackupMode(c.DefaultQuery("mode", service.BackupModeFull))
+	if c.Request.Method != http.MethodPost {
+		jsonBadRequest(c, "加密备份需要输入密码，请使用新版备份页面导出")
+		return
+	}
+
+	var request backupExportRequest
+	if strings.Contains(strings.ToLower(c.GetHeader("Content-Type")), "application/json") {
+		if err := c.ShouldBindJSON(&request); err != nil {
+			jsonBadRequest(c, "备份导出参数格式不正确")
+			return
+		}
+	} else {
+		request.Mode = c.PostForm("mode")
+		request.backupPasswordRequest = backupPasswordRequestFromForm(c)
+	}
+
+	password, err := resolveBackupArchivePassword(c, request.backupPasswordRequest)
+	if err != nil {
+		jsonBadRequest(c, err.Error())
+		return
+	}
+	mode := service.NormalizeBackupMode(request.Mode)
 
 	tempFile, err := os.CreateTemp("", "export_*.db")
 	if err != nil {
-		htmlServerError(c, "创建导出临时文件", err)
+		jsonServerError(c, "创建导出临时文件", err)
 		return
 	}
-	tempPath := tempFile.Name()
+	databasePath := tempFile.Name()
 	if err := tempFile.Close(); err != nil {
-		safeio.Remove(tempPath)
-		htmlServerError(c, "完成导出临时文件写入", err)
+		safeio.Remove(databasePath)
+		jsonServerError(c, "完成导出临时文件写入", err)
 		return
 	}
-	defer safeio.Remove(tempPath)
+	defer safeio.Remove(databasePath)
 
-	if err := service.CreateBackupFile(tempPath, mode); err != nil {
-		htmlServerError(c, "创建备份文件", err)
+	if err := service.CreateBackupFile(databasePath, mode); err != nil {
+		jsonServerError(c, "创建备份文件", err)
 		return
 	}
 
-	c.FileAttachment(tempPath, service.BackupFilename(mode, time.Now()))
+	archiveFile, err := os.CreateTemp("", "export_*.zip")
+	if err != nil {
+		jsonServerError(c, "创建导出压缩包", err)
+		return
+	}
+	archivePath := archiveFile.Name()
+	if err := archiveFile.Close(); err != nil {
+		safeio.Remove(archivePath)
+		jsonServerError(c, "完成导出压缩包写入", err)
+		return
+	}
+	defer safeio.Remove(archivePath)
+
+	if err := service.CreateEncryptedBackupArchive(databasePath, archivePath, mode, password); err != nil {
+		jsonServerError(c, "压缩并加密备份", err)
+		return
+	}
+
+	c.Header("Content-Type", "application/zip")
+	c.FileAttachment(archivePath, service.BackupFilename(mode, time.Now()))
 }
 
 func ImportBackupHandler(c *gin.Context) {
 	htmlBadRequest(c, "已经禁用直接恢复，请先通过分析/预览流程确认备份内容。")
+}
+
+func saveUploadedBackup(file *multipart.FileHeader) (string, error) {
+	tempFile, err := os.CreateTemp("", "restore_analyze_*")
+	if err != nil {
+		return "", err
+	}
+	sourcePath := tempFile.Name()
+	cleanup := true
+	defer func() {
+		safeio.Close(tempFile)
+		if cleanup {
+			safeio.Remove(sourcePath)
+		}
+	}()
+
+	src, err := file.Open()
+	if err != nil {
+		return "", err
+	}
+	defer safeio.Close(src)
+
+	if _, err := io.Copy(tempFile, src); err != nil {
+		return "", err
+	}
+	if err := tempFile.Close(); err != nil {
+		return "", err
+	}
+	cleanup = false
+	return sourcePath, nil
 }

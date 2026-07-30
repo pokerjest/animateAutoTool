@@ -17,6 +17,8 @@ type ScanRunStatus struct {
 	CandidateSeries      int
 	WalkErrorCount       int
 	FailedDirectories    int
+	ParseFailureCount    int
+	ParseConflictCount   int
 	CurrentDirectory     string
 	LastStartedAt        *time.Time
 	LastFinishedAt       *time.Time
@@ -46,6 +48,8 @@ func (t *scanStatusTracker) Begin(total int) ScanRunStatus {
 		CandidateSeries:      0,
 		WalkErrorCount:       0,
 		FailedDirectories:    0,
+		ParseFailureCount:    0,
+		ParseConflictCount:   0,
 		CurrentDirectory:     "",
 		LastStartedAt:        &now,
 		LastFinishedAt:       nil,
@@ -97,19 +101,22 @@ func (t *scanStatusTracker) Advance(dir string, result *ScanResult, err error) S
 		t.status.DiscoveredFiles += result.DiscoveredFiles
 		t.status.CandidateSeries += result.CandidateSeries
 		t.status.WalkErrorCount += result.WalkErrors
+		t.status.ParseFailureCount += result.ParseFailures
+		t.status.ParseConflictCount += result.ParseConflicts
 	}
 	if err != nil {
 		t.status.FailedDirectories++
 		t.status.LastError = err.Error()
 	}
 	t.status.LastSummary = fmt.Sprintf(
-		"正在扫描第 %d/%d 个目录，发现 %d 个媒体文件、%d 部候选番剧，新增 %d，更新 %d，失败 %d",
+		"正在扫描第 %d/%d 个目录，发现 %d 个媒体文件、%d 部候选番剧，新增 %d，更新 %d，解析失败 %d，失败目录 %d",
 		t.status.ProcessedDirectories,
 		maxInt(t.status.TotalDirectories, 1),
 		t.status.DiscoveredFiles,
 		t.status.CandidateSeries,
 		t.status.AddedCount,
 		t.status.UpdatedCount,
+		t.status.ParseFailureCount,
 		t.status.FailedDirectories,
 	)
 
@@ -128,13 +135,14 @@ func (t *scanStatusTracker) Finish() ScanRunStatus {
 	t.status.LastFinishedAt = &now
 	t.status.LastDuration = humanizeScanDuration(now.Sub(*t.status.LastStartedAt))
 	t.status.LastSummary = fmt.Sprintf(
-		"最近一轮扫描了 %d 个目录：发现 %d 个媒体文件、%d 部候选番剧，新增 %d，更新 %d，移除 %d，失败 %d",
+		"最近一轮扫描了 %d 个目录：发现 %d 个媒体文件、%d 部候选番剧，新增 %d，更新 %d，移除 %d，解析失败 %d，失败目录 %d",
 		t.status.TotalDirectories,
 		t.status.DiscoveredFiles,
 		t.status.CandidateSeries,
 		t.status.AddedCount,
 		t.status.UpdatedCount,
 		t.status.RemovedCount,
+		t.status.ParseFailureCount,
 		t.status.FailedDirectories,
 	)
 	t.status.CurrentDirectory = ""

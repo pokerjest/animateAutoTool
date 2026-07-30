@@ -60,6 +60,12 @@ func loadSubscriptionTrendReport(windowDays int) SubscriptionTrendReport {
 		switch sub.LastRunStatus {
 		case service.SubscriptionRunStatusSuccess:
 			report.SuccessCount++
+		case service.SubscriptionRunStatusIdle:
+			// An idle run completed its RSS check successfully but found no
+			// new item (for example, all entries were already tracked). Count
+			// it as a normal check so the overview does not misleadingly show
+			// "success 0" for healthy subscriptions.
+			report.SuccessCount++
 		case service.SubscriptionRunStatusWarning:
 			report.WarningCount++
 			report.ActiveIssueCount++
@@ -151,6 +157,24 @@ func populateSubscriptionStat(sub *model.Subscription) {
 
 	count, _ := logStore.CountDistinctEpisodesBySubscription(sub.ID, []string{"downloading", "completed", "renamed"})
 	sub.DownloadedCount = count
+	if db.DB != nil {
+		var resources []model.SubscriptionResource
+		if err := db.DB.Where("subscription_id = ?", sub.ID).Find(&resources).Error; err == nil {
+			sub.RSSCount,
+				sub.CanonicalEpisodeCount,
+				sub.ConfirmedCount,
+				sub.DownloadingCount,
+				sub.CompletedCount,
+				sub.FailedCount,
+				sub.UnresolvedCount = service.ResourceSummary(resources)
+			for _, resource := range resources {
+				if service.ResourceNeedsAttention(resource) {
+					sub.NeedsAttention = true
+					break
+				}
+			}
+		}
+	}
 	populateSubscriptionActionHints(sub)
 }
 
@@ -346,16 +370,26 @@ type subscriptionLocalMatch struct {
 func findSubscriptionLocalAnimes(sub *model.Subscription) ([]model.LocalAnime, error) {
 	var localAnimes []model.LocalAnime
 	if sub.MetadataID != nil && *sub.MetadataID != 0 {
-		if err := db.DB.Where("metadata_id = ?", *sub.MetadataID).Order("local_animes.id ASC").Find(&localAnimes).Error; err != nil || len(localAnimes) > 0 {
-			return localAnimes, err
+		if err := db.DB.Where("metadata_id = ?", *sub.MetadataID).Order("local_animes.id ASC").Find(&localAnimes).Error; err != nil {
+			return nil, err
+		}
+		if matched := filterSubscriptionLocalAnimes(sub, localAnimes); len(matched) > 0 {
+			return matched, nil
+		}
+		if len(localAnimes) > 0 {
+			log.Printf("WARN: subscription %q shares metadata_id=%d with %d unrelated local series; ignoring metadata-only library match",
+				sub.Title, *sub.MetadataID, len(localAnimes))
 		}
 	}
 	if sub.Metadata != nil && sub.Metadata.BangumiID != 0 {
 		if err := db.DB.Model(&model.LocalAnime{}).
 			Joins("JOIN anime_metadata ON anime_metadata.id = local_animes.metadata_id").
 			Where("anime_metadata.bangumi_id = ?", sub.Metadata.BangumiID).
-			Order("local_animes.id ASC").Find(&localAnimes).Error; err != nil || len(localAnimes) > 0 {
-			return localAnimes, err
+			Order("local_animes.id ASC").Find(&localAnimes).Error; err != nil {
+			return nil, err
+		}
+		if matched := filterSubscriptionLocalAnimes(sub, localAnimes); len(matched) > 0 {
+			return matched, nil
 		}
 	}
 
@@ -366,6 +400,7 @@ func findSubscriptionLocalAnimes(sub *model.Subscription) ([]model.LocalAnime, e
 	if err := db.DB.Where("title IN ?", titles).Order("local_animes.id ASC").Find(&localAnimes).Error; err != nil {
 		return nil, err
 	}
+	localAnimes = filterSubscriptionLocalAnimes(sub, localAnimes)
 	// Files organized from a subscription use the subscription metadata title.
 	// Link a single unambiguous fallback match so later Jellyfin reconciliation
 	// can use provider IDs without requiring a manual local-library visit.
@@ -377,6 +412,16 @@ func findSubscriptionLocalAnimes(sub *model.Subscription) ([]model.LocalAnime, e
 		}
 	}
 	return localAnimes, nil
+}
+
+func filterSubscriptionLocalAnimes(sub *model.Subscription, candidates []model.LocalAnime) []model.LocalAnime {
+	matched := make([]model.LocalAnime, 0, len(candidates))
+	for i := range candidates {
+		if service.LocalAnimeMatchesSubscription(sub, &candidates[i]) {
+			matched = append(matched, candidates[i])
+		}
+	}
+	return matched
 }
 
 func subscriptionLocalTitleCandidates(sub *model.Subscription) []string {
@@ -687,7 +732,13 @@ func missingEpisodeSummary(sub *model.Subscription) string {
 
 	observed := make(map[int]struct{}, len(logs))
 	for _, logEntry := range logs {
-		ep := strings.TrimSpace(logEntry.Episode)
+		ep := parser.NormalizeEpisodeNumber(logEntry.Episode)
+		if ep == "" {
+			// Older download logs may not have persisted Episode yet. Reuse
+			// the same title parser as subscription de-duplication so those
+			// records still participate in missing-episode diagnostics.
+			ep = parser.EpisodeNumberFromTitle(logEntry.Title)
+		}
 		if ep == "" || strings.Contains(ep, ".") {
 			continue
 		}
@@ -772,7 +823,7 @@ func loadSubscriptionHistory(id uint) (SubscriptionHistoryData, error) {
 	if logStore == nil {
 		return SubscriptionHistoryData{}, gorm.ErrInvalidDB
 	}
-	logs, err := logStore.ListBySubscription(sub.ID, 12)
+	logs, err := logStore.ListRecentVisibleBySubscription(sub.ID, 12)
 	if err != nil {
 		return SubscriptionHistoryData{}, err
 	}
@@ -784,11 +835,19 @@ func loadSubscriptionHistory(id uint) (SubscriptionHistoryData, error) {
 		Find(&runs).Error; err != nil {
 		return SubscriptionHistoryData{}, err
 	}
+	var resources []model.SubscriptionResource
+	if err := db.DB.Where("subscription_id = ?", sub.ID).
+		Order("season_val ASC, episode ASC, selected DESC, candidate_rank ASC, id ASC").
+		Limit(200).
+		Find(&resources).Error; err != nil {
+		return SubscriptionHistoryData{}, err
+	}
 
 	return SubscriptionHistoryData{
 		Subscription: sub,
 		Runs:         runs,
 		Logs:         logs,
+		Resources:    resources,
 	}, nil
 }
 

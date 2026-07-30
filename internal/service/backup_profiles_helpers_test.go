@@ -18,10 +18,10 @@ func TestBackupFilenameByMode(t *testing.T) {
 		wantSub  string
 		wantTail string
 	}{
-		{BackupModeFull, "full", "_20260520_103045.db"},
-		{BackupModeSettings, "settings", "_20260520_103045.db"},
-		{BackupModeCloudflare, "cloudflare", "_20260520_103045.db"},
-		{"", "full", "_20260520_103045.db"}, // unknown -> full
+		{BackupModeFull, "full", "_20260520_103045.zip"},
+		{BackupModeSettings, "settings", "_20260520_103045.zip"},
+		{BackupModeCloudflare, "cloudflare", "_20260520_103045.zip"},
+		{"", "full", "_20260520_103045.zip"}, // unknown -> full
 	}
 	for _, tc := range cases {
 		t.Run(tc.mode, func(t *testing.T) {
@@ -52,7 +52,7 @@ func TestR2BackupObjectKeyByMode(t *testing.T) {
 			got := R2BackupObjectKey(tc.mode, ts)
 			assert.True(t, strings.HasPrefix(got, "animate_backup_"+tc.wantSub),
 				"object key %q should start with mode prefix %q", got, tc.wantSub)
-			assert.True(t, strings.HasSuffix(got, "_20260102_030405.db"),
+			assert.True(t, strings.HasSuffix(got, "_20260102_030405.zip"),
 				"object key %q should embed timestamp", got)
 		})
 	}

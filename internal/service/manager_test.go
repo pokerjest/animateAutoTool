@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/pokerjest/animateAutoTool/internal/db"
+	"github.com/pokerjest/animateAutoTool/internal/downloader"
 	"github.com/pokerjest/animateAutoTool/internal/event"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/parser"
@@ -48,11 +49,15 @@ func (f fakeRSSParser) GetDashboard(year, season string) (*parser.MikanDashboard
 type fakeDownloader struct {
 	addErr    error
 	added     []string
+	attempts  int
 	savePaths []string
+	torrents  []downloader.TorrentInfo
+	listErr   error
 }
 
 func (f *fakeDownloader) Login(username, password string) error { return nil }
 func (f *fakeDownloader) AddTorrent(url, savePath, category string, paused bool) error {
+	f.attempts++
 	if f.addErr != nil {
 		return f.addErr
 	}
@@ -61,6 +66,9 @@ func (f *fakeDownloader) AddTorrent(url, savePath, category string, paused bool)
 	return nil
 }
 func (f *fakeDownloader) Ping() error { return nil }
+func (f *fakeDownloader) ListTorrents() ([]downloader.TorrentInfo, error) {
+	return append([]downloader.TorrentInfo(nil), f.torrents...), f.listErr
+}
 
 type fakeTorrentFetcher struct {
 	fakeRSSParser
@@ -161,6 +169,240 @@ func TestProcessSubscriptionPersistsSuccessState(t *testing.T) {
 	}
 	if runLogs[0].TriggerSource != "manual" {
 		t.Fatalf("expected manual trigger source, got %q", runLogs[0].TriggerSource)
+	}
+}
+
+func TestProcessSubscriptionRecoversExistingQBTaskAfterFailsResponse(t *testing.T) {
+	withServiceTestDB(t)
+
+	sub := model.Subscription{
+		Title:    "Recovered Show",
+		RSSUrl:   "https://example.test/recovered",
+		IsActive: true,
+	}
+	if err := db.DB.Create(&sub).Error; err != nil {
+		t.Fatalf("failed to create subscription: %v", err)
+	}
+
+	down := &fakeDownloader{
+		addErr: downloader.ErrTorrentRejected,
+		torrents: []downloader.TorrentInfo{{
+			Hash:        "existing-hash",
+			Name:        "[ANi] Recovered Show - 01 [1080P]",
+			State:       "uploading",
+			ContentPath: "/downloads/Recovered Show/Recovered Show - 01.mkv",
+			Progress:    1,
+		}},
+	}
+	mgr := &SubscriptionManager{
+		RSSParser: fakeRSSParser{episodes: []parser.Episode{{
+			Title:      "[ANi] Recovered Show - 01 [1080P]",
+			EpisodeNum: "01",
+			TorrentURL: "magnet:?xt=urn:btih:existing-hash",
+		}}},
+		Downloader: down,
+		DB:         db.DB,
+	}
+
+	mgr.ProcessSubscription(&sub)
+
+	var logEntry model.DownloadLog
+	if err := db.DB.Where("subscription_id = ?", sub.ID).First(&logEntry).Error; err != nil {
+		t.Fatalf("expected recovered download log: %v", err)
+	}
+	if logEntry.InfoHash != "existing-hash" {
+		t.Fatalf("expected existing hash, got %q", logEntry.InfoHash)
+	}
+	if logEntry.Status != downloadLogStatusCompleted {
+		t.Fatalf("expected completed status, got %q", logEntry.Status)
+	}
+	if logEntry.TargetFile != "/downloads/Recovered Show/Recovered Show - 01.mkv" {
+		t.Fatalf("unexpected recovered target: %q", logEntry.TargetFile)
+	}
+
+	var updated model.Subscription
+	if err := db.DB.First(&updated, sub.ID).Error; err != nil {
+		t.Fatalf("reload subscription: %v", err)
+	}
+	if updated.LastRunStatus != SubscriptionRunStatusSuccess {
+		t.Fatalf("expected successful recovery, got %q", updated.LastRunStatus)
+	}
+	if updated.LastRunSummary != "已恢复 1 个 qB 现有任务的下载记录" {
+		t.Fatalf("unexpected recovery summary: %q", updated.LastRunSummary)
+	}
+}
+
+func TestProcessSubscriptionRecoversRejectedTaskByEpisodeAndSavePath(t *testing.T) {
+	withServiceTestDB(t)
+
+	sub := model.Subscription{
+		Title:    "恋爱游戏世界对路人角色很不友好",
+		RSSUrl:   "https://example.test/alternate-title",
+		SavePath: `E:\Bangumi\恋爱游戏世界对路人角色很不友好`,
+		IsActive: true,
+	}
+	if err := db.DB.Create(&sub).Error; err != nil {
+		t.Fatalf("failed to create subscription: %v", err)
+	}
+
+	down := &fakeDownloader{
+		addErr: downloader.ErrTorrentRejected,
+		torrents: []downloader.TorrentInfo{{
+			Hash:        "localized-season-hash",
+			Name:        "[ANi] 女性向游戏世界对路人角色很不友好 第二季 - 03 [1080P]",
+			State:       "downloading",
+			SavePath:    `e:\bangumi\恋爱游戏世界对路人角色很不友好\Season 01`,
+			ContentPath: `e:\bangumi\恋爱游戏世界对路人角色很不友好\Season 01\[ANi] female-game - 03.mkv`,
+			Progress:    0.42,
+		}},
+	}
+	mgr := &SubscriptionManager{
+		RSSParser: fakeRSSParser{episodes: []parser.Episode{{
+			Title:      "[ANi] 女性向游戏世界对路人角色很不友好 第二季 - 03 [1080P]",
+			EpisodeNum: "03",
+			TorrentURL: "magnet:?xt=urn:btih:localized-season-hash",
+		}}},
+		Downloader: down,
+		DB:         db.DB,
+	}
+
+	mgr.ProcessSubscription(&sub)
+
+	var entry model.DownloadLog
+	if err := db.DB.Where("subscription_id = ?", sub.ID).First(&entry).Error; err != nil {
+		t.Fatalf("expected rejected task to be recovered: %v", err)
+	}
+	if entry.InfoHash != "localized-season-hash" {
+		t.Fatalf("expected recovered hash, got %q", entry.InfoHash)
+	}
+	if entry.Status != downloadLogStatusDownloading {
+		t.Fatalf("expected active qB task status, got %q", entry.Status)
+	}
+}
+
+func TestProcessSubscriptionRecoversRejectedHTTPTask(t *testing.T) {
+	withServiceTestDB(t)
+
+	sub := model.Subscription{
+		Title:    "HTTP Torrent Show",
+		RSSUrl:   "https://example.test/http-torrent",
+		IsActive: true,
+	}
+	if err := db.DB.Create(&sub).Error; err != nil {
+		t.Fatalf("failed to create subscription: %v", err)
+	}
+
+	down := &fakeTorrentFileDownloader{
+		fakeDownloader: fakeDownloader{
+			torrents: []downloader.TorrentInfo{{
+				Hash:        "http-existing-hash",
+				Name:        "[Group] HTTP Torrent Show - 02",
+				SavePath:    `downloads\HTTP Torrent Show\Season 01`,
+				ContentPath: `downloads\HTTP Torrent Show\Season 01\episode-02.mkv`,
+				State:       "uploading",
+			}},
+		},
+		uploadErr: downloader.ErrTorrentRejected,
+	}
+	fetcher := &fakeTorrentFetcher{
+		fakeRSSParser: fakeRSSParser{episodes: []parser.Episode{{
+			Title:      "[Group] HTTP Torrent Show - 02",
+			EpisodeNum: "02",
+			TorrentURL: "https://example.test/http-torrent-file",
+		}}},
+		filename: "episode.torrent",
+		data:     []byte("d4:infode"),
+	}
+	mgr := &SubscriptionManager{RSSParser: fetcher, Downloader: down, DB: db.DB}
+
+	mgr.ProcessSubscription(&sub)
+
+	var entry model.DownloadLog
+	if err := db.DB.Where("subscription_id = ?", sub.ID).First(&entry).Error; err != nil {
+		t.Fatalf("expected HTTP rejected task to be recovered: %v", err)
+	}
+	if entry.InfoHash != "http-existing-hash" {
+		t.Fatalf("expected recovered HTTP task hash, got %q", entry.InfoHash)
+	}
+}
+
+func TestFindExistingTorrentDoesNotCrossEpisodeOrDirectory(t *testing.T) {
+	withServiceTestDB(t)
+
+	sub := model.Subscription{
+		Title:    "Scoped Show",
+		RSSUrl:   "https://example.test/scoped",
+		SavePath: `/downloads/Scoped Show`,
+		IsActive: true,
+	}
+	down := &fakeDownloader{torrents: []downloader.TorrentInfo{
+		{
+			Hash:        "wrong-episode",
+			Name:        "[Group] Scoped Show - 02",
+			SavePath:    `/downloads/Scoped Show/Season 01`,
+			ContentPath: `/downloads/Scoped Show/Season 01/Scoped Show - 02.mkv`,
+		},
+		{
+			Hash:        "wrong-directory",
+			Name:        "[Other] Another Show - 01",
+			SavePath:    `/downloads/Other Show/Season 01`,
+			ContentPath: `/downloads/Other Show/Season 01/Scoped Show - 01.mkv`,
+		},
+	}}
+	mgr := &SubscriptionManager{Downloader: down}
+
+	got, found, err := mgr.findExistingTorrent(context.Background(), &sub, "[Group] Scoped Show - 01", "S01", "01", "episode:1:1")
+	if err != nil {
+		t.Fatalf("findExistingTorrent returned error: %v", err)
+	}
+	if found {
+		t.Fatalf("expected no match, got %q", got.Hash)
+	}
+}
+
+func TestFindExistingTorrentMatchesRejectedMagnetByInfoHash(t *testing.T) {
+	withServiceTestDB(t)
+
+	const infoHash = "0123456789abcdef0123456789abcdef01234567"
+	sub := model.Subscription{
+		Title:    "Hash Matched Show",
+		RSSUrl:   "https://example.test/hash-matched",
+		SavePath: "/downloads/hash-matched",
+		IsActive: true,
+	}
+	down := &fakeDownloader{torrents: []downloader.TorrentInfo{{
+		Hash:        infoHash,
+		Name:        "qB normalized display name",
+		State:       "uploading",
+		ContentPath: "/other/path/episode.mkv",
+	}}}
+	mgr := &SubscriptionManager{Downloader: down}
+
+	got, found, err := mgr.findExistingTorrent(
+		context.Background(),
+		&sub,
+		"RSS title that qB rewrote",
+		"S01",
+		"03",
+		"episode:1:3",
+		"magnet:?xt=urn:btih:"+infoHash,
+	)
+	if err != nil {
+		t.Fatalf("findExistingTorrent returned error: %v", err)
+	}
+	if !found {
+		t.Fatal("expected the rejected magnet to match qB by info hash")
+	}
+	if got.Hash != infoHash {
+		t.Fatalf("expected hash %q, got %q", infoHash, got.Hash)
+	}
+}
+
+func TestTorrentInfoHashFromURLEncodedMagnet(t *testing.T) {
+	const infoHash = "0123456789abcdef0123456789abcdef01234567"
+	got := torrentInfoHashFromURL("magnet:?xt=urn%3Abtih%3A" + infoHash + "&dn=episode")
+	if got != infoHash {
+		t.Fatalf("expected %q, got %q", infoHash, got)
 	}
 }
 
@@ -274,6 +516,88 @@ func TestProcessSubscriptionPersistsIdleStateForDuplicates(t *testing.T) {
 	}
 	if updated.LastNewDownloads != 0 {
 		t.Fatalf("expected no new downloads, got %d", updated.LastNewDownloads)
+	}
+}
+
+func TestProcessSubscriptionDeduplicatesVersionedEpisodes(t *testing.T) {
+	withServiceTestDB(t)
+
+	sub := model.Subscription{
+		Title:    "Versioned Show",
+		RSSUrl:   "https://example.test/versioned",
+		IsActive: true,
+	}
+	if err := db.DB.Create(&sub).Error; err != nil {
+		t.Fatalf("failed to create subscription: %v", err)
+	}
+
+	down := &fakeDownloader{}
+	mgr := &SubscriptionManager{
+		RSSParser: fakeRSSParser{
+			episodes: []parser.Episode{
+				{Title: "[ANi] Versioned Show - 01 [1080P][MP4]", EpisodeNum: "01", TorrentURL: "magnet:?xt=urn:btih:v1"},
+				{Title: "[ANi] Versioned Show - 01 [1080P][V2][MP4]", EpisodeNum: "01", TorrentURL: "magnet:?xt=urn:btih:v2"},
+				{Title: "[ANi] Versioned Show - 02 [1080P][MP4]", EpisodeNum: "02", TorrentURL: "magnet:?xt=urn:btih:v3"},
+			},
+		},
+		Downloader: down,
+		DB:         db.DB,
+	}
+
+	mgr.ProcessSubscription(&sub)
+
+	if len(down.added) != 2 {
+		t.Fatalf("expected two unique torrents, got %d (%v)", len(down.added), down.added)
+	}
+	var updated model.Subscription
+	if err := db.DB.First(&updated, sub.ID).Error; err != nil {
+		t.Fatalf("failed to reload subscription: %v", err)
+	}
+	if updated.LastRunSummary != "新增 2 集待下载，跳过 1 个重复版本" {
+		t.Fatalf("unexpected duplicate-aware summary: %q", updated.LastRunSummary)
+	}
+	var logs []model.DownloadLog
+	if err := db.DB.Where("subscription_id = ?", sub.ID).Order("id ASC").Find(&logs).Error; err != nil {
+		t.Fatalf("failed to load download logs: %v", err)
+	}
+	if len(logs) != 2 {
+		t.Fatalf("expected two download logs, got %d", len(logs))
+	}
+	if logs[0].Title != "[ANi] Versioned Show - 01 [1080P][MP4]" {
+		t.Fatalf("expected the first release to win the duplicate slot, got %q", logs[0].Title)
+	}
+}
+
+func TestProcessSubscriptionAllowsDifferentSubgroupsWhenConfigured(t *testing.T) {
+	withServiceTestDB(t)
+
+	sub := model.Subscription{
+		Title:              "Multi Group Show",
+		RSSUrl:             "https://example.test/multi-group",
+		IsActive:           true,
+		AllowMultiSubgroup: true,
+	}
+	if err := db.DB.Create(&sub).Error; err != nil {
+		t.Fatalf("failed to create subscription: %v", err)
+	}
+
+	down := &fakeDownloader{}
+	mgr := &SubscriptionManager{
+		RSSParser: fakeRSSParser{
+			episodes: []parser.Episode{
+				{Title: "[ANi] Multi Group Show - 01 [1080P]", EpisodeNum: "01", SubGroup: "ANi", TorrentURL: "magnet:?xt=urn:btih:ani"},
+				{Title: "[Other] Multi Group Show - 01 [1080P][V2]", EpisodeNum: "01", SubGroup: "Other", TorrentURL: "magnet:?xt=urn:btih:other"},
+				{Title: "[ANi] Multi Group Show - 01 [1080P][V2]", EpisodeNum: "01", SubGroup: "ANi", TorrentURL: "magnet:?xt=urn:btih:ani-v2"},
+			},
+		},
+		Downloader: down,
+		DB:         db.DB,
+	}
+
+	mgr.ProcessSubscription(&sub)
+
+	if len(down.added) != 2 {
+		t.Fatalf("expected one release per subgroup, got %d (%v)", len(down.added), down.added)
 	}
 }
 

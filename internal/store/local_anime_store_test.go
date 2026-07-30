@@ -81,6 +81,9 @@ func TestLocalAnimeStoreNilSafety(t *testing.T) {
 	if _, err := s.EpisodePathsByEpisodeNum(1); err != gorm.ErrInvalidDB {
 		t.Errorf("EpisodePathsByEpisodeNum nil: got %v", err)
 	}
+	if _, err := s.EpisodePathByPath("/x"); err != gorm.ErrInvalidDB {
+		t.Errorf("EpisodePathByPath nil: got %v", err)
+	}
 	if _, err := s.ListEpisodesByAnimeID(1); err != gorm.ErrInvalidDB {
 		t.Errorf("ListEpisodesByAnimeID nil: got %v", err)
 	}
@@ -137,7 +140,7 @@ func TestLocalAnimeStoreRemoveDirectoryWithAnimes(t *testing.T) {
 	if err := s.CreateDirectory(dir); err != nil {
 		t.Fatalf("CreateDirectory: %v", err)
 	}
-	anime := &model.LocalAnime{Title: "Show", Path: "/media/anime/Show", DirectoryID: dir.ID}
+	anime := &model.LocalAnime{Title: testAnimeMetadataShowTitle, Path: "/media/anime/Show", DirectoryID: dir.ID}
 	if err := s.CreateAnime(anime); err != nil {
 		t.Fatalf("CreateAnime: %v", err)
 	}
@@ -212,7 +215,7 @@ func TestLocalAnimeStoreAnimeAndEpisodeCRUD(t *testing.T) {
 func TestLocalAnimeStoreDeleteEpisodesNotInPaths(t *testing.T) {
 	s := setupLocalAnimeStore(t)
 
-	anime := &model.LocalAnime{Title: "Show", Path: "/p/s"}
+	anime := &model.LocalAnime{Title: testAnimeMetadataShowTitle, Path: "/p/s"}
 	if err := s.CreateAnime(anime); err != nil {
 		t.Fatalf("CreateAnime: %v", err)
 	}
@@ -248,7 +251,7 @@ func TestLocalAnimeStoreDeleteEpisodesNotInPaths(t *testing.T) {
 
 func TestLocalAnimeStoreCanRestoreSoftDeletedEpisode(t *testing.T) {
 	s := setupLocalAnimeStore(t)
-	anime := &model.LocalAnime{Title: "Show", Path: "/p/s"}
+	anime := &model.LocalAnime{Title: testAnimeMetadataShowTitle, Path: "/p/s"}
 	if err := s.CreateAnime(anime); err != nil {
 		t.Fatalf("CreateAnime: %v", err)
 	}
@@ -319,7 +322,7 @@ func TestLocalAnimeStoreEpisodePathJoins(t *testing.T) {
 	if err := db.DB.Create(meta).Error; err != nil {
 		t.Fatalf("create meta: %v", err)
 	}
-	anime := &model.LocalAnime{Title: "Show", Path: "/p/s", MetadataID: &meta.ID}
+	anime := &model.LocalAnime{Title: testAnimeMetadataShowTitle, Path: "/p/s", MetadataID: &meta.ID}
 	if err := s.CreateAnime(anime); err != nil {
 		t.Fatalf("CreateAnime: %v", err)
 	}
@@ -331,7 +334,8 @@ func TestLocalAnimeStoreEpisodePathJoins(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EpisodePathsByMetadata: %v", err)
 	}
-	if len(rows) != 1 || rows[0].Path != "/p/s/01.mkv" {
+	if len(rows) != 1 || rows[0].Path != "/p/s/01.mkv" || rows[0].AnimeTitle != testAnimeMetadataShowTitle ||
+		rows[0].AnimePath != "/p/s" || rows[0].LocalAnimeID != anime.ID || rows[0].EpisodeNum != 1 {
 		t.Fatalf("unexpected rows: %+v", rows)
 	}
 
@@ -339,7 +343,15 @@ func TestLocalAnimeStoreEpisodePathJoins(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EpisodePathsByEpisodeNum: %v", err)
 	}
-	if len(titleRows) != 1 || titleRows[0].AnimeTitle != "Show" {
+	if len(titleRows) != 1 || titleRows[0].AnimeTitle != testAnimeMetadataShowTitle {
 		t.Fatalf("unexpected title rows: %+v", titleRows)
+	}
+
+	pathRow, err := s.EpisodePathByPath("/p/s/01.mkv")
+	if err != nil {
+		t.Fatalf("EpisodePathByPath: %v", err)
+	}
+	if pathRow.LocalAnimeID != anime.ID || pathRow.MetadataID == nil || *pathRow.MetadataID != meta.ID {
+		t.Fatalf("unexpected path row: %+v", pathRow)
 	}
 }

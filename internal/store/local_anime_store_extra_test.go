@@ -91,13 +91,13 @@ func TestLocalAnimeStoreGetAnimeAndDirectory(t *testing.T) {
 	if err := s.CreateDirectory(dir); err != nil {
 		t.Fatalf("CreateDirectory: %v", err)
 	}
-	anime := &model.LocalAnime{Title: "Show", Path: "/p/anime/Show", DirectoryID: dir.ID}
+	anime := &model.LocalAnime{Title: testAnimeMetadataShowTitle, Path: "/p/anime/Show", DirectoryID: dir.ID}
 	if err := s.CreateAnime(anime); err != nil {
 		t.Fatalf("CreateAnime: %v", err)
 	}
 
 	got, err := s.GetAnime(anime.ID)
-	if err != nil || got == nil || got.Title != "Show" {
+	if err != nil || got == nil || got.Title != testAnimeMetadataShowTitle {
 		t.Fatalf("GetAnime: %v / %+v", err, got)
 	}
 	if _, err := s.GetAnime(99999); !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -142,7 +142,7 @@ func TestLocalAnimeStoreListAnimesByDirectory(t *testing.T) {
 
 func TestLocalAnimeStoreListEpisodesByAnimeIDOrdered(t *testing.T) {
 	s := setupLocalAnimeStore(t)
-	anime := &model.LocalAnime{Title: "Show", Path: "/p/s"}
+	anime := &model.LocalAnime{Title: testAnimeMetadataShowTitle, Path: "/p/s"}
 	if err := s.CreateAnime(anime); err != nil {
 		t.Fatalf("CreateAnime: %v", err)
 	}
@@ -173,7 +173,7 @@ func TestLocalAnimeStoreListEpisodesByAnimeIDOrdered(t *testing.T) {
 
 func TestLocalAnimeStoreUpdateEpisodePath(t *testing.T) {
 	s := setupLocalAnimeStore(t)
-	anime := &model.LocalAnime{Title: "Show", Path: "/p/s"}
+	anime := &model.LocalAnime{Title: testAnimeMetadataShowTitle, Path: "/p/s"}
 	if err := s.CreateAnime(anime); err != nil {
 		t.Fatalf("CreateAnime: %v", err)
 	}

@@ -365,8 +365,13 @@ func (s *LocalAnimeStore) CleanupOrphansByDirectory(directoryID uint) error {
 
 // EpisodePathByMetadata is the join used by download log repair.
 type EpisodePathRow struct {
-	Path       string
-	AnimeTitle string
+	Path         string
+	AnimeTitle   string
+	AnimePath    string
+	LocalAnimeID uint
+	MetadataID   *uint
+	EpisodeNum   int
+	SeasonNum    int
 }
 
 func (s *LocalAnimeStore) EpisodePathsByMetadata(metadataID uint, episodeNum int) ([]EpisodePathRow, error) {
@@ -375,7 +380,13 @@ func (s *LocalAnimeStore) EpisodePathsByMetadata(metadataID uint, episodeNum int
 	}
 	var rows []EpisodePathRow
 	if err := s.db.Table("local_episodes").
-		Select("local_episodes.path, '' AS anime_title").
+		Select(`local_episodes.path,
+			local_animes.title AS anime_title,
+			local_animes.path AS anime_path,
+			local_animes.id AS local_anime_id,
+			local_animes.metadata_id AS metadata_id,
+			local_episodes.episode_num,
+			local_episodes.season_num`).
 		Joins("JOIN local_animes ON local_animes.id = local_episodes.local_anime_id").
 		Where("local_animes.metadata_id = ? AND local_episodes.episode_num = ?", metadataID, episodeNum).
 		Order("local_episodes.updated_at DESC").
@@ -391,7 +402,13 @@ func (s *LocalAnimeStore) EpisodePathsByEpisodeNum(episodeNum int) ([]EpisodePat
 	}
 	var rows []EpisodePathRow
 	if err := s.db.Table("local_episodes").
-		Select("local_episodes.path, local_animes.title AS anime_title").
+		Select(`local_episodes.path,
+			local_animes.title AS anime_title,
+			local_animes.path AS anime_path,
+			local_animes.id AS local_anime_id,
+			local_animes.metadata_id AS metadata_id,
+			local_episodes.episode_num,
+			local_episodes.season_num`).
 		Joins("JOIN local_animes ON local_animes.id = local_episodes.local_anime_id").
 		Where("local_episodes.episode_num = ?", episodeNum).
 		Order("local_episodes.updated_at DESC").
@@ -399,4 +416,28 @@ func (s *LocalAnimeStore) EpisodePathsByEpisodeNum(episodeNum int) ([]EpisodePat
 		return nil, err
 	}
 	return rows, nil
+}
+
+// EpisodePathByPath returns the indexed local-series identity for a concrete
+// media path. Download-history reconciliation uses this to distinguish a real
+// file belonging to the subscription from a cross-series metadata collision.
+func (s *LocalAnimeStore) EpisodePathByPath(path string) (*EpisodePathRow, error) {
+	if s == nil || s.db == nil {
+		return nil, gorm.ErrInvalidDB
+	}
+	var row EpisodePathRow
+	if err := s.db.Table("local_episodes").
+		Select(`local_episodes.path,
+			local_animes.title AS anime_title,
+			local_animes.path AS anime_path,
+			local_animes.id AS local_anime_id,
+			local_animes.metadata_id AS metadata_id,
+			local_episodes.episode_num,
+			local_episodes.season_num`).
+		Joins("JOIN local_animes ON local_animes.id = local_episodes.local_anime_id").
+		Where("local_episodes.path = ?", path).
+		Take(&row).Error; err != nil {
+		return nil, err
+	}
+	return &row, nil
 }

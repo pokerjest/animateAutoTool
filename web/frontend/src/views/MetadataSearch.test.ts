@@ -28,7 +28,7 @@ describe('metadata search', () => {
   it('renders every typed Bangumi result with its title and id', async () => {
     vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
       const path = String(input)
-      if (path.endsWith('/api/v1/library')) {
+      if (path.includes('/api/v1/library?')) {
         return response({
           items: [{
             ID: 1,

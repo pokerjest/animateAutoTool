@@ -351,10 +351,12 @@ func (s *MetadataService) processTMDB(m *model.AnimeMetadata, client *tmdb.Clien
 
 	if tmdbShow != nil {
 		imgRaw := s.fetchAndCacheImage(tmdbShow.PosterPath, model.ConfigKeyProxyTMDB)
+		backdropRaw := s.fetchAndCacheImage(tmdbShow.BackdropPath, model.ConfigKeyProxyTMDB)
 		mu.Lock()
 		m.TMDBID = tmdbShow.ID
 		m.TMDBTitle = tmdbShow.Name
 		m.TMDBImage = tmdbShow.PosterPath
+		m.TMDBBackdrop = tmdbShow.BackdropPath
 		m.TMDBSummary = tmdbShow.Overview
 		m.TMDBRating = tmdbShow.VoteAverage
 		if m.AirDate == "" {
@@ -367,6 +369,7 @@ func (s *MetadataService) processTMDB(m *model.AnimeMetadata, client *tmdb.Clien
 			m.TitleJP = tmdbShow.OriginalName
 		}
 		m.TMDBImageRaw = imgRaw
+		m.TMDBBackdropRaw = backdropRaw
 		mu.Unlock()
 	}
 }
@@ -513,6 +516,16 @@ func mergeEnrichedMetadata(dst, src *model.AnimeMetadata) {
 	copyString(&dst.TitleCN, src.TitleCN)
 	copyString(&dst.TitleEN, src.TitleEN)
 	copyString(&dst.TitleJP, src.TitleJP)
+	copyString(&dst.SortTitle, src.SortTitle)
+	copyString(&dst.OriginalTitle, src.OriginalTitle)
+	copyString(&dst.Genres, src.Genres)
+	copyString(&dst.Studios, src.Studios)
+	copyString(&dst.Tags, src.Tags)
+	copyString(&dst.Actors, src.Actors)
+	copyString(&dst.Directors, src.Directors)
+	copyInt(&dst.RuntimeMinutes, src.RuntimeMinutes)
+	copyString(&dst.ContentRating, src.ContentRating)
+	copyString(&dst.OriginalCountry, src.OriginalCountry)
 	copyInt(&dst.BangumiID, src.BangumiID)
 	copyInt(&dst.TMDBID, src.TMDBID)
 	copyInt(&dst.AniListID, src.AniListID)
@@ -523,15 +536,18 @@ func mergeEnrichedMetadata(dst, src *model.AnimeMetadata) {
 	copyBytes(&dst.BangumiImageRaw, src.BangumiImageRaw)
 	copyString(&dst.TMDBTitle, src.TMDBTitle)
 	copyString(&dst.TMDBImage, src.TMDBImage)
+	copyString(&dst.TMDBBackdrop, src.TMDBBackdrop)
 	copyString(&dst.TMDBSummary, src.TMDBSummary)
 	copyFloat(&dst.TMDBRating, src.TMDBRating)
 	copyBytes(&dst.TMDBImageRaw, src.TMDBImageRaw)
+	copyBytes(&dst.TMDBBackdropRaw, src.TMDBBackdropRaw)
 	copyString(&dst.AniListTitle, src.AniListTitle)
 	copyString(&dst.AniListImage, src.AniListImage)
 	copyString(&dst.AniListSummary, src.AniListSummary)
 	copyFloat(&dst.AniListRating, src.AniListRating)
 	copyBytes(&dst.AniListImageRaw, src.AniListImageRaw)
 	copyString(&dst.DataSource, src.DataSource)
+	copyString(&dst.FieldSources, src.FieldSources)
 	copyInt(&dst.BangumiWatchedEps, src.BangumiWatchedEps)
 	copyInt(&dst.AniListWatchedEps, src.AniListWatchedEps)
 	dst.DeletedAt.Valid = false
@@ -539,13 +555,25 @@ func mergeEnrichedMetadata(dst, src *model.AnimeMetadata) {
 
 func (s *MetadataService) setActiveFields(m *model.AnimeMetadata, rawQueryTitle string) {
 	selected := selectMetadataSource(rawQueryTitle, m)
+	fieldSources := metadataFieldSources(m.FieldSources)
 	if selected != nil {
-		m.Title = selected.title
-		m.Image = selected.image
-		m.Summary = selected.summary
 		m.DataSource = selected.name
-		if m.Summary == "" {
-			m.Summary = fallbackSummaryForSource(selected.name, m)
+		if !metadataFieldLocked(fieldSources, "title") && selected.title != "" {
+			m.Title = selected.title
+			fieldSources["title"] = selected.name
+		}
+	}
+
+	if !metadataFieldLocked(fieldSources, "image") {
+		if value, source := firstConfiguredMetadataField(m, "image"); value != "" {
+			m.Image = value
+			fieldSources["image"] = source
+		}
+	}
+	if !metadataFieldLocked(fieldSources, "summary") {
+		if value, source := firstConfiguredMetadataField(m, "summary"); value != "" {
+			m.Summary = value
+			fieldSources["summary"] = source
 		}
 	}
 
@@ -555,6 +583,7 @@ func (s *MetadataService) setActiveFields(m *model.AnimeMetadata, rawQueryTitle 
 	if m.Title == "" {
 		m.Title = rawQueryTitle
 	}
+	m.FieldSources = mergeFieldSources(m.FieldSources, fieldSources)
 }
 
 func (s *MetadataService) fetchAndCacheImage(url, proxyFlagKey string) []byte {
