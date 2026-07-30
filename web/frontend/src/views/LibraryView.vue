@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
-import { useQuery, useQueryClient } from '@tanstack/vue-query'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { useInfiniteQuery, useQueryClient } from '@tanstack/vue-query'
 import { BookmarkCheck, MoreHorizontal, Play, RefreshCw, Search, SlidersHorizontal } from '@lucide/vue'
-import { api, handlePosterError, posterURL } from '../api/client'
+import { api, apiEnvelope, handlePosterError, posterURL } from '../api/client'
 import type { LibraryItem, MetadataMatchCandidate, MetadataMatchSearchResult, MetadataSearchResult, TaskAccepted } from '../api/types'
 import AppDialog from '../components/AppDialog.vue'
 import AutoLoadSentinel from '../components/AutoLoadSentinel.vue'
@@ -14,12 +14,42 @@ import { useAsyncActions } from '../composables/useAsyncActions'
 import { useUIStore } from '../stores/ui'
 
 const search=ref(''),status=ref('all'),ui=useUIStore(),qc=useQueryClient(),actions=useAsyncActions(),selected=ref<LibraryItem|null>(null),matchSource=ref('bangumi'),matchQuery=ref(''),matchResults=ref<MetadataMatchCandidate[]>([]),matchStatus=ref<MetadataMatchSearchResult['source_status']>({})
-const query=useQuery({queryKey:['library'],queryFn:()=>api<{items:LibraryItem[]}>('/library')})
-const items=computed(()=>{const q=search.value.toLowerCase();return (query.data.value?.items||[]).filter(i=>(status.value==='all'||(status.value==='subscribed'&&i.is_subscribed)||(status.value==='local'&&i.is_local))&&`${i.title} ${i.title_cn} ${i.title_jp}`.toLowerCase().includes(q))})
-const visibleCount=ref(24)
-const visibleItems=computed(()=>items.value.slice(0,visibleCount.value))
-const canLoadMore=computed(()=>visibleItems.value.length<items.value.length)
-watch([search,status],()=>{visibleCount.value=24})
+const debouncedSearch=ref('')
+let searchTimer:ReturnType<typeof setTimeout>|undefined
+watch(search,value=>{
+  if(searchTimer)clearTimeout(searchTimer)
+  searchTimer=setTimeout(()=>{debouncedSearch.value=value.trim()},250)
+})
+onBeforeUnmount(()=>{if(searchTimer)clearTimeout(searchTimer)})
+const query=useInfiniteQuery({
+  queryKey:computed(()=>['library',debouncedSearch.value,status.value]),
+  initialPageParam:1,
+  queryFn:({pageParam})=>{
+    const params=new URLSearchParams({page:String(pageParam),page_size:'48'})
+    if(debouncedSearch.value)params.set('q',debouncedSearch.value)
+    if(status.value!=='all')params.set('status',status.value)
+    return apiEnvelope<{items:LibraryItem[]}>(`/library?${params}`)
+  },
+  getNextPageParam:lastPage=>{
+    const page=lastPage.meta?.page??1
+    const pageSize=lastPage.meta?.page_size??lastPage.data.items.length
+    const total=lastPage.meta?.total??lastPage.data.items.length
+    return page*pageSize<total?page+1:undefined
+  },
+})
+const pages=computed(()=>query.data.value?.pages||[])
+const items=computed(()=>pages.value.flatMap(page=>page.data.items))
+const hasServerPagination=computed(()=>Boolean(pages.value[0]?.meta))
+const legacyVisibleCount=ref(24)
+watch([debouncedSearch,status],()=>{legacyVisibleCount.value=24})
+const displayedItems=computed(()=>hasServerPagination.value?items.value:items.value.slice(0,legacyVisibleCount.value))
+const hasLegacyItems=computed(()=>!hasServerPagination.value&&displayedItems.value.length<items.value.length)
+const totalItems=computed(()=>pages.value[0]?.meta?.total??items.value.length)
+const remainingItems=computed(()=>Math.max(0,totalItems.value-displayedItems.value.length))
+async function loadMore(){
+  if(query.hasNextPage.value&&!query.isFetchingNextPage.value){await query.fetchNextPage();return}
+  if(hasLegacyItems.value)legacyVisibleCount.value+=24
+}
 async function refresh(){try{await actions.runTask('refresh-all',()=>api<TaskAccepted>('/library/refresh',{method:'POST'}),'刷新全部元数据','metadata','正在刷新番剧元数据');ui.toast('元数据刷新已经启动')}catch(e){ui.toast(e instanceof Error?e.message:'刷新失败','error')}}
 async function refreshItem(){if(!selected.value)return;const id=selected.value.ID;try{await actions.runTask(`refresh-${id}`,()=>api<TaskAccepted>(`/library/metadata/${id}/refresh`,{method:'POST'}),'刷新元数据','metadata','正在刷新当前条目');ui.toast('条目刷新已经启动')}catch(e){ui.toast(e instanceof Error?e.message:'刷新失败','error')}}
 function selectedSourceID(){if(!selected.value)return 0;return matchSource.value==='bangumi'?selected.value.bangumi_id:matchSource.value==='tmdb'?selected.value.tmdb_id:selected.value.anilist_id}
@@ -31,6 +61,6 @@ const resultKey=(item:MetadataMatchCandidate)=>`${item.bangumi?.id||0}-${item.tm
 const sourceLabel=(source:string)=>source==='bangumi'?'Bangumi':source==='tmdb'?'TMDB':'AniList'
 </script>
 
-<template><div class="page-grid"><PageHeader eyebrow="COLLECTION" title="番剧图鉴" description="统一浏览订阅与本地媒体的元数据、海报和来源状态。"><AsyncButton class="btn btn-primary" :loading="actions.isBusy('refresh-all','metadata-refresh')" loading-label="刷新中…" @click="refresh"><RefreshCw :size="17"/>刷新全部元数据</AsyncButton></PageHeader><section class="panel grid gap-3 p-4 md:grid-cols-[1fr_auto]"><label class="search-field"><Search :size="18" aria-hidden="true"/><input v-model="search" class="field field-leading-icon" placeholder="搜索中、日、英文标题" aria-label="搜索番剧"/></label><div class="flex gap-2 overflow-x-auto"><button v-for="item in [{id:'all',label:'全部'},{id:'subscribed',label:'已订阅'},{id:'local',label:'本地可用'}]" :key="item.id" class="btn whitespace-nowrap" :class="status===item.id?'btn-primary':'btn-secondary'" @click="status=item.id"><SlidersHorizontal v-if="item.id==='all'" :size="15"/>{{ item.label }}</button></div></section><StateBlock v-if="query.isLoading.value" state="loading"/><StateBlock v-else-if="query.isError.value" state="error" title="图鉴加载失败" :retrying="query.isFetching.value" @retry="query.refetch()"/><StateBlock v-else-if="!items.length" state="empty" title="没有符合条件的番剧"/><section v-else class="poster-grid"><PosterCard v-for="item in visibleItems" :key="item.ID" openable open-label="查看详情" :title="item.title_cn||item.title||item.title_jp||'未命名番剧'" :image="posterURL(item,{width:360})" :meta="item.air_date||item.data_source" :badges="[item.is_subscribed?'已订阅':'',item.is_local?'本地可用':''].filter(Boolean)" @open="open(item)"><template v-if="item.is_local" #actions><details class="poster-card-menu"><summary aria-label="更多操作" title="更多操作"><MoreHorizontal :size="17"/></summary><div class="poster-card-menu-content"><RouterLink :to="`/local-anime?highlight=${item.local_anime_id}`" @click.stop><Play :size="14"/>打开本地媒体</RouterLink></div></details></template></PosterCard></section><AutoLoadSentinel v-if="canLoadMore" :remaining="items.length-visibleItems.length" @load="visibleCount+=24"/>
+<template><div class="page-grid"><PageHeader eyebrow="COLLECTION" title="番剧图鉴" description="统一浏览订阅与本地媒体的元数据、海报和来源状态。"><AsyncButton class="btn btn-primary" :loading="actions.isBusy('refresh-all','metadata-refresh')" loading-label="刷新中…" @click="refresh"><RefreshCw :size="17"/>刷新全部元数据</AsyncButton></PageHeader><section class="panel grid gap-3 p-4 md:grid-cols-[1fr_auto]"><label class="search-field"><Search :size="18" aria-hidden="true"/><input v-model="search" class="field field-leading-icon" placeholder="搜索中、日、英文标题" aria-label="搜索番剧"/></label><div class="flex flex-wrap items-center justify-end gap-2"><span class="badge">{{ totalItems }} 部番剧</span><div class="flex gap-2 overflow-x-auto"><button v-for="item in [{id:'all',label:'全部'},{id:'subscribed',label:'已订阅'},{id:'local',label:'本地可用'}]" :key="item.id" class="btn whitespace-nowrap" :class="status===item.id?'btn-primary':'btn-secondary'" @click="status=item.id"><SlidersHorizontal v-if="item.id==='all'" :size="15"/>{{ item.label }}</button></div></div></section><StateBlock v-if="query.isLoading.value" state="loading"/><StateBlock v-else-if="query.isError.value" state="error" title="图鉴加载失败" :retrying="query.isFetching.value" @retry="query.refetch()"/><StateBlock v-else-if="!items.length" state="empty" title="没有符合条件的番剧"/><section v-else class="poster-grid"><PosterCard v-for="item in displayedItems" :key="item.ID" openable open-label="查看详情" :title="item.title_cn||item.title||item.title_jp||'未命名番剧'" :image="posterURL(item,{width:360})" :meta="item.air_date||item.data_source" :badges="[item.is_subscribed?'已订阅':'',item.is_local?'本地可用':''].filter(Boolean)" @open="open(item)"><template v-if="item.is_local" #actions><details class="poster-card-menu"><summary aria-label="更多操作" title="更多操作"><MoreHorizontal :size="17"/></summary><div class="poster-card-menu-content"><RouterLink :to="`/local-anime?highlight=${item.local_anime_id}`" @click.stop><Play :size="14"/>打开本地媒体</RouterLink></div></details></template></PosterCard></section><AutoLoadSentinel v-if="query.hasNextPage.value||hasLegacyItems" :remaining="remainingItems" :loading="query.isFetchingNextPage.value" :paused="query.isError.value" @load="loadMore"/><p v-if="query.isFetchingNextPage.value" class="muted py-3 text-center text-sm" role="status" aria-live="polite">正在加载更多番剧…</p>
   <AppDialog :open="Boolean(selected)" :title="selected?.title_cn||selected?.title||'番剧详情'" description="检查来源信息、修正匹配，并同步收藏状态。" wide @update:open="v=>{if(!v){selected=null;matchResults=[];matchStatus={}}}"><div class="grid gap-6 lg:grid-cols-[260px_1fr]"><section><img :src="posterURL(selected||{},{width:720})" alt="" decoding="async" class="aspect-[2/3] w-full rounded-2xl object-cover" @error="handlePosterError($event,selected?.image)"/><div class="mt-3 flex flex-wrap gap-2"><span class="badge">{{ selected?.data_source||'metadata' }}</span><span v-if="selected?.is_subscribed" class="badge badge-success">已订阅</span><span v-if="selected?.is_local" class="badge badge-success">本地可用</span></div><p class="muted mt-4 text-sm leading-6">{{ selected?.summary||'暂无简介' }}</p><AsyncButton class="btn btn-secondary mt-4 w-full" :loading="Boolean(selected&&actions.isBusy(`refresh-${selected.ID}`,`metadata-${selected.ID}`))" loading-label="刷新中…" @click="refreshItem"><RefreshCw :size="16"/>刷新此条目</AsyncButton><div v-if="selected?.bangumi_id" class="panel-muted mt-4 p-3"><p class="text-xs font-black">Bangumi 收藏</p><div class="mt-2 grid grid-cols-2 gap-2"><AsyncButton class="btn btn-quiet px-2 text-xs" :loading="actions.isBusy('bangumi-1')" loading-label="同步中…" @click="setBangumi(1)">想看</AsyncButton><AsyncButton class="btn btn-quiet px-2 text-xs" :loading="actions.isBusy('bangumi-3')" loading-label="同步中…" @click="setBangumi(3)"><BookmarkCheck :size="14"/>在看</AsyncButton><AsyncButton class="btn btn-quiet px-2 text-xs" :loading="actions.isBusy('bangumi-2')" loading-label="同步中…" @click="setBangumi(2)">看过</AsyncButton><AsyncButton class="btn btn-quiet px-2 text-xs" :loading="actions.isBusy('bangumi-4')" loading-label="同步中…" @click="setBangumi(4)">搁置</AsyncButton></div></div></section><section><h3 class="text-lg font-black">手动修正三源匹配</h3><p class="muted mt-1 text-sm">选择一个来源作为起点，后端会同时搜索 Bangumi、TMDB、AniList；确认后一次性写入。</p><div class="mt-4 grid gap-3 sm:grid-cols-[140px_1fr_auto]"><select v-model="matchSource" class="field"><option value="bangumi">Bangumi</option><option value="tmdb">TMDB</option><option value="anilist">AniList</option></select><input v-model="matchQuery" class="field" @keydown.enter.prevent="searchMatch"/><AsyncButton class="btn btn-primary" :loading="actions.isBusy('search-match')" loading-label="搜索中…" @click="searchMatch"><Search :size="16"/>搜索</AsyncButton></div><div v-if="Object.keys(matchStatus).length" class="mt-3 flex flex-wrap gap-2"><span v-for="(status,source) in matchStatus" :key="source" class="badge" :class="status.error?'badge-warning':status.searched?'badge-success':''">{{ sourceLabel(source) }}：{{ status.error||`${status.count} 个候选` }}</span></div><div class="mt-4 space-y-2"><AsyncButton v-for="item in matchResults" :key="resultKey(item)" class="panel-muted block w-full p-3 text-left" :loading="actions.isBusy(`fix-${item.bangumi?.id||item.tmdb?.id||item.anilist?.id}`)" loading-label="正在应用匹配…" @click="fixMatch(item)"><div class="flex items-center justify-between gap-3"><strong>{{ item.title||'未命名条目' }}</strong><span class="badge badge-success">使用此匹配</span></div><div class="mt-2 grid gap-2 text-xs sm:grid-cols-3"><span :class="item.bangumi?'':'muted'">Bangumi：{{ item.bangumi?`${item.bangumi.name_cn||item.bangumi.name} (#${item.bangumi.id})`:'未找到' }}</span><span :class="item.tmdb?'':'muted'">TMDB：{{ item.tmdb?`${item.tmdb.name_cn||item.tmdb.name} (#${item.tmdb.id})`:'未找到/未配置' }}</span><span :class="item.anilist?'':'muted'">AniList：{{ item.anilist?`${item.anilist.name_cn||item.anilist.name} (#${item.anilist.id})`:'未找到/未配置' }}</span></div><p v-if="item.evidence?.length" class="muted mt-2 text-xs">{{ item.evidence.join(' · ') }}</p></AsyncButton></div><StateBlock v-if="!matchResults.length" state="empty" title="搜索并选择正确条目"/></section></div></AppDialog>
 </div></template>

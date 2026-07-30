@@ -102,6 +102,7 @@ function numberField(row: Record<string, unknown>, primary: string, fallback: st
 }
 
 function hasLiveProgress(row: Record<string, unknown>) {
+  if (field(row, 'Status', 'status').trim().toLowerCase() === 'archived') return false
   return numberField(row, 'total_bytes', 'TotalBytes') > 0
     || numberField(row, 'downloaded_bytes', 'DownloadedBytes') > 0
     || numberField(row, 'download_speed', 'DownloadSpeed') > 0

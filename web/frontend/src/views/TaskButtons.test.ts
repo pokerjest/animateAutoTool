@@ -87,7 +87,7 @@ describe('background task buttons', () => {
   it('keeps metadata refresh active until its task update arrives', async () => {
     vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input)
-      if (path.endsWith('/api/v1/library')) return response({ items: [] })
+      if (path.includes('/api/v1/library?')) return response({ items: [] })
       if (path.endsWith('/api/v1/library/refresh') && init?.method === 'POST') return response({ task_id: 'metadata-refresh', status: 'running' }, 202)
       throw new Error(`unexpected request: ${path}`)
     }))

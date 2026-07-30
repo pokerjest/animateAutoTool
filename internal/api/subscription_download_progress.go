@@ -69,7 +69,7 @@ func enrichSubscriptionDownloadProgress(ctx context.Context, logs []model.Downlo
 		if !ok {
 			continue
 		}
-		if liveStatus := service.DownloadLogStatusFromTorrentState(torrent.State); liveStatus != "" {
+		if liveStatus := service.DownloadLogStatusFromTorrent(torrent); liveStatus != "" {
 			switch logEntryStatus := strings.TrimSpace(logs[index].Status); logEntryStatus {
 			case "downloading", "failed":
 				logs[index].Status = liveStatus
@@ -96,6 +96,11 @@ func liveTorrentForLog(logEntry model.DownloadLog, byHash map[string]downloader.
 }
 
 func liveTorrentForLogWithEpisodes(logEntry model.DownloadLog, byHash map[string]downloader.TorrentInfo, byName map[string]downloader.TorrentInfo, byEpisode map[string][]downloader.TorrentInfo) (downloader.TorrentInfo, bool) {
+	// Archived rows are retained only as audit evidence. Never attach a live
+	// qBittorrent snapshot to them or they can appear active again in history.
+	if strings.EqualFold(strings.TrimSpace(logEntry.Status), "archived") {
+		return downloader.TorrentInfo{}, false
+	}
 	if hash := strings.ToLower(strings.TrimSpace(logEntry.InfoHash)); hash != "" {
 		if torrent, ok := byHash[hash]; ok {
 			return torrent, true
@@ -153,15 +158,36 @@ func preferTorrent(current, candidate downloader.TorrentInfo) downloader.Torrent
 	if strings.TrimSpace(current.Name) == "" {
 		return candidate
 	}
+	currentRank := liveTorrentStatusRank(current)
+	candidateRank := liveTorrentStatusRank(candidate)
+	if candidateRank != currentRank {
+		if candidateRank > currentRank {
+			return candidate
+		}
+		return current
+	}
 	currentRatio := normalizeTorrentProgress(current.Progress)
 	candidateRatio := normalizeTorrentProgress(candidate.Progress)
-	if candidate.DownloadSpeed > current.DownloadSpeed {
+	if candidateRatio > currentRatio {
 		return candidate
 	}
-	if candidate.DownloadSpeed == current.DownloadSpeed && candidateRatio > currentRatio {
+	if candidateRatio == currentRatio && candidate.DownloadSpeed > current.DownloadSpeed {
 		return candidate
 	}
 	return current
+}
+
+func liveTorrentStatusRank(torrent downloader.TorrentInfo) int {
+	switch service.DownloadLogStatusFromTorrent(torrent) {
+	case "completed":
+		return 3
+	case "downloading":
+		return 2
+	case "failed":
+		return 1
+	default:
+		return 0
+	}
 }
 
 func bestTorrent(candidates []downloader.TorrentInfo) (downloader.TorrentInfo, bool) {

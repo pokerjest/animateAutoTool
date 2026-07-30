@@ -164,6 +164,22 @@ func migrateAnimeMetadataExtendedFields(tx *gorm.DB) error {
 	return nil
 }
 
+// ensureAnimeMetadataExtendedFields is deliberately called on every startup,
+// not only when migration 014 is newly recorded. A previous build could have
+// recorded 014 before all of its columns were introduced, leaving an otherwise
+// "current" database without sort_title and the other scraper fields. Schema
+// history is useful for compatibility decisions, but the actual table shape
+// remains the source of truth for this idempotent repair.
+func ensureAnimeMetadataExtendedFields(target *gorm.DB) error {
+	if target == nil {
+		return nil
+	}
+	if err := migrateAnimeMetadataExtendedFields(target); err != nil {
+		return fmt.Errorf("ensure anime_metadata extended fields: %w", err)
+	}
+	return nil
+}
+
 func backfillSchemaMigrationSequences(tx *gorm.DB) error {
 	if err := tx.AutoMigrate(&SchemaMigration{}); err != nil {
 		return err
@@ -522,6 +538,13 @@ func RunMigrations(target *gorm.DB) error {
 		}); err != nil {
 			return fmt.Errorf("apply migration %s: %w", m.ID, err)
 		}
+	}
+
+	// Keep this invariant check outside the "new migration" branch. It repairs
+	// databases from builds that marked 014 as applied while still missing one
+	// or more columns, without requiring users to delete migration history.
+	if err := ensureAnimeMetadataExtendedFields(target); err != nil {
+		return err
 	}
 
 	return nil

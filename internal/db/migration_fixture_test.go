@@ -204,3 +204,53 @@ func TestAnimeMetadataExtendedFieldsMigrationRepairsLegacyTable(t *testing.T) {
 		t.Fatalf("rerun metadata extension migration: %v", err)
 	}
 }
+
+func TestRunMigrationsRepairsExtendedFieldsWhenMigrationWasAlreadyRecorded(t *testing.T) {
+	target, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "metadata-recorded.db")), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open legacy database: %v", err)
+	}
+	t.Cleanup(func() {
+		sqlDB, dbErr := target.DB()
+		if dbErr == nil {
+			_ = sqlDB.Close()
+		}
+	})
+
+	if err := target.AutoMigrate(&model.AnimeMetadata{}, &SchemaMigration{}); err != nil {
+		t.Fatalf("create metadata and migration tables: %v", err)
+	}
+	for _, field := range []string{"sort_title", "original_title", "genres", "studios", "tags", "actors", "directors", "runtime_minutes", "content_rating", "original_country", "tmdb_backdrop", "tmdb_backdrop_raw", "field_sources"} {
+		if err := target.Migrator().DropColumn(&model.AnimeMetadata{}, field); err != nil {
+			t.Fatalf("drop %s from simulated broken database: %v", field, err)
+		}
+	}
+	for _, item := range migrations {
+		if err := target.Create(&SchemaMigration{
+			ID:          item.ID,
+			Sequence:    migrationSequence(item.ID),
+			Description: item.Description,
+			AppliedAt:   time.Now().UTC(),
+		}).Error; err != nil {
+			t.Fatalf("seed migration %s: %v", item.ID, err)
+		}
+	}
+
+	originalDBPath := CurrentDBPath
+	CurrentDBPath = sqliteMemoryPath
+	t.Cleanup(func() { CurrentDBPath = originalDBPath })
+	if target.Migrator().HasColumn(&model.AnimeMetadata{}, "sort_title") {
+		t.Fatal("test fixture unexpectedly contains sort_title before repair")
+	}
+	if err := RunMigrations(target); err != nil {
+		t.Fatalf("run invariant repair: %v", err)
+	}
+	for _, field := range []string{"sort_title", "original_title", "genres", "studios", "tags", "actors", "directors", "runtime_minutes", "content_rating", "original_country", "tmdb_backdrop", "tmdb_backdrop_raw", "field_sources"} {
+		if !target.Migrator().HasColumn(&model.AnimeMetadata{}, field) {
+			t.Fatalf("expected repaired anime_metadata.%s column", field)
+		}
+	}
+	if got := CurrentSchemaVersion(target); got != migrations[len(migrations)-1].ID {
+		t.Fatalf("schema version changed during invariant repair: %q", got)
+	}
+}

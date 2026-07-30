@@ -78,6 +78,90 @@ func TestSyncDownloadLogStatusesMarksCompletedAndStoresMetadata(t *testing.T) {
 	}
 }
 
+func TestDownloadLogStatusTreatsFullProgressAsCompleted(t *testing.T) {
+	for _, torrent := range []downloader.TorrentInfo{
+		{State: "downloading", Progress: 1},
+		{State: "downloading", Progress: 100},
+		{State: "downloading", Size: 1024, Completed: 1024},
+		{State: "stalledDL", Size: 1024, Completed: 2048},
+	} {
+		if got := DownloadLogStatusFromTorrent(torrent); got != downloadLogStatusCompleted {
+			t.Fatalf("DownloadLogStatusFromTorrent(%+v) = %q, want completed", torrent, got)
+		}
+	}
+}
+
+func TestDownloadLogStatusKeepsExplicitErrorsFailedAtFullProgress(t *testing.T) {
+	torrent := downloader.TorrentInfo{State: "error", Progress: 1, Size: 1024, Completed: 1024}
+	if got := DownloadLogStatusFromTorrent(torrent); got != downloadLogStatusFailed {
+		t.Fatalf("DownloadLogStatusFromTorrent(%+v) = %q, want failed", torrent, got)
+	}
+}
+
+func TestSyncDownloadLogStatusesReconcilesFullProgressResourceAsCompleted(t *testing.T) {
+	withServiceTestDB(t)
+
+	subscription := model.Subscription{Title: "Progress Show", RSSUrl: "https://example.test/progress"}
+	if err := db.DB.Create(&subscription).Error; err != nil {
+		t.Fatalf("create subscription: %v", err)
+	}
+	resource := model.SubscriptionResource{
+		SubscriptionID: subscription.ID,
+		CanonicalKey:   "s01:e01",
+		Fingerprint:    resourceFingerprintForLog(model.DownloadLog{InfoHash: "progress-full"}),
+		Title:          "[Group] Progress Show - 01",
+		Episode:        "01",
+		SeasonVal:      "S01",
+		State:          SubscriptionResourceStateDownloading,
+		Selected:       true,
+	}
+	if err := db.DB.Create(&resource).Error; err != nil {
+		t.Fatalf("create resource: %v", err)
+	}
+	logEntry := model.DownloadLog{
+		SubscriptionID: subscription.ID,
+		ResourceID:     &resource.ID,
+		Title:          resource.Title,
+		Episode:        resource.Episode,
+		SeasonVal:      resource.SeasonVal,
+		Status:         downloadLogStatusDownloading,
+		InfoHash:       "progress-full",
+	}
+	if err := db.DB.Create(&logEntry).Error; err != nil {
+		t.Fatalf("create download log: %v", err)
+	}
+
+	result, err := SyncDownloadLogStatuses(fakeTorrentStatusSource{torrents: []downloader.TorrentInfo{{
+		Hash:      "progress-full",
+		Name:      resource.Title,
+		State:     "downloading",
+		Progress:  1,
+		Size:      1024,
+		Completed: 1024,
+	}}})
+	if err != nil {
+		t.Fatalf("sync statuses: %v", err)
+	}
+	if result.Completed != 1 {
+		t.Fatalf("expected completed sync result, got %+v", result)
+	}
+
+	var updatedLog model.DownloadLog
+	if err := db.DB.First(&updatedLog, logEntry.ID).Error; err != nil {
+		t.Fatalf("reload download log: %v", err)
+	}
+	if updatedLog.Status != downloadLogStatusCompleted {
+		t.Fatalf("download log status = %q, want completed", updatedLog.Status)
+	}
+	var updatedResource model.SubscriptionResource
+	if err := db.DB.First(&updatedResource, resource.ID).Error; err != nil {
+		t.Fatalf("reload resource: %v", err)
+	}
+	if updatedResource.State != SubscriptionResourceStateCompleted {
+		t.Fatalf("resource state = %q, want completed", updatedResource.State)
+	}
+}
+
 func TestSyncDownloadLogStatusesMatchesVersionedReleaseTitle(t *testing.T) {
 	withServiceTestDB(t)
 

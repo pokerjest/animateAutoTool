@@ -463,7 +463,7 @@ func (m *SubscriptionManager) ProcessSubscriptionWithSourceContext(ctx context.C
 		infoHash := torrentInfoHashFromURL(torrentURL)
 		targetFile := ""
 		if recoveredExisting || confirmedAdded {
-			if mapped := mapTorrentStateToLogStatus(matchedTorrent.State); mapped != "" {
+			if mapped := torrentLogStatus(matchedTorrent); mapped != "" {
 				status = mapped
 			}
 			if matchedHash := strings.TrimSpace(matchedTorrent.Hash); matchedHash != "" {

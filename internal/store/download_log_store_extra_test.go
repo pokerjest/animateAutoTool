@@ -14,6 +14,9 @@ func TestDownloadLogStoreExtraNilSafety(t *testing.T) {
 	if _, err := s.ListBySubscription(1, 5); err != gorm.ErrInvalidDB {
 		t.Errorf("ListBySubscription nil: got %v", err)
 	}
+	if _, err := s.ListRecentVisibleBySubscription(1, 5); err != gorm.ErrInvalidDB {
+		t.Errorf("ListRecentVisibleBySubscription nil: got %v", err)
+	}
 	if _, err := s.ListBySubscriptionAndStatuses(1, []string{statusFailed}); err != gorm.ErrInvalidDB {
 		t.Errorf("ListBySubscriptionAndStatuses nil: got %v", err)
 	}
@@ -71,6 +74,33 @@ func TestDownloadLogStoreListBySubscription(t *testing.T) {
 	}
 	if len(limited) != 3 {
 		t.Fatalf("expected 3 logs after limit, got %d", len(limited))
+	}
+}
+
+func TestDownloadLogStoreListRecentVisibleBySubscriptionExcludesArchived(t *testing.T) {
+	s := setupDownloadLogStore(t)
+
+	archived := seedLog(t, statusArchived, "", 1, "01")
+	time.Sleep(2 * time.Millisecond)
+	active := seedLog(t, statusDownloading, "", 1, "01")
+	time.Sleep(2 * time.Millisecond)
+	completed := seedLog(t, statusCompleted, "/library/02.mkv", 1, "02")
+	seedLog(t, statusCompleted, "/other/01.mkv", 2, "01")
+
+	logs, err := s.ListRecentVisibleBySubscription(1, 12)
+	if err != nil {
+		t.Fatalf("ListRecentVisibleBySubscription: %v", err)
+	}
+	if len(logs) != 2 {
+		t.Fatalf("expected 2 visible logs, got %d: %+v", len(logs), logs)
+	}
+	if logs[0].ID != completed.ID || logs[1].ID != active.ID {
+		t.Fatalf("unexpected visible log order: %+v", logs)
+	}
+	for _, entry := range logs {
+		if entry.ID == archived.ID || entry.Status == statusArchived {
+			t.Fatalf("archived log leaked into visible history: %+v", entry)
+		}
 	}
 }
 

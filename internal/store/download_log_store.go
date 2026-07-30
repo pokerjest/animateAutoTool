@@ -137,6 +137,26 @@ func (s *DownloadLogStore) ListBySubscription(subscriptionID uint, limit int) ([
 	return logs, nil
 }
 
+// ListRecentVisibleBySubscription returns current user-facing history rows.
+// Archived rows remain available in the database for audit and repair
+// diagnostics, but must not be shown alongside their replacement row.
+func (s *DownloadLogStore) ListRecentVisibleBySubscription(subscriptionID uint, limit int) ([]model.DownloadLog, error) {
+	if s == nil || s.db == nil {
+		return nil, gorm.ErrInvalidDB
+	}
+	q := s.db.
+		Where("subscription_id = ? AND status <> ?", subscriptionID, "archived").
+		Order("created_at DESC, id DESC")
+	if limit > 0 {
+		q = q.Limit(limit)
+	}
+	var logs []model.DownloadLog
+	if err := q.Find(&logs).Error; err != nil {
+		return nil, err
+	}
+	return logs, nil
+}
+
 // ListBySubscriptionAndStatuses fetches all download logs for a subscription
 // whose status appears in the supplied set.
 func (s *DownloadLogStore) ListBySubscriptionAndStatuses(subscriptionID uint, statuses []string) ([]model.DownloadLog, error) {

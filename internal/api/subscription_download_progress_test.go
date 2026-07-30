@@ -26,6 +26,20 @@ func TestLiveTorrentForLogMatchesHashBeforeTitle(t *testing.T) {
 	}
 }
 
+func TestLiveTorrentForLogDoesNotEnrichArchivedHistory(t *testing.T) {
+	torrent := downloader.TorrentInfo{Name: "Show - 01", Hash: "abc123", Progress: 0.42}
+	byHash := map[string]downloader.TorrentInfo{"abc123": torrent}
+	byName := map[string]downloader.TorrentInfo{"Show - 01": torrent}
+
+	if matched, ok := liveTorrentForLog(
+		model.DownloadLog{Status: "archived", InfoHash: "ABC123", Title: "Show - 01", Episode: "01"},
+		byHash,
+		byName,
+	); ok {
+		t.Fatalf("archived history matched live torrent: %+v", matched)
+	}
+}
+
 func TestLiveTorrentForLogMatchesVersionedTitleAndEpisode(t *testing.T) {
 	byHash := map[string]downloader.TorrentInfo{}
 	byName := map[string]downloader.TorrentInfo{
@@ -74,5 +88,13 @@ func TestNormalizeTorrentProgressSupportsRatioAndPercent(t *testing.T) {
 		if got := normalizeTorrentProgress(test.input); got != test.want {
 			t.Fatalf("normalizeTorrentProgress(%v) = %v, want %v", test.input, got, test.want)
 		}
+	}
+}
+
+func TestPreferTorrentChoosesCompletedSnapshotBeforeActiveDuplicate(t *testing.T) {
+	active := downloader.TorrentInfo{Name: "Show - 01", State: "downloading", Progress: .99, DownloadSpeed: 1024}
+	completed := downloader.TorrentInfo{Name: "Show - 01", State: "downloading", Progress: 1}
+	if got := preferTorrent(active, completed); got.Progress != 1 {
+		t.Fatalf("preferTorrent chose %#v, want completed snapshot", got)
 	}
 }

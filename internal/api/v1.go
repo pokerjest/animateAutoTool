@@ -417,7 +417,7 @@ func V1DashboardHandler(c *gin.Context) {
 	db.DB.Model(&model.LocalAnime{}).Count(&localSeries)
 	db.DB.Model(&model.LibraryIssue{}).Where("status = ?", service.LibraryIssueStatusOpen).Count(&openIssues)
 	var recent []model.DownloadLog
-	db.DB.Order("created_at DESC").Limit(8).Find(&recent)
+	db.DB.Where("status <> ?", "archived").Order("created_at DESC, id DESC").Limit(8).Find(&recent)
 	taskData := TaskOverviewData{Scheduler: buildSchedulerTaskCard(), Scanner: buildScannerTaskCard(), Metadata: buildMetadataTaskCard(), Downloads: buildDownloadSyncTaskCard()}
 	tasks := []TaskOverviewCard{taskData.Scheduler, taskData.Scanner, taskData.Metadata, taskData.Downloads}
 	taskPayload := make([]gin.H, 0, len(tasks))
@@ -607,14 +607,44 @@ func V1LibraryHandler(c *gin.Context) {
 		}
 	}
 	items := make([]LibraryItem, 0, len(metadata))
+	search := strings.ToLower(strings.TrimSpace(c.Query("q")))
+	status := strings.ToLower(strings.TrimSpace(c.Query("status")))
 	for _, item := range metadata {
-		items = append(items, LibraryItem{AnimeMetadata: item, IsSubscribed: subMap[item.ID], IsLocal: localMap[item.ID] > 0, LocalAnimeID: localMap[item.ID]})
+		libraryItem := LibraryItem{AnimeMetadata: item, IsSubscribed: subMap[item.ID], IsLocal: localMap[item.ID] > 0, LocalAnimeID: localMap[item.ID]}
+		if status == libraryStatusSubscribed && !libraryItem.IsSubscribed {
+			continue
+		}
+		if status == libraryStatusLocal && !libraryItem.IsLocal {
+			continue
+		}
+		if search != "" && !libraryItemMatchesSearch(libraryItem, search) {
+			continue
+		}
+		items = append(items, libraryItem)
 	}
 	page, pageSize := v1Pagination(c, 100)
 	total := len(items)
 	start := min((page-1)*pageSize, total)
 	end := min(start+pageSize, total)
 	v1Page(c, items[start:end], page, pageSize, int64(total))
+}
+
+func libraryItemMatchesSearch(item LibraryItem, search string) bool {
+	for _, value := range []string{
+		item.Title,
+		item.TitleCN,
+		item.TitleJP,
+		item.TitleEN,
+		item.OriginalTitle,
+		item.BangumiTitle,
+		item.TMDBTitle,
+		item.AniListTitle,
+	} {
+		if strings.Contains(strings.ToLower(value), search) {
+			return true
+		}
+	}
+	return false
 }
 
 func V1RefreshLibraryHandler(c *gin.Context) {

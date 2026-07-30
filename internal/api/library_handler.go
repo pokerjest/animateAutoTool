@@ -23,26 +23,62 @@ type LibraryItem struct {
 	LocalAnimeID uint `json:"local_anime_id"` // 0 if not local
 }
 
+const (
+	libraryStatusSubscribed = "subscribed"
+	libraryStatusLocal      = "local"
+)
+
 // deduplicateLibraryMetadata applies the same identity rules used by the
 // library UI so dashboard counts agree with the actual catalog.
 func deduplicateLibraryMetadata(metadata []model.AnimeMetadata) []model.AnimeMetadata {
 	items := make([]model.AnimeMetadata, 0, len(metadata))
-	seenBangumiIDs := make(map[int]bool)
-	seenTitles := make(map[string]bool)
+	seenBangumiIDs := make(map[int]struct{})
+	seenTMDBIDs := make(map[int]struct{})
+	seenAniListIDs := make(map[int]struct{})
+	seenUnidentifiedTitles := make(map[string]struct{})
 	for _, item := range metadata {
-		if item.BangumiID > 0 && seenBangumiIDs[item.BangumiID] {
-			continue
+		hasProviderID := item.BangumiID > 0 || item.TMDBID > 0 || item.AniListID > 0
+		duplicate := false
+		if item.BangumiID > 0 {
+			_, duplicate = seenBangumiIDs[item.BangumiID]
 		}
-		if seenTitles[item.Title] {
+		if !duplicate && item.TMDBID > 0 {
+			_, duplicate = seenTMDBIDs[item.TMDBID]
+		}
+		if !duplicate && item.AniListID > 0 {
+			_, duplicate = seenAniListIDs[item.AniListID]
+		}
+		titleKey := libraryMetadataTitleKey(item)
+		if !hasProviderID && titleKey != "" {
+			_, duplicate = seenUnidentifiedTitles[titleKey]
+		}
+		if duplicate {
 			continue
 		}
 		if item.BangumiID > 0 {
-			seenBangumiIDs[item.BangumiID] = true
+			seenBangumiIDs[item.BangumiID] = struct{}{}
 		}
-		seenTitles[item.Title] = true
+		if item.TMDBID > 0 {
+			seenTMDBIDs[item.TMDBID] = struct{}{}
+		}
+		if item.AniListID > 0 {
+			seenAniListIDs[item.AniListID] = struct{}{}
+		}
+		if !hasProviderID && titleKey != "" {
+			seenUnidentifiedTitles[titleKey] = struct{}{}
+		}
 		items = append(items, item)
 	}
 	return items
+}
+
+func libraryMetadataTitleKey(item model.AnimeMetadata) string {
+	for _, title := range []string{item.Title, item.TitleCN, item.TitleJP, item.TitleEN, item.OriginalTitle} {
+		if normalized := strings.ToLower(strings.TrimSpace(title)); normalized != "" {
+			return normalized
+		}
+	}
+	return ""
 }
 
 func GetLibraryHandler(c *gin.Context) {
@@ -97,10 +133,10 @@ func GetLibraryHandler(c *gin.Context) {
 		isLocal := localID > 0
 
 		// Apply Status Filter
-		if statusFilter == "subscribed" && !isSub {
+		if statusFilter == libraryStatusSubscribed && !isSub {
 			continue
 		}
-		if statusFilter == "local" && !isLocal {
+		if statusFilter == libraryStatusLocal && !isLocal {
 			continue
 		}
 

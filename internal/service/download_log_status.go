@@ -168,7 +168,7 @@ func SyncDownloadLogStatuses(source TorrentStatusSource) (DownloadLogStatusSyncR
 			continue
 		}
 
-		nextStatus := mapTorrentStateToLogStatus(torrent.State)
+		nextStatus := torrentLogStatus(torrent)
 		if nextStatus == "" {
 			result.Unmatched++
 			continue
@@ -261,8 +261,8 @@ func addPreferredTorrent(index map[string]downloader.TorrentInfo, key string, ca
 }
 
 func preferredTorrent(candidate, current downloader.TorrentInfo) bool {
-	candidateRank := torrentStateRank(candidate.State)
-	currentRank := torrentStateRank(current.State)
+	candidateRank := torrentStateRank(candidate)
+	currentRank := torrentStateRank(current)
 	if candidateRank != currentRank {
 		return candidateRank > currentRank
 	}
@@ -274,8 +274,8 @@ func preferredTorrent(candidate, current downloader.TorrentInfo) bool {
 	return candidate.DownloadSpeed > current.DownloadSpeed
 }
 
-func torrentStateRank(state string) int {
-	switch mapTorrentStateToLogStatus(state) {
+func torrentStateRank(torrent downloader.TorrentInfo) int {
+	switch torrentLogStatus(torrent) {
 	case downloadLogStatusCompleted:
 		return 2
 	case downloadLogStatusDownloading:
@@ -309,6 +309,27 @@ func mapTorrentStateToLogStatus(state string) string {
 	default:
 		return ""
 	}
+}
+
+func torrentLogStatus(torrent downloader.TorrentInfo) string {
+	mapped := mapTorrentStateToLogStatus(torrent.State)
+	// Explicit qB error states must win even if stale byte counters still
+	// report 100% from an earlier attempt.
+	if mapped == downloadLogStatusFailed {
+		return mapped
+	}
+	if normalizeTorrentProgress(torrent.Progress) >= 1 ||
+		(torrent.Size > 0 && torrent.Completed >= torrent.Size) {
+		return downloadLogStatusCompleted
+	}
+	return mapped
+}
+
+// DownloadLogStatusFromTorrent derives the effective status from both qB's
+// state and its progress counters. Some qB versions briefly keep the state as
+// "downloading" after all bytes have arrived.
+func DownloadLogStatusFromTorrent(torrent downloader.TorrentInfo) string {
+	return torrentLogStatus(torrent)
 }
 
 // DownloadLogStatusFromTorrentState exposes the same deterministic mapping to

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import type { Subscription } from '../../api/types'
 import SubscriptionCard from './SubscriptionCard.vue'
+import SubscriptionHistoryDialog from './SubscriptionHistoryDialog.vue'
 import SubscriptionOverview from './SubscriptionOverview.vue'
 
 function subscription(overrides: Partial<Subscription> = {}): Subscription {
@@ -125,5 +126,39 @@ describe('subscription presentational components', () => {
     expect(wrapper.text()).toContain('正在等待 Jellyfin 扫描媒体文件')
     await wrapper.findAll('button').find(button => button.text().includes('同步 Jellyfin'))!.trigger('click')
     expect(wrapper.emitted('repair')).toEqual([['refresh-library']])
+  })
+
+  it('does not render stale live progress for archived audit rows', () => {
+    const wrapper = mount(SubscriptionHistoryDialog, {
+      props: {
+        open: true,
+        title: '测试番剧',
+        loading: false,
+        error: false,
+        retrying: false,
+        runs: [],
+        logs: [{
+          ID: 1,
+          Title: '测试番剧 - 01',
+          Episode: '01',
+          Status: 'archived',
+          progress_percent: 42,
+          downloaded_bytes: 420,
+          total_bytes: 1000,
+          download_speed: 100,
+        }],
+        resources: [],
+        isBusy: () => false,
+      },
+      global: {
+        stubs: {
+          AppDialog: { template: '<div><slot /></div>' },
+        },
+      },
+    })
+
+    expect(wrapper.text()).toContain('已归档')
+    expect(wrapper.text()).not.toContain('42.0%')
+    expect(wrapper.find('[role="progressbar"]').exists()).toBe(false)
   })
 })

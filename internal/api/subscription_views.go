@@ -823,7 +823,7 @@ func loadSubscriptionHistory(id uint) (SubscriptionHistoryData, error) {
 	if logStore == nil {
 		return SubscriptionHistoryData{}, gorm.ErrInvalidDB
 	}
-	logs, err := logStore.ListBySubscription(sub.ID, 12)
+	logs, err := logStore.ListRecentVisibleBySubscription(sub.ID, 12)
 	if err != nil {
 		return SubscriptionHistoryData{}, err
 	}
