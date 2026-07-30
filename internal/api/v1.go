@@ -408,6 +408,12 @@ func V1DashboardHandler(c *gin.Context) {
 	db.DB.Model(&model.Subscription{}).Where("is_active = ?", true).Count(&active)
 	db.DB.Model(&model.DownloadLog{}).Count(&downloads)
 	db.DB.Model(&model.AnimeMetadata{}).Count(&libraryItems)
+	var metadata []model.AnimeMetadata
+	if err := db.DB.Select("bangumi_id, title").Find(&metadata).Error; err != nil {
+		log.Printf("dashboard library count failed: %v", err)
+	} else {
+		libraryItems = int64(len(deduplicateLibraryMetadata(metadata)))
+	}
 	db.DB.Model(&model.LocalAnime{}).Count(&localSeries)
 	db.DB.Model(&model.LibraryIssue{}).Where("status = ?", service.LibraryIssueStatusOpen).Count(&openIssues)
 	var recent []model.DownloadLog
@@ -584,6 +590,7 @@ func V1LibraryHandler(c *gin.Context) {
 		v1Error(c, http.StatusInternalServerError, "library_unavailable", "无法读取番剧图鉴")
 		return
 	}
+	metadata = deduplicateLibraryMetadata(metadata)
 	var subs []model.Subscription
 	var locals []model.LocalAnime
 	db.DB.Select("metadata_id").Where("metadata_id IS NOT NULL").Find(&subs)
@@ -600,18 +607,7 @@ func V1LibraryHandler(c *gin.Context) {
 		}
 	}
 	items := make([]LibraryItem, 0, len(metadata))
-	seenIDs, seenTitles := map[int]bool{}, map[string]bool{}
 	for _, item := range metadata {
-		if item.BangumiID > 0 && seenIDs[item.BangumiID] {
-			continue
-		}
-		if seenTitles[item.Title] {
-			continue
-		}
-		if item.BangumiID > 0 {
-			seenIDs[item.BangumiID] = true
-		}
-		seenTitles[item.Title] = true
 		items = append(items, LibraryItem{AnimeMetadata: item, IsSubscribed: subMap[item.ID], IsLocal: localMap[item.ID] > 0, LocalAnimeID: localMap[item.ID]})
 	}
 	page, pageSize := v1Pagination(c, 100)

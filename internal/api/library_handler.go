@@ -23,6 +23,28 @@ type LibraryItem struct {
 	LocalAnimeID uint `json:"local_anime_id"` // 0 if not local
 }
 
+// deduplicateLibraryMetadata applies the same identity rules used by the
+// library UI so dashboard counts agree with the actual catalog.
+func deduplicateLibraryMetadata(metadata []model.AnimeMetadata) []model.AnimeMetadata {
+	items := make([]model.AnimeMetadata, 0, len(metadata))
+	seenBangumiIDs := make(map[int]bool)
+	seenTitles := make(map[string]bool)
+	for _, item := range metadata {
+		if item.BangumiID > 0 && seenBangumiIDs[item.BangumiID] {
+			continue
+		}
+		if seenTitles[item.Title] {
+			continue
+		}
+		if item.BangumiID > 0 {
+			seenBangumiIDs[item.BangumiID] = true
+		}
+		seenTitles[item.Title] = true
+		items = append(items, item)
+	}
+	return items
+}
+
 func GetLibraryHandler(c *gin.Context) {
 	query := c.Query("q")
 	var metadata []model.AnimeMetadata
@@ -67,24 +89,9 @@ func GetLibraryHandler(c *gin.Context) {
 
 	// Construct items
 	var items []LibraryItem
-	seenBangumiIDs := make(map[int]bool)
-	seenTitles := make(map[string]bool)
-
 	statusFilter := c.Query("status")
 
-	for _, m := range metadata {
-		// Deduplication Strategy:
-		if m.BangumiID > 0 {
-			if seenBangumiIDs[m.BangumiID] {
-				continue
-			}
-			seenBangumiIDs[m.BangumiID] = true
-		}
-		if seenTitles[m.Title] {
-			continue
-		}
-		seenTitles[m.Title] = true
-
+	for _, m := range deduplicateLibraryMetadata(metadata) {
 		isSub := subMap[m.ID]
 		localID := localMap[m.ID]
 		isLocal := localID > 0

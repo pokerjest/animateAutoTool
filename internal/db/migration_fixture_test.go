@@ -1,7 +1,9 @@
 package db
 
 import (
+	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/glebarez/sqlite"
 	"github.com/pokerjest/animateAutoTool/internal/model"
@@ -101,5 +103,104 @@ func TestHistoricalFixturesUpgradeToCurrent(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestAnimeMetadataExtendedFieldsMigrationRepairsLegacyTable(t *testing.T) {
+	target, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "metadata-legacy.db")), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open legacy database: %v", err)
+	}
+	t.Cleanup(func() {
+		sqlDB, dbErr := target.DB()
+		if dbErr == nil {
+			_ = sqlDB.Close()
+		}
+	})
+
+	// This is representative of a database that has run the original core
+	// schema migration but predates the extended metadata fields.
+	if err := target.Exec(`
+		CREATE TABLE anime_metadata (
+			id integer primary key autoincrement,
+			created_at datetime,
+			updated_at datetime,
+			deleted_at datetime,
+			title text,
+			title_cn text,
+			title_en text,
+			title_jp text,
+			bangumi_id integer default 0,
+			tmdb_id integer default 0,
+			anilist_id integer default 0,
+			data_source text default 'jellyfin'
+		)
+	`).Error; err != nil {
+		t.Fatalf("create legacy anime_metadata table: %v", err)
+	}
+	if err := target.Exec(
+		"INSERT INTO anime_metadata (title, bangumi_id, tmdb_id, anilist_id, data_source) VALUES (?, 0, 0, 0, ?)",
+		"保留的旧数据",
+		"jellyfin",
+	).Error; err != nil {
+		t.Fatalf("seed legacy metadata row: %v", err)
+	}
+	if err := target.AutoMigrate(&SchemaMigration{}); err != nil {
+		t.Fatalf("create migration history: %v", err)
+	}
+	for _, item := range migrations {
+		if item.ID == "014_anime_metadata_extended_fields" {
+			break
+		}
+		if err := target.Create(&SchemaMigration{
+			ID:          item.ID,
+			Sequence:    migrationSequence(item.ID),
+			Description: item.Description,
+			AppliedAt:   time.Now().UTC(),
+		}).Error; err != nil {
+			t.Fatalf("seed migration %s: %v", item.ID, err)
+		}
+	}
+
+	originalDBPath := CurrentDBPath
+	CurrentDBPath = sqliteMemoryPath
+	t.Cleanup(func() { CurrentDBPath = originalDBPath })
+	if err := RunMigrations(target); err != nil {
+		t.Fatalf("run metadata extension migration: %v", err)
+	}
+
+	for _, field := range []string{
+		"sort_title",
+		"original_title",
+		"genres",
+		"studios",
+		"tags",
+		"actors",
+		"directors",
+		"runtime_minutes",
+		"content_rating",
+		"original_country",
+		"tmdb_backdrop",
+		"tmdb_backdrop_raw",
+		"field_sources",
+	} {
+		if !target.Migrator().HasColumn(&model.AnimeMetadata{}, field) {
+			t.Fatalf("expected anime_metadata.%s to be added", field)
+		}
+	}
+	var metadata model.AnimeMetadata
+	if err := target.First(&metadata).Error; err != nil {
+		t.Fatalf("load legacy metadata after migration: %v", err)
+	}
+	if metadata.Title != "保留的旧数据" {
+		t.Fatalf("legacy metadata was not preserved: %+v", metadata)
+	}
+	if got := CurrentSchemaVersion(target); got != "014_anime_metadata_extended_fields" {
+		t.Fatalf("expected current schema 014, got %q", got)
+	}
+
+	// A second run must not attempt to add the columns again.
+	if err := RunMigrations(target); err != nil {
+		t.Fatalf("rerun metadata extension migration: %v", err)
 	}
 }

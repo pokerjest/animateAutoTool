@@ -1,7 +1,10 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
-const props = defineProps<{ remaining: number }>()
+const props = withDefaults(defineProps<{ remaining: number; loading?: boolean; paused?: boolean }>(), {
+  loading: false,
+  paused: false,
+})
 const emit = defineEmits<{ load: [] }>()
 const sentinel = ref<HTMLElement | null>(null)
 
@@ -9,11 +12,20 @@ let observer: IntersectionObserver | null = null
 let fallbackHandler: (() => void) | null = null
 let queued = false
 
+function isNearViewport() {
+  if (!sentinel.value) return false
+  const bounds = sentinel.value.getBoundingClientRect()
+  return bounds.top <= window.innerHeight + 320 && bounds.bottom >= -320
+}
+
 function requestLoad() {
-  if (queued) return
+  if (queued || props.loading || props.paused) return
   queued = true
   emit('load')
-  void nextTick(() => { queued = false })
+}
+
+function requestLoadIfVisible() {
+  if (!props.loading && !props.paused && isNearViewport()) requestLoad()
 }
 
 onMounted(() => {
@@ -32,6 +44,23 @@ onMounted(() => {
     if (bounds.top <= window.innerHeight + 320 && bounds.bottom >= -320) requestLoad()
   }
   window.addEventListener('scroll', fallbackHandler, { passive: true })
+})
+
+// Keep the sentinel armed while a slow page request is in flight. Intersection
+// Observer does not necessarily emit a second event when the sentinel remains
+// visible after the response arrives, so re-check visibility when loading ends.
+watch(() => props.loading, (loading, wasLoading) => {
+  if (wasLoading && !loading) {
+    queued = false
+    void nextTick(requestLoadIfVisible)
+  }
+})
+
+watch(() => props.paused, (paused, wasPaused) => {
+  if (wasPaused && !paused) {
+    queued = false
+    void nextTick(requestLoadIfVisible)
+  }
 })
 
 onBeforeUnmount(() => {

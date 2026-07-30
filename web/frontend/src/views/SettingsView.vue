@@ -28,16 +28,14 @@ const jellyfinFields:Field[]=[
   {key:'jellyfin_password',label:'密码',type:'password'},
   {key:'jellyfin_api_key',label:'API Key',type:'password'},
 ]
-const alistFields:Field[]=[{key:'alist_url',label:'服务地址'},{key:'alist_token',label:'Token',type:'password'}]
 const mediaApps:MediaApp[]=[
   {id:'jellyfin',title:'Jellyfin',eyebrow:'媒体服务器',description:'在这里完成服务器连接、媒体库范围和播放器线路测试。',icon:Film,fields:jellyfinFields,provider:'jellyfin'},
-  {id:'alist',title:'AList',eyebrow:'文件聚合',description:'连接独立的 AList 服务，用于访问聚合后的文件资源。',icon:Cloud,fields:alistFields},
 ]
 const groups:Group[]=[
   {id:'downloader',label:'下载器',icon:Download,providers:['qb'],fields:[{key:'qb_mode',label:'运行模式',type:'select',options:[{value:'managed',label:'内置托管'},{value:'external',label:'外部 Web UI'}]},{key:'qb_url',label:'Web UI 地址'},{key:'qb_username',label:'用户名'},{key:'qb_password',label:'密码',type:'password'},{key:'base_download_dir',label:'媒体根目录'},{key:'auto_rename_enabled',label:'下载完成后自动整理',type:'boolean'},{key:'incremental_scan_enabled',label:'下载完成后增量扫描',type:'boolean'},{key:'media_naming_preset',label:'媒体命名预设',type:'select',options:[{value:'jellyfin-emby',label:'Jellyfin / Emby TV 标准'},{value:'custom',label:'自定义模板'}]},{key:'auto_rename_series_template',label:'系列文件夹模板'},{key:'auto_rename_episode_template',label:'剧集文件模板'},{key:'write_nfo_enabled',label:'生成或补充 NFO',type:'boolean'},{key:'write_images_enabled',label:'保存本地海报与背景图',type:'boolean'}]},
   {id:'metadata',label:'元数据',icon:Database,providers:['bangumi','tmdb','anilist'],fields:[{key:'metadata_source_order',label:'刮削来源顺序',type:'select',options:[{value:'bangumi,tmdb,anilist',label:'Bangumi → TMDB → AniList'},{value:'bangumi,anilist,tmdb',label:'Bangumi → AniList → TMDB'},{value:'tmdb,bangumi,anilist',label:'TMDB → Bangumi → AniList'},{value:'tmdb,anilist,bangumi',label:'TMDB → AniList → Bangumi'},{value:'anilist,bangumi,tmdb',label:'AniList → Bangumi → TMDB'},{value:'anilist,tmdb,bangumi',label:'AniList → TMDB → Bangumi'}],description:'三个来源仍会联查；这个顺序决定标题、简介和图片发生冲突时的字段优先级。'},{key:'metadata_overwrite_policy',label:'本地 NFO 覆盖策略',type:'select',options:[{value:'field-layered',label:'按字段分层（推荐）'},{value:'local-only',label:'本地 NFO 优先，不改已有文件'},{value:'network-first',label:'网络刮削优先'}]},{key:'tmdb_token',label:'TMDB Token',type:'password'},{key:'anilist_token',label:'AniList Token',type:'password'},{key:'bangumi_app_id',label:'Bangumi App ID'},{key:'bangumi_app_secret',label:'Bangumi App Secret',type:'password'},{key:'bangumi_access_token',label:'Bangumi Access Token',type:'password'}]},
   {id:'network',label:'网络代理',icon:Network,providers:['mikan'],fields:[{key:'proxy_url',label:'代理地址'},{key:'proxy_bangumi_enabled',label:'Bangumi 使用代理',type:'boolean'},{key:'proxy_mikan_enabled',label:'Mikan 使用代理',type:'boolean'},{key:'proxy_tmdb_enabled',label:'TMDB 使用代理',type:'boolean'},{key:'proxy_anilist_enabled',label:'AniList 使用代理',type:'boolean'},{key:'proxy_jellyfin_enabled',label:'Jellyfin 使用代理',type:'boolean'},{key:'proxy_ai_enabled',label:'AI 服务使用代理',type:'boolean'},{key:'proxy_updater_enabled',label:'应用更新使用代理',type:'boolean'}]},
-  {id:'media',label:'媒体服务',icon:Film,providers:['jellyfin'],fields:[...jellyfinFields,...alistFields]},
+  {id:'media',label:'媒体服务',icon:Film,providers:['jellyfin'],fields:jellyfinFields},
   {id:'ai',label:'AI 助手',icon:Bot,fields:[
     {key:'ai_provider',label:'当前服务商'},
     {key:'ai_openai_base_url',label:'OpenAI Base URL'},{key:'ai_openai_model',label:'OpenAI 模型'},{key:'ai_openai_api_key',label:'OpenAI API Key',type:'password'},

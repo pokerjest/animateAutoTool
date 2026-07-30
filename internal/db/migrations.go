@@ -120,6 +120,48 @@ var migrations = []migration{
 			return tx.AutoMigrate(&model.LocalEpisode{})
 		},
 	},
+	{
+		ID:          "014_anime_metadata_extended_fields",
+		Description: "Add extended metadata fields introduced by the local media scraper",
+		Apply:       migrateAnimeMetadataExtendedFields,
+	},
+}
+
+// migrateAnimeMetadataExtendedFields repairs databases created before the
+// extended AnimeMetadata fields were added to the model. Those databases can
+// legitimately have all explicit migrations through 013 recorded while still
+// missing columns such as sort_title, because the fields were introduced after
+// the original core-schema migration. Keep this migration focused on the
+// affected table so it is safe to run against every supported historical
+// database and harmless when a column already exists.
+func migrateAnimeMetadataExtendedFields(tx *gorm.DB) error {
+	if !tx.Migrator().HasTable(&model.AnimeMetadata{}) {
+		return tx.AutoMigrate(&model.AnimeMetadata{})
+	}
+
+	for _, field := range []string{
+		"SortTitle",
+		"OriginalTitle",
+		"Genres",
+		"Studios",
+		"Tags",
+		"Actors",
+		"Directors",
+		"RuntimeMinutes",
+		"ContentRating",
+		"OriginalCountry",
+		"TMDBBackdrop",
+		"TMDBBackdropRaw",
+		"FieldSources",
+	} {
+		if tx.Migrator().HasColumn(&model.AnimeMetadata{}, field) {
+			continue
+		}
+		if err := tx.Migrator().AddColumn(&model.AnimeMetadata{}, field); err != nil {
+			return fmt.Errorf("add anime_metadata.%s: %w", field, err)
+		}
+	}
+	return nil
 }
 
 func backfillSchemaMigrationSequences(tx *gorm.DB) error {

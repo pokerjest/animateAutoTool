@@ -10,7 +10,25 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/bangumi"
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/model"
+	"gorm.io/gorm"
 )
+
+func TestDeduplicateLibraryMetadataMatchesCatalogIdentityRules(t *testing.T) {
+	metadata := []model.AnimeMetadata{
+		{Model: gorm.Model{ID: 1}, BangumiID: 100, Title: "同一番剧"},
+		{Model: gorm.Model{ID: 2}, BangumiID: 100, Title: "同一番剧（重复 ID）"},
+		{Model: gorm.Model{ID: 3}, BangumiID: 200, Title: "同一番剧"},
+		{Model: gorm.Model{ID: 4}, BangumiID: 0, Title: "另一番剧"},
+	}
+
+	items := deduplicateLibraryMetadata(metadata)
+	if len(items) != 2 {
+		t.Fatalf("expected 2 catalog items after deduplication, got %d: %+v", len(items), items)
+	}
+	if items[0].ID != 1 || items[1].ID != 4 {
+		t.Fatalf("unexpected catalog identity order: %+v", items)
+	}
+}
 
 func TestBangumiMetadataSearchResultsPreservesEveryMatch(t *testing.T) {
 	results := []bangumi.SearchResult{
