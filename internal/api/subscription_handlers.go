@@ -18,6 +18,7 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/parser"
 	"github.com/pokerjest/animateAutoTool/internal/qbutil"
+	"github.com/pokerjest/animateAutoTool/internal/runtimejournal"
 	"github.com/pokerjest/animateAutoTool/internal/scheduler"
 	"github.com/pokerjest/animateAutoTool/internal/service"
 	"gorm.io/gorm"
@@ -113,6 +114,12 @@ type RSSValidationResponse struct {
 var runSubscriptionCheck = func(sub *model.Subscription, source string) error {
 	if sub == nil {
 		return fmt.Errorf("subscription is nil")
+	}
+	if runtimejournal.RecoveryBlocked() {
+		return runtimejournal.ErrRecoveryBlocked
+	}
+	if runtimejournal.RecoveryInProgress() {
+		return runtimejournal.ErrRecoveryInProgress
 	}
 
 	qbCfg := qbutil.LoadConfig()

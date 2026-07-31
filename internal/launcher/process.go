@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -100,7 +101,10 @@ func (m *Manager) startAlist() error {
 	cmd := exec.CommandContext(m.Ctx, binPath, "server", "--data", dataDir)
 	// Redirect stdout/stderr so we can debug, or suppress
 	// Logging to file would be better
-	logFile, _ := os.Create(filepath.Join(m.DataDir, "alist.log"))
+	logFile, logErr := os.Create(filepath.Join(m.DataDir, "alist.log"))
+	if logErr != nil {
+		log.Printf("WARN: failed to open managed service log service=alist error=%v", logErr)
+	}
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 
@@ -108,12 +112,7 @@ func (m *Manager) startAlist() error {
 		return fmt.Errorf("failed to start alist: %w", err)
 	}
 	m.wg.Add(1)
-	go func() {
-		defer m.wg.Done()
-		if err := cmd.Wait(); err != nil {
-			fmt.Printf("Alist process exited with error: %v\n", err)
-		}
-	}()
+	go m.waitForManagedProcess("alist", cmd, logFile)
 
 	fmt.Println("Alist started (Port 5244)")
 	return nil
@@ -156,12 +155,7 @@ func (m *Manager) startQB() error {
 	}
 
 	m.wg.Add(1)
-	go func() {
-		defer m.wg.Done()
-		if err := cmd.Wait(); err != nil {
-			fmt.Printf("qBittorrent process exited with error: %v\n", err)
-		}
-	}()
+	go m.waitForManagedProcess("qbittorrent", cmd, nil)
 
 	fmt.Println("qBittorrent started (Port 8080)")
 	return nil
@@ -368,7 +362,10 @@ func (m *Manager) startJellyfin() error {
 	//nolint:gosec // binPath and args are derived from managed-service configuration under the app workspace.
 	cmd := exec.CommandContext(m.Ctx, binPath, args...)
 
-	logFile, _ := os.Create(filepath.Clean(filepath.Join(logDir, "startup.log"))) //nolint:gosec // startup log path is created under the managed Jellyfin log directory.
+	logFile, logErr := os.Create(filepath.Clean(filepath.Join(logDir, "startup.log"))) //nolint:gosec // startup log path is created under the managed Jellyfin log directory.
+	if logErr != nil {
+		log.Printf("WARN: failed to open managed service log service=jellyfin error=%v", logErr)
+	}
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 
@@ -377,12 +374,7 @@ func (m *Manager) startJellyfin() error {
 	}
 
 	m.wg.Add(1)
-	go func() {
-		defer m.wg.Done()
-		if err := cmd.Wait(); err != nil {
-			fmt.Printf("Jellyfin process exited with error: %v\n", err)
-		}
-	}()
+	go m.waitForManagedProcess("jellyfin", cmd, logFile)
 
 	fmt.Println("Jellyfin started (Port 8096)")
 
@@ -434,6 +426,35 @@ func (m *Manager) startJellyfin() error {
 	}()
 
 	return nil
+}
+
+func (m *Manager) waitForManagedProcess(serviceName string, cmd *exec.Cmd, logFile *os.File) {
+	defer m.wg.Done()
+	if logFile != nil {
+		defer func() {
+			if err := logFile.Sync(); err != nil {
+				log.Printf("WARN: failed to sync managed service log service=%s error=%v", serviceName, err)
+			}
+			if err := logFile.Close(); err != nil {
+				log.Printf("WARN: failed to close managed service log service=%s error=%v", serviceName, err)
+			}
+		}()
+	}
+
+	err := cmd.Wait()
+	pid := 0
+	if cmd.Process != nil {
+		pid = cmd.Process.Pid
+	}
+	if m.Ctx.Err() != nil {
+		log.Printf("Managed service stopped during application shutdown service=%s pid=%d", serviceName, pid)
+		return
+	}
+	if err != nil {
+		log.Printf("ERROR: managed service exited unexpectedly service=%s pid=%d error=%v", serviceName, pid, err)
+		return
+	}
+	log.Printf("WARN: managed service exited unexpectedly service=%s pid=%d exit_status=0", serviceName, pid)
 }
 
 func waitForDatabase(timeout time.Duration) bool {

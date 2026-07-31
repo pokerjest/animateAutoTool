@@ -1,6 +1,7 @@
 package db
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -58,6 +59,12 @@ func InitDB(storagePath string) {
 	sqlDB.SetMaxOpenConns(1)
 	sqlDB.SetMaxIdleConns(1)
 
+	if !isInMemoryDB(storagePath) {
+		if err := CheckIntegrity(DB); err != nil {
+			log.Fatalf("database integrity check failed: %v", err)
+		}
+	}
+
 	err = RunMigrations(DB)
 	if err != nil {
 		log.Fatalf("failed to migrate database: %v", err)
@@ -68,11 +75,39 @@ func InitDB(storagePath string) {
 }
 
 func CloseDB() error {
+	if DB == nil {
+		return nil
+	}
+	if !isInMemoryDB(CurrentDBPath) {
+		var journalMode string
+		if err := DB.Raw("PRAGMA journal_mode").Scan(&journalMode).Error; err == nil &&
+			strings.EqualFold(strings.TrimSpace(journalMode), "wal") {
+			if err := DB.Exec("PRAGMA wal_checkpoint(TRUNCATE)").Error; err != nil {
+				log.Printf("WARN: database WAL checkpoint during shutdown failed: %v", err)
+			}
+		}
+	}
 	sqlDB, err := DB.DB()
 	if err != nil {
 		return err
 	}
-	return sqlDB.Close()
+	err = sqlDB.Close()
+	DB = nil
+	return err
+}
+
+func CheckIntegrity(target *gorm.DB) error {
+	if target == nil {
+		return gorm.ErrInvalidDB
+	}
+	var result string
+	if err := target.Raw("PRAGMA quick_check").Scan(&result).Error; err != nil {
+		return err
+	}
+	if !strings.EqualFold(strings.TrimSpace(result), "ok") {
+		return fmt.Errorf("sqlite quick_check returned %q", result)
+	}
+	return nil
 }
 
 // SaveGlobalConfig helper to upsert config
@@ -136,7 +171,8 @@ func sqliteDriverPath(storagePath string) string {
 	if strings.Contains(storagePath, "?") {
 		separator = "&"
 	}
-	driverPath := storagePath + separator + "_pragma=busy_timeout(5000)"
+	driverPath := storagePath + separator +
+		"_pragma=busy_timeout(5000)&_pragma=synchronous(FULL)&_pragma=foreign_keys(ON)"
 	if currentDBGOOS() != "windows" {
 		return driverPath
 	}

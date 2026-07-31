@@ -109,6 +109,7 @@ func (w *HealthWriter) writeIssueLineLocked(line []byte) {
 		return
 	}
 	_, _ = file.WriteString(RedactHealthLogLine(string(line)))
+	_ = file.Sync()
 	_ = file.Close()
 	w.pruneLocked()
 }

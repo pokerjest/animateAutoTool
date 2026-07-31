@@ -63,6 +63,9 @@ func RefreshAndRepairSubscriptions(
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	endOperation := beginSubscriptionSyncOperation()
+	defer endOperation()
+
 	if source == nil {
 		return SubscriptionRefreshResult{}, fmt.Errorf("qBittorrent 客户端不可用")
 	}

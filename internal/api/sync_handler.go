@@ -13,6 +13,7 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/config"
 	"github.com/pokerjest/animateAutoTool/internal/downloader"
 	"github.com/pokerjest/animateAutoTool/internal/qbutil"
+	"github.com/pokerjest/animateAutoTool/internal/runtimejournal"
 	"github.com/pokerjest/animateAutoTool/internal/scheduler"
 	"github.com/pokerjest/animateAutoTool/internal/service"
 )
@@ -87,6 +88,14 @@ var runDashboardSyncNow = func(ctx context.Context) error {
 }
 
 func DashboardSyncHandler(c *gin.Context) {
+	if runtimejournal.RecoveryBlocked() {
+		htmlServerError(c, "立即同步", runtimejournal.ErrRecoveryBlocked)
+		return
+	}
+	if runtimejournal.RecoveryInProgress() {
+		htmlServerError(c, "立即同步", runtimejournal.ErrRecoveryInProgress)
+		return
+	}
 	go func() {
 		if err := runDashboardSyncNow(context.Background()); err != nil {
 			log.Printf("Dashboard sync failed: %v", err)

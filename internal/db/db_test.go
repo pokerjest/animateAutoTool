@@ -14,7 +14,7 @@ func TestSQLiteDriverPathAddsBusyTimeoutOnNonWindows(t *testing.T) {
 	t.Cleanup(func() { currentDBGOOS = prev })
 
 	input := "/tmp/animate.db"
-	want := "/tmp/animate.db?_pragma=busy_timeout(5000)"
+	want := "/tmp/animate.db?_pragma=busy_timeout(5000)&_pragma=synchronous(FULL)&_pragma=foreign_keys(ON)"
 	if got := sqliteDriverPath(input); got != want {
 		t.Fatalf("sqliteDriverPath(%q) = %q, want %q", input, got, want)
 	}
@@ -42,6 +42,23 @@ func TestSQLiteDriverPathAppliesBusyTimeout(t *testing.T) {
 	if timeout != 5000 {
 		t.Fatalf("busy timeout = %d, want 5000", timeout)
 	}
+	var synchronous int
+	if err := target.Raw("PRAGMA synchronous").Scan(&synchronous).Error; err != nil {
+		t.Fatalf("read synchronous mode: %v", err)
+	}
+	if synchronous != 2 {
+		t.Fatalf("synchronous = %d, want FULL (2)", synchronous)
+	}
+	var foreignKeys int
+	if err := target.Raw("PRAGMA foreign_keys").Scan(&foreignKeys).Error; err != nil {
+		t.Fatalf("read foreign keys: %v", err)
+	}
+	if foreignKeys != 1 {
+		t.Fatalf("foreign_keys = %d, want 1", foreignKeys)
+	}
+	if err := CheckIntegrity(target); err != nil {
+		t.Fatalf("quick check: %v", err)
+	}
 }
 
 func TestSQLiteDriverPathUsesBusyTimeoutAndWALOnWindows(t *testing.T) {
@@ -57,12 +74,12 @@ func TestSQLiteDriverPathUsesBusyTimeoutAndWALOnWindows(t *testing.T) {
 		{
 			name:  "plain path",
 			input: `C:\AnimateAutoTool\data\app.db`,
-			want:  `C:\AnimateAutoTool\data\app.db?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)`,
+			want:  `C:\AnimateAutoTool\data\app.db?_pragma=busy_timeout(5000)&_pragma=synchronous(FULL)&_pragma=foreign_keys(ON)&_pragma=journal_mode(WAL)`,
 		},
 		{
 			name:  "existing query",
 			input: `C:\AnimateAutoTool\data\app.db?cache=shared`,
-			want:  `C:\AnimateAutoTool\data\app.db?cache=shared&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)`,
+			want:  `C:\AnimateAutoTool\data\app.db?cache=shared&_pragma=busy_timeout(5000)&_pragma=synchronous(FULL)&_pragma=foreign_keys(ON)&_pragma=journal_mode(WAL)`,
 		},
 	}
 

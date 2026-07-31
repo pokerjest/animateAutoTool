@@ -718,6 +718,135 @@ func TestProcessSubscriptionFallsBackToBackupRSS(t *testing.T) {
 	}
 }
 
+func TestProcessSubscriptionRecordsPrimaryRSSFailureWhenBackupRecovers(t *testing.T) {
+	withServiceTestDB(t)
+
+	sub := model.Subscription{
+		Title:        "Recovered RSS Show",
+		RSSUrl:       "https://example.test/primary-down",
+		BackupRSSUrl: "https://example.test/backup-up",
+		IsActive:     true,
+	}
+	if err := db.DB.Create(&sub).Error; err != nil {
+		t.Fatalf("failed to create subscription: %v", err)
+	}
+
+	mgr := &SubscriptionManager{
+		RSSParser: fakeRSSParser{
+			episodesBy: map[string][]parser.Episode{
+				"https://example.test/backup-up": {{
+					Title:      "[Alt] Recovered RSS Show - 01",
+					EpisodeNum: "01",
+					TorrentURL: "magnet:?xt=urn:btih:recovered-rss-1",
+				}},
+			},
+			errByURL: map[string]error{
+				"https://example.test/primary-down": errors.New("connection reset by peer"),
+			},
+		},
+		Downloader: &fakeDownloader{},
+		DB:         db.DB,
+	}
+
+	mgr.ProcessSubscription(&sub)
+
+	var updated model.Subscription
+	if err := db.DB.First(&updated, sub.ID).Error; err != nil {
+		t.Fatalf("failed to reload subscription: %v", err)
+	}
+	if updated.LastRunStatus != SubscriptionRunStatusWarning {
+		t.Fatalf("expected warning status after fallback recovery, got %q", updated.LastRunStatus)
+	}
+	if !strings.Contains(updated.LastRunSummary, "主 RSS 暂时不可用") {
+		t.Fatalf("expected fallback recovery summary, got %q", updated.LastRunSummary)
+	}
+	if !strings.Contains(updated.LastError, "connection reset by peer") {
+		t.Fatalf("expected primary RSS error to be retained, got %q", updated.LastError)
+	}
+}
+
+func TestProcessSubscriptionKeepsDownloadAndFallbackErrors(t *testing.T) {
+	withServiceTestDB(t)
+
+	sub := model.Subscription{
+		Title:        "Fallback Download Failure",
+		RSSUrl:       "https://example.test/primary-down",
+		BackupRSSUrl: "https://example.test/backup-up",
+		IsActive:     true,
+	}
+	if err := db.DB.Create(&sub).Error; err != nil {
+		t.Fatalf("failed to create subscription: %v", err)
+	}
+
+	mgr := &SubscriptionManager{
+		RSSParser: fakeRSSParser{
+			episodesBy: map[string][]parser.Episode{
+				"https://example.test/backup-up": {{
+					Title:      "[Alt] Fallback Download Failure - 01",
+					EpisodeNum: "01",
+					TorrentURL: "magnet:?xt=urn:btih:fallback-download-failure",
+				}},
+			},
+			errByURL: map[string]error{
+				"https://example.test/primary-down": errors.New("primary host unavailable"),
+			},
+		},
+		Downloader: &fakeDownloader{addErr: errors.New("qBittorrent unavailable")},
+		DB:         db.DB,
+	}
+
+	mgr.ProcessSubscription(&sub)
+
+	var updated model.Subscription
+	if err := db.DB.First(&updated, sub.ID).Error; err != nil {
+		t.Fatalf("failed to reload subscription: %v", err)
+	}
+	if !strings.Contains(updated.LastError, "qBittorrent unavailable") {
+		t.Fatalf("expected qB error to be retained, got %q", updated.LastError)
+	}
+	if !strings.Contains(updated.LastError, "primary host unavailable") {
+		t.Fatalf("expected primary RSS error to be retained, got %q", updated.LastError)
+	}
+}
+
+func TestProcessSubscriptionCombinesPrimaryAndBackupRSSErrors(t *testing.T) {
+	withServiceTestDB(t)
+
+	sub := model.Subscription{
+		Title:        "Unavailable RSS Show",
+		RSSUrl:       "https://example.test/primary-down",
+		BackupRSSUrl: "https://example.test/backup-down",
+		IsActive:     true,
+	}
+	if err := db.DB.Create(&sub).Error; err != nil {
+		t.Fatalf("failed to create subscription: %v", err)
+	}
+
+	mgr := &SubscriptionManager{
+		RSSParser: fakeRSSParser{
+			errByURL: map[string]error{
+				"https://example.test/primary-down": errors.New("dial tcp: host is down"),
+				"https://example.test/backup-down":  errors.New("context deadline exceeded"),
+			},
+		},
+		Downloader: &fakeDownloader{},
+		DB:         db.DB,
+	}
+
+	mgr.ProcessSubscription(&sub)
+
+	var updated model.Subscription
+	if err := db.DB.First(&updated, sub.ID).Error; err != nil {
+		t.Fatalf("failed to reload subscription: %v", err)
+	}
+	if updated.LastRunStatus != SubscriptionRunStatusError {
+		t.Fatalf("expected error status when both RSS sources fail, got %q", updated.LastRunStatus)
+	}
+	if !strings.Contains(updated.LastError, "host is down") || !strings.Contains(updated.LastError, "context deadline exceeded") {
+		t.Fatalf("expected both RSS errors to be retained, got %q", updated.LastError)
+	}
+}
+
 func TestProcessSubscriptionAutoDisablesCompletedSeries(t *testing.T) {
 	withServiceTestDB(t)
 

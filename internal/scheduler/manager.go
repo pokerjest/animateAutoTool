@@ -11,6 +11,7 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/downloader"
 	"github.com/pokerjest/animateAutoTool/internal/event"
 	"github.com/pokerjest/animateAutoTool/internal/qbutil"
+	"github.com/pokerjest/animateAutoTool/internal/runtimejournal"
 	"github.com/pokerjest/animateAutoTool/internal/service"
 	"github.com/pokerjest/animateAutoTool/internal/store"
 )
@@ -66,6 +67,18 @@ func (m *Manager) CheckUpdates() {
 }
 
 func (m *Manager) CheckUpdatesContext(ctx context.Context) {
+	if runtimejournal.RecoveryBlocked() {
+		log.Println("Scheduler: Skipping update check because database recovery is blocked.")
+		status := GlobalRunStatus.Skip("auto", "数据库完整性检查失败，自动任务已停用")
+		publishSchedulerStatus(status)
+		return
+	}
+	if runtimejournal.RecoveryInProgress() {
+		log.Println("Scheduler: Skipping update check while crash recovery is in progress.")
+		status := GlobalRunStatus.Skip("auto", "异常退出恢复正在运行")
+		publishSchedulerStatus(status)
+		return
+	}
 	if !schedulerRunInProgress.CompareAndSwap(false, true) {
 		log.Println("Scheduler: Check already running, skipping duplicate trigger.")
 		return
@@ -110,6 +123,14 @@ func (m *Manager) CheckUpdatesContext(ctx context.Context) {
 	}
 
 	mgr := service.NewSubscriptionManager(qbt)
+	if err := runtimejournal.BeginOperation(runtimejournal.OperationSubscriptionSync); err != nil {
+		log.Printf("WARN: failed to persist scheduler subscription marker: %v", err)
+	}
+	defer func() {
+		if err := runtimejournal.EndOperation(runtimejournal.OperationSubscriptionSync); err != nil {
+			log.Printf("WARN: failed to clear scheduler subscription marker: %v", err)
+		}
+	}()
 	successCount := 0
 	warningCount := 0
 	errorCount := 0

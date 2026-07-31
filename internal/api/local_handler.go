@@ -13,6 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/model"
+	"github.com/pokerjest/animateAutoTool/internal/runtimejournal"
 	"github.com/pokerjest/animateAutoTool/internal/service"
 )
 
@@ -275,6 +276,14 @@ func DeleteLocalDirectoryHandler(c *gin.Context) {
 
 // ScanLocalDirectoryHandler 触发重新扫描
 func ScanLocalDirectoryHandler(c *gin.Context) {
+	if runtimejournal.RecoveryBlocked() {
+		htmlServerError(c, "本地扫描", runtimejournal.ErrRecoveryBlocked)
+		return
+	}
+	if runtimejournal.RecoveryInProgress() {
+		htmlServerError(c, "本地扫描", runtimejournal.ErrRecoveryInProgress)
+		return
+	}
 	scanner := service.NewScannerService()
 	go func() {
 		// Phase 1: Scanner (Events emitted via EventBus)

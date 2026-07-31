@@ -20,6 +20,7 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/event"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/parser"
+	"github.com/pokerjest/animateAutoTool/internal/runtimejournal"
 	"gorm.io/gorm"
 )
 
@@ -141,8 +142,19 @@ func (s *ScannerService) ScanAll() error {
 // ScanAllWithProgress first estimates the number of readable folders, then
 // reports monotonic progress while the real scan processes those folders.
 func (s *ScannerService) ScanAllWithProgress(report ScanProgressFunc) error {
+	if runtimejournal.RecoveryBlocked() {
+		return runtimejournal.ErrRecoveryBlocked
+	}
 	scanRunMu.Lock()
 	defer scanRunMu.Unlock()
+	if err := runtimejournal.BeginOperation(runtimejournal.OperationLocalLibraryScan); err != nil {
+		log.Printf("WARN: failed to persist local scan operation marker: %v", err)
+	}
+	defer func() {
+		if err := runtimejournal.EndOperation(runtimejournal.OperationLocalLibraryScan); err != nil {
+			log.Printf("WARN: failed to clear local scan operation marker: %v", err)
+		}
+	}()
 
 	st := localAnimeStore()
 	if st == nil {
@@ -1039,7 +1051,7 @@ func buildScanCandidates(root string, files []scannedMediaFile) []scanCandidate 
 
 	candidates := make([]scanCandidate, 0, len(byKey))
 	for _, candidate := range byKey {
-		if candidate.AllLoose && len(byKey) == 1 {
+		if candidate.AllLoose {
 			candidate.Path = root
 		}
 		sort.Slice(candidate.Files, func(i, j int) bool { return candidate.Files[i].Path < candidate.Files[j].Path })
@@ -1100,7 +1112,10 @@ func selectExistingAnime(candidate *scanCandidate, existing []model.LocalAnime, 
 			continue
 		}
 		relationScore := 0
-		if sameComparisonPath(anime.Path, candidate.Path) {
+		// Multiple loose series can legitimately share the same library root.
+		// Reusing a row from that shared path alone can attach another show's
+		// metadata after an interrupted or partial scan.
+		if !candidate.AllLoose && sameComparisonPath(anime.Path, candidate.Path) {
 			relationScore = 4000
 		}
 		for _, episode := range anime.Episodes {

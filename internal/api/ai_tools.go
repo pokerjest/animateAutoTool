@@ -18,6 +18,7 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/parser"
+	"github.com/pokerjest/animateAutoTool/internal/runtimejournal"
 	"github.com/pokerjest/animateAutoTool/internal/service"
 	"github.com/pokerjest/animateAutoTool/internal/taskstate"
 )
@@ -948,6 +949,12 @@ func applySubscriptionRuleProposalTool(ctx context.Context, raw string) (string,
 }
 
 func runConfirmedLibraryScanTool(ctx context.Context, raw string) (string, error) {
+	if runtimejournal.RecoveryBlocked() {
+		return "", runtimejournal.ErrRecoveryBlocked
+	}
+	if runtimejournal.RecoveryInProgress() {
+		return "", runtimejournal.ErrRecoveryInProgress
+	}
 	taskID := "ai-library-scan-" + strconv.FormatInt(time.Now().UnixNano(), 10)
 	taskstate.Global.Start(taskID, "scan", "AI 确认的本地扫描", "正在扫描本地媒体库")
 	go func() {

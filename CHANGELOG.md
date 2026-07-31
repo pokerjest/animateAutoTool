@@ -8,6 +8,20 @@
 
 ## [Unreleased]
 
+## [1.0.0-beta.4] - 2026-07-31
+
+### Added
+- 新增持久化运行会话与数据操作日志；进程崩溃、强制终止或主机断电后，会自动识别并恢复被中断的媒体扫描、元数据链接和订阅对账。
+- 为 RSS 主源、备用源和全部源不可用场景补充明确日志，并记录 AList、qBittorrent、Jellyfin 等托管服务的意外退出。
+
+### Changed
+- SQLite 启用完整同步与外键约束，启动时执行完整性检查，正常关闭时截断 WAL；数据库损坏时停止后台写任务并给出恢复提示。
+- 元数据与订阅链接写入改为事务化处理，恢复期间暂停并发扫描、同步和定时任务，避免重复写入。
+
+### Fixed
+- 修复媒体目录只读状态误报、错误文件路径提示，以及共享媒体根目录下不同番剧可能错误关联的问题。
+- 修复 RSS 主源宕机后未正确使用备用源、主源错误被 qBittorrent 错误覆盖，以及服务中断信息不足的问题。
+
 ## [1.0.0-beta.3] - 2026-07-31
 
 ### Fixed
@@ -515,7 +529,8 @@
 
 ---
 
-[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.3...HEAD
+[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.4...HEAD
+[1.0.0-beta.4]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.3...v1.0.0-beta.4
 [1.0.0-beta.3]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.2...v1.0.0-beta.3
 [1.0.0-beta.2]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.1...v1.0.0-beta.2
 [1.0.0-beta.1]: https://github.com/pokerjest/animateAutoTool/compare/v0.9.9...v1.0.0-beta.1

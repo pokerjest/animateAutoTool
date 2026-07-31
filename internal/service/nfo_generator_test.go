@@ -1,13 +1,16 @@
 package service
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/parser"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 func TestNFOGeneratorPreservesLocalFieldsAndAddsMissingMetadata(t *testing.T) {
@@ -80,4 +83,64 @@ func TestNFOGeneratorDoesNotTreatMissingLocalSeasonAsZero(t *testing.T) {
 	require.Equal(t, 2, nfo.Season)
 	require.Equal(t, 1, nfo.Episode)
 	require.Equal(t, "手工标题", nfo.Title)
+}
+
+func TestNFOGeneratorUsesParentDirectoryForLegacyFilePath(t *testing.T) {
+	withServiceTestDB(t)
+	root := t.TempDir()
+	videoPath := filepath.Join(root, "Loose Show - 01.mp4")
+	require.NoError(t, os.WriteFile(videoPath, []byte("video"), 0o600))
+
+	anime := &model.LocalAnime{
+		Title: "Loose Show",
+		Path:  videoPath,
+		Metadata: &model.AnimeMetadata{
+			Title: "Loose Show",
+		},
+	}
+	require.NoError(t, NewNFOGeneratorService().GenerateTVShowNFO(anime))
+	_, err := os.Stat(filepath.Join(root, "tvshow.nfo"))
+	require.NoError(t, err)
+	require.Empty(t, mustOpenLibraryIssues(t))
+}
+
+func TestNFOGeneratorReportsWriteFailureWithoutReadOnlyFalsePositive(t *testing.T) {
+	withServiceTestDB(t)
+	root := t.TempDir()
+	videoPath := filepath.Join(root, "Locked Show - 01.mp4")
+	require.NoError(t, os.WriteFile(videoPath, []byte("video"), 0o600))
+
+	legacy := model.LibraryIssue{
+		IssueKey:      "readonly:23",
+		IssueType:     LibraryIssueTypeScrape,
+		Status:        LibraryIssueStatusOpen,
+		Title:         "媒体目录只读 (Directory Read-Only)",
+		DirectoryPath: videoPath,
+	}
+	require.NoError(t, db.DB.Create(&legacy).Error)
+
+	originalProbe := probeMediaDirectoryWritable
+	probeMediaDirectoryWritable = func(path string) error {
+		require.Equal(t, root, path)
+		return errors.New("sharing violation")
+	}
+	t.Cleanup(func() { probeMediaDirectoryWritable = originalProbe })
+
+	anime := &model.LocalAnime{Model: gorm.Model{ID: 23}, Title: "Locked Show", Path: videoPath}
+	_, err := NewNFOGeneratorService().checkAndReportWritability(anime)
+	require.Error(t, err)
+
+	issues := mustOpenLibraryIssues(t)
+	require.Len(t, issues, 1)
+	require.Equal(t, "media-write:23", issues[0].IssueKey)
+	require.Equal(t, root, issues[0].DirectoryPath)
+	require.NotContains(t, issues[0].Title, "只读")
+	require.Contains(t, issues[0].Message, "sharing violation")
+}
+
+func mustOpenLibraryIssues(t *testing.T) []model.LibraryIssue {
+	t.Helper()
+	issues, err := ListOpenLibraryIssues(20)
+	require.NoError(t, err)
+	return issues
 }

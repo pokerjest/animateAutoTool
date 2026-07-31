@@ -88,7 +88,13 @@ func runServer() {
 	if err := db.SyncGlobalConfigsWithConfigFile(); err != nil {
 		log.Printf("Failed to synchronize system settings with %s: %v", config.ConfigFilePath(), err)
 	}
-	startup.Run(rootCtx)
+	cleanupStartup := startup.Run(rootCtx)
+	defer func() {
+		cleanupStartup()
+		if err := db.CloseDB(); err != nil {
+			log.Printf("WARN: database close failed during shutdown: %v", err)
+		}
+	}()
 
 	r := gin.Default()
 	if err := r.SetTrustedProxies(config.AppConfig.Server.TrustedProxies); err != nil {

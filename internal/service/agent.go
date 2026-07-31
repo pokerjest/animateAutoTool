@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -15,6 +16,8 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/parser"
+	"github.com/pokerjest/animateAutoTool/internal/runtimejournal"
+	"github.com/pokerjest/animateAutoTool/internal/store"
 	"gorm.io/gorm"
 )
 
@@ -80,8 +83,20 @@ func (s *AgentService) RunAgentForAnimeIDs(ids []uint) {
 // workers have stopped, when the database is least likely to be busy again.
 func (s *AgentService) RunAgentForLibraryWithRepair(report MetadataIssueRepairProgressFunc) (MetadataIssueRepairResult, error) {
 	log.Println("Agent: Starting metadata enrichment (Agent Phase)...")
+	if runtimejournal.RecoveryBlocked() {
+		return MetadataIssueRepairResult{}, runtimejournal.ErrRecoveryBlocked
+	}
+	if err := runtimejournal.BeginOperation(runtimejournal.OperationMetadataEnrich); err != nil {
+		log.Printf("WARN: failed to persist metadata operation marker: %v", err)
+	}
+	defer func() {
+		if err := runtimejournal.EndOperation(runtimejournal.OperationMetadataEnrich); err != nil {
+			log.Printf("WARN: failed to clear metadata operation marker: %v", err)
+		}
+	}()
 
 	networkQueue := make(chan uint, 1000)
+	producerErr := make(chan error, 1)
 	var wg sync.WaitGroup
 
 	// Start Network Workers
@@ -95,6 +110,15 @@ func (s *AgentService) RunAgentForLibraryWithRepair(report MetadataIssueRepairPr
 
 	// Producer
 	go func() {
+		defer close(networkQueue)
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				err := fmt.Errorf("metadata producer panic: %v", recovered)
+				log.Printf("ERROR: %v\n%s", err, debug.Stack())
+				producerErr <- err
+			}
+			close(producerErr)
+		}()
 		var animes []model.LocalAnime
 		batchSize := 100
 		err := db.DB.Preload("Metadata").FindInBatches(&animes, batchSize, func(tx *gorm.DB, batch int) error {
@@ -111,11 +135,14 @@ func (s *AgentService) RunAgentForLibraryWithRepair(report MetadataIssueRepairPr
 		}).Error
 		if err != nil {
 			log.Printf("Agent: FindInBatches failed: %v", err)
+			producerErr <- err
 		}
-		close(networkQueue)
 	}()
 
 	wg.Wait()
+	if err := <-producerErr; err != nil {
+		return MetadataIssueRepairResult{}, err
+	}
 	log.Println("Agent: Metadata enrichment completed.")
 	return s.RepairDatabaseMetadataIssues(context.Background(), report)
 }
@@ -301,37 +328,44 @@ func (s *AgentService) persistLocalAssetMetadata(anime *model.LocalAnime) error 
 	if anime == nil || anime.Metadata == nil {
 		return fmt.Errorf("local metadata is empty")
 	}
-	mStore := metadataStore()
-	laStore := localAnimeStore()
-	if mStore == nil || laStore == nil {
+	if db.DB == nil {
 		return gorm.ErrInvalidDB
 	}
 
-	if anime.Metadata.ID == 0 {
-		if err := mStore.Create(anime.Metadata); err != nil {
-			return err
-		}
-	} else if err := mStore.Save(anime.Metadata); err != nil {
-		return err
-	}
-	if len(anime.Metadata.BangumiImageRaw) > 0 || len(anime.Metadata.TMDBImageRaw) > 0 || len(anime.Metadata.AniListImageRaw) > 0 {
-		posterURL := fmt.Sprintf("/api/v1/posters/%d", anime.Metadata.ID)
-		if anime.Metadata.Image != posterURL {
-			anime.Metadata.Image = posterURL
-			if err := mStore.Save(anime.Metadata); err != nil {
+	return db.DB.Transaction(func(tx *gorm.DB) error {
+		mStore := store.NewAnimeMetadataStore(tx)
+		laStore := store.NewLocalAnimeStore(tx)
+		if anime.Metadata.ID == 0 {
+			if err := mStore.Create(anime.Metadata); err != nil {
 				return err
 			}
+		} else if err := mStore.Save(anime.Metadata); err != nil {
+			return err
 		}
-	}
+		if len(anime.Metadata.BangumiImageRaw) > 0 || len(anime.Metadata.TMDBImageRaw) > 0 || len(anime.Metadata.AniListImageRaw) > 0 {
+			posterURL := fmt.Sprintf("/api/v1/posters/%d", anime.Metadata.ID)
+			if anime.Metadata.Image != posterURL {
+				anime.Metadata.Image = posterURL
+				if err := mStore.Save(anime.Metadata); err != nil {
+					return err
+				}
+			}
+		}
 
-	anime.MetadataID = &anime.Metadata.ID
-	anime.Image = anime.Metadata.Image
-	anime.Summary = anime.Metadata.Summary
-	if err := laStore.SaveAnime(anime); err != nil {
-		return err
-	}
-	s.metadataService().SyncMetadataToModels(anime.Metadata)
-	return nil
+		anime.MetadataID = &anime.Metadata.ID
+		anime.Image = anime.Metadata.Image
+		anime.Summary = anime.Metadata.Summary
+		if err := laStore.SaveAnime(anime); err != nil {
+			return err
+		}
+		updates := map[string]interface{}{"image": anime.Metadata.Image, "summary": anime.Metadata.Summary}
+		if err := mStore.PropagateToSubscriptions(anime.Metadata.ID, updates); err != nil {
+			return err
+		}
+		return mStore.PropagateToLocalAnimes(anime.Metadata.ID, map[string]interface{}{
+			"image": anime.Metadata.Image, "summary": anime.Metadata.Summary, "air_date": anime.Metadata.AirDate,
+		})
+	})
 }
 
 func (s *AgentService) metadataService() *MetadataService {
@@ -350,18 +384,25 @@ func (s *AgentService) enrich(anime *model.LocalAnime) error {
 
 func (s *AgentService) networkWorker(queue <-chan uint) {
 	for id := range queue {
-		// Rate Limit
-		time.Sleep(s.NetworkRateLimit)
+		func() {
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					log.Printf("ERROR: metadata worker panic local_anime_id=%d error=%v\n%s", id, recovered, debug.Stack())
+				}
+			}()
+			// Rate Limit
+			time.Sleep(s.NetworkRateLimit)
 
-		var anime model.LocalAnime
-		if err := db.DB.Preload("Metadata").First(&anime, id).Error; err != nil {
-			continue
-		}
+			var anime model.LocalAnime
+			if err := db.DB.Preload("Metadata").First(&anime, id).Error; err != nil {
+				return
+			}
 
-		// The metadata clients already enforce request timeouts. Run enrichment
-		// synchronously inside the worker so wg.Wait truly means every database
-		// writer has stopped before the serial repair pass begins.
-		s.enrichAndReport(&anime)
+			// The metadata clients already enforce request timeouts. Run enrichment
+			// synchronously inside the worker so wg.Wait truly means every database
+			// writer has stopped before the serial repair pass begins.
+			s.enrichAndReport(&anime)
+		}()
 	}
 }
 

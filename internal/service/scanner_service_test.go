@@ -81,11 +81,47 @@ func TestScannerGroupsLooseFilesAndNestedSeasonDirectories(t *testing.T) {
 		byTitle[anime.Title] = anime
 	}
 	require.Len(t, byTitle["Loose Show"].Episodes, 2)
+	require.Equal(t, root, byTitle["Loose Show"].Path)
 	require.Len(t, byTitle["Nested Show"].Episodes, 2)
 	for _, episode := range byTitle["Nested Show"].Episodes {
 		require.Equal(t, 2, episode.SeasonNum)
 		require.Greater(t, episode.EpisodeNum, 0)
 	}
+}
+
+func TestScannerKeepsLooseSeriesMetadataSeparatedAcrossRescans(t *testing.T) {
+	withServiceTestDB(t)
+	root := t.TempDir()
+	writeScannerFixture(t, filepath.Join(root, "[ANi] Loose Alpha - 01 [1080p].mkv"))
+	writeScannerFixture(t, filepath.Join(root, "[ANi] Loose Beta - 01 [1080p].mkv"))
+	directory := createScannerDirectory(t, root)
+	scanner := NewScannerService()
+
+	_, err := scanner.ScanDirectory(&directory)
+	require.NoError(t, err)
+
+	var animes []model.LocalAnime
+	require.NoError(t, db.DB.Order("title").Find(&animes).Error)
+	require.Len(t, animes, 2)
+	for i := range animes {
+		require.Equal(t, root, animes[i].Path)
+		metadata := model.AnimeMetadata{Title: animes[i].Title}
+		require.NoError(t, db.DB.Create(&metadata).Error)
+		require.NoError(t, db.DB.Model(&animes[i]).Update("metadata_id", metadata.ID).Error)
+	}
+
+	_, err = scanner.ScanDirectory(&directory)
+	require.NoError(t, err)
+
+	var rescanned []model.LocalAnime
+	require.NoError(t, db.DB.Preload("Metadata").Order("title").Find(&rescanned).Error)
+	require.Len(t, rescanned, 2)
+	require.Equal(t, "Loose Alpha", rescanned[0].Title)
+	require.NotNil(t, rescanned[0].Metadata)
+	require.Equal(t, "Loose Alpha", rescanned[0].Metadata.Title)
+	require.Equal(t, "Loose Beta", rescanned[1].Title)
+	require.NotNil(t, rescanned[1].Metadata)
+	require.Equal(t, "Loose Beta", rescanned[1].Metadata.Title)
 }
 
 func TestScannerUsesSeriesAndEpisodeNFOData(t *testing.T) {

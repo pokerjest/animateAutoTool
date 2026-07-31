@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/parser"
@@ -19,48 +20,102 @@ type NFOGeneratorService struct{}
 const (
 	nfoOverwriteLocalOnly    = "local-only"
 	nfoOverwriteFieldLayered = "field-layered"
+	mediaWriteProbeAttempts  = 3
+	mediaWriteProbeDelay     = 150 * time.Millisecond
 )
+
+var probeMediaDirectoryWritable = checkMediaDirectoryWritable
 
 func NewNFOGeneratorService() *NFOGeneratorService {
 	return &NFOGeneratorService{}
 }
 
-func (s *NFOGeneratorService) checkAndReportWritability(anime *model.LocalAnime) bool {
+func (s *NFOGeneratorService) checkAndReportWritability(anime *model.LocalAnime) (string, error) {
 	if anime == nil {
-		return false
+		return "", fmt.Errorf("anime is nil")
 	}
-	writable := isDirWritable(anime.Path)
-	issueKey := "readonly:" + strconv.FormatUint(uint64(anime.ID), 10)
-	if !writable {
-		log.Printf("NFO: Directory %s is not writable. Reporting LibraryIssue...", anime.Path)
+	directory := mediaDirectoryPath(anime.Path)
+	id := strconv.FormatUint(uint64(anime.ID), 10)
+	issueKey := "media-write:" + id
+	legacyIssueKey := "readonly:" + id
+	if err := probeMediaDirectoryWritable(directory); err != nil {
+		log.Printf("WARN: media directory write probe failed path=%q anime_id=%d error=%v", directory, anime.ID, err)
 		_ = ReportLibraryIssue(LibraryIssueInput{
 			IssueKey:      issueKey,
 			IssueType:     LibraryIssueTypeScrape,
-			Title:         "媒体目录只读 (Directory Read-Only)",
-			DirectoryPath: anime.Path,
+			Title:         "媒体目录暂时无法写入",
+			DirectoryPath: directory,
 			LocalAnimeID:  &anime.ID,
-			Message:       fmt.Sprintf("动漫《%s》的本地存放路径没有写权限，无法生成 NFO 元数据或本地海报缓存。", anime.Title),
-			Hint:          "请检查您的系统权限、挂载点属性（如只读 SMB/NFS 或 Docker 卷映射只读），并确保给该路径授予读写权限。",
+			Message:       fmt.Sprintf("动漫《%s》的媒体目录写入探针失败，NFO 或海报本轮未写入：%v", anime.Title, err),
+			Hint:          "系统已短暂重试。请检查 qBittorrent/杀毒软件是否占用文件、磁盘或网络存储是否离线、剩余空间和目录权限；只有确认挂载点为只读时才按只读目录处理。",
 		})
-		return false
+		_ = ResolveLibraryIssue(legacyIssueKey)
+		return directory, fmt.Errorf("media directory %s is not writable: %w", directory, err)
 	}
 
-	// Writable, resolve any previous read-only issue
+	// A successful probe clears both the current diagnostic and legacy
+	// read-only false positives created before the error classification split.
 	_ = ResolveLibraryIssue(issueKey)
-	return true
+	_ = ResolveLibraryIssue(legacyIssueKey)
+	return directory, nil
 }
 
-func isDirWritable(dir string) bool {
-	if _, err := os.Stat(dir); os.IsNotExist(err) {
-		return false
+func mediaDirectoryPath(path string) string {
+	path = filepath.Clean(strings.TrimSpace(path))
+	if path == "." || path == "" {
+		return path
 	}
-	testFile := filepath.Join(dir, ".animate_write_test")
-	err := os.WriteFile(testFile, []byte{1}, 0o600)
+	if info, err := os.Stat(path); err == nil {
+		if !info.IsDir() {
+			return filepath.Dir(path)
+		}
+		return path
+	}
+	if parser.IsVideoFile(path) {
+		return filepath.Dir(path)
+	}
+	return path
+}
+
+func checkMediaDirectoryWritable(dir string) error {
+	info, err := os.Stat(dir)
 	if err != nil {
-		return false
+		return err
 	}
-	_ = os.Remove(testFile)
-	return true
+	if !info.IsDir() {
+		return fmt.Errorf("path is not a directory")
+	}
+
+	var lastErr error
+	for attempt := 1; attempt <= mediaWriteProbeAttempts; attempt++ {
+		lastErr = probeMediaDirectoryOnce(dir)
+		if lastErr == nil {
+			return nil
+		}
+		if attempt < mediaWriteProbeAttempts {
+			time.Sleep(mediaWriteProbeDelay)
+		}
+	}
+	return lastErr
+}
+
+func probeMediaDirectoryOnce(dir string) error {
+	testFile, err := os.CreateTemp(dir, ".animate-write-test-*")
+	if err != nil {
+		return err
+	}
+	testPath := testFile.Name()
+	defer func() { _ = os.Remove(testPath) }()
+
+	if _, err := testFile.Write([]byte{1}); err != nil {
+		_ = testFile.Close()
+		return err
+	}
+	if err := testFile.Sync(); err != nil {
+		_ = testFile.Close()
+		return err
+	}
+	return testFile.Close()
 }
 
 // GenerateTVShowNFO generates tvshow.nfo for the series
@@ -72,8 +127,9 @@ func (s *NFOGeneratorService) GenerateTVShowNFO(anime *model.LocalAnime) error {
 		return fmt.Errorf("metadata is nil")
 	}
 
-	if !s.checkAndReportWritability(anime) {
-		return fmt.Errorf("directory %s is read-only", anime.Path)
+	directory, err := s.checkAndReportWritability(anime)
+	if err != nil {
+		return err
 	}
 
 	meta := anime.Metadata
@@ -129,7 +185,7 @@ func (s *NFOGeneratorService) GenerateTVShowNFO(anime *model.LocalAnime) error {
 	}
 
 	// Save
-	path := filepath.Join(anime.Path, "tvshow.nfo")
+	path := filepath.Join(directory, "tvshow.nfo")
 	if existing, err := parser.ParseTVShowNFO(path); err == nil {
 		switch metadataOverwritePolicy() {
 		case nfoOverwriteLocalOnly:
@@ -150,8 +206,8 @@ func (s *NFOGeneratorService) GenerateEpisodeNFO(ep *model.LocalEpisode, anime *
 		return fmt.Errorf("nil argument")
 	}
 
-	if !s.checkAndReportWritability(anime) {
-		return fmt.Errorf("directory %s is read-only", anime.Path)
+	if _, err := s.checkAndReportWritability(anime); err != nil {
+		return err
 	}
 
 	nfo := parser.EpisodeNFO{
@@ -197,8 +253,9 @@ func (s *NFOGeneratorService) SaveLocalImages(anime *model.LocalAnime) error {
 		return nil
 	}
 
-	if !s.checkAndReportWritability(anime) {
-		return fmt.Errorf("directory %s is read-only", anime.Path)
+	directory, err := s.checkAndReportWritability(anime)
+	if err != nil {
+		return err
 	}
 
 	// Helper to write blob
@@ -206,7 +263,7 @@ func (s *NFOGeneratorService) SaveLocalImages(anime *model.LocalAnime) error {
 		if len(data) == 0 {
 			return
 		}
-		path := filepath.Join(anime.Path, name)
+		path := filepath.Join(directory, name)
 		if _, err := os.Stat(path); err == nil {
 			return // Exists
 		}

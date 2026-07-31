@@ -23,6 +23,7 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/httpx"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/renamer"
+	"github.com/pokerjest/animateAutoTool/internal/runtimejournal"
 	"github.com/pokerjest/animateAutoTool/internal/safeio"
 	"github.com/pokerjest/animateAutoTool/internal/service"
 	"github.com/pokerjest/animateAutoTool/internal/store"
@@ -432,6 +433,9 @@ func V1DashboardHandler(c *gin.Context) {
 }
 
 func V1SyncHandler(c *gin.Context) {
+	if rejectRuntimeRecoveryTask(c) {
+		return
+	}
 	const taskID = "manual-sync"
 	taskstate.Global.Start(taskID, "sync", "立即同步", "正在同步订阅、本地媒体和下载状态")
 	go func() {
@@ -710,6 +714,9 @@ func V1LocalAnimeEpisodesHandler(c *gin.Context) {
 }
 
 func V1LocalScanHandler(c *gin.Context) {
+	if rejectRuntimeRecoveryTask(c) {
+		return
+	}
 	const taskID = "local-scan"
 	taskstate.Global.Start(taskID, "scan", "本地扫描", "正在扫描本地媒体目录")
 	go func() {
@@ -740,6 +747,9 @@ func V1LocalScanHandler(c *gin.Context) {
 }
 
 func V1AddLocalDirectoryHandler(c *gin.Context) {
+	if rejectRuntimeRecoveryTask(c) {
+		return
+	}
 	var req struct {
 		Path string `json:"path"`
 	}
@@ -771,6 +781,19 @@ func V1AddLocalDirectoryHandler(c *gin.Context) {
 		taskstate.Global.Complete(taskID, appendMetadataRepairSummary("目录已添加，本地扫描完成", repairResult))
 	}()
 	v1Message(c, http.StatusAccepted, "目录已添加，扫描任务已经启动", gin.H{"task_id": taskID, "status": "running"})
+}
+
+func rejectRuntimeRecoveryTask(c *gin.Context) bool {
+	switch {
+	case runtimejournal.RecoveryBlocked():
+		v1Error(c, http.StatusServiceUnavailable, "database_recovery_blocked", runtimejournal.ErrRecoveryBlocked.Error())
+		return true
+	case runtimejournal.RecoveryInProgress():
+		v1Error(c, http.StatusConflict, "runtime_recovery_running", runtimejournal.ErrRecoveryInProgress.Error())
+		return true
+	default:
+		return false
+	}
 }
 
 func runLocalMetadataPhase(taskID string) (service.MetadataIssueRepairResult, error) {

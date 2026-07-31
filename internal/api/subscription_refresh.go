@@ -10,6 +10,7 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/config"
 	"github.com/pokerjest/animateAutoTool/internal/downloader"
 	"github.com/pokerjest/animateAutoTool/internal/qbutil"
+	"github.com/pokerjest/animateAutoTool/internal/runtimejournal"
 	"github.com/pokerjest/animateAutoTool/internal/scheduler"
 	"github.com/pokerjest/animateAutoTool/internal/service"
 	"github.com/pokerjest/animateAutoTool/internal/taskstate"
@@ -37,6 +38,14 @@ var runSubscriptionRefreshNow = func(
 }
 
 func V1RefreshSubscriptionsHandler(c *gin.Context) {
+	if runtimejournal.RecoveryBlocked() {
+		v1Error(c, http.StatusServiceUnavailable, "database_recovery_blocked", "数据库完整性检查失败，订阅写入已停用，请先恢复数据库")
+		return
+	}
+	if runtimejournal.RecoveryInProgress() {
+		v1Error(c, http.StatusConflict, "runtime_recovery_running", "异常退出恢复正在运行，请等待恢复完成")
+		return
+	}
 	if scheduler.IsRunInProgress() {
 		v1Error(c, http.StatusConflict, "subscription_check_running", "自动订阅检查正在运行，请稍后再刷新")
 		return

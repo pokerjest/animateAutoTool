@@ -84,9 +84,13 @@ func (w *HourlyWriter) Close() error {
 		w.closed = true
 		return nil
 	}
+	syncErr := w.file.Sync()
 	err := w.file.Close()
 	w.file = nil
 	w.closed = true
+	if syncErr != nil {
+		return syncErr
+	}
 	return err
 }
 
@@ -107,6 +111,7 @@ func (w *HourlyWriter) rotateLocked(now time.Time) error {
 	w.file = next
 	w.hour = hour
 	if previous != nil {
+		_ = previous.Sync()
 		_ = previous.Close()
 	}
 	_ = w.pruneLocked()
