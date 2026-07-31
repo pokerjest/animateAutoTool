@@ -820,18 +820,26 @@ func V1AddLocalDirectoryHandler(c *gin.Context) {
 }
 
 func reportLocalScanProgress(taskID string, progress service.ScanProgress) {
+	if strings.EqualFold(strings.TrimSpace(progress.Phase), "complete") {
+		startLocalMetadataProgress(taskID)
+		return
+	}
 	message := strings.TrimSpace(progress.Message)
 	if message == "" {
 		message = "正在扫描本地媒体"
 	}
-	taskstate.Global.ProgressPhase(taskID, "scan", "第 1/2 阶段 · "+message, progress.Current, progress.Total)
+	taskstate.Global.ProgressPhase(taskID, "scan", message, progress.Current, progress.Total)
 }
 
 func startLocalMetadataProgress(taskID string) {
+	if task, ok := taskstate.Global.Get(taskID); ok && (task.Phase == "metadata" || task.Phase == "repair") {
+		return
+	}
+	log.Printf("local scan: file scan completed; starting metadata phase")
 	taskstate.Global.ProgressPhase(
 		taskID,
 		"metadata",
-		"第 2/2 阶段 · 文件扫描完成，正在整理元数据",
+		"文件扫描完成，正在整理元数据",
 		0,
 		0,
 	)
@@ -859,7 +867,7 @@ func runLocalMetadataPhase(taskID string) (service.MetadataIssueRepairResult, er
 		taskstate.Global.ProgressPhase(
 			taskID,
 			phase,
-			"第 2/2 阶段 · "+strings.TrimSpace(progress.Message),
+			strings.TrimSpace(progress.Message),
 			progress.Current,
 			progress.Total,
 		)

@@ -50,7 +50,13 @@ const totalItems=computed(()=>pages.value[0]?.meta?.total??items.value.length)
 const remainingItems=computed(()=>Math.max(0,totalItems.value-items.value.length))
 const selectedCount=computed(()=>allMatching.value?Math.max(0,totalItems.value-excludedIDs.value.size):selectedIDs.value.size)
 const scanTask=computed(()=>tasks.taskByID('local-scan'))
-const scanPercent=computed(()=>scanTask.value?.total?Math.min(100,Math.round((scanTask.value.current||0)/scanTask.value.total*100)):0)
+const scanPercent=computed(()=>{
+  const current=scanTask.value?.current||0
+  const total=scanTask.value?.total||0
+  if(!total)return 0
+  if(current>=total)return 100
+  return Math.min(99,Math.floor(current/total*100))
+})
 const scanPhaseLabel=computed(()=>['metadata','repair'].includes(scanTask.value?.phase||'')?'第 2/2 阶段 · 元数据整理':'第 1/2 阶段 · 文件扫描')
 const scanProgressUnit=computed(()=>scanTask.value?.phase==='repair'?'条修复任务':['metadata','repair'].includes(scanTask.value?.phase||'')?'部本地番剧':'个扫描步骤')
 const scanPendingLabel=computed(()=>['metadata','repair'].includes(scanTask.value?.phase||'')?'处理中':'正在统计')

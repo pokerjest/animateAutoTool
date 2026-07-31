@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 
 	"github.com/pokerjest/animateAutoTool/internal/db"
@@ -91,4 +92,49 @@ func TestSyncJellyfinLibraryMappingsSkipsSeriesWithoutEpisodes(t *testing.T) {
 	require.NoError(t, err)
 	assert.Zero(t, result.PendingSeries)
 	assert.Zero(t, result.MatchedSeries)
+}
+
+func TestSyncJellyfinLibraryMappingsForAnimeIDsHandlesSeriesAppearingAcrossPolls(t *testing.T) {
+	withServiceTestDB(t)
+
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if calls.Add(1) == 1 {
+			_, _ = w.Write([]byte(`{"Items":[{"Id":"jf-first","Name":"同时完成番剧 A","ProviderIds":{}}]}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"Items":[{"Id":"jf-first","Name":"同时完成番剧 A","ProviderIds":{}},{"Id":"jf-second","Name":"同时完成番剧 B","ProviderIds":{}}]}`))
+	}))
+	t.Cleanup(server.Close)
+	require.NoError(t, store.NewConfigStore(db.DB).SetMany(map[string]string{
+		model.ConfigKeyJellyfinUrl: server.URL, model.ConfigKeyJellyfinApiKey: "test-key",
+	}))
+
+	first := model.LocalAnime{Title: "同时完成番剧 A"}
+	second := model.LocalAnime{Title: "同时完成番剧 B"}
+	require.NoError(t, db.DB.Create(&first).Error)
+	require.NoError(t, db.DB.Create(&second).Error)
+	require.NoError(t, db.DB.Create(&model.LocalEpisode{
+		LocalAnimeID: first.ID, SeasonNum: 1, EpisodeNum: 1, Path: "/library/concurrent-a-s01e01.mkv",
+	}).Error)
+	require.NoError(t, db.DB.Create(&model.LocalEpisode{
+		LocalAnimeID: second.ID, SeasonNum: 1, EpisodeNum: 1, Path: "/library/concurrent-b-s01e01.mkv",
+	}).Error)
+
+	firstPass, err := SyncJellyfinLibraryMappingsForAnimeIDs(context.Background(), []uint{first.ID, second.ID})
+	require.NoError(t, err)
+	assert.Equal(t, 2, firstPass.PendingSeries)
+	assert.Equal(t, 1, firstPass.MatchedSeries)
+
+	secondPass, err := SyncJellyfinLibraryMappingsForAnimeIDs(context.Background(), []uint{first.ID, second.ID})
+	require.NoError(t, err)
+	assert.Equal(t, 1, secondPass.PendingSeries)
+	assert.Equal(t, 1, secondPass.MatchedSeries)
+
+	var updated []model.LocalAnime
+	require.NoError(t, db.DB.Where("id IN ?", []uint{first.ID, second.ID}).Order("id").Find(&updated).Error)
+	require.Len(t, updated, 2)
+	assert.Equal(t, "jf-first", updated[0].JellyfinSeriesID)
+	assert.Equal(t, "jf-second", updated[1].JellyfinSeriesID)
 }

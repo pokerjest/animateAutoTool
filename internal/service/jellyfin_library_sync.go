@@ -35,15 +35,31 @@ func RequestJellyfinLibraryRefresh(ctx context.Context) error {
 // exact title is the safe fallback for older Jellyfin entries without IDs.
 // This makes playback availability independent from opening an episode first.
 func SyncJellyfinLibraryMappings(ctx context.Context) (JellyfinLibrarySyncResult, error) {
+	return syncJellyfinLibraryMappings(ctx, nil)
+}
+
+// SyncJellyfinLibraryMappingsForAnimeIDs limits reconciliation to the local
+// series touched by one completed-download batch.
+func SyncJellyfinLibraryMappingsForAnimeIDs(ctx context.Context, animeIDs []uint) (JellyfinLibrarySyncResult, error) {
+	if len(animeIDs) == 0 {
+		return JellyfinLibrarySyncResult{}, nil
+	}
+	return syncJellyfinLibraryMappings(ctx, animeIDs)
+}
+
+func syncJellyfinLibraryMappings(ctx context.Context, animeIDs []uint) (JellyfinLibrarySyncResult, error) {
 	result := JellyfinLibrarySyncResult{}
 	if db.DB == nil {
 		return result, nil
 	}
 
 	var pending []model.LocalAnime
-	if err := db.DB.Preload("Metadata").
-		Where("(jellyfin_series_id = '' OR jellyfin_series_id IS NULL) AND EXISTS (SELECT 1 FROM local_episodes WHERE local_episodes.local_anime_id = local_animes.id AND local_episodes.deleted_at IS NULL)").
-		Find(&pending).Error; err != nil {
+	query := db.DB.Preload("Metadata").
+		Where("(jellyfin_series_id = '' OR jellyfin_series_id IS NULL) AND EXISTS (SELECT 1 FROM local_episodes WHERE local_episodes.local_anime_id = local_animes.id AND local_episodes.deleted_at IS NULL)")
+	if len(animeIDs) > 0 {
+		query = query.Where("local_animes.id IN ?", animeIDs)
+	}
+	if err := query.Find(&pending).Error; err != nil {
 		return result, err
 	}
 	result.PendingSeries = len(pending)

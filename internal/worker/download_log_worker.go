@@ -202,7 +202,7 @@ func runCompletedDownloadPostProcessing(ctx context.Context, targets []string, i
 	}
 	// A single serialized post-processing run refreshes Jellyfin once for the
 	// whole debounce window, even when several torrents finish together.
-	syncCompletedDownloadsToJellyfin(ctx)
+	syncCompletedDownloadsToJellyfin(ctx, affected)
 }
 
 func mergeAnimeIDs(groups ...[]uint) []uint {
@@ -226,7 +226,7 @@ func sortedUintIDs(values map[uint]struct{}) []uint {
 	return result
 }
 
-func syncCompletedDownloadsToJellyfin(ctx context.Context) {
+func syncCompletedDownloadsToJellyfin(ctx context.Context, animeIDs []uint) {
 	if err := service.RequestJellyfinLibraryRefresh(ctx); err != nil {
 		if !errors.Is(err, service.ErrJellyfinNotConfigured) {
 			log.Printf("Worker: Jellyfin library refresh after download failed: %v", err)
@@ -249,7 +249,15 @@ func syncCompletedDownloadsToJellyfin(ctx context.Context) {
 			return
 		}
 
-		result, err := service.SyncJellyfinLibraryMappings(ctx)
+		var (
+			result service.JellyfinLibrarySyncResult
+			err    error
+		)
+		if len(animeIDs) > 0 {
+			result, err = service.SyncJellyfinLibraryMappingsForAnimeIDs(ctx, animeIDs)
+		} else {
+			result, err = service.SyncJellyfinLibraryMappings(ctx)
+		}
 		if err != nil {
 			log.Printf("Worker: Jellyfin library reconciliation after download failed: %v", err)
 			return
@@ -259,13 +267,16 @@ func syncCompletedDownloadsToJellyfin(ctx context.Context) {
 			event.GlobalBus.Publish(event.EventMetadataUpdated, map[string]interface{}{
 				"type": "jellyfin_library_sync", "status": "completed", "matched_series": result.MatchedSeries,
 			})
-			return
 		}
-		if result.PendingSeries == 0 {
+		if completedDownloadJellyfinBatchSettled(result) {
 			return
 		}
 	}
 	log.Printf("Worker: Jellyfin accepted the scan request but pending series were not visible after 30 seconds")
+}
+
+func completedDownloadJellyfinBatchSettled(result service.JellyfinLibrarySyncResult) bool {
+	return result.PendingSeries == 0 || result.MatchedSeries >= result.PendingSeries
 }
 
 func autoScanCompletedDownloads(targets []string) []uint {

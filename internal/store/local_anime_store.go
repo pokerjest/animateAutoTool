@@ -254,6 +254,26 @@ func (s *LocalAnimeStore) SaveAnime(anime *model.LocalAnime) error {
 	return retrySQLiteBusy(func() error { return s.db.Save(anime).Error })
 }
 
+// DeleteAnimesByIDs hard-deletes the selected local-anime rows. Callers use
+// this only for rows that have already been verified as safe to remove.
+func (s *LocalAnimeStore) DeleteAnimesByIDs(ids []uint) (int64, error) {
+	if s == nil || s.db == nil {
+		return 0, gorm.ErrInvalidDB
+	}
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	var result *gorm.DB
+	err := retrySQLiteBusy(func() error {
+		result = s.db.Unscoped().Where("id IN ?", ids).Delete(&model.LocalAnime{})
+		return result.Error
+	})
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected, nil
+}
+
 // UpdateJellyfinSeriesID updates only the external media-server association.
 // Keeping this narrow avoids overwriting scanner changes when reconciliation
 // runs concurrently with a local-library scan.

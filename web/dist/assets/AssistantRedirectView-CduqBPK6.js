@@ -1,2 +1,0 @@
-import{d as n,aU as c,as as i,aj as u,b as p,s as d,y as l}from"./index-DQzhraO8.js";const _={class:"sr-only",role:"status"},h=n({__name:"AssistantRedirectView",setup(f){const a=d(),o=c(),t=i();function r(){const e=t.isMedia?"/media":"/",s=t.routeFor(t.mode);return!s||s==="/assistant"||s.startsWith("/login")||s.startsWith("/recover")||s.startsWith("/setup")?e:s}return u(async()=>{o.expand(),await a.replace(r())}),(e,s)=>(l(),p("div",_,"正在打开 AI 助手…"))}});export{h as default};
-//# sourceMappingURL=AssistantRedirectView-CduqBPK6.js.map

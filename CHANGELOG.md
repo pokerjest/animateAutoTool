@@ -8,6 +8,16 @@
 
 ## [Unreleased]
 
+## [1.0.0-beta.6] - 2026-07-31
+
+### Changed
+- 本地媒体扫描现在会明确切换文件扫描与元数据整理阶段，进度在阶段真正完成前最多显示 99%。
+- 下载完成后的 Jellyfin 映射按本批受影响番剧执行，并持续轮询直到整批待映射番剧均已处理。
+
+### Fixed
+- 清理增量扫描遗留的同路径空白重复番剧记录，避免并发下载后生成幽灵条目。
+- 修复文件扫描完成时任务中心短暂显示 100% 或仍停留在第一阶段的问题。
+
 ## [1.0.0-beta.5] - 2026-07-31
 
 ### Added
@@ -537,7 +547,8 @@
 
 ---
 
-[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.5...HEAD
+[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.6...HEAD
+[1.0.0-beta.6]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.5...v1.0.0-beta.6
 [1.0.0-beta.5]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.4...v1.0.0-beta.5
 [1.0.0-beta.4]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.3...v1.0.0-beta.4
 [1.0.0-beta.3]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.2...v1.0.0-beta.3

@@ -52,10 +52,14 @@ func TestScanAllReportsEstimatedFolderProgress(t *testing.T) {
 	}
 	require.True(t, sawPlanning)
 	last := updates[len(updates)-1]
-	require.Equal(t, "finalizing", last.Phase)
+	require.Equal(t, "complete", last.Phase)
 	require.EqualValues(t, 4, last.Total)
 	require.Equal(t, last.Total, last.Current)
-	require.Contains(t, last.Message, "1/1 个扫描根目录")
+	require.Contains(t, last.Message, "文件扫描完成")
+	require.GreaterOrEqual(t, len(updates), 2)
+	finalizing := updates[len(updates)-2]
+	require.Equal(t, "finalizing", finalizing.Phase)
+	require.Contains(t, finalizing.Message, "1/1 个扫描根目录")
 }
 
 func TestScannerGroupsLooseFilesAndNestedSeasonDirectories(t *testing.T) {
@@ -245,6 +249,42 @@ func TestScannerRestoresEpisodeWhenAFileReturns(t *testing.T) {
 	require.NoError(t, db.DB.Model(&model.LocalEpisode{}).Count(&episodeCount).Error)
 	require.EqualValues(t, 1, animeCount)
 	require.EqualValues(t, 1, episodeCount)
+}
+
+func TestScannerTargetScanRemovesEmptyDuplicateAtPopulatedPath(t *testing.T) {
+	withServiceTestDB(t)
+	root := t.TempDir()
+	showPath := filepath.Join(root, "Concurrent Download Show")
+	firstEpisode := filepath.Join(showPath, "Concurrent Download Show - 01.mkv")
+	secondEpisode := filepath.Join(showPath, "Concurrent Download Show - 02.mkv")
+	writeScannerFixture(t, firstEpisode)
+	writeScannerFixture(t, secondEpisode)
+	directory := createScannerDirectory(t, root)
+	scanner := NewScannerService()
+
+	_, err := scanner.ScanDirectory(&directory)
+	require.NoError(t, err)
+	var populated model.LocalAnime
+	require.NoError(t, db.DB.Preload("Episodes").Where("path = ?", showPath).First(&populated).Error)
+	require.Len(t, populated.Episodes, 2)
+
+	ghost := model.LocalAnime{
+		DirectoryID: directory.ID,
+		Title:       populated.Title,
+		Path:        showPath,
+		FileCount:   0,
+	}
+	require.NoError(t, db.DB.Create(&ghost).Error)
+
+	result, err := scanner.ScanTargets(&directory, []string{firstEpisode, secondEpisode})
+	require.NoError(t, err)
+	require.Len(t, result.ScannedScopes, 1)
+	require.GreaterOrEqual(t, result.ScanResult.Deleted, 1)
+
+	var animes []model.LocalAnime
+	require.NoError(t, db.DB.Where("directory_id = ?", directory.ID).Find(&animes).Error)
+	require.Len(t, animes, 1)
+	require.Equal(t, populated.ID, animes[0].ID)
 }
 
 func TestScannerKeepsExistingRecordWhenSeasonFolderIsRenamed(t *testing.T) {

@@ -21,6 +21,7 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/parser"
 	"github.com/pokerjest/animateAutoTool/internal/runtimejournal"
+	"github.com/pokerjest/animateAutoTool/internal/store"
 	"gorm.io/gorm"
 )
 
@@ -246,6 +247,13 @@ func (s *ScannerService) ScanAllWithProgress(report ScanProgressFunc) error {
 		"scope":   "run",
 		"summary": GlobalScanStatus.Snapshot().LastSummary,
 	})
+	emitScanProgress(report, ScanProgress{
+		Phase:        "complete",
+		Message:      "文件扫描完成，正在准备元数据整理",
+		Current:      totalWork,
+		Total:        totalWork,
+		FoldersFound: folderEstimate,
+	})
 	return nil
 }
 
@@ -469,6 +477,12 @@ func (s *ScannerService) scanScope(
 			log.Printf("Scanner: cleanup empty anime rows failed for %s: %v", root, err)
 		}
 	}
+	if removed, cleanupErr := cleanupEmptyDuplicateAnimes(st, dir.ID, root); cleanupErr != nil {
+		log.Printf("Scanner: cleanup empty duplicate anime rows failed for %s: %v", root, cleanupErr)
+	} else if removed > 0 {
+		res.Deleted += int(removed)
+		log.Printf("Scanner: removed %d empty duplicate anime rows for %s", removed, root)
+	}
 
 	log.Printf(
 		"ScannerService: Scan complete for %s. Media files: %d, candidate series: %d, added: %d, updated: %d, removed: %d, walk errors: %d",
@@ -488,6 +502,52 @@ func (s *ScannerService) scanScope(
 		return res, affectedAnimeIDs, errors.Join(walkErrors...)
 	}
 	return res, affectedAnimeIDs, nil
+}
+
+// cleanupEmptyDuplicateAnimes removes ghost rows left by an earlier
+// incremental scan. A path can legitimately be shared by multiple loose-file
+// series, so only an empty row is removed when another row at that exact path
+// already owns live episodes.
+func cleanupEmptyDuplicateAnimes(st *store.LocalAnimeStore, directoryID uint, scope string) (int64, error) {
+	if st == nil {
+		return 0, gorm.ErrInvalidDB
+	}
+	animes, err := st.ListAnimesByDirectoryWithEpisodes(directoryID)
+	if err != nil {
+		return 0, err
+	}
+
+	groups := make(map[string][]model.LocalAnime)
+	for _, anime := range animes {
+		if !pathWithinRoot(scope, anime.Path) {
+			continue
+		}
+		key := canonicalComparisonPath(anime.Path)
+		if key == "" {
+			continue
+		}
+		groups[key] = append(groups[key], anime)
+	}
+
+	duplicateIDs := make([]uint, 0)
+	for _, group := range groups {
+		hasPopulatedRow := false
+		for _, anime := range group {
+			if len(anime.Episodes) > 0 {
+				hasPopulatedRow = true
+				break
+			}
+		}
+		if !hasPopulatedRow {
+			continue
+		}
+		for _, anime := range group {
+			if len(anime.Episodes) == 0 {
+				duplicateIDs = append(duplicateIDs, anime.ID)
+			}
+		}
+	}
+	return st.DeleteAnimesByIDs(duplicateIDs)
 }
 
 func inferTargetScanScopes(root string, targets []string) ([]string, error) {

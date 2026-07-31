@@ -200,6 +200,24 @@ func TestCompletedDownloadRescanCoordinatorMergesBatches(t *testing.T) {
 	}
 }
 
+func TestCompletedDownloadJellyfinBatchWaitsForEveryPendingSeries(t *testing.T) {
+	if completedDownloadJellyfinBatchSettled(service.JellyfinLibrarySyncResult{
+		PendingSeries: 2,
+		MatchedSeries: 1,
+	}) {
+		t.Fatal("partial Jellyfin match must keep polling for the other completed series")
+	}
+	if !completedDownloadJellyfinBatchSettled(service.JellyfinLibrarySyncResult{
+		PendingSeries: 1,
+		MatchedSeries: 1,
+	}) {
+		t.Fatal("batch should settle after every pending series is matched")
+	}
+	if !completedDownloadJellyfinBatchSettled(service.JellyfinLibrarySyncResult{}) {
+		t.Fatal("batch with no pending series should settle immediately")
+	}
+}
+
 func writeWorkerFixture(t *testing.T, path string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

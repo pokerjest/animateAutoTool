@@ -8,7 +8,8 @@ const tasks = useTaskStore()
 
 function progressPercent(current = 0, total = 0) {
   if (!total) return 0
-  return Math.min(100, Math.round(current / total * 100))
+  if (current >= total) return 100
+  return Math.min(99, Math.floor(current / total * 100))
 }
 </script>
 
