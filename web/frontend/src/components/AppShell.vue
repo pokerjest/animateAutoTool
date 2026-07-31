@@ -99,8 +99,8 @@ onMounted(() => {
 
     <header :class="['glass fixed inset-x-3 top-3 z-40 flex h-16 items-center justify-between rounded-2xl px-3', ui.desktopSidebarCollapsed ? 'lg:left-[104px]' : 'lg:left-[280px]', 'lg:right-6']">
       <div class="flex min-w-0 items-center gap-3">
-        <button class="btn btn-quiet h-11 min-h-11 w-11 p-0 lg:hidden" type="button" @click="ui.mobileMore = true" aria-label="打开更多导航"><Menu :size="21" /></button>
-        <button class="btn btn-quiet hidden h-11 min-h-11 w-11 p-0 lg:inline-flex" type="button" :aria-expanded="!ui.desktopSidebarCollapsed" :aria-label="ui.desktopSidebarCollapsed ? '展开侧边栏' : '收起侧边栏'" :title="ui.desktopSidebarCollapsed ? '展开侧边栏' : '收起侧边栏'" @click="toggleDesktopSidebar"><Menu :size="21" /></button>
+        <button class="btn btn-quiet app-header-mobile-menu h-11 min-h-11 w-11 p-0" type="button" @click="ui.mobileMore = true" aria-label="打开更多导航"><Menu :size="21" /></button>
+        <button class="btn btn-quiet app-header-sidebar-toggle h-11 min-h-11 w-11 p-0" type="button" :aria-expanded="!ui.desktopSidebarCollapsed" :aria-label="ui.desktopSidebarCollapsed ? '展开侧边栏' : '收起侧边栏'" :title="ui.desktopSidebarCollapsed ? '展开侧边栏' : '收起侧边栏'" @click="toggleDesktopSidebar"><Menu :size="21" /></button>
         <div class="min-w-0"><p class="eyebrow">Animate Auto Tool</p><h1 class="truncate text-lg font-extrabold">{{ route.meta.title }}</h1></div>
       </div>
       <div class="flex items-center gap-2">

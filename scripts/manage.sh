@@ -2,7 +2,7 @@
 # scripts/manage.sh
 
 # Configuration
-APP_NAME="animate-server"
+APP_NAME="AnimateAutoTool"
 BIN_DIR="./bin"
 BIN_PATH="$BIN_DIR/$APP_NAME"
 PID_FILE="$BIN_DIR/server.pid"
@@ -120,6 +120,17 @@ function build() {
     fi
 }
 
+function prepare_binary() {
+    if [ -f "go.mod" ] && [ -d "web/frontend" ]; then
+        build
+        return
+    fi
+    if [ ! -x "$BIN_PATH" ]; then
+        echo -e "${RED}Error: $BIN_PATH not found or not executable.${NC}"
+        exit 1
+    fi
+}
+
 function stop() {
     echo -e "${YELLOW}Stopping server...${NC}"
     
@@ -233,19 +244,19 @@ case $CMD in
         build
         ;;
     start)
-        build
+        prepare_binary
         start
         ;;
     stop)
         stop
         ;;
     restart)
-        build
+        prepare_binary
         stop
         start
         ;;
     run)
-        build
+        prepare_binary
         run
         ;;
     status)

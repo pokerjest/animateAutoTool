@@ -2,12 +2,14 @@
 
 set -euo pipefail
 
-APP_NAME="animate-server"
+RELEASE_ASSET_NAME="animate-server"
+LAUNCHER_NAME="AnimateAutoTool"
+LEGACY_LAUNCHER_NAME="animate-server"
 APP_DISPLAY_NAME="Animate Auto Tool"
 APP_BUNDLE_NAME="${APP_DISPLAY_NAME}.app"
 APP_IDENTIFIER="com.pokerjest.animateautotool"
 VERSION_FILE="./VERSION"
-DEFAULT_VERSION="v0.9.9"
+DEFAULT_VERSION="v1.0.0-beta.1"
 DIST_DIR="${DIST_DIR:-./dist}"
 SRC_PATH="./cmd/server"
 
@@ -79,13 +81,20 @@ package_archive() {
     local binary_path="$3"
     local output_name="$4"
 
-    local platform_dir_name="${APP_NAME}_${VERSION}_${os}_${arch}"
+    local platform_dir_name="${RELEASE_ASSET_NAME}_${VERSION}_${os}_${arch}"
     local platform_dir="$DIST_DIR/$platform_dir_name"
 
     rm -rf "$platform_dir"
     mkdir -p "$platform_dir/bin" "$platform_dir/scripts" "$platform_dir/logs" "$platform_dir/data"
 
     cp "$binary_path" "$platform_dir/bin/$output_name"
+    local legacy_output_name="$LEGACY_LAUNCHER_NAME"
+    if [ "$os" = "windows" ]; then
+        legacy_output_name="${legacy_output_name}.exe"
+    fi
+    if [ "$legacy_output_name" != "$output_name" ]; then
+        cp "$binary_path" "$platform_dir/bin/$legacy_output_name"
+    fi
     cp config.yaml.example "$platform_dir/"
     cp config.yaml.example "$platform_dir/config.yaml"
     cp README.md "$platform_dir/"
@@ -129,7 +138,7 @@ package_archive() {
 package_windows_standalone() {
     local arch="$1"
     local binary_path="$2"
-    local artifact_name="${APP_NAME}_${VERSION}_windows_${arch}.exe"
+    local artifact_name="${RELEASE_ASSET_NAME}_${VERSION}_windows_${arch}.exe"
 
     cp "$binary_path" "$DIST_DIR/$artifact_name"
 }
@@ -157,13 +166,13 @@ package_macos_dmg() {
     local contents_dir="$app_dir/Contents"
     local macos_dir="$contents_dir/MacOS"
     local resources_dir="$contents_dir/Resources"
-    local dmg_name="${APP_NAME}_${VERSION}_darwin_${arch}.dmg"
+    local dmg_name="${RELEASE_ASSET_NAME}_${VERSION}_darwin_${arch}.dmg"
 
     rm -rf "$stage_dir"
     mkdir -p "$macos_dir" "$resources_dir"
 
-    cp "$binary_path" "$macos_dir/$APP_NAME"
-    chmod +x "$macos_dir/$APP_NAME"
+    cp "$binary_path" "$macos_dir/$LAUNCHER_NAME"
+    chmod +x "$macos_dir/$LAUNCHER_NAME"
     cp config.yaml.example "$resources_dir/"
     cp README.md "$resources_dir/"
     cp "$DIST_DIR/animate-release-manifest.json" "$resources_dir/"
@@ -182,7 +191,7 @@ package_macos_dmg() {
     <key>CFBundleDisplayName</key>
     <string>${APP_DISPLAY_NAME}</string>
     <key>CFBundleExecutable</key>
-    <string>${APP_NAME}</string>
+    <string>${LAUNCHER_NAME}</string>
     <key>CFBundleIdentifier</key>
     <string>${APP_IDENTIFIER}</string>
     <key>CFBundleName</key>
@@ -275,7 +284,7 @@ while IFS= read -r platform; do
     [ -n "$platform" ] || continue
 
     IFS="/" read -r os arch <<< "$platform"
-    output_name="$APP_NAME"
+    output_name="$LAUNCHER_NAME"
     if [ "$os" = "windows" ]; then
         output_name="${output_name}.exe"
     fi

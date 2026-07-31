@@ -65,6 +65,11 @@ describe('management workspace navigation', () => {
       .findAll('a')
       .map(link => link.attributes('href'))
     expect(mobilePrimaryLinks).toEqual(['/', '/calendar', '/subscriptions', '/library'])
+    expect(wrapper.findAll('header .app-header-mobile-menu')).toHaveLength(1)
+    expect(wrapper.findAll('header .app-header-sidebar-toggle')).toHaveLength(1)
+
+    await wrapper.get('header .app-header-mobile-menu').trigger('click')
+    expect(wrapper.findAll('h2').some(heading => heading.text() === '所有功能')).toBe(true)
 
     wrapper.unmount()
   })

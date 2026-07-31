@@ -149,7 +149,7 @@ func (s *AgentService) scanLocalAssets(anime *model.LocalAnime) {
 		if err == nil {
 			log.Printf("Agent: Found local NFO for %s", anime.Title)
 			// Upsert Metadata
-			if anime.MetadataID == nil || *anime.MetadataID == 0 {
+			if anime.Metadata == nil || anime.MetadataID == nil || *anime.MetadataID == 0 {
 				m := &model.AnimeMetadata{}
 				anime.Metadata = m
 			}
@@ -249,7 +249,7 @@ func (s *AgentService) scanLocalAssets(anime *model.LocalAnime) {
 
 			data, err := os.ReadFile(filepath.Clean(imgPath)) //nolint:gosec // imgPath is constrained to known local image names inside the anime directory.
 			if err == nil && len(data) > 0 {
-				if anime.MetadataID == nil || *anime.MetadataID == 0 {
+				if anime.Metadata == nil || anime.MetadataID == nil || *anime.MetadataID == 0 {
 					anime.Metadata = &model.AnimeMetadata{Title: anime.Title}
 				}
 

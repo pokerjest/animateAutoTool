@@ -97,12 +97,20 @@ if [ -z "$PACKAGE_DIR" ]; then
     exit 1
 fi
 
-BINARY="$PACKAGE_DIR/bin/animate-server"
+BINARY="$PACKAGE_DIR/bin/AnimateAutoTool"
 if [ ! -f "$BINARY" ]; then
-    BINARY="$PACKAGE_DIR/bin/animate-server.exe"
+    BINARY="$PACKAGE_DIR/bin/AnimateAutoTool.exe"
 fi
 if [ ! -f "$BINARY" ]; then
     echo "The archive does not contain the server binary." >&2
+    exit 1
+fi
+LEGACY_BINARY="$PACKAGE_DIR/bin/animate-server"
+if [[ "$BINARY" == *.exe ]]; then
+    LEGACY_BINARY="${LEGACY_BINARY}.exe"
+fi
+if [ ! -f "$LEGACY_BINARY" ]; then
+    echo "The archive does not contain the legacy updater compatibility binary." >&2
     exit 1
 fi
 chmod +x "$BINARY"

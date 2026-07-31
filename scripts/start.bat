@@ -1,7 +1,7 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-set "APP_EXE=%CD%\bin\animate-server.exe"
+set "APP_EXE=%CD%\bin\AnimateAutoTool.exe"
 set "BIN_DIR=%CD%\bin"
 set "LOG_DIR=%CD%\logs"
 set "PID_FILE=%BIN_DIR%\server.pid"
@@ -49,7 +49,7 @@ if exist "%PID_FILE%" (
 echo Starting Animate Auto Tool...
 powershell -NoProfile -NonInteractive -Command "$psi = New-Object System.Diagnostics.ProcessStartInfo; $psi.FileName = '%APP_EXE%'; $psi.WorkingDirectory = '%CD%'; $psi.UseShellExecute = $true; $psi.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden; $p = [System.Diagnostics.Process]::Start($psi); if ($null -eq $p) { exit 1 }; Set-Content -LiteralPath '%PID_FILE%' -Value $p.Id -Encoding ascii"
 if %ERRORLEVEL% NEQ 0 (
-    echo Failed to start animate-server.exe
+    echo Failed to start AnimateAutoTool.exe
     echo Check write permissions for:
     echo   %LOG_DIR%
     pause

@@ -60,7 +60,7 @@ func (s *MetadataService) EnrichAnime(anime *model.LocalAnime) error {
 	log.Printf("MetadataService: Enriching '%s' (Path: %s)", anime.Title, anime.Path)
 
 	// 1. Ensure Metadata record exists or link to existing
-	if anime.MetadataID == nil || *anime.MetadataID == 0 {
+	if anime.Metadata == nil || anime.MetadataID == nil || *anime.MetadataID == 0 {
 		queryTitle := parser.CleanTitle(anime.Title)
 		log.Printf("Enrich: Attempting to link '%s' to existing metadata...", queryTitle)
 

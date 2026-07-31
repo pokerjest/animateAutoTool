@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/pokerjest/animateAutoTool/internal/appidentity"
 	"github.com/pokerjest/animateAutoTool/internal/config"
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/service"
@@ -43,10 +44,11 @@ func RollbackSnapshot(id string) (bool, error) {
 
 	previousBinary := filepath.Join(snapshotDir, "previous-binary")
 	if info, statErr := os.Stat(previousBinary); statErr == nil && !info.IsDir() {
+		targetBinary := appidentity.CanonicalExecutablePath(executable, runtime.GOOS)
 		if runtime.GOOS == goosWindows {
-			return true, startWindowsRollback(previousBinary, executable, snapshot, logPath, readiness)
+			return true, startWindowsRollback(previousBinary, targetBinary, snapshot, logPath, readiness)
 		}
-		return true, startUnixRollback(previousBinary, executable, snapshot, logPath, readiness)
+		return true, startUnixRollback(previousBinary, targetBinary, snapshot, logPath, readiness)
 	}
 
 	return false, service.RestoreSafetySnapshot(id)

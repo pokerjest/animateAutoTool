@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pokerjest/animateAutoTool/internal/appidentity"
 	"github.com/pokerjest/animateAutoTool/internal/config"
 	"github.com/pokerjest/animateAutoTool/internal/safeio"
 )
@@ -48,8 +49,9 @@ func applyArchiveBinaryUpdate(downloadedArchive, snapshotID, readiness, database
 		return err
 	}
 
-	stagedBinaryPath := filepath.Join(updateDir, filepath.Base(exePath)+".new")
-	if err := extractBinaryFromTarGz(downloadedArchive, filepath.Base(exePath), stagedBinaryPath); err != nil {
+	targetExecutablePath := appidentity.CanonicalExecutablePath(exePath, runtime.GOOS)
+	stagedBinaryPath := filepath.Join(updateDir, filepath.Base(targetExecutablePath)+".new")
+	if err := extractBinaryFromTarGzCandidates(downloadedArchive, appidentity.ExecutableCandidates(runtime.GOOS), stagedBinaryPath); err != nil {
 		return err
 	}
 
@@ -66,6 +68,7 @@ SNAPSHOT_DIR="$5"
 READY_URL="$6"
 DATABASE_PATH="$7"
 CONFIG_PATH="$8"
+LEGACY_BIN="$9"
 TMP_BIN="${TARGET_BIN}.new"
 BAK_BIN="${TARGET_BIN}.bak"
 
@@ -81,6 +84,8 @@ if [ -f "$BAK_BIN" ]; then
 fi
 if [ -f "$TARGET_BIN" ]; then
   mv "$TARGET_BIN" "$BAK_BIN"
+elif [ -f "$LEGACY_BIN" ]; then
+  mv "$LEGACY_BIN" "$BAK_BIN"
 fi
 
 if ! mv "$TMP_BIN" "$TARGET_BIN"; then
@@ -133,7 +138,8 @@ fi
 	}
 
 	snapshotDir := filepath.Join(config.DataDir(), "updates", "snapshots", filepath.Base(snapshotID))
-	cmd := exec.Command("/bin/bash", scriptPath, strconv.Itoa(os.Getpid()), stagedBinaryPath, exePath, logPath, snapshotDir, readiness, databasePath, configPath) //nolint:gosec
+	legacyExecutablePath := filepath.Join(filepath.Dir(exePath), appidentity.LegacyExecutableName(runtime.GOOS))
+	cmd := exec.Command("/bin/bash", scriptPath, strconv.Itoa(os.Getpid()), stagedBinaryPath, targetExecutablePath, logPath, snapshotDir, readiness, databasePath, configPath, legacyExecutablePath) //nolint:gosec
 	if err := cmd.Start(); err != nil {
 		return err
 	}
@@ -143,6 +149,10 @@ fi
 }
 
 func extractBinaryFromTarGz(archivePath, targetBinaryName, destinationPath string) error {
+	return extractBinaryFromTarGzCandidates(archivePath, []string{targetBinaryName}, destinationPath)
+}
+
+func extractBinaryFromTarGzCandidates(archivePath string, targetBinaryNames []string, destinationPath string) error {
 	src, err := os.Open(archivePath) //nolint:gosec
 	if err != nil {
 		return err
@@ -156,13 +166,27 @@ func extractBinaryFromTarGz(archivePath, targetBinaryName, destinationPath strin
 	defer safeio.Close(gzReader)
 
 	tarReader := tar.NewReader(gzReader)
-	targetBinaryName = strings.TrimSpace(targetBinaryName)
-	if targetBinaryName == "" {
-		return errors.New("target binary name is empty")
+	candidateRanks := make(map[string]int, len(targetBinaryNames))
+	candidateLabels := make([]string, 0, len(targetBinaryNames))
+	for _, candidate := range targetBinaryNames {
+		candidate = filepath.Base(strings.TrimSpace(candidate))
+		if candidate == "" {
+			continue
+		}
+		key := strings.ToLower(candidate)
+		if _, exists := candidateRanks[key]; exists {
+			continue
+		}
+		candidateRanks[key] = len(candidateLabels)
+		candidateLabels = append(candidateLabels, candidate)
+	}
+	if len(candidateLabels) == 0 {
+		return errors.New("target binary names are empty")
 	}
 
 	tempPath := destinationPath + ".part"
 	_ = os.Remove(tempPath)
+	bestRank := len(candidateLabels)
 
 	for {
 		header, err := tarReader.Next()
@@ -178,7 +202,8 @@ func extractBinaryFromTarGz(archivePath, targetBinaryName, destinationPath strin
 		}
 
 		name := filepath.Base(strings.TrimSpace(header.Name))
-		if !strings.EqualFold(name, targetBinaryName) {
+		rank, isCandidate := candidateRanks[strings.ToLower(name)]
+		if !isCandidate || rank >= bestRank {
 			continue
 		}
 		if !strings.Contains(filepath.ToSlash(header.Name), "/bin/") {
@@ -198,18 +223,25 @@ func extractBinaryFromTarGz(archivePath, targetBinaryName, destinationPath strin
 			_ = os.Remove(tempPath)
 			return err
 		}
-		if err := os.Rename(tempPath, destinationPath); err != nil {
-			_ = os.Remove(tempPath)
-			return err
+		bestRank = rank
+		if bestRank == 0 {
+			break
 		}
-		if err := os.Chmod(destinationPath, 0755); err != nil {
-			return err
-		}
-		return nil
 	}
 
-	_ = os.Remove(tempPath)
-	return fmt.Errorf("binary %s not found in archive %s", targetBinaryName, filepath.Base(archivePath))
+	if bestRank == len(candidateLabels) {
+		_ = os.Remove(tempPath)
+		return fmt.Errorf("binaries %s not found in archive %s", strings.Join(candidateLabels, ", "), filepath.Base(archivePath))
+	}
+	_ = os.Remove(destinationPath)
+	if err := os.Rename(tempPath, destinationPath); err != nil {
+		_ = os.Remove(tempPath)
+		return err
+	}
+	if err := os.Chmod(destinationPath, 0755); err != nil {
+		return err
+	}
+	return nil
 }
 
 func applyWindowsUpdate(downloadedExe, snapshotID, readiness, databasePath, configPath string) error {
@@ -228,6 +260,7 @@ func applyWindowsUpdate(downloadedExe, snapshotID, readiness, databasePath, conf
 	if err := os.MkdirAll(config.LogsDir(), 0755); err != nil {
 		return err
 	}
+	targetExecutablePath := appidentity.CanonicalExecutablePath(exePath, runtime.GOOS)
 
 	scriptPath := filepath.Join(updateDir, "apply_update.bat")
 	logPath := filepath.Join(config.LogsDir(), "updater.log")
@@ -237,12 +270,13 @@ set "OLD_PID=%~1"
 set "NEW_EXE=%~2"
 set "TARGET_EXE=%~3"
 set "LOG_FILE=%~4"
-set "TMP_EXE=%TARGET_EXE%.new"
-set "BAK_EXE=%TARGET_EXE%.bak"
 set "SNAPSHOT_DIR=%~5"
 set "READY_URL=%~6"
 set "DATABASE_PATH=%~7"
 set "CONFIG_PATH=%~8"
+set "LEGACY_EXE=%~9"
+set "TMP_EXE=%TARGET_EXE%.new"
+set "BAK_EXE=%TARGET_EXE%.bak"
 
 :waitloop
 tasklist /FI "PID eq %OLD_PID%" | find "%OLD_PID%" >nul
@@ -258,7 +292,11 @@ if %ERRORLEVEL% neq 0 (
 )
 
 if exist "%BAK_EXE%" del /F /Q "%BAK_EXE%" >nul 2>nul
-if exist "%TARGET_EXE%" ren "%TARGET_EXE%" "%~n3%~x3.bak"
+if exist "%TARGET_EXE%" (
+  ren "%TARGET_EXE%" "%~n3%~x3.bak"
+) else if exist "%LEGACY_EXE%" (
+  ren "%LEGACY_EXE%" "%~n3%~x3.bak"
+)
 if %ERRORLEVEL% neq 0 (
   echo [%DATE% %TIME%] backup rename failed >> "%LOG_FILE%"
   del /F /Q "%TMP_EXE%" >nul 2>nul
@@ -308,7 +346,8 @@ if exist "%BAK_EXE%" move /Y "%BAK_EXE%" "%SNAPSHOT_DIR%\previous-binary" >nul
 	}
 
 	snapshotDir := filepath.Join(config.DataDir(), "updates", "snapshots", filepath.Base(snapshotID))
-	cmd := exec.Command("cmd", "/C", scriptPath, strconv.Itoa(os.Getpid()), downloadedExe, exePath, logPath, snapshotDir, readiness, databasePath, configPath) //nolint:gosec
+	legacyExecutablePath := filepath.Join(filepath.Dir(exePath), appidentity.LegacyExecutableName(runtime.GOOS))
+	cmd := exec.Command("cmd", "/C", scriptPath, strconv.Itoa(os.Getpid()), downloadedExe, targetExecutablePath, logPath, snapshotDir, readiness, databasePath, configPath, legacyExecutablePath) //nolint:gosec
 	if err := cmd.Start(); err != nil {
 		return err
 	}

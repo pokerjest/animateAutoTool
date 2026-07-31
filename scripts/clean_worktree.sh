@@ -14,6 +14,9 @@ rm -rf \
 
 rm -f \
   animate-server \
+  animate-server.exe \
+  AnimateAutoTool \
+  AnimateAutoTool.exe \
   animateAutoTool \
   animateTool \
   animate_server \

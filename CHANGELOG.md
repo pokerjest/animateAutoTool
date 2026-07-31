@@ -8,6 +8,17 @@
 
 ## [Unreleased]
 
+## [1.0.0-beta.1] - 2026-07-31
+
+### Changed
+- 本地启动器统一更名为 `AnimateAutoTool`（Windows 为 `AnimateAutoTool.exe`），同时保留 `animate-server_*` Release 资产命名以兼容旧版更新器。
+- 更新器、回滚流程、启动脚本和发行包统一使用新启动器名称，并支持从 v0.9.9 自动迁移旧文件和脚本。
+
+### Fixed
+- 修复本地媒体扫描遇到失效关联记录时可能崩溃的问题，并增加定向扫描回归覆盖。
+- 修复移动端顶部同时显示两个菜单按钮的问题。
+- 修复发行包中的启动脚本在无源码环境下仍尝试重新构建程序的问题。
+
 ## [0.9.9] - 2026-07-31
 
 ### Added
@@ -494,7 +505,8 @@
 
 ---
 
-[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v0.9.9...HEAD
+[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.1...HEAD
+[1.0.0-beta.1]: https://github.com/pokerjest/animateAutoTool/compare/v0.9.9...v1.0.0-beta.1
 [0.9.9]: https://github.com/pokerjest/animateAutoTool/compare/v0.9.8...v0.9.9
 [0.9.4]: https://github.com/pokerjest/animateAutoTool/compare/v0.9.3...v0.9.4
 [0.9.2.1]: https://github.com/pokerjest/animateAutoTool/compare/v0.9.2...v0.9.2.1

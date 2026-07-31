@@ -79,7 +79,7 @@ help:
 	@echo "Animate Auto Tool Makefile 帮助"
 	@echo "========================================"
 	@echo "可用命令:"
-	@echo "  make build    - 编译项目 (bin/animate-server)"
+	@echo "  make build    - 编译项目 (bin/AnimateAutoTool)"
 	@echo "  make frontend-build - 构建嵌入式 Vue 前端"
 	@echo "  make frontend-test  - 运行前端组件测试"
 	@echo "  make lint     - 运行 golangci-lint 静态检查"

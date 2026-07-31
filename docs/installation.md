@@ -13,6 +13,8 @@
 
 下载后固定目录、复制配置模板，再按[快速开始](getting-started.md)启动。
 
+压缩包与 GitHub Release 资产继续使用 `animate-server_*` 前缀以兼容旧版更新器；包内本地主程序名为 `AnimateAutoTool`（Windows 为 `AnimateAutoTool.exe`）。
+
 ## Docker Compose
 
 仓库中的 `docker-compose.yml` 只提供起点。正式使用前必须确认三个挂载点：

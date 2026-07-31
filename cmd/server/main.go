@@ -16,6 +16,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/pokerjest/animateAutoTool/internal/api"
+	"github.com/pokerjest/animateAutoTool/internal/appidentity"
 	"github.com/pokerjest/animateAutoTool/internal/config"
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/event"
@@ -35,11 +36,17 @@ const (
 )
 
 func main() {
+	launcherMigration, launcherMigrationErr := appidentity.PrepareLocalLauncher()
 	if err := config.LoadConfig(""); err != nil {
 		log.Fatalf("Failed to load config: %v", err)
 	}
 	logCleanup := configureLogging()
 	defer logCleanup()
+	if launcherMigrationErr != nil {
+		log.Printf("Failed to prepare canonical launcher name: %v", launcherMigrationErr)
+	} else if err := launcherMigration.Complete(); err != nil {
+		log.Printf("Failed to finish launcher name migration: %v", err)
+	}
 
 	if config.AppConfig.Server.Headless {
 		log.Println("Tray integration disabled; starting in headless mode.")

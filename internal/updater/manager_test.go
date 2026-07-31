@@ -133,13 +133,69 @@ func TestCurrentVersionWantsPrerelease(t *testing.T) {
 	}
 }
 
-func TestExtractBinaryFromTarGz(t *testing.T) {
+func TestExtractBinaryFromTarGzPrefersCanonicalName(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
 	archivePath := filepath.Join(dir, "artifact.tar.gz")
-	destPath := filepath.Join(dir, "animate-server")
-	payload := []byte("binary-content")
+	destPath := filepath.Join(dir, "AnimateAutoTool")
+
+	file, err := os.Create(filepath.Clean(archivePath)) //nolint:gosec // archivePath is created under t.TempDir().
+	if err != nil {
+		t.Fatalf("create archive: %v", err)
+	}
+	gz := gzip.NewWriter(file)
+	tw := tar.NewWriter(gz)
+	entries := []struct {
+		name    string
+		payload []byte
+	}{
+		{name: "animate-server_v0.5.2_linux_amd64/bin/animate-server", payload: []byte("legacy-content")},
+		{name: "animate-server_v0.5.2_linux_amd64/bin/AnimateAutoTool", payload: []byte("canonical-content")},
+	}
+	for _, entry := range entries {
+		header := &tar.Header{
+			Name: entry.name,
+			Mode: 0o755,
+			Size: int64(len(entry.payload)),
+		}
+		if err := tw.WriteHeader(header); err != nil {
+			t.Fatalf("write header: %v", err)
+		}
+		if _, err := tw.Write(entry.payload); err != nil {
+			t.Fatalf("write payload: %v", err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatalf("close tar writer: %v", err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatalf("close gzip writer: %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("close archive: %v", err)
+	}
+
+	if err := extractBinaryFromTarGzCandidates(archivePath, []string{"AnimateAutoTool", "animate-server"}, destPath); err != nil {
+		t.Fatalf("extractBinaryFromTarGz: %v", err)
+	}
+
+	got, err := os.ReadFile(filepath.Clean(destPath)) //nolint:gosec // destPath is extracted under t.TempDir().
+	if err != nil {
+		t.Fatalf("read extracted binary: %v", err)
+	}
+	if string(got) != "canonical-content" {
+		t.Fatalf("unexpected extracted content: %q", string(got))
+	}
+}
+
+func TestExtractBinaryFromTarGzAcceptsLegacyName(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	archivePath := filepath.Join(dir, "artifact.tar.gz")
+	destPath := filepath.Join(dir, "AnimateAutoTool")
+	payload := []byte("legacy-content")
 
 	file, err := os.Create(filepath.Clean(archivePath)) //nolint:gosec // archivePath is created under t.TempDir().
 	if err != nil {
@@ -168,16 +224,54 @@ func TestExtractBinaryFromTarGz(t *testing.T) {
 		t.Fatalf("close archive: %v", err)
 	}
 
-	if err := extractBinaryFromTarGz(archivePath, "animate-server", destPath); err != nil {
+	if err := extractBinaryFromTarGzCandidates(archivePath, []string{"AnimateAutoTool", "animate-server"}, destPath); err != nil {
 		t.Fatalf("extractBinaryFromTarGz: %v", err)
 	}
-
 	got, err := os.ReadFile(filepath.Clean(destPath)) //nolint:gosec // destPath is extracted under t.TempDir().
 	if err != nil {
 		t.Fatalf("read extracted binary: %v", err)
 	}
 	if string(got) != string(payload) {
 		t.Fatalf("unexpected extracted content: %q", string(got))
+	}
+}
+
+func TestExtractBinaryFromTarGzSingleNameCompatibility(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	archivePath := filepath.Join(dir, "artifact.tar.gz")
+	destPath := filepath.Join(dir, "animate-server")
+	payload := []byte("binary-content")
+
+	file, err := os.Create(filepath.Clean(archivePath)) //nolint:gosec // archivePath is created under t.TempDir().
+	if err != nil {
+		t.Fatalf("create archive: %v", err)
+	}
+	gz := gzip.NewWriter(file)
+	tw := tar.NewWriter(gz)
+	if err := tw.WriteHeader(&tar.Header{
+		Name: "animate-server_v0.5.2_linux_amd64/bin/animate-server",
+		Mode: 0o755,
+		Size: int64(len(payload)),
+	}); err != nil {
+		t.Fatalf("write header: %v", err)
+	}
+	if _, err := tw.Write(payload); err != nil {
+		t.Fatalf("write payload: %v", err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatalf("close tar writer: %v", err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatalf("close gzip writer: %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("close archive: %v", err)
+	}
+
+	if err := extractBinaryFromTarGz(archivePath, "animate-server", destPath); err != nil {
+		t.Fatalf("extractBinaryFromTarGz: %v", err)
 	}
 }
 

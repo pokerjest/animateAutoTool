@@ -53,3 +53,5 @@ Recommended filenames:
 8. `SHA256SUMS.txt`
 
 `SHA256SUMS.txt` should include checksum lines for all updater assets above.
+
+Release asset names intentionally keep the `animate-server` prefix for updater compatibility. The launcher stored inside archives and macOS app bundles is named `AnimateAutoTool`; archives also carry a temporary `animate-server` compatibility copy so v0.9.9 can upgrade in place.
