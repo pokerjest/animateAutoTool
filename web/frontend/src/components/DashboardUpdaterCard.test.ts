@@ -45,7 +45,10 @@ describe('DashboardUpdaterCard', () => {
         channel: 'beta',
         current_version: 'v0.9.7',
         latest_version: 'v0.9.9-beta.1',
-        items: [{ version: 'v0.9.9-beta.1', prerelease: true, release_url: 'https://example.test/v0.9.9-beta.1', asset_available: true, newer_than_current: true }],
+        items: [
+          { version: 'v0.9.9', prerelease: false, release_url: 'https://example.test/v0.9.9', asset_available: true, newer_than_current: true, installable: true, switchable: true },
+          { version: 'v0.9.9-beta.1', prerelease: true, release_url: 'https://example.test/v0.9.9-beta.1', asset_available: true, newer_than_current: true },
+        ],
       })
       throw new Error(`unexpected request: ${path}`)
     })
@@ -56,6 +59,8 @@ describe('DashboardUpdaterCard', () => {
 
     await wrapper.findAll('button').find(button => button.text().includes('测试版'))!.trigger('click')
     await vi.waitFor(() => expect(wrapper.text()).toContain('v0.9.9-beta.1 · 测试版'))
+    expect(wrapper.text()).not.toContain('v0.9.9 · 稳定版')
+    expect(wrapper.text()).not.toContain('可回切')
     expect(localStorage.getItem('animate.updater.channel')).toBe('beta')
   })
 

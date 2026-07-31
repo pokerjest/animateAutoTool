@@ -8,6 +8,11 @@
 
 ## [Unreleased]
 
+## [1.0.0-beta.3] - 2026-07-31
+
+### Fixed
+- 修复测试版更新频道错误混入稳定版和“可回切”选项的问题；稳定版与测试版列表现在严格分离。
+
 ## [1.0.0-beta.2] - 2026-07-31
 
 ### Fixed
@@ -510,7 +515,8 @@
 
 ---
 
-[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.2...HEAD
+[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.3...HEAD
+[1.0.0-beta.3]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.2...v1.0.0-beta.3
 [1.0.0-beta.2]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.1...v1.0.0-beta.2
 [1.0.0-beta.1]: https://github.com/pokerjest/animateAutoTool/compare/v0.9.9...v1.0.0-beta.1
 [0.9.9]: https://github.com/pokerjest/animateAutoTool/compare/v0.9.8...v0.9.9

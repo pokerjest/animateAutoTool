@@ -150,7 +150,9 @@ func buildReleaseCatalog(releases []githubRelease, channel ReleaseChannel, curre
 		if release.Draft || strings.TrimSpace(release.TagName) == "" || !ValidReleaseVersion(release.TagName) {
 			continue
 		}
-		if channel == ReleaseChannelStable && releaseIsPrerelease(release) {
+		isPrerelease := releaseIsPrerelease(release)
+		if (channel == ReleaseChannelStable && isPrerelease) ||
+			(channel == ReleaseChannelBeta && !isPrerelease) {
 			continue
 		}
 		filtered = append(filtered, release)

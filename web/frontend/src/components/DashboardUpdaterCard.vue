@@ -31,8 +31,11 @@ const snapshots = useQuery({
   staleTime: 60_000,
 })
 
+const channelReleases = computed(() =>
+  (releases.data.value?.items || []).filter(item => channel.value === 'beta' ? item.prerelease : !item.prerelease),
+)
 const installableReleases = computed(() =>
-  (releases.data.value?.items || []).filter(item => item.installable ?? (item.newer_than_current && item.asset_available)),
+  channelReleases.value.filter(item => item.installable ?? (item.newer_than_current && item.asset_available)),
 )
 const selectedRelease = computed<UpdateRelease | undefined>(() =>
   installableReleases.value.find(item => item.version === selectedVersion.value),
@@ -118,7 +121,7 @@ async function restoreSnapshot() {
         <div class="min-w-0">
           <p class="eyebrow">APPLICATION UPDATE</p>
           <h2 class="mt-1 text-xl font-black">选择要更新的版本</h2>
-          <p class="muted mt-1 text-sm leading-6">稳定版用于日常使用；测试版会额外显示 GitHub prerelease，方便快速验证新功能。</p>
+          <p class="muted mt-1 text-sm leading-6">稳定版仅显示正式 Release；测试版仅显示 GitHub prerelease，方便快速验证新功能。</p>
         </div>
       </div>
       <span class="badge">当前 {{ releases.data.value?.current_version || '读取中' }}</span>
