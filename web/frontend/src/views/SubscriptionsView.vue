@@ -179,7 +179,7 @@ function openHistory(item: Subscription) {
 }
 
 function playSubscription(item: Subscription) {
-  if (!item.playable || !item.local_anime_id) return
+  if (!item.local_anime_id || (item.library_episode_count || 0) <= 0) return
   detailTarget.value = null
   void router.push(localPlayerLocation(item.local_anime_id, undefined, true))
 }

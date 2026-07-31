@@ -144,22 +144,30 @@ var enrichSubscriptionMetadata = func(metadata *model.AnimeMetadata, title strin
 	service.NewMetadataService().EnrichMetadata(metadata, title)
 }
 
+func reconcileSubscriptionLibraryState() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, err := service.SyncJellyfinLibraryMappings(ctx)
+	if errors.Is(err, service.ErrJellyfinNotConfigured) {
+		return nil
+	}
+	return err
+}
+
 func SubscriptionsHandler(c *gin.Context) {
 	skip := IsHTMX(c)
 	subs, err := listSubscriptionsWithMetadata()
 	if err != nil {
 		log.Printf("Error fetching subscriptions: %v", err)
 	}
-	populateSubscriptionStats(subs)
 	syncContext, cancelSync := context.WithTimeout(c.Request.Context(), 5*time.Second)
-	syncResult, syncErr := service.SyncJellyfinLibraryMappings(syncContext)
+	_, syncErr := service.SyncJellyfinLibraryMappings(syncContext)
 	if syncErr != nil && !errors.Is(syncErr, service.ErrJellyfinNotConfigured) {
 		log.Printf("subscription Jellyfin state reconciliation failed: %v", syncErr)
 	}
 	cancelSync()
-	if syncResult.MatchedSeries > 0 {
-		populateSubscriptionStats(subs)
-	}
+	populateSubscriptionStats(subs)
 
 	data := SubscriptionsData{
 		SkipLayout:      skip,
@@ -458,9 +466,13 @@ func RunSubscriptionHandler(c *gin.Context) {
 		return
 	}
 
-	if err := runSubscriptionCheck(sub, "manual"); err != nil {
-		log.Printf("RunSubscription: QB Login failed: %v", err)
-		subscriptionSaveError(c, "立即检查订阅", fmt.Errorf("QBittorrent 连接失败: %w", err))
+	checkErr := runSubscriptionCheck(sub, "manual")
+	if reconcileErr := reconcileSubscriptionLibraryState(); reconcileErr != nil {
+		log.Printf("RunSubscription: local library reconciliation failed: %v", reconcileErr)
+	}
+	if checkErr != nil {
+		log.Printf("RunSubscription: QB Login failed: %v", checkErr)
+		subscriptionSaveError(c, "立即检查订阅", fmt.Errorf("QBittorrent 连接失败: %w", checkErr))
 		return
 	}
 

@@ -8,6 +8,14 @@
 
 ## [Unreleased]
 
+## [1.0.0-beta.7] - 2026-07-31
+
+### Changed
+- 订阅列表会先完成 Jellyfin 与本地媒体库对账再计算入库状态，手动检查订阅后也会立即补做映射。
+
+### Fixed
+- 修复本地已有可播放剧集、但 Jellyfin 尚未完成关联时，订阅卡片和历史弹窗错误隐藏播放入口的问题。
+
 ## [1.0.0-beta.6] - 2026-07-31
 
 ### Changed
@@ -547,7 +555,8 @@
 
 ---
 
-[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.6...HEAD
+[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.7...HEAD
+[1.0.0-beta.7]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.6...v1.0.0-beta.7
 [1.0.0-beta.6]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.5...v1.0.0-beta.6
 [1.0.0-beta.5]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.4...v1.0.0-beta.5
 [1.0.0-beta.4]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.3...v1.0.0-beta.4

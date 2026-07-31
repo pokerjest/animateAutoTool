@@ -108,6 +108,23 @@ describe('subscription presentational components', () => {
     expect(wrapper.text()).toContain('本地已入库 3 集')
   })
 
+  it('exposes local playback before Jellyfin has linked the series', () => {
+    const wrapper = mount(SubscriptionCard, {
+      props: {
+        item: subscription({
+          local_anime_id: 43,
+          library_episode_count: 2,
+          library_stage: '等待 Jellyfin 扫描',
+          library_hint: '本地已识别 2 集，正在等待 Jellyfin 扫描媒体文件。',
+          playable: false,
+        }),
+        isBusy: () => false,
+      },
+    })
+
+    wrapper.get('button[aria-label="打开播放器"]')
+  })
+
   it('explains pending Jellyfin scans with a specific sync action', async () => {
     const wrapper = mount(SubscriptionCard, {
       props: {

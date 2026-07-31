@@ -47,7 +47,11 @@ const releaseFilterLabel = computed(() => {
   return parts.join(' · ')
 })
 
-const canPlay = computed(() => Boolean(props.item.playable && props.item.local_anime_id))
+// Local playback uses the local episode table; Jellyfin association is
+// optional and must not hide a playable local series from the subscription UI.
+const canPlay = computed(() => Boolean(
+  props.item.local_anime_id && (props.item.library_episode_count || 0) > 0,
+))
 const usesResourceLedger = computed(() => props.item.rss_count !== undefined)
 const showIssueBadge = computed(() => usesResourceLedger.value
   ? Boolean(props.item.needs_attention)

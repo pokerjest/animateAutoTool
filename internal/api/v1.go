@@ -493,19 +493,15 @@ func V1SubscriptionsHandler(c *gin.Context) {
 		v1Error(c, http.StatusInternalServerError, "subscriptions_unavailable", "无法读取订阅")
 		return
 	}
-	// The first pass also links newly scanned files back to their subscription
-	// metadata. Jellyfin reconciliation can then resolve those records during
-	// the same request instead of waiting for a player page to be opened.
-	populateSubscriptionStats(items)
+	// Reconcile first so dynamic playback fields are computed from the latest
+	// Jellyfin/local-library state in the same response.
 	syncContext, cancelSync := context.WithTimeout(c.Request.Context(), 5*time.Second)
-	syncResult, syncErr := service.SyncJellyfinLibraryMappings(syncContext)
+	_, syncErr := service.SyncJellyfinLibraryMappings(syncContext)
 	if syncErr != nil && !errors.Is(syncErr, service.ErrJellyfinNotConfigured) {
 		log.Printf("subscription Jellyfin state reconciliation failed: %v", syncErr)
 	}
 	cancelSync()
-	if syncResult.MatchedSeries > 0 {
-		populateSubscriptionStats(items)
-	}
+	populateSubscriptionStats(items)
 	page, pageSize := v1Pagination(c, 100)
 	total := len(items)
 	start := min((page-1)*pageSize, total)
@@ -560,9 +556,13 @@ func V1SubscriptionActionHandler(action string) gin.HandlerFunc {
 			taskID := "subscription-" + c.Param("id")
 			taskstate.Global.Start(taskID, "subscription", "订阅检查", "正在检查 "+sub.Title)
 			go func(target *model.Subscription) {
-				if err := runSubscriptionCheck(target, "manual"); err != nil {
-					log.Printf("manual subscription run failed: %v", err)
-					taskstate.Global.Fail(taskID, err)
+				checkErr := runSubscriptionCheck(target, "manual")
+				if reconcileErr := reconcileSubscriptionLibraryState(); reconcileErr != nil {
+					log.Printf("manual subscription library reconciliation failed: %v", reconcileErr)
+				}
+				if checkErr != nil {
+					log.Printf("manual subscription run failed: %v", checkErr)
+					taskstate.Global.Fail(taskID, checkErr)
 					return
 				}
 				taskstate.Global.Complete(taskID, "订阅检查完成")
