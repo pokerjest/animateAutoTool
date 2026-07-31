@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-APP_NAME="${APP_NAME:-animate-server}"
+APP_NAME="${APP_NAME:-AnimateAutoTool}"
 VERSION_FILE="${VERSION_FILE:-./VERSION}"
 DIST_DIR="${DIST_DIR:-./dist}"
 WINDOWS_ARCHES="${WINDOWS_ARCHES:-amd64}"

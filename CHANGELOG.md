@@ -8,6 +8,11 @@
 
 ## [Unreleased]
 
+## [1.0.0-beta.2] - 2026-07-31
+
+### Fixed
+- 修复发行包和 Windows 独立可执行文件仍使用 `animate-server_*` 文件名前缀的问题；新资产统一使用 `AnimateAutoTool_*`，同时保留旧资产更新兼容。
+
 ## [1.0.0-beta.1] - 2026-07-31
 
 ### Changed
@@ -505,7 +510,8 @@
 
 ---
 
-[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.1...HEAD
+[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.2...HEAD
+[1.0.0-beta.2]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.1...v1.0.0-beta.2
 [1.0.0-beta.1]: https://github.com/pokerjest/animateAutoTool/compare/v0.9.9...v1.0.0-beta.1
 [0.9.9]: https://github.com/pokerjest/animateAutoTool/compare/v0.9.8...v0.9.9
 [0.9.4]: https://github.com/pokerjest/animateAutoTool/compare/v0.9.3...v0.9.4

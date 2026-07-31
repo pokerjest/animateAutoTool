@@ -30,7 +30,7 @@ func TestIsChecksumLikeFile(t *testing.T) {
 		name string
 		want bool
 	}{
-		{"animate-server_v0.5.3_linux_amd64.tar.gz.sha256", true},
+		{"AnimateAutoTool_v0.5.3_linux_amd64.tar.gz.sha256", true},
 		{"SHA256SUMS.txt", true},
 		{"checksums.txt", true},
 		{"animate-server.exe", false},
@@ -49,10 +49,10 @@ func TestParseChecksumTextSkipsCommentsAndUnrelated(t *testing.T) {
 		"# header comment",
 		"",
 		strings.Repeat("a", 64) + "  other.tar.gz",
-		strings.Repeat("b", 64) + "  animate-server_v0.5.3_linux_amd64.tar.gz",
+		strings.Repeat("b", 64) + "  AnimateAutoTool_v0.5.3_linux_amd64.tar.gz",
 	}, "\n")
 
-	hash, err := parseChecksumText(text, "animate-server_v0.5.3_linux_amd64.tar.gz")
+	hash, err := parseChecksumText(text, "AnimateAutoTool_v0.5.3_linux_amd64.tar.gz")
 	if err != nil {
 		t.Fatalf("parseChecksumText: %v", err)
 	}

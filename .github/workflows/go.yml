@@ -114,7 +114,7 @@ jobs:
       - name: Test packaged binary
         env:
           PACKAGE_E2E_INSTALL_BROWSER: "0"
-          PACKAGE_E2E_ARTIFACT: dist/animate-server_${{ env.APP_VERSION }}_linux_amd64.tar.gz
+          PACKAGE_E2E_ARTIFACT: dist/AnimateAutoTool_${{ env.APP_VERSION }}_linux_amd64.tar.gz
           PACKAGE_E2E_VERSION: ${{ env.APP_VERSION }}
         run: bash ./scripts/test-package-e2e.sh
 

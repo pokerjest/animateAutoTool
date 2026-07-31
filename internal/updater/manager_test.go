@@ -61,7 +61,7 @@ func TestPickAssetForCurrentPlatform(t *testing.T) {
 		TagName: "v0.4.4",
 		Assets: []releaseAsset{
 			{Name: "unrelated_asset.zip", BrowserDownloadURL: "https://example.com/unrelated"},
-			{Name: "animate-server_v0.4.4" + candidates[0], BrowserDownloadURL: "https://example.com/matched"},
+			{Name: "AnimateAutoTool_v0.4.4" + candidates[0], BrowserDownloadURL: "https://example.com/matched"},
 		},
 	}
 
@@ -71,6 +71,31 @@ func TestPickAssetForCurrentPlatform(t *testing.T) {
 	}
 	if asset == nil || asset.BrowserDownloadURL != "https://example.com/matched" {
 		t.Fatalf("unexpected selected asset: %#v", asset)
+	}
+}
+
+func TestPickAssetForCurrentPlatformSupportsLegacyPrefix(t *testing.T) {
+	t.Parallel()
+
+	candidates := platformAssetCandidates(runtime.GOOS, runtime.GOARCH, false)
+	if len(candidates) == 0 {
+		t.Skip("current platform not supported by updater")
+	}
+
+	release := &githubRelease{
+		TagName: "v0.4.4",
+		Assets: []releaseAsset{{
+			Name:               "animate-server_v0.4.4" + candidates[0],
+			BrowserDownloadURL: "https://example.com/legacy",
+		}},
+	}
+
+	asset, err := pickAssetForCurrentPlatform(release)
+	if err != nil {
+		t.Fatalf("expected legacy asset to remain supported, got %v", err)
+	}
+	if asset == nil || asset.BrowserDownloadURL != "https://example.com/legacy" {
+		t.Fatalf("unexpected selected legacy asset: %#v", asset)
 	}
 }
 

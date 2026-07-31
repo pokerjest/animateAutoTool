@@ -10,7 +10,7 @@ func releaseWithCurrentPlatformAsset(version string, prerelease bool) githubRele
 	assets := []releaseAsset{}
 	if len(candidates) > 0 {
 		assets = append(assets, releaseAsset{
-			Name:               "animate-server_" + normalizeVersion(version) + candidates[0],
+			Name:               "AnimateAutoTool_" + normalizeVersion(version) + candidates[0],
 			BrowserDownloadURL: "https://example.test/" + version,
 		})
 	}

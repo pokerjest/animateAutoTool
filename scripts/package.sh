@@ -2,14 +2,14 @@
 
 set -euo pipefail
 
-RELEASE_ASSET_NAME="animate-server"
+RELEASE_ASSET_NAME="AnimateAutoTool"
 LAUNCHER_NAME="AnimateAutoTool"
 LEGACY_LAUNCHER_NAME="animate-server"
 APP_DISPLAY_NAME="Animate Auto Tool"
 APP_BUNDLE_NAME="${APP_DISPLAY_NAME}.app"
 APP_IDENTIFIER="com.pokerjest.animateautotool"
 VERSION_FILE="./VERSION"
-DEFAULT_VERSION="v1.0.0-beta.1"
+DEFAULT_VERSION="v1.0.0-beta.2"
 DIST_DIR="${DIST_DIR:-./dist}"
 SRC_PATH="./cmd/server"
 

@@ -43,15 +43,15 @@ The app updater currently recognizes these release asset suffixes:
 
 Recommended filenames:
 
-1. `animate-server_<version>_windows_amd64.exe`
-2. `animate-server_<version>_linux_amd64.tar.gz`
-3. `animate-server_<version>_linux_arm64.tar.gz`
-4. `animate-server_<version>_darwin_amd64.tar.gz`
-5. `animate-server_<version>_darwin_arm64.tar.gz`
-6. `animate-server_<version>_darwin_amd64.dmg`
-7. `animate-server_<version>_darwin_arm64.dmg`
+1. `AnimateAutoTool_<version>_windows_amd64.exe`
+2. `AnimateAutoTool_<version>_linux_amd64.tar.gz`
+3. `AnimateAutoTool_<version>_linux_arm64.tar.gz`
+4. `AnimateAutoTool_<version>_darwin_amd64.tar.gz`
+5. `AnimateAutoTool_<version>_darwin_arm64.tar.gz`
+6. `AnimateAutoTool_<version>_darwin_amd64.dmg`
+7. `AnimateAutoTool_<version>_darwin_arm64.dmg`
 8. `SHA256SUMS.txt`
 
 `SHA256SUMS.txt` should include checksum lines for all updater assets above.
 
-Release asset names intentionally keep the `animate-server` prefix for updater compatibility. The launcher stored inside archives and macOS app bundles is named `AnimateAutoTool`; archives also carry a temporary `animate-server` compatibility copy so v0.9.9 can upgrade in place.
+Release assets use the `AnimateAutoTool` prefix. The updater matches platform suffixes and remains compatible with older `animate-server_*` assets. The launcher stored inside archives and macOS app bundles is named `AnimateAutoTool`; archives also carry an `animate-server` compatibility copy so v0.9.9 can upgrade in place.
