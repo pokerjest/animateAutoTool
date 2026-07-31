@@ -46,13 +46,13 @@ function submitSearch() {
       <AsyncButton class="btn btn-primary" :loading="actions.isBusy('media-refresh')" loading-label="刷新中…" @click="actions.run('media-refresh', refresh)"><RefreshCw :size="17" />刷新媒体库</AsyncButton>
     </PageHeader>
 
-    <section v-if="providers.isLoading.value" class="panel p-6"><StateBlock state="loading" title="正在连接媒体服务" /></section>
+    <section v-if="providers.isLoading.value" class="panel p-6"><StateBlock state="loading" scene="diagnosing" title="正在连接媒体服务" /></section>
     <section v-else-if="!configured" class="panel p-7">
-      <StateBlock state="empty" title="请先配置 Jellyfin" description="媒体模式需要保存 Jellyfin 地址和 API Key。配置完成后即可回来浏览媒体库。" />
+      <StateBlock state="empty" scene="empty-library" title="请先配置 Jellyfin" description="媒体模式需要保存 Jellyfin 地址和 API Key。配置完成后即可回来浏览媒体库。" />
       <div class="mt-5 flex justify-center"><RouterLink class="btn btn-primary" to="/settings?focus=media">打开媒体服务设置</RouterLink></div>
     </section>
     <section v-else-if="!connected" class="panel p-7">
-      <StateBlock state="error" title="Jellyfin 已配置但当前不可达" :description="jellyfin?.detail || '请检查 AnimateTool 连接地址、API Key 和网络代理设置。'" />
+      <StateBlock state="error" scene="diagnosing" title="Jellyfin 已配置但当前不可达" :description="jellyfin?.detail || '请检查 AnimateTool 连接地址、API Key 和网络代理设置。'" />
       <div class="mt-5 flex flex-wrap justify-center gap-2"><AsyncButton class="btn btn-primary" :loading="actions.isBusy('media-refresh')" loading-label="刷新中…" @click="actions.run('media-refresh', refresh)"><RefreshCw :size="17" />重新检查</AsyncButton><RouterLink class="btn btn-secondary" to="/settings?focus=media">检查媒体服务设置</RouterLink></div>
     </section>
     <template v-else>
@@ -66,7 +66,7 @@ function submitSearch() {
         <label class="search-field min-w-0 flex-1"><Search :size="18" /><input v-model="search" class="field field-leading-icon min-w-0" placeholder="搜索媒体标题、剧集或电影" aria-label="搜索媒体" /></label>
         <button class="btn btn-primary w-full justify-center sm:w-auto" type="submit">搜索</button>
       </form>
-      <StateBlock v-if="!shelves.length" state="empty" title="媒体库暂时没有可展示内容" description="可以在 Jellyfin 中扫描媒体库，或者打开媒体库页面查看全部条目。" />
+      <StateBlock v-if="!shelves.length" state="empty" scene="empty-library" title="媒体库暂时没有可展示内容" description="可以在 Jellyfin 中扫描媒体库，或者打开媒体库页面查看全部条目。" />
       <section v-for="shelf in shelves" :key="shelf.key" class="space-y-3">
         <div class="flex items-center justify-between"><h2 class="text-xl font-black">{{ shelf.title }}</h2><RouterLink class="muted text-sm font-bold hover:text-[var(--brand)]" :to="shelf.key === 'continue' ? '/media?section=continue' : shelf.key === 'favorites' ? '/media?section=favorites' : '/media/library/all'">查看全部</RouterLink></div>
         <div class="poster-grid">

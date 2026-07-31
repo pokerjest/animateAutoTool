@@ -22,6 +22,26 @@ describe('ui store', () => {
     expect(localStorage.getItem('animate-background-mode')).toBe('anime')
   })
 
+  it('persists and applies the current mascot skin without changing other preferences', () => {
+    const ui = useUIStore()
+    ui.setTheme('dark')
+    ui.setBackgroundMode('anime')
+    ui.setSkin('mascot')
+
+    expect(ui.skin).toBe('mascot')
+    expect(localStorage.getItem('animate-ui-skin')).toBe('mascot')
+    expect(document.documentElement.dataset.skin).toBe('mascot')
+    expect(document.documentElement.classList.contains('dark')).toBe(true)
+    expect(ui.backgroundMode).toBe('anime')
+  })
+
+  it('falls back to the classic skin for unknown stored values', () => {
+    localStorage.setItem('animate-ui-skin', 'v1')
+    const ui = useUIStore()
+
+    expect(ui.skin).toBe('classic')
+  })
+
   it('queues a globally visible toast', () => {
     vi.useFakeTimers()
     const ui = useUIStore()

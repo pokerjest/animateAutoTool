@@ -85,6 +85,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/session/change-username": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Changes the current administrator login name after verifying the current password. The active session remains valid because it is bound to the user ID. */
+        post: operations["changeUsername"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/recovery/reset": {
         parameters: {
             query?: never;
@@ -1995,6 +2012,11 @@ export interface components {
             /** @default false */
             remember_me: boolean;
         };
+        ChangeUsernameInput: {
+            /** Format: password */
+            current_password: string;
+            new_username: string;
+        };
         BackupArchivePasswordInput: {
             /**
              * Format: password
@@ -2844,6 +2866,24 @@ export interface operations {
         responses: {
             200: components["responses"]["Success"];
             400: components["responses"]["Error"];
+        };
+    };
+    changeUsername: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChangeUsernameInput"];
+            };
+        };
+        responses: {
+            200: components["responses"]["Success"];
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
         };
     };
     recoverPassword: {

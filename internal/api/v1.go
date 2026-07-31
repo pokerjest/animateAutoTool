@@ -110,6 +110,7 @@ func initV1Routes(r *gin.Engine) {
 	{
 		protected.POST("/session/logout", V1LogoutHandler)
 		protected.POST("/session/change-password", V1ChangePasswordHandler)
+		protected.POST("/session/change-username", V1ChangeUsernameHandler)
 		protected.GET("/events", SSEHandler)
 		protected.GET("/tasks", V1TasksHandler)
 		protected.GET("/tasks/:task_id", V1TaskHandler)
@@ -370,6 +371,42 @@ func V1ChangePasswordHandler(c *gin.Context) {
 	}
 	service.RecordAudit(buildAuditContext(c), service.AuditEntry{Action: service.AuditActionPasswordChange, Outcome: service.AuditOutcomeSuccess})
 	v1Message(c, http.StatusOK, "密码修改成功", nil)
+}
+
+func V1ChangeUsernameHandler(c *gin.Context) {
+	var req ChangeUsernameRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		v1Error(c, http.StatusBadRequest, "invalid_username_request", "请填写新用户名和当前密码")
+		return
+	}
+	uid, err := currentSessionUserID(c)
+	if err != nil {
+		v1Error(c, http.StatusUnauthorized, "unauthorized", "当前登录状态已失效")
+		return
+	}
+
+	auditCtx := buildAuditContext(c)
+	newUsername := strings.TrimSpace(req.NewUsername)
+	if err := service.NewAuthService().ChangeUsername(uid, req.CurrentPassword, newUsername); err != nil {
+		service.RecordAudit(auditCtx, service.AuditEntry{
+			Action:     service.AuditActionUsernameChange,
+			Outcome:    service.AuditOutcomeFailure,
+			TargetType: "user",
+			TargetID:   strconv.FormatUint(uint64(uid), 10),
+			Details:    map[string]string{"new_username": newUsername, "error": err.Error()},
+		})
+		v1Error(c, http.StatusBadRequest, "username_change_failed", err.Error())
+		return
+	}
+
+	service.RecordAudit(auditCtx, service.AuditEntry{
+		Action:     service.AuditActionUsernameChange,
+		Outcome:    service.AuditOutcomeSuccess,
+		TargetType: "user",
+		TargetID:   strconv.FormatUint(uint64(uid), 10),
+		Details:    map[string]string{"old_username": auditCtx.Username, "new_username": newUsername},
+	})
+	v1Message(c, http.StatusOK, "管理员用户名修改成功", gin.H{"username": newUsername})
 }
 
 func V1RecoveryHandler(c *gin.Context) {

@@ -5,6 +5,8 @@ import (
 	"log"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/pokerjest/animateAutoTool/internal/bootstrap"
 	"github.com/pokerjest/animateAutoTool/internal/db"
@@ -12,6 +14,7 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/security"
 	"github.com/pokerjest/animateAutoTool/internal/store"
 	"golang.org/x/crypto/bcrypt"
+	"gorm.io/gorm"
 )
 
 type AuthService struct{}
@@ -133,6 +136,72 @@ func (s *AuthService) ChangePassword(userID uint, oldPassword, newPassword strin
 	}
 
 	return s.updatePassword(user, newPassword)
+}
+
+// ChangeUsername updates the administrator login name after verifying the
+// current password. Sessions remain valid because they are bound to the user
+// ID rather than the mutable username.
+func (s *AuthService) ChangeUsername(userID uint, currentPassword, newUsername string) error {
+	st := userStore()
+	if st == nil {
+		return errors.New("用户不存在")
+	}
+	user, err := st.GetByID(userID)
+	if err != nil {
+		return errors.New("用户不存在")
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(currentPassword)); err != nil {
+		return errors.New("当前密码不正确")
+	}
+
+	newUsername = strings.TrimSpace(newUsername)
+	if err := validateUsername(newUsername); err != nil {
+		return err
+	}
+	if newUsername == user.Username {
+		return nil
+	}
+
+	existing, err := st.GetByUsername(newUsername)
+	switch {
+	case err == nil && existing.ID != user.ID:
+		return errors.New("用户名已被使用")
+	case err != nil && !errors.Is(err, gorm.ErrRecordNotFound):
+		return err
+	}
+
+	oldUsername := user.Username
+	user.Username = newUsername
+	if err := st.Save(user); err != nil {
+		lower := strings.ToLower(err.Error())
+		if errors.Is(err, gorm.ErrDuplicatedKey) || strings.Contains(lower, "unique constraint") || strings.Contains(lower, "duplicate") {
+			return errors.New("用户名已被使用")
+		}
+		return err
+	}
+
+	if info, err := bootstrap.LoadAdminBootstrapInfo(); err == nil && info.Username == oldUsername {
+		if err := bootstrap.ClearAdminBootstrapInfo(); err != nil {
+			log.Printf("Failed to clear bootstrap admin info: %v", err)
+		}
+	}
+	return nil
+}
+
+func validateUsername(username string) error {
+	length := utf8.RuneCountInString(username)
+	if length < 3 {
+		return errors.New("用户名至少需要 3 个字符")
+	}
+	if length > 64 {
+		return errors.New("用户名不能超过 64 个字符")
+	}
+	for _, r := range username {
+		if unicode.IsControl(r) {
+			return errors.New("用户名不能包含换行或控制字符")
+		}
+	}
+	return nil
 }
 
 func (s *AuthService) SetPassword(userID uint, newPassword string) error {

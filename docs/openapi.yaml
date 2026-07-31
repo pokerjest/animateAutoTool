@@ -30,6 +30,19 @@ paths:
     post: { operationId: logout, responses: { "200": { $ref: "#/components/responses/Success" } } }
   /session/change-password:
     post: { operationId: changePassword, requestBody: { $ref: "#/components/requestBodies/JsonObject" }, responses: { "200": { $ref: "#/components/responses/Success" }, "400": { $ref: "#/components/responses/Error" } } }
+  /session/change-username:
+    post:
+      operationId: changeUsername
+      description: Changes the current administrator login name after verifying the current password. The active session remains valid because it is bound to the user ID.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ChangeUsernameInput" }
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
   /recovery/reset:
     post: { security: [], operationId: recoverPassword, requestBody: { $ref: "#/components/requestBodies/JsonObject" }, responses: { "200": { $ref: "#/components/responses/Success" }, "403": { $ref: "#/components/responses/Error" } } }
   /setup/readiness:
@@ -1171,6 +1184,13 @@ components:
       type: object
       required: [username, password]
       properties: { username: { type: string }, password: { type: string, format: password }, remember_me: { type: boolean, default: false } }
+    ChangeUsernameInput:
+      type: object
+      additionalProperties: false
+      required: [current_password, new_username]
+      properties:
+        current_password: { type: string, format: password }
+        new_username: { type: string, minLength: 3, maxLength: 64 }
     BackupArchivePasswordInput:
       type: object
       properties:

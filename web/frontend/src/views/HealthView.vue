@@ -72,8 +72,8 @@ async function analyzeHealth() {
     </PageHeader>
 
     <AIProposalPanel v-if="aiProposalID" :proposal-id="aiProposalID" @applied="query.refetch()" @dismissed="aiProposalID = ''" />
-    <StateBlock v-if="query.isLoading.value" state="loading"/>
-    <StateBlock v-else-if="query.isError.value" state="error" title="健康报告加载失败" :retrying="query.isFetching.value" @retry="query.refetch()"/>
+    <StateBlock v-if="query.isLoading.value" state="loading" scene="diagnosing"/>
+    <StateBlock v-else-if="query.isError.value" state="error" scene="diagnosing" title="健康报告加载失败" :retrying="query.isFetching.value" @retry="query.refetch()"/>
     <template v-else-if="query.data.value">
       <section class="rounded-[1.5rem] border p-6" :class="query.data.value.health.health_tone === 'rose' ? 'border-red-200 bg-red-50 dark:border-red-900 dark:bg-red-950/40' : query.data.value.health.health_tone === 'amber' ? 'border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/40' : 'border-emerald-200 bg-emerald-50 dark:border-emerald-900 dark:bg-emerald-950/40'">
         <div class="flex items-start gap-4">

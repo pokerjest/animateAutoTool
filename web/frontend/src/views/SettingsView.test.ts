@@ -3,6 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query'
 import { createPinia } from 'pinia'
 import { createMemoryHistory, createRouter } from 'vue-router'
+import { useSessionStore } from '../stores/session'
 import SettingsView from './SettingsView.vue'
 
 function response(data: unknown) {
@@ -19,6 +20,8 @@ describe('SettingsView proxy settings', () => {
     localStorage.clear()
     let proxyTestBody: Record<string, string> | undefined
     let settingsSaveBody: { values: Record<string, string> } | undefined
+    let usernameChangeBody: { current_password: string; new_username: string } | undefined
+    let currentUsername = 'admin'
     let jellyfinTestURL = ''
     const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input)
@@ -28,6 +31,14 @@ describe('SettingsView proxy settings', () => {
       }
       if (path.endsWith('/api/v1/settings') && (!init?.method || init.method === 'GET')) {
         return response({ values: { proxy_url: '', proxy_bangumi_enabled: 'false', proxy_mikan_enabled: 'false', auth_ip_allowlist_enabled: 'false', auth_ip_allowlist: '' }, configured: {}, stats: {}, request_ip: '100.64.1.20' })
+      }
+      if (path.endsWith('/api/v1/session/change-username')) {
+        usernameChangeBody = JSON.parse(String(init?.body)) as { current_password: string; new_username: string }
+        currentUsername = usernameChangeBody.new_username
+        return response({ username: currentUsername })
+      }
+      if (path.endsWith('/api/v1/session')) {
+        return response({ authenticated: true, setup_pending: false, local_setup_available: false, local_recovery_available: true, username: currentUsername, auth_mode: 'session', version: 'test', recovery_local_only: true })
       }
       if (path.includes('/api/v1/audit-logs')) return response({ items: [] })
       if (path.endsWith('/api/v1/settings/maintenance')) return response({ deployment: { items: [] }, updater: {} })
@@ -56,13 +67,15 @@ describe('SettingsView proxy settings', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
+    const pinia = createPinia()
+    useSessionStore(pinia).state = { authenticated: true, setup_pending: false, local_setup_available: false, local_recovery_available: true, username: currentUsername, auth_mode: 'session', version: 'test', recovery_local_only: true }
     const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/settings', component: SettingsView }] })
     await router.push('/settings')
     await router.isReady()
     const wrapper = mount(SettingsView, {
       attachTo: document.body,
       global: {
-        plugins: [createPinia(), router, [VueQueryPlugin, { queryClient }]],
+        plugins: [pinia, router, [VueQueryPlugin, { queryClient }]],
         stubs: { RouterLink: { template: '<a><slot /></a>' } },
       },
     })
@@ -123,6 +136,14 @@ describe('SettingsView proxy settings', () => {
     expect(appearanceTab).toBeDefined()
     await appearanceTab!.trigger('click')
     expect(wrapper.text()).toContain('主题模式')
+    expect(wrapper.text()).toContain('界面风格')
+    expect(wrapper.get('[data-testid="skin-classic"]').attributes('aria-pressed')).toBe('true')
+    expect(wrapper.get('[data-testid="skin-mascot"]').attributes('aria-pressed')).toBe('false')
+    await wrapper.get('[data-testid="skin-mascot"]').trigger('click')
+    expect(wrapper.get('[data-testid="skin-mascot"]').attributes('aria-pressed')).toBe('true')
+    expect(localStorage.getItem('animate-ui-skin')).toBe('mascot')
+    await wrapper.get('[data-testid="skin-classic"]').trigger('click')
+    expect(localStorage.getItem('animate-ui-skin')).toBe('classic')
     expect(wrapper.text()).not.toContain('修改管理员密码')
     const backgroundMode = wrapper.get('[data-testid="background-mode"]')
     await backgroundMode.setValue('anime')
@@ -132,10 +153,20 @@ describe('SettingsView proxy settings', () => {
     const securityTab = wrapper.findAll('button').find(button => button.text() === '安全')
     expect(securityTab).toBeDefined()
     await securityTab!.trigger('click')
+    expect(wrapper.text()).toContain('修改管理员用户名')
     expect(wrapper.text()).toContain('修改管理员密码')
     expect(wrapper.text()).toContain('最近安全审计')
     expect(wrapper.text()).toContain('IP 白名单免密访问')
     expect(wrapper.text()).not.toContain('主题模式')
+    const usernamePanel = wrapper.get('[data-testid="change-username"]')
+    expect(usernamePanel.text()).toContain('当前账号：admin')
+    await usernamePanel.get('input[type="text"]').setValue('新的管理员')
+    await usernamePanel.get('input[type="password"]').setValue('admin')
+    await usernamePanel.findAll('button').find(button => button.text().includes('修改用户名'))!.trigger('click')
+    await flushPromises()
+    expect(usernameChangeBody).toEqual({ current_password: 'admin', new_username: '新的管理员' })
+    expect(usernamePanel.text()).toContain('当前账号：新的管理员')
+    expect(useSessionStore(pinia).state?.username).toBe('新的管理员')
     const allowlistPanel = wrapper.get('[data-testid="auth-ip-allowlist"]')
     expect(allowlistPanel.text()).toContain('100.64.1.20')
     await allowlistPanel.findAll('button').find(button => button.text().includes('填入当前 IP'))!.trigger('click')

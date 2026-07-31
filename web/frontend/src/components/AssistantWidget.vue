@@ -18,6 +18,8 @@ import { useAssistantStore } from '../stores/assistant'
 import { useSessionStore } from '../stores/session'
 import { useUIStore } from '../stores/ui'
 import SafeMarkdown from './SafeMarkdown.vue'
+import MascotArt from './MascotArt.vue'
+import type { MascotScene } from '../utils/mascot'
 
 const SAFE = 24
 const PET_SIZE = 56
@@ -73,6 +75,12 @@ const statusLabel = computed(() => {
   return assistant.status?.configured
     ? `${assistant.status.provider_label} · ${assistant.status.model}`
     : 'AI 未配置'
+})
+const assistantScene = computed<MascotScene>(() => {
+  if (assistant.error) return 'assistant-error'
+  if (assistant.sending || assistant.hydrating) return 'assistant-thinking'
+  if (assistant.unread) return 'assistant-unread'
+  return 'assistant-idle'
 })
 
 function clamp(value: number, minimum: number, maximum: number) {
@@ -331,7 +339,8 @@ onBeforeUnmount(() => {
     @pointercancel="endPointer"
     @click="petClick"
   >
-    <Bot :size="25" />
+    <MascotArt v-if="ui.skin === 'mascot'" :scene="assistantScene" decorative class="assistant-mascot-pet"/>
+    <Bot v-else :size="25" />
     <Sparkles class="assistant-pet-sparkle absolute -right-1 -top-1 rounded-full bg-[var(--surface-solid)] p-1 text-[var(--brand)] shadow" :size="19" />
     <span v-if="assistant.unread" class="absolute -left-1 -top-1 h-3.5 w-3.5 rounded-full border-2 border-[var(--surface-solid)] bg-[var(--warning)]" aria-label="有未读回复"></span>
   </button>
@@ -352,8 +361,9 @@ onBeforeUnmount(() => {
       @pointerup="endPointer"
       @pointercancel="endPointer"
     >
-      <span class="relative grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[var(--brand-soft)] text-[var(--brand)]">
-        <Bot :size="20" />
+      <span class="assistant-mascot-avatar relative grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[var(--brand-soft)] text-[var(--brand)]">
+        <MascotArt v-if="ui.skin === 'mascot'" :scene="assistantScene" decorative />
+        <Bot v-else :size="20" />
         <span v-if="assistant.sending" class="absolute inset-0 animate-ping rounded-xl border border-[var(--brand)]"></span>
       </span>
       <div class="min-w-0 flex-1">
@@ -389,11 +399,11 @@ onBeforeUnmount(() => {
       <div ref="scroll" class="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4">
         <div class="space-y-4">
           <article v-if="assistant.messages.length === 0 && !assistant.hydrating" class="flex gap-2.5">
-            <span class="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-[var(--brand-soft)] text-[var(--brand)]"><Bot :size="17" /></span>
+            <span class="assistant-mascot-avatar grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-[var(--brand-soft)] text-[var(--brand)]"><MascotArt v-if="ui.skin === 'mascot'" scene="assistant-idle" decorative /><Bot v-else :size="17" /></span>
             <div class="max-w-[85%] rounded-2xl bg-[var(--surface-muted)] px-3.5 py-2.5 text-sm leading-6">你好，我可以帮助检查订阅、分析健康问题，或者解释媒体库状态。</div>
           </article>
           <article v-for="(message, index) in assistant.messages" :key="`${index}-${message.role}`" class="flex gap-2.5" :class="message.role === 'user' ? 'justify-end' : ''">
-            <span v-if="message.role === 'assistant'" class="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-[var(--brand-soft)] text-[var(--brand)]"><Bot :size="17" /></span>
+            <span v-if="message.role === 'assistant'" class="assistant-mascot-avatar grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-[var(--brand-soft)] text-[var(--brand)]"><MascotArt v-if="ui.skin === 'mascot'" scene="assistant-idle" decorative /><Bot v-else :size="17" /></span>
             <div class="max-w-[85%] overflow-hidden rounded-2xl px-3.5 py-2.5 text-sm leading-6" :class="message.role === 'user' ? 'whitespace-pre-wrap bg-[var(--brand)] text-white' : 'bg-[var(--surface-muted)]'">
               <SafeMarkdown v-if="message.role === 'assistant'" :content="message.content" />
               <template v-else>{{ message.content }}</template>
@@ -442,7 +452,7 @@ onBeforeUnmount(() => {
       aria-label="AI 助手"
     >
       <header class="flex items-center gap-3 border-b border-[var(--line)] bg-[var(--surface-solid)] px-4 py-3">
-        <span class="relative grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[var(--brand-soft)] text-[var(--brand)]"><Bot :size="20" /><span v-if="assistant.sending" class="absolute inset-0 animate-ping rounded-xl border border-[var(--brand)]"></span></span>
+        <span class="assistant-mascot-avatar relative grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[var(--brand-soft)] text-[var(--brand)]"><MascotArt v-if="ui.skin === 'mascot'" :scene="assistantScene" decorative /><Bot v-else :size="20" /><span v-if="assistant.sending" class="absolute inset-0 animate-ping rounded-xl border border-[var(--brand)]"></span></span>
         <div class="min-w-0 flex-1"><strong class="block truncate text-sm">AnimateTool 助手</strong><span class="muted block truncate text-[.68rem]">{{ statusLabel }}</span></div>
         <button class="btn btn-quiet h-10 min-h-10 w-10 p-0" type="button" :aria-label="assistant.mobileSize === 'full' ? '切换到半屏' : '切换到全屏'" @click="assistant.setMobileSize(assistant.mobileSize === 'full' ? 'half' : 'full')"><Minimize2 v-if="assistant.mobileSize === 'full'" :size="18" /><Maximize2 v-else :size="18" /></button>
         <button class="btn btn-quiet h-10 min-h-10 w-10 p-0" type="button" aria-label="清空对话" :disabled="assistant.clearing" @click="clearConversation"><LoaderCircle v-if="assistant.clearing" class="animate-spin" :size="17" /><Trash2 v-else :size="17" /></button>
@@ -459,9 +469,9 @@ onBeforeUnmount(() => {
 
         <div ref="scroll" class="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
           <div class="space-y-4">
-            <article v-if="assistant.messages.length === 0 && !assistant.hydrating" class="flex gap-2.5"><span class="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-[var(--brand-soft)] text-[var(--brand)]"><Bot :size="17" /></span><div class="max-w-[85%] rounded-2xl bg-[var(--surface-muted)] px-3.5 py-2.5 text-sm leading-6">你好，我可以帮助检查订阅、分析健康问题，或者解释媒体库状态。</div></article>
+          <article v-if="assistant.messages.length === 0 && !assistant.hydrating" class="flex gap-2.5"><span class="assistant-mascot-avatar grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-[var(--brand-soft)] text-[var(--brand)]"><MascotArt v-if="ui.skin === 'mascot'" scene="assistant-idle" decorative /><Bot v-else :size="17" /></span><div class="max-w-[85%] rounded-2xl bg-[var(--surface-muted)] px-3.5 py-2.5 text-sm leading-6">你好，我可以帮助检查订阅、分析健康问题，或者解释媒体库状态。</div></article>
             <article v-for="(message, index) in assistant.messages" :key="`mobile-${index}-${message.role}`" class="flex gap-2.5" :class="message.role === 'user' ? 'justify-end' : ''">
-              <span v-if="message.role === 'assistant'" class="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-[var(--brand-soft)] text-[var(--brand)]"><Bot :size="17" /></span>
+              <span v-if="message.role === 'assistant'" class="assistant-mascot-avatar grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-[var(--brand-soft)] text-[var(--brand)]"><MascotArt v-if="ui.skin === 'mascot'" scene="assistant-idle" decorative /><Bot v-else :size="17" /></span>
               <div class="max-w-[85%] overflow-hidden rounded-2xl px-3.5 py-2.5 text-sm leading-6" :class="message.role === 'user' ? 'whitespace-pre-wrap bg-[var(--brand)] text-white' : 'bg-[var(--surface-muted)]'"><SafeMarkdown v-if="message.role === 'assistant'" :content="message.content" /><template v-else>{{ message.content }}</template></div>
             </article>
             <div v-if="assistant.hydrating || assistant.sending" class="flex items-center gap-2 text-xs font-bold muted" role="status"><Sparkles class="animate-pulse text-[var(--brand)]" :size="17" />{{ assistant.hydrating ? '正在恢复对话…' : '正在读取系统上下文并思考…' }}</div>
@@ -484,6 +494,21 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.assistant-mascot-avatar img,
+.assistant-mascot-pet {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: center bottom;
+}
+.assistant-mascot-avatar {
+  overflow: hidden;
+}
+.assistant-mascot-pet {
+  width: 3.2rem;
+  height: 3.2rem;
+  filter: drop-shadow(0 5px 8px rgba(0, 0, 0, .24));
+}
 .assistant-pet {
   animation: assistant-float 3.2s ease-in-out infinite;
 }
@@ -495,6 +520,14 @@ onBeforeUnmount(() => {
 }
 .assistant-pet-sparkle {
   animation: assistant-sparkle 2.4s ease-in-out infinite;
+}
+:global(html[data-skin="mascot"]) .assistant-pet {
+  color: #1f2329;
+  border-color: #d7dee7;
+  background: linear-gradient(145deg, #ffffff, #eef2f6);
+}
+:global(html[data-skin="mascot"]) .assistant-pet-sparkle {
+  color: #087dd1;
 }
 @keyframes assistant-float {
   0%, 100% { transform: translateY(0) rotate(0); }

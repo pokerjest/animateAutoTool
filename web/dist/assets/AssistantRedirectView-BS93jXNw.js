@@ -1,2 +1,0 @@
-import{d as n,aT as c,ar as i,ai as u,a as p,p as d,s as l}from"./index-CqWS-Xyr.js";const _={class:"sr-only",role:"status"},h=n({__name:"AssistantRedirectView",setup(f){const a=d(),r=c(),s=i();function o(){const e=s.isMedia?"/media":"/",t=s.routeFor(s.mode);return!t||t==="/assistant"||t.startsWith("/login")||t.startsWith("/recover")||t.startsWith("/setup")?e:t}return u(async()=>{r.expand(),await a.replace(o())}),(e,t)=>(l(),p("div",_,"正在打开 AI 助手…"))}});export{h as default};
-//# sourceMappingURL=AssistantRedirectView-BS93jXNw.js.map

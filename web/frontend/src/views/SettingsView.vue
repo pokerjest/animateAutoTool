@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch, watchEffect } from 'vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
-import { Bot, Cloud, Database, Download, Film, KeyRound, Network, Palette, RefreshCw, Save, Settings2, ShieldCheck, Wrench } from '@lucide/vue'
+import { Bot, Cloud, Database, Download, Film, KeyRound, Network, Palette, RefreshCw, Save, Settings2, ShieldCheck, UserRound, Wrench } from '@lucide/vue'
 import { useRoute } from 'vue-router'
 import { api } from '../api/client'
 import type { AIToolRun, MediaLibrary } from '../api/types'
@@ -14,7 +14,9 @@ import StateBlock from '../components/StateBlock.vue'
 import { useAsyncActions } from '../composables/useAsyncActions'
 import { useUIStore, type BackgroundMode, type ThemeMode } from '../stores/ui'
 import { usePlaybackStore } from '../stores/playback'
+import { useSessionStore } from '../stores/session'
 import { useWorkspaceStore } from '../stores/workspace'
+import MascotArt from '../components/MascotArt.vue'
 
 interface SettingsData{values:Record<string,string>;configured:Record<string,boolean>;stats:Record<string,unknown>;request_ip?:string}
 interface Field { key:string; label:string; type?:'text'|'password'|'select'|'boolean'; options?:Array<{value:string;label:string}>; placeholder?:string; description?:string }
@@ -47,13 +49,14 @@ const groups:Group[]=[
   {id:'security',label:'安全',icon:ShieldCheck,fields:[]},
   {id:'maintenance',label:'应用维护',icon:Wrench,fields:[]},
 ]
-const route=useRoute(),ui=useUIStore(),playback=usePlaybackStore(),workspace=useWorkspaceStore(),qc=useQueryClient(),actions=useAsyncActions(),active=ref(String(route.query.focus||'downloader')),form=reactive<Record<string,string>>({}),connection=reactive<Record<string,{connected:boolean;detail:string;account?:string;source?:string;source_label?:string}|null>>({}),oldPassword=ref(''),newPassword=ref(''),confirmPassword=ref('')
+const route=useRoute(),ui=useUIStore(),playback=usePlaybackStore(),session=useSessionStore(),workspace=useWorkspaceStore(),qc=useQueryClient(),actions=useAsyncActions(),active=ref(String(route.query.focus||'downloader')),form=reactive<Record<string,string>>({}),connection=reactive<Record<string,{connected:boolean;detail:string;account?:string;source?:string;source_label?:string}|null>>({}),newUsername=ref(session.state?.username||''),usernamePassword=ref(''),oldPassword=ref(''),newPassword=ref(''),confirmPassword=ref('')
 const query=useQuery({queryKey:['settings'],queryFn:()=>api<SettingsData>('/settings')})
 const mediaLibraries=useQuery({queryKey:['settings-media-libraries'],queryFn:()=>api<{items:MediaLibrary[]}>('/media/providers/jellyfin/libraries'),enabled:computed(()=>Boolean(query.data.value?.values.jellyfin_url&&query.data.value?.values.jellyfin_api_key)),retry:false})
 const audits=useQuery({queryKey:['audit-logs'],queryFn:()=>api<{items:AuditEntry[]}>('/audit-logs?page_size=25')})
 const aiToolRuns=useQuery({queryKey:['ai-tool-runs'],queryFn:()=>api<{items:AIToolRun[]}>('/ai/tool-runs?limit=30'),enabled:computed(()=>active.value==='ai')})
 const maintenance=useQuery({queryKey:['maintenance'],queryFn:()=>api<Record<string,unknown>>('/settings/maintenance'),refetchInterval:15000})
 watchEffect(()=>{if(query.data.value)Object.assign(form,query.data.value.values)})
+watch(()=>session.state?.username,username=>{if(username&&!newUsername.value)newUsername.value=username},{immediate:true})
 watch(()=>form.media_naming_preset,value=>{
   if(value==='jellyfin-emby'){
     form.auto_rename_series_template='{title}'
@@ -70,6 +73,22 @@ async function testProvider(provider:string){connection[provider]=null;try{await
 async function testProxy(){connection.proxy=null;try{await actions.run('test-proxy',async()=>{connection.proxy=await api('/settings/proxy/test',{method:'POST',body:JSON.stringify({proxy_url:form.proxy_url||''}),headers:{'Content-Type':'application/json'}})})}catch(e){connection.proxy={connected:false,detail:e instanceof Error?e.message:'代理连接失败'}}}
 async function testR2(){connection.r2=null;try{await actions.run('test-r2',async()=>{const result=await api<{message?:string}>('/backup/r2/test',{method:'POST',body:JSON.stringify({endpoint:form.r2_endpoint||'',bucket:form.r2_bucket||'',access_key:form.r2_access_key||'',secret_key:form.r2_secret_key||''}),headers:{'Content-Type':'application/json'}});connection.r2={connected:true,detail:result.message||'读写校验通过'}})}catch(e){connection.r2={connected:false,detail:e instanceof Error?e.message:'连接失败'}}}
 async function changePassword(){if(newPassword.value.length<8||newPassword.value!==confirmPassword.value){ui.toast('新密码至少 8 位，且两次输入必须一致','error');return}try{await actions.run('change-password',async()=>{await api('/session/change-password',{method:'POST',body:JSON.stringify({old_password:oldPassword.value,new_password:newPassword.value}),headers:{'Content-Type':'application/json'}});oldPassword.value='';newPassword.value='';confirmPassword.value='';ui.toast('密码修改成功');qc.invalidateQueries({queryKey:['audit-logs']})})}catch(e){ui.toast(e instanceof Error?e.message:'密码修改失败','error')}}
+async function changeUsername(){
+  const value=newUsername.value.trim()
+  const length=Array.from(value).length
+  if(length<3||length>64){ui.toast('用户名需要 3–64 个字符','error');return}
+  if(!usernamePassword.value){ui.toast('请输入当前管理员密码','error');return}
+  try{
+    await actions.run('change-username',async()=>{
+      await api<{username:string}>('/session/change-username',{method:'POST',body:JSON.stringify({current_password:usernamePassword.value,new_username:value}),headers:{'Content-Type':'application/json'}})
+      usernamePassword.value=''
+      await session.load(true)
+      newUsername.value=session.state?.username||value
+      ui.toast('管理员用户名修改成功')
+      qc.invalidateQueries({queryKey:['audit-logs']})
+    })
+  }catch(e){ui.toast(e instanceof Error?e.message:'用户名修改失败','error')}
+}
 function addCurrentIPToAllowlist(){const ip=query.data.value?.request_ip?.trim();if(!ip)return;const entries=(form.auth_ip_allowlist||'').split(/[\s,;]+/).filter(Boolean);if(!entries.includes(ip))entries.push(ip);form.auth_ip_allowlist=entries.join('\n')}
 const deploymentItems=computed(()=>{const d=maintenance.data.value?.deployment as Record<string,unknown>|undefined;return (d?.Items||d?.items||[]) as Array<Record<string,unknown>>})
 const updater=computed(()=>(maintenance.data.value?.updater||{}) as Record<string,unknown>)
@@ -156,7 +175,7 @@ function toggleLibrary(id:string,checked:boolean){
     <div v-if="group.providers?.length&&group.id!=='media'" class="mt-6"><h4 class="font-black">连接状态</h4><div class="mt-3 grid gap-3 sm:grid-cols-2"><AsyncButton v-for="provider in group.providers" :key="provider" class="panel-muted min-h-20 p-3 text-left" :loading="actions.isBusy(`provider-${provider}`)" loading-label="连接测试中…" @click="testProvider(provider)"><div class="flex items-center justify-between"><strong class="uppercase">{{ provider }}</strong><RefreshCw :size="15" class="text-[var(--sky)]"/></div><p class="mt-2 text-xs" :class="connection[provider]?.connected?'text-[var(--success)]':'muted'">{{ connection[provider]?(connection[provider]?.connected?`已连接 ${connection[provider]?.account||''}`:connection[provider]?.detail):'点击测试当前已保存配置' }}</p></AsyncButton></div></div>
     <AsyncButton v-if="group.id==='cloud'" class="panel-muted mt-6 min-h-20 w-full p-3 text-left" :loading="actions.isBusy('test-r2')" loading-label="R2 测试中…" @click="testR2"><div class="flex items-center justify-between"><strong>R2 读写连通性</strong><RefreshCw :size="15" class="text-[var(--sky)]"/></div><p class="mt-2 text-xs" :class="connection.r2?.connected?'text-[var(--success)]':'muted'">{{ connection.r2?.detail||'点击测试表单中的配置；空白凭据沿用已保存值' }}</p></AsyncButton>
   </template>
-  <template v-else-if="group.id==='appearance'"><section class="max-w-2xl"><h4 class="font-black">外观与辅助功能</h4><p class="muted mt-1 text-sm leading-6">调整当前浏览器的主题与页面背景，不影响其他设备。</p><div class="mt-5 grid gap-4"><label class="label">主题模式<select class="field" :value="ui.theme" @change="ui.setTheme(($event.target as HTMLSelectElement).value as ThemeMode)"><option value="system">跟随系统</option><option value="light">亮色</option><option value="dark">深色</option></select></label><label class="label">页面背景<select class="field" data-testid="background-mode" :value="ui.backgroundMode" @change="ui.setBackgroundMode(($event.target as HTMLSelectElement).value as BackgroundMode)"><option value="default">默认渐变背景</option><option value="anime">随机动漫海报</option></select></label><div v-if="ui.backgroundMode==='anime'" class="rounded-xl border border-[var(--line)] bg-[var(--brand-soft)] p-4 text-sm leading-6 text-[var(--brand-strong)]"><strong class="block">已启用动漫海报背景</strong><span>从番剧图鉴随机选择，并自动为手机、平板和电脑加载 640、960、1280px 的合适尺寸；页面切换不会重复下载。</span></div></div></section></template>
+  <template v-else-if="group.id==='appearance'"><section class="max-w-2xl"><h4 class="font-black">外观与辅助功能</h4><p class="muted mt-1 text-sm leading-6">调整当前浏览器的主题、界面风格与页面背景，不影响其他设备。</p><div class="mt-5 grid gap-4"><label class="label">主题模式<select class="field" :value="ui.theme" @change="ui.setTheme(($event.target as HTMLSelectElement).value as ThemeMode)"><option value="system">跟随系统</option><option value="light">亮色</option><option value="dark">深色</option></select></label><label class="label">页面背景<select class="field" data-testid="background-mode" :value="ui.backgroundMode" @change="ui.setBackgroundMode(($event.target as HTMLSelectElement).value as BackgroundMode)"><option value="default">默认渐变背景</option><option value="anime">随机动漫海报</option></select></label><div v-if="ui.backgroundMode==='anime'" class="rounded-xl border border-[var(--line)] bg-[var(--brand-soft)] p-4 text-sm leading-6 text-[var(--brand-strong)]"><strong class="block">已启用动漫海报背景</strong><span>从番剧图鉴随机选择，并自动为手机、平板和电脑加载 640、960、1280px 的合适尺寸；页面切换不会重复下载。</span></div></div><div class="mt-8"><div><h4 class="font-black">界面风格</h4><p class="muted mt-1 text-sm leading-6">选择适合当前浏览器的界面视觉，随时可以切换。</p></div><div class="mt-4 grid gap-3 sm:grid-cols-2" role="group" aria-label="选择界面风格"><button type="button" class="skin-option skin-option-classic" data-testid="skin-classic" :aria-pressed="ui.skin==='classic'" @click="ui.setSkin('classic')"><span class="skin-option-preview" aria-hidden="true"></span><span class="min-w-0"><strong class="block">经典玫粉</strong><span class="muted mt-1 block text-xs leading-5">保留当前轻柔的玫粉与天空蓝界面。</span></span></button><button type="button" class="skin-option" data-testid="skin-mascot" :aria-pressed="ui.skin==='mascot'" @click="ui.setSkin('mascot')"><span class="skin-option-preview" aria-hidden="true"><MascotArt scene="brand" decorative /></span><span class="min-w-0"><strong class="block">AnimateTool Q版</strong><span class="muted mt-1 block text-xs leading-5">银白为主、蓝色点缀、黑色结构的媒体整理风格。</span></span></button></div></div></section></template>
   <template v-else-if="group.id==='security'">
     <div class="grid gap-6 xl:grid-cols-2">
       <section class="panel-muted p-4">
@@ -164,16 +183,32 @@ function toggleLibrary(id:string,checked:boolean){
         <h4 class="mt-3 font-extrabold">浏览器安全策略已启用</h4>
         <p class="muted mt-1 text-sm leading-6">会话 Cookie、同源写保护、本机恢复限制、IP 白名单与审计记录由服务器统一执行。</p>
       </section>
-      <section>
-        <h4 class="font-black">修改管理员密码</h4>
-        <div class="mt-4 grid gap-3">
-          <input v-model="oldPassword" class="field" type="password" placeholder="当前密码"/>
-          <input v-model="newPassword" class="field" type="password" placeholder="新密码（至少 8 位）"/>
-          <input v-model="confirmPassword" class="field" type="password" placeholder="再次输入新密码"/>
-          <AsyncButton class="btn btn-primary" :loading="actions.isBusy('change-password')" loading-label="修改中…" @click="changePassword"><KeyRound :size="16"/>修改密码</AsyncButton>
-          <LocalRecoveryLink label="打开本机恢复" link-class="btn btn-secondary"/>
-        </div>
-      </section>
+      <div class="grid gap-6">
+        <section data-testid="change-username">
+          <div class="flex items-start gap-3">
+            <UserRound class="mt-0.5 shrink-0 text-[var(--sky)]" :size="20"/>
+            <div>
+              <h4 class="font-black">修改管理员用户名</h4>
+              <p class="muted mt-1 text-sm">当前账号：<strong class="text-[var(--text)]">{{ session.state?.username || '管理员' }}</strong></p>
+            </div>
+          </div>
+          <div class="mt-4 grid gap-3">
+            <input v-model="newUsername" class="field" type="text" autocomplete="username" maxlength="64" placeholder="新用户名（3–64 个字符）"/>
+            <input v-model="usernamePassword" class="field" type="password" autocomplete="current-password" placeholder="当前管理员密码"/>
+            <AsyncButton class="btn btn-primary" :loading="actions.isBusy('change-username')" loading-label="修改中…" @click="changeUsername"><UserRound :size="16"/>修改用户名</AsyncButton>
+          </div>
+        </section>
+        <section class="border-t border-[var(--line)] pt-6">
+          <h4 class="font-black">修改管理员密码</h4>
+          <div class="mt-4 grid gap-3">
+            <input v-model="oldPassword" class="field" type="password" autocomplete="current-password" placeholder="当前密码"/>
+            <input v-model="newPassword" class="field" type="password" autocomplete="new-password" placeholder="新密码（至少 8 位）"/>
+            <input v-model="confirmPassword" class="field" type="password" autocomplete="new-password" placeholder="再次输入新密码"/>
+            <AsyncButton class="btn btn-primary" :loading="actions.isBusy('change-password')" loading-label="修改中…" @click="changePassword"><KeyRound :size="16"/>修改密码</AsyncButton>
+            <LocalRecoveryLink label="打开本机恢复" link-class="btn btn-secondary"/>
+          </div>
+        </section>
+      </div>
     </div>
     <section class="panel-muted mt-8 p-4 sm:p-5" data-testid="auth-ip-allowlist">
       <div class="flex flex-wrap items-start justify-between gap-4">

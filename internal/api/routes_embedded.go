@@ -21,6 +21,8 @@ func InitRoutes(r *gin.Engine) {
 		switch {
 		case strings.HasPrefix(c.Request.URL.Path, "/assets/"):
 			c.Header("Cache-Control", "public, max-age=31536000, immutable")
+		case strings.HasPrefix(c.Request.URL.Path, "/mascot/"):
+			c.Header("Cache-Control", "public, max-age=31536000, immutable")
 		case strings.HasPrefix(c.Request.URL.Path, "/static/"):
 			c.Header("Cache-Control", "public, max-age=86400")
 		}
@@ -38,6 +40,12 @@ func InitRoutes(r *gin.Engine) {
 		panic(err)
 	}
 	r.StaticFS("/assets", distAssets)
+
+	mascotAssets, err := webassets.MascotAssetsFS()
+	if err != nil {
+		panic(err)
+	}
+	r.StaticFS("/mascot", mascotAssets)
 
 	// Image proxy is intentionally public so cached posters can render before
 	// the SPA has completed session discovery.

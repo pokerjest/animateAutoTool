@@ -183,9 +183,9 @@ async function syncProgress() {
 
 <template>
   <div class="page-grid">
-    <StateBlock v-if="!animeId" state="empty" title="还没有可继续观看的内容" description="请先在本地番剧中选择一部作品开始播放。" />
-    <StateBlock v-else-if="query.isLoading.value" state="loading" title="正在读取剧集" />
-    <StateBlock v-else-if="query.isError.value" state="error" title="无法读取剧集" :retrying="query.isFetching.value" @retry="query.refetch()" />
+    <StateBlock v-if="!animeId" state="empty" scene="empty-playback" title="还没有可继续观看的内容" description="请先在本地番剧中选择一部作品开始播放。" />
+    <StateBlock v-else-if="query.isLoading.value" state="loading" scene="diagnosing" title="正在读取剧集" />
+    <StateBlock v-else-if="query.isError.value" state="error" scene="error" title="无法读取剧集" :retrying="query.isFetching.value" @retry="query.refetch()" />
     <template v-else-if="query.data.value">
       <section class="panel overflow-hidden">
         <div class="grid gap-6 p-5 lg:grid-cols-[220px_1fr]">

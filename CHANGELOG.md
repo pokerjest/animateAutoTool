@@ -8,6 +8,14 @@
 
 ## [Unreleased]
 
+## [1.0.0-beta.5] - 2026-07-31
+
+### Added
+- 在系统设置的安全区域支持修改管理员用户名；修改需要当前密码，当前会话保持有效，侧边栏账号名会即时刷新。
+
+### Fixed
+- 为用户名修改补充唯一性校验、控制字符校验、审计记录和旧 `/api/*` 兼容接口。
+
 ## [1.0.0-beta.4] - 2026-07-31
 
 ### Added
@@ -529,7 +537,8 @@
 
 ---
 
-[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.4...HEAD
+[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.5...HEAD
+[1.0.0-beta.5]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.4...v1.0.0-beta.5
 [1.0.0-beta.4]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.3...v1.0.0-beta.4
 [1.0.0-beta.3]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.2...v1.0.0-beta.3
 [1.0.0-beta.2]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.1...v1.0.0-beta.2
