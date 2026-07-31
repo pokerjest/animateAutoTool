@@ -401,6 +401,19 @@ func findSubscriptionLocalAnimes(sub *model.Subscription) ([]model.LocalAnime, e
 		return nil, err
 	}
 	localAnimes = filterSubscriptionLocalAnimes(sub, localAnimes)
+	if len(localAnimes) == 0 {
+		// Local folders commonly retain season or year suffixes, so an exact SQL
+		// title lookup can miss a series that the identity matcher recognizes.
+		// Restrict the fallback to series with indexed episodes before applying
+		// the same strong matcher used by the safer metadata paths above.
+		if err := db.DB.
+			Where("local_animes.id IN (?)", db.DB.Model(&model.LocalEpisode{}).Select("local_anime_id")).
+			Order("local_animes.id ASC").
+			Find(&localAnimes).Error; err != nil {
+			return nil, err
+		}
+		localAnimes = filterSubscriptionLocalAnimes(sub, localAnimes)
+	}
 	// Files organized from a subscription use the subscription metadata title.
 	// Link a single unambiguous fallback match so later Jellyfin reconciliation
 	// can use provider IDs without requiring a manual local-library visit.
