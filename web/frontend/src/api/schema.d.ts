@@ -441,6 +441,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/subscriptions/{id}/poster": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Retry a subscription poster from Mikan or the local metadata cache. The server returns image bytes and never proxies an arbitrary remote URL. */
+        get: operations["getSubscriptionPoster"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/subscriptions/{id}/toggle": {
         parameters: {
             query?: never;
@@ -2540,6 +2557,7 @@ export interface components {
             title: string;
             /** @enum {string} */
             status: "queued" | "running" | "completed" | "error";
+            phase?: string;
             message: string;
             /** Format: int64 */
             current?: number;
@@ -3210,6 +3228,53 @@ export interface operations {
         requestBody?: never;
         responses: {
             200: components["responses"]["Success"];
+        };
+    };
+    getSubscriptionPoster: {
+        parameters: {
+            query: {
+                source: "mikan" | "local";
+                width?: number;
+            };
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Same-origin subscription poster */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/jpeg": string;
+                    "image/png": string;
+                };
+            };
+            /** @description Invalid subscription ID or source */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Subscription not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Requested poster source unavailable */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
     toggleSubscription: {

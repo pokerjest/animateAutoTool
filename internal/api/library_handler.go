@@ -441,40 +441,46 @@ func GetPosterHandler(c *gin.Context) {
 		return
 	}
 
-	var data []byte
-	switch source {
-	case SourceBangumi:
-		data = m.BangumiImageRaw
-	case SourceTMDB:
-		data = m.TMDBImageRaw
-	case SourceAniList:
-		data = m.AniListImageRaw
-	default:
-		// Default to current active source or first available
-		if m.Title == m.BangumiTitle && len(m.BangumiImageRaw) > 0 {
-			data = m.BangumiImageRaw
-		} else if m.Title == m.TMDBTitle && len(m.TMDBImageRaw) > 0 {
-			data = m.TMDBImageRaw
-		} else if m.Title == m.AniListTitle && len(m.AniListImageRaw) > 0 {
-			data = m.AniListImageRaw
-		} else {
-			// fallback to whatever is not empty
-			if len(m.BangumiImageRaw) > 0 {
-				data = m.BangumiImageRaw
-			} else if len(m.TMDBImageRaw) > 0 {
-				data = m.TMDBImageRaw
-			} else if len(m.AniListImageRaw) > 0 {
-				data = m.AniListImageRaw
-			}
-		}
-	}
-
+	data := metadataPosterData(&m, source)
 	if len(data) == 0 {
 		c.Status(http.StatusNotFound)
 		return
 	}
-
 	servePosterImage(c, data)
+}
+
+func metadataPosterData(m *model.AnimeMetadata, source string) []byte {
+	if m == nil {
+		return nil
+	}
+
+	switch source {
+	case SourceBangumi:
+		return m.BangumiImageRaw
+	case SourceTMDB:
+		return m.TMDBImageRaw
+	case SourceAniList:
+		return m.AniListImageRaw
+	default:
+		// Default to current active source or first available
+		if m.Title == m.BangumiTitle && len(m.BangumiImageRaw) > 0 {
+			return m.BangumiImageRaw
+		} else if m.Title == m.TMDBTitle && len(m.TMDBImageRaw) > 0 {
+			return m.TMDBImageRaw
+		} else if m.Title == m.AniListTitle && len(m.AniListImageRaw) > 0 {
+			return m.AniListImageRaw
+		} else {
+			// fallback to whatever is not empty
+			if len(m.BangumiImageRaw) > 0 {
+				return m.BangumiImageRaw
+			} else if len(m.TMDBImageRaw) > 0 {
+				return m.TMDBImageRaw
+			} else if len(m.AniListImageRaw) > 0 {
+				return m.AniListImageRaw
+			}
+		}
+	}
+	return nil
 }
 
 // ProxyTMDBImageHandler proxies TMDB images through the server

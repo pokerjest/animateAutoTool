@@ -308,6 +308,31 @@ func TestV1TaskSnapshotEndpointsRequireAuthAndReturnTypedState(t *testing.T) {
 	assert.Contains(t, missing.Body.String(), `"code":"task_not_found"`)
 }
 
+func TestLocalScanTaskSwitchesFromScanToMetadataPhase(t *testing.T) {
+	taskstate.Global.Reset()
+	t.Cleanup(taskstate.Global.Reset)
+	taskstate.Global.Start("local-scan", "scan", "本地扫描", "准备扫描")
+
+	reportLocalScanProgress("local-scan", service.ScanProgress{
+		Message: "正在扫描文件夹 5/5",
+		Current: 5,
+		Total:   5,
+	})
+	scanTask, ok := taskstate.Global.Get("local-scan")
+	require.True(t, ok)
+	assert.Equal(t, "scan", scanTask.Phase)
+	assert.Equal(t, int64(5), scanTask.Current)
+	assert.Contains(t, scanTask.Message, "第 1/2 阶段")
+
+	startLocalMetadataProgress("local-scan")
+	metadataTask, ok := taskstate.Global.Get("local-scan")
+	require.True(t, ok)
+	assert.Equal(t, "metadata", metadataTask.Phase)
+	assert.Zero(t, metadataTask.Current)
+	assert.Zero(t, metadataTask.Total)
+	assert.Contains(t, metadataTask.Message, "第 2/2 阶段")
+}
+
 func TestV1SettingsNeverReturnSecretValues(t *testing.T) {
 	resetAuthFixtures(t)
 	require.NoError(t, db.DB.Create(&model.GlobalConfig{Key: model.ConfigKeyAIApiKey, Value: "top-secret"}).Error)

@@ -68,4 +68,43 @@ describe('task stream store', () => {
     store.track({ task_id: 'fast-task', status: 'running' }, '同步', 'sync')
     expect(store.taskByID('fast-task')?.tone).toBe('success')
   })
+
+  it('lets the first server update replace an accepted-response placeholder', () => {
+    const store = useTaskStore()
+    store.track({ task_id: 'local-scan', status: 'running' }, '本地扫描', 'scan', '正在启动扫描')
+    store.upsert({ id: 'local-scan', kind: 'scan', phase: 'metadata', title: '本地扫描', detail: '第 2/2 阶段 · 正在整理元数据', current: 1, total: 8, tone: 'running', updatedAt: '2026-07-31T06:00:03Z' })
+
+    expect(store.taskByID('local-scan')?.phase).toBe('metadata')
+    expect(store.taskByID('local-scan')?.detail).toContain('第 2/2 阶段')
+  })
+
+  it('ignores stale task updates that arrive after a newer phase', () => {
+    const store = useTaskStore()
+    store.upsert({ id: 'local-scan', kind: 'scan', phase: 'metadata', title: '本地扫描', detail: '第 2/2 阶段 · 正在整理元数据', current: 1, total: 10, tone: 'running', updatedAt: '2026-07-31T06:00:02Z' })
+    store.upsert({ id: 'local-scan', kind: 'scan', phase: 'scan', title: '本地扫描', detail: '第 1/2 阶段 · 正在扫描文件夹', current: 465, total: 465, tone: 'running', updatedAt: '2026-07-31T06:00:01Z' })
+
+    expect(store.taskByID('local-scan')?.phase).toBe('metadata')
+    expect(store.taskByID('local-scan')?.detail).toContain('第 2/2 阶段')
+    expect(store.taskByID('local-scan')?.current).toBe(1)
+  })
+
+  it('coalesces legacy scan events and removes them when the typed task arrives', () => {
+    const store = useTaskStore()
+    store.connect()
+    const source = FakeEventSource.instances[0]
+
+    source.emit('scan_progress', { type: 'progress', dir: '/media/anime', current: 2, total: 4 })
+    source.emit('scan_run', { IsRunning: true, LastSummary: '正在扫描 1 个目录' })
+    expect(store.tasks.filter(task => task.id === 'legacy:scan')).toHaveLength(1)
+
+    source.emit('scan_complete', { scope: 'run', summary: '扫描完成' })
+    expect(store.taskByID('legacy:scan')?.tone).toBe('success')
+
+    source.emit('task_update', {
+      task_id: 'local-scan', kind: 'scan', phase: 'metadata', title: '本地扫描', status: 'running', message: '第 2/2 阶段 · 正在整理元数据', current: 1, total: 8, updated_at: '2026-07-31T06:00:03Z',
+    })
+    expect(store.taskByID('legacy:scan')).toBeUndefined()
+    expect(store.tasks.filter(task => task.id === 'local-scan')).toHaveLength(1)
+    store.disconnect()
+  })
 })

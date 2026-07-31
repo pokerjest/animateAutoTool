@@ -51,6 +51,9 @@ const remainingItems=computed(()=>Math.max(0,totalItems.value-items.value.length
 const selectedCount=computed(()=>allMatching.value?Math.max(0,totalItems.value-excludedIDs.value.size):selectedIDs.value.size)
 const scanTask=computed(()=>tasks.taskByID('local-scan'))
 const scanPercent=computed(()=>scanTask.value?.total?Math.min(100,Math.round((scanTask.value.current||0)/scanTask.value.total*100)):0)
+const scanPhaseLabel=computed(()=>['metadata','repair'].includes(scanTask.value?.phase||'')?'第 2/2 阶段 · 元数据整理':'第 1/2 阶段 · 文件扫描')
+const scanProgressUnit=computed(()=>scanTask.value?.phase==='repair'?'条修复任务':['metadata','repair'].includes(scanTask.value?.phase||'')?'部本地番剧':'个扫描步骤')
+const scanPendingLabel=computed(()=>['metadata','repair'].includes(scanTask.value?.phase||'')?'处理中':'正在统计')
 const scanStatus=computed(()=>firstPage.value?.scan_status)
 async function loadMore(){if(query.hasNextPage.value&&!query.isFetchingNextPage.value)await query.fetchNextPage()}
 async function scan(){try{await actions.runTask('scan',()=>api<TaskAccepted>('/local-anime/scan',{method:'POST'}),'本地扫描','scan','正在扫描本地媒体目录');ui.toast('本地扫描已经启动')}catch(e){ui.toast(e instanceof Error?e.message:'扫描失败','error')}}
@@ -89,9 +92,9 @@ const sourceLabel=(source:string)=>source==='bangumi'?'Bangumi':source==='tmdb'?
   <div class="page-grid">
     <PageHeader eyebrow="ON DEVICE" title="本地番剧" description="扫描本地媒体，检查元数据，并从同一工作区进入播放。"><button class="btn btn-secondary" :class="batchMode?'border-[var(--brand)] text-[var(--brand)]':''" @click="toggleBatchMode"><ListChecks :size="17"/>{{ batchMode?'退出批量':'批量整理' }}</button><button class="btn btn-secondary" @click="adding=true"><FolderPlus :size="17"/>添加目录</button><AsyncButton class="btn btn-primary" :loading="actions.isBusy('scan','local-scan')" loading-label="扫描中…" @click="scan"><RefreshCw :size="17"/>重新扫描</AsyncButton></PageHeader>
     <section v-if="scanTask?.tone==='running'" class="panel p-4" role="status" aria-live="polite" aria-busy="true">
-      <div class="flex flex-wrap items-center justify-between gap-3"><div><p class="eyebrow">LOCAL SCAN</p><strong class="mt-1 block">{{ scanTask.detail }}</strong></div><span class="badge">{{ scanTask.total ? `${scanPercent}%` : '正在统计' }}</span></div>
+      <div class="flex flex-wrap items-center justify-between gap-3"><div><p class="eyebrow">{{ scanPhaseLabel }}</p><strong class="mt-1 block">{{ scanTask.detail }}</strong></div><span class="badge">{{ scanTask.total ? `${scanPercent}%` : scanPendingLabel }}</span></div>
       <div class="mt-3 h-2 overflow-hidden rounded-full bg-[var(--surface-muted)]"><div v-if="scanTask.total" class="h-full rounded-full bg-[var(--brand)] transition-[width]" :style="{width:`${scanPercent}%`}"></div><div v-else class="h-full w-1/3 animate-pulse rounded-full bg-[var(--brand)]"></div></div>
-      <p v-if="scanTask.total" class="muted mt-2 text-xs">{{ scanTask.current||0 }} / {{ scanTask.total }} 个扫描步骤</p>
+      <p v-if="scanTask.total" class="muted mt-2 text-xs">{{ scanTask.current||0 }} / {{ scanTask.total }} {{ scanProgressUnit }}</p>
     </section>
     <section v-else-if="scanStatus?.LastSummary" class="panel-muted flex flex-wrap items-center gap-3 p-4 text-sm">
       <div class="min-w-0 flex-1"><strong>最近扫描</strong><p class="muted mt-1">{{ scanStatus.LastSummary }}</p></div>

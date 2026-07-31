@@ -5,6 +5,7 @@ import type { TaskAccepted, TaskUpdate } from '../api/types'
 export interface LiveTask {
   id: string
   kind?: string
+  phase?: string
   title: string
   detail: string
   current?: number
@@ -19,6 +20,7 @@ function toLiveTask(task: TaskUpdate): LiveTask {
   return {
     id: task.task_id,
     kind: task.kind,
+    phase: task.phase,
     title: task.title,
     detail: task.message,
     current: task.current,
@@ -66,9 +68,28 @@ export const useTaskStore = defineStore('tasks', {
         const data = JSON.parse((event as MessageEvent).data || '{}')
         const status = data.status || data.type
         const tone = status === 'error' ? 'error' : ['complete', 'completed', 'success', 'resolved'].includes(status) ? 'success' : 'running'
-        this.upsert({ id: `legacy:${name}`, title, detail: data.summary || data.message || data.title || data.dir || '任务状态已更新', current: data.current, total: data.total, tone })
+        this.upsert({ id: `legacy:${name}`, title, detail: data.summary || data.message || data.title || data.dir || '任务状态已更新', current: data.current, total: data.total, tone, updatedAt: new Date().toISOString() })
       })
-      bindLegacy('scan_progress', '本地扫描'); bindLegacy('scan_run', '本地扫描'); bindLegacy('scan_complete', '本地扫描')
+      const bindLegacyScan = (name: string) => source.addEventListener(name, event => {
+        if (this.tasks.some(task => task.id === 'local-scan')) return
+        const data = JSON.parse((event as MessageEvent).data || '{}')
+        const existing = this.tasks.find(task => task.id === 'legacy:scan')
+        const complete = name === 'scan_complete' || (name === 'scan_run' && data.IsRunning === false)
+        if (complete && !existing) return
+        const detail = data.summary || data.LastSummary || data.message || data.title || data.dir || data.CurrentDirectory || '正在扫描本地媒体'
+        this.upsert({
+          id: 'legacy:scan',
+          kind: 'scan',
+          phase: 'scan',
+          title: '本地扫描',
+          detail,
+          current: data.current ?? data.ProcessedDirectories,
+          total: data.total ?? data.TotalDirectories,
+          tone: complete ? 'success' : 'running',
+          updatedAt: new Date().toISOString(),
+        })
+      })
+      bindLegacyScan('scan_progress'); bindLegacyScan('scan_run'); bindLegacyScan('scan_complete')
       bindLegacy('metadata_updated', '元数据刷新'); bindLegacy('subscription_run', '订阅检查'); bindLegacy('scheduler_run', '自动调度')
       bindLegacy('download_progress', '下载任务'); bindLegacy('download_ready', '下载完成'); bindLegacy('library_issue', '媒体库诊断')
       if (!refreshTimer) refreshTimer = setInterval(() => { if (this.runningCount || !this.connected) void this.hydrate() }, 3000)
@@ -82,14 +103,24 @@ export const useTaskStore = defineStore('tasks', {
     },
     track(task: TaskAccepted, title: string, kind = 'task', detail = '任务已经启动') {
       const existing = this.taskByID(task.task_id)
-      if (existing && existing.tone !== 'running') return
-      this.upsert({ id: task.task_id, kind, title, detail, tone: 'running', updatedAt: new Date().toISOString() })
+      if (existing) return
+      this.upsert({ id: task.task_id, kind, title, detail, tone: 'running' })
     },
     consumeTransitions() {
       return this.transitions.splice(0)
     },
     upsert(task: LiveTask) {
+      if (task.id === 'local-scan') {
+        const legacyScanIndex = this.tasks.findIndex(item => item.id === 'legacy:scan')
+        if (legacyScanIndex >= 0) this.tasks.splice(legacyScanIndex, 1)
+      }
       const index = this.tasks.findIndex(item => item.id === task.id)
+      const existing = index >= 0 ? this.tasks[index] : undefined
+      if (existing?.updatedAt && task.updatedAt) {
+        const existingTime = Date.parse(existing.updatedAt)
+        const incomingTime = Date.parse(task.updatedAt)
+        if (Number.isFinite(existingTime) && Number.isFinite(incomingTime) && incomingTime < existingTime) return
+      }
       const previousTone = index >= 0 ? this.tasks[index].tone : undefined
       if (index >= 0) this.tasks.splice(index, 1)
       this.tasks.unshift(task)

@@ -95,6 +95,39 @@ func (s *AgentService) RunAgentForLibraryWithRepair(report MetadataIssueRepairPr
 		}
 	}()
 
+	var totalAnimes int64
+	if err := db.DB.Model(&model.LocalAnime{}).Count(&totalAnimes).Error; err != nil {
+		return MetadataIssueRepairResult{}, err
+	}
+	if report != nil {
+		report(MetadataIssueRepairProgress{
+			Phase:   "metadata",
+			Message: fmt.Sprintf("正在整理 %d 部本地番剧的元数据", totalAnimes),
+			Total:   totalAnimes,
+		})
+	}
+
+	var progressMu sync.Mutex
+	var completedAnimes int64
+	reportAnimeComplete := func(_ uint, title string) {
+		if report == nil {
+			return
+		}
+		progressMu.Lock()
+		defer progressMu.Unlock()
+		completedAnimes++
+		message := fmt.Sprintf("正在整理元数据 %d/%d", completedAnimes, totalAnimes)
+		if strings.TrimSpace(title) != "" {
+			message += "：" + strings.TrimSpace(title)
+		}
+		report(MetadataIssueRepairProgress{
+			Phase:   "metadata",
+			Message: message,
+			Current: completedAnimes,
+			Total:   totalAnimes,
+		})
+	}
+
 	networkQueue := make(chan uint, 1000)
 	producerErr := make(chan error, 1)
 	var wg sync.WaitGroup
@@ -104,7 +137,7 @@ func (s *AgentService) RunAgentForLibraryWithRepair(report MetadataIssueRepairPr
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			s.networkWorker(networkQueue)
+			s.networkWorker(networkQueue, reportAnimeComplete)
 		}()
 	}
 
@@ -129,6 +162,8 @@ func (s *AgentService) RunAgentForLibraryWithRepair(report MetadataIssueRepairPr
 				// 2. Decide if Network Needed
 				if s.animeNeedsNetwork(&anime) {
 					networkQueue <- anime.ID
+				} else {
+					reportAnimeComplete(anime.ID, anime.Title)
 				}
 			}
 			return nil
@@ -144,6 +179,14 @@ func (s *AgentService) RunAgentForLibraryWithRepair(report MetadataIssueRepairPr
 		return MetadataIssueRepairResult{}, err
 	}
 	log.Println("Agent: Metadata enrichment completed.")
+	if report != nil {
+		report(MetadataIssueRepairProgress{
+			Phase:   "metadata",
+			Message: "元数据整理完成，正在检查历史数据库冲突",
+			Current: totalAnimes,
+			Total:   totalAnimes,
+		})
+	}
 	return s.RepairDatabaseMetadataIssues(context.Background(), report)
 }
 
@@ -382,12 +425,16 @@ func (s *AgentService) enrich(anime *model.LocalAnime) error {
 	return s.metadataService().EnrichAnime(anime)
 }
 
-func (s *AgentService) networkWorker(queue <-chan uint) {
+func (s *AgentService) networkWorker(queue <-chan uint, complete func(uint, string)) {
 	for id := range queue {
+		title := ""
 		func() {
 			defer func() {
 				if recovered := recover(); recovered != nil {
 					log.Printf("ERROR: metadata worker panic local_anime_id=%d error=%v\n%s", id, recovered, debug.Stack())
+				}
+				if complete != nil {
+					complete(id, title)
 				}
 			}()
 			// Rate Limit
@@ -397,6 +444,7 @@ func (s *AgentService) networkWorker(queue <-chan uint) {
 			if err := db.DB.Preload("Metadata").First(&anime, id).Error; err != nil {
 				return
 			}
+			title = anime.Title
 
 			// The metadata clients already enforce request timeouts. Run enrichment
 			// synchronously inside the worker so wg.Wait truly means every database
@@ -416,7 +464,7 @@ func (s *AgentService) runNetworkWorkers(queue <-chan uint) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			s.networkWorker(queue)
+			s.networkWorker(queue, nil)
 		}()
 	}
 	wg.Wait()

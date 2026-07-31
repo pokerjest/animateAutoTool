@@ -37,6 +37,51 @@ func TestRunAgentForAnimeIDsOnlyEnrichesRequestedSeries(t *testing.T) {
 	require.Equal(t, []uint{first.ID}, calls)
 }
 
+func TestRunAgentForLibraryReportsMetadataPhaseProgress(t *testing.T) {
+	withServiceTestDB(t)
+	directory := model.LocalAnimeDirectory{Path: t.TempDir()}
+	require.NoError(t, db.DB.Create(&directory).Error)
+
+	metadata := model.AnimeMetadata{Title: "Already Enriched", BangumiID: 100}
+	require.NoError(t, db.DB.Create(&metadata).Error)
+	ready := model.LocalAnime{
+		DirectoryID: directory.ID,
+		Title:       "Already Enriched",
+		Path:        t.TempDir(),
+		MetadataID:  &metadata.ID,
+	}
+	pending := model.LocalAnime{DirectoryID: directory.ID, Title: "Needs Network", Path: t.TempDir()}
+	require.NoError(t, db.DB.Create(&ready).Error)
+	require.NoError(t, db.DB.Create(&pending).Error)
+
+	var mu sync.Mutex
+	var progress []MetadataIssueRepairProgress
+	agent := &AgentService{
+		NetworkWorkerCount: 1,
+		NetworkRateLimit:   0,
+		enrichAnime:        func(*model.LocalAnime) error { return nil },
+	}
+	_, err := agent.RunAgentForLibraryWithRepair(func(update MetadataIssueRepairProgress) {
+		mu.Lock()
+		progress = append(progress, update)
+		mu.Unlock()
+	})
+	require.NoError(t, err)
+
+	mu.Lock()
+	defer mu.Unlock()
+	require.NotEmpty(t, progress)
+	require.Equal(t, "metadata", progress[0].Phase)
+	require.Equal(t, int64(0), progress[0].Current)
+	require.Equal(t, int64(2), progress[0].Total)
+	require.Equal(t, "metadata", progress[len(progress)-1].Phase)
+	require.Equal(t, int64(2), progress[len(progress)-1].Current)
+	require.Equal(t, int64(2), progress[len(progress)-1].Total)
+	for index := 1; index < len(progress); index++ {
+		require.GreaterOrEqual(t, progress[index].Current, progress[index-1].Current)
+	}
+}
+
 func TestScanLocalAssetsRepairsMissingMetadataAssociation(t *testing.T) {
 	withServiceTestDB(t)
 

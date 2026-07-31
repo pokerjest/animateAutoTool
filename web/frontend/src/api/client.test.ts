@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { api, ApiError, calendarPosterProxyURL, calendarPosterURL, handlePosterError, mikanPosterProxyURL, normalizePosterURL, posterThumbnailURL, posterURL } from './client'
+import { api, ApiError, calendarPosterProxyURL, calendarPosterURL, handlePosterError, mikanPosterProxyURL, normalizePosterURL, posterThumbnailURL, posterURL, subscriptionPosterURL } from './client'
 
 describe('api client', () => {
   afterEach(() => vi.unstubAllGlobals())
@@ -53,5 +53,34 @@ describe('poster URLs', () => {
     expect(calendarPosterURL(99, 'https://lain.bgm.tv/pic/cover/l/test.jpg', 360)).toBe('https://lain.bgm.tv/pic/cover/l/test.jpg')
     expect(calendarPosterProxyURL(99, 360)).toBe('/api/v1/calendar/posters/99?width=360')
     expect(calendarPosterProxyURL(0, 360)).toBe('')
+  })
+
+  it('builds subscription poster retry URLs', () => {
+    expect(subscriptionPosterURL(7, 'mikan', 160)).toBe('/api/v1/subscriptions/7/poster?source=mikan&width=160')
+    expect(subscriptionPosterURL(7, 'local', 160)).toBe('/api/v1/subscriptions/7/poster?source=local&width=160')
+    expect(subscriptionPosterURL()).toBe('')
+  })
+
+  it('continues to the local poster after a subscription Mikan retry fails', () => {
+    const image = document.createElement('img')
+    image.src = '/api/v1/subscriptions/7/poster?source=mikan&width=160'
+    handlePosterError(
+      { currentTarget: image } as unknown as Event,
+      '/api/v1/subscriptions/7/poster?source=mikan&width=160',
+      '/api/v1/subscriptions/7/poster?source=local&width=160',
+    )
+    expect(image.getAttribute('src')).toBe('/api/v1/subscriptions/7/poster?source=local&width=160')
+  })
+
+  it('ends the subscription poster chain at the placeholder without looping', () => {
+    const image = document.createElement('img')
+    const mikan = '/api/v1/subscriptions/7/poster?source=mikan&width=160'
+    const local = '/api/v1/subscriptions/7/poster?source=local&width=160'
+    image.src = '/api/v1/posters/7'
+    handlePosterError({ currentTarget: image } as unknown as Event, mikan, local)
+    handlePosterError({ currentTarget: image } as unknown as Event, mikan, local)
+    expect(image.getAttribute('src')).toBe(local)
+    handlePosterError({ currentTarget: image } as unknown as Event, mikan, local)
+    expect(image.getAttribute('src')).toBe('/static/img/no_poster.svg')
   })
 })

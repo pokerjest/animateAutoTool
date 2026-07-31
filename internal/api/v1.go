@@ -132,6 +132,7 @@ func initV1Routes(r *gin.Engine) {
 		protected.GET("/subscriptions/mikan/poster", V1MikanPosterHandler)
 		protected.GET("/subscriptions/mikan/resolve", V1MikanResolveHandler)
 		protected.GET("/subscriptions/mikan/subgroups", V1MikanSubgroupsHandler)
+		protected.GET("/subscriptions/:id/poster", V1SubscriptionPosterHandler)
 		protected.POST("/subscriptions/refresh", V1RefreshSubscriptionsHandler)
 		protected.PUT("/subscriptions/:id", V1UpdateSubscriptionHandler)
 		protected.POST("/subscriptions/:id/toggle", V1SubscriptionActionHandler("toggle"))
@@ -722,14 +723,13 @@ func V1LocalScanHandler(c *gin.Context) {
 	go func() {
 		scanner := service.NewScannerService()
 		if err := scanner.ScanAllWithProgress(func(progress service.ScanProgress) {
-			taskstate.Global.Progress(taskID, progress.Message, progress.Current, progress.Total)
+			reportLocalScanProgress(taskID, progress)
 		}); err != nil {
 			log.Printf("local scan failed: %v", err)
 			taskstate.Global.Fail(taskID, err)
 			return
 		}
-		current, _ := taskstate.Global.Get(taskID)
-		taskstate.Global.Progress(taskID, "文件扫描完成，正在整理元数据并修复历史数据库冲突", current.Current, current.Total)
+		startLocalMetadataProgress(taskID)
 		repairResult, repairErr := runLocalMetadataPhase(taskID)
 		if repairErr != nil {
 			taskstate.Global.Fail(taskID, repairErr)
@@ -765,13 +765,12 @@ func V1AddLocalDirectoryHandler(c *gin.Context) {
 	taskstate.Global.Start(taskID, "scan", "本地扫描", "目录已添加，正在扫描本地媒体")
 	go func() {
 		if err := service.NewScannerService().ScanAllWithProgress(func(progress service.ScanProgress) {
-			taskstate.Global.Progress(taskID, progress.Message, progress.Current, progress.Total)
+			reportLocalScanProgress(taskID, progress)
 		}); err != nil {
 			taskstate.Global.Fail(taskID, err)
 			return
 		}
-		current, _ := taskstate.Global.Get(taskID)
-		taskstate.Global.Progress(taskID, "文件扫描完成，正在整理元数据并修复历史数据库冲突", current.Current, current.Total)
+		startLocalMetadataProgress(taskID)
 		repairResult, repairErr := runLocalMetadataPhase(taskID)
 		if repairErr != nil {
 			taskstate.Global.Fail(taskID, repairErr)
@@ -781,6 +780,24 @@ func V1AddLocalDirectoryHandler(c *gin.Context) {
 		taskstate.Global.Complete(taskID, appendMetadataRepairSummary("目录已添加，本地扫描完成", repairResult))
 	}()
 	v1Message(c, http.StatusAccepted, "目录已添加，扫描任务已经启动", gin.H{"task_id": taskID, "status": "running"})
+}
+
+func reportLocalScanProgress(taskID string, progress service.ScanProgress) {
+	message := strings.TrimSpace(progress.Message)
+	if message == "" {
+		message = "正在扫描本地媒体"
+	}
+	taskstate.Global.ProgressPhase(taskID, "scan", "第 1/2 阶段 · "+message, progress.Current, progress.Total)
+}
+
+func startLocalMetadataProgress(taskID string) {
+	taskstate.Global.ProgressPhase(
+		taskID,
+		"metadata",
+		"第 2/2 阶段 · 文件扫描完成，正在整理元数据",
+		0,
+		0,
+	)
 }
 
 func rejectRuntimeRecoveryTask(c *gin.Context) bool {
@@ -797,15 +814,18 @@ func rejectRuntimeRecoveryTask(c *gin.Context) bool {
 }
 
 func runLocalMetadataPhase(taskID string) (service.MetadataIssueRepairResult, error) {
-	task, _ := taskstate.Global.Get(taskID)
-	baseCurrent := task.Current
-	baseTotal := task.Total
 	return service.NewAgentService().RunAgentForLibraryWithRepair(func(progress service.MetadataIssueRepairProgress) {
-		total := baseTotal + progress.Total
-		if total <= 0 {
-			total = progress.Total
+		phase := strings.TrimSpace(progress.Phase)
+		if phase == "" {
+			phase = "metadata"
 		}
-		taskstate.Global.Progress(taskID, progress.Message, baseCurrent+progress.Current, total)
+		taskstate.Global.ProgressPhase(
+			taskID,
+			phase,
+			"第 2/2 阶段 · "+strings.TrimSpace(progress.Message),
+			progress.Current,
+			progress.Total,
+		)
 	})
 }
 

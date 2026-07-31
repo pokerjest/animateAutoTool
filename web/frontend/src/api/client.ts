@@ -38,6 +38,7 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
 export const jsonBody = (value: unknown): RequestInit => ({ body: JSON.stringify(value) })
 
 const noPosterURL = '/static/img/no_poster.svg'
+const posterAttemptsKey = 'posterAttempts'
 
 export function normalizePosterURL(image?: string) {
   const value = image?.trim()
@@ -106,25 +107,51 @@ export function calendarPosterProxyURL(subjectID?: number, width = 360) {
   return `/api/v1/calendar/posters/${subjectID}?width=${Math.max(64, Math.min(1280, Math.round(width)))}`
 }
 
+export function subscriptionPosterURL(id?: number, source: 'mikan' | 'local' = 'mikan', width = 360) {
+  if (!id) return ''
+  return `/api/v1/subscriptions/${id}/poster?source=${source}&width=${Math.max(64, Math.min(1280, Math.round(width)))}`
+}
+
+function posterAttempts(image: HTMLImageElement) {
+  const raw = image.dataset[posterAttemptsKey] || ''
+  return new Set(raw ? raw.split('\n') : [])
+}
+
+function rememberPosterAttempt(image: HTMLImageElement, candidate: string) {
+  if (candidate === noPosterURL) return
+  const attempts = posterAttempts(image)
+  attempts.add(candidate)
+  image.dataset[posterAttemptsKey] = [...attempts].join('\n')
+}
+
 export function handlePosterError(event: Event, ...fallbacks: Array<string | undefined>) {
   const image = event.currentTarget
   if (!(image instanceof HTMLImageElement)) return false
   const current = image.getAttribute('src') || ''
+  const attempted = posterAttempts(image)
 
   // Prefer direct Mikan loading when the browser can reach it. Remote devices
   // that cannot will transparently retry through the AnimateTool host.
   const mikanProxy = mikanPosterProxyURL(current)
-  if (mikanProxy) {
+  if (mikanProxy && !attempted.has(mikanProxy)) {
+    rememberPosterAttempt(image, mikanProxy)
     image.src = mikanProxy
     return true
   }
+
   if (current.startsWith('/api/v1/subscriptions/mikan/poster?')) {
-    image.src = noPosterURL
+    const next = fallbacks
+      .map(normalizePosterURL)
+      .find(candidate => candidate !== current && !attempted.has(candidate) && !mikanPosterProxyURL(candidate))
+    if (next) rememberPosterAttempt(image, next)
+    image.src = next || noPosterURL
     return true
   }
 
-  const next = [...fallbacks.map(normalizePosterURL), noPosterURL].find(candidate => candidate !== current)
+  const next = [...fallbacks.map(normalizePosterURL), noPosterURL]
+    .find(candidate => candidate !== current && !attempted.has(candidate))
   if (!next) return false
+  rememberPosterAttempt(image, next)
   image.src = next
   return true
 }

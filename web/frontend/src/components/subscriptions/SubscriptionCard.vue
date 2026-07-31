@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { CircleAlert, FilePenLine, Pause, Play, PlayCircle, RefreshCw, Sparkles, Trash2 } from '@lucide/vue'
-import { handlePosterError, posterURL } from '../../api/client'
+import { handlePosterError, posterURL, subscriptionPosterURL } from '../../api/client'
 import type { Subscription } from '../../api/types'
 import AsyncButton from '../AsyncButton.vue'
 
@@ -91,7 +91,7 @@ function isRepairBusy(name: string) {
       decoding="async"
       fetchpriority="low"
       class="pointer-events-none relative z-10 h-24 w-16 rounded-xl object-cover md:h-20 md:w-14"
-      @error="handlePosterError($event, item.image)"
+      @error="handlePosterError($event, subscriptionPosterURL(item.ID, 'mikan', 160), subscriptionPosterURL(item.ID, 'local', 160))"
     />
 
     <div class="pointer-events-none relative z-10 min-w-0">

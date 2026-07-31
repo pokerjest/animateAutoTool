@@ -154,6 +154,21 @@ paths:
     parameters: [{ $ref: "#/components/parameters/Id" }]
     put: { operationId: updateSubscription, requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/SubscriptionInput" } } } }, responses: { "200": { $ref: "#/components/responses/Success" } } }
     delete: { operationId: deleteSubscription, responses: { "200": { $ref: "#/components/responses/Success" } } }
+  /subscriptions/{id}/poster:
+    get:
+      operationId: getSubscriptionPoster
+      description: Retry a subscription poster from Mikan or the local metadata cache. The server returns image bytes and never proxies an arbitrary remote URL.
+      parameters:
+        - { $ref: "#/components/parameters/Id" }
+        - { name: source, in: query, required: true, schema: { type: string, enum: [mikan, local] } }
+        - { name: width, in: query, schema: { type: integer, minimum: 64, maximum: 1280 } }
+      responses:
+        "200":
+          description: Same-origin subscription poster
+          content: { image/jpeg: { schema: { type: string, format: binary } }, image/png: { schema: { type: string, format: binary } } }
+        "400": { description: Invalid subscription ID or source }
+        "404": { description: Subscription not found }
+        "502": { description: Requested poster source unavailable }
   /subscriptions/{id}/toggle:
     post: { operationId: toggleSubscription, parameters: [{ $ref: "#/components/parameters/Id" }], responses: { "200": { $ref: "#/components/responses/Success" } } }
   /subscriptions/{id}/run:
@@ -1785,6 +1800,7 @@ components:
         kind: { type: string }
         title: { type: string }
         status: { type: string, enum: [queued, running, completed, error] }
+        phase: { type: string }
         message: { type: string }
         current: { type: integer, format: int64, minimum: 0 }
         total: { type: integer, format: int64, minimum: 0 }

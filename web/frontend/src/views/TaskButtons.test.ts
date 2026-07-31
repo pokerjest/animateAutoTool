@@ -79,7 +79,12 @@ describe('background task buttons', () => {
     expect(wrapper.text()).toContain('30%')
     expect(wrapper.text()).toContain('3 / 10 个扫描步骤')
 
-    tasks.upsert({ id: 'local-scan', kind: 'scan', title: '本地扫描', detail: '扫描完成', tone: 'success', updatedAt: new Date().toISOString() })
+    tasks.upsert({ id: 'local-scan', kind: 'scan', phase: 'metadata', title: '本地扫描', detail: '第 2/2 阶段 · 正在整理元数据 1/8', current: 1, total: 8, tone: 'running', updatedAt: new Date(Date.now()+1000).toISOString() })
+    await flushPromises()
+    expect(wrapper.text()).toContain('第 2/2 阶段 · 元数据整理')
+    expect(wrapper.text()).toContain('1 / 8 部本地番剧')
+
+    tasks.upsert({ id: 'local-scan', kind: 'scan', title: '本地扫描', detail: '扫描完成', tone: 'success', updatedAt: new Date(Date.now()+2000).toISOString() })
     await flushPromises()
     expect(wrapper.text()).not.toContain('扫描中…')
   })
