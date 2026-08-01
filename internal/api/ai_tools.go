@@ -938,13 +938,13 @@ func applySubscriptionRuleProposalTool(ctx context.Context, raw string) (string,
 	}
 	taskID := "ai-subscription-recheck-" + strconv.FormatUint(uint64(subscription.ID), 10)
 	taskstate.Global.Start(taskID, "subscription-repair", "AI 订阅规则复核", "正在按新规则重新检查订阅")
-	go func() {
+	GoBackground(func(context.Context) {
 		if err := runSubscriptionCheck(&subscription, "ai-rule"); err != nil {
 			taskstate.Global.Fail(taskID, err)
 			return
 		}
 		taskstate.Global.Complete(taskID, "订阅规则已保存并完成重新检查")
-	}()
+	})
 	return marshalToolResult(map[string]any{"task_id": taskID, "status": "running"})
 }
 
@@ -957,18 +957,18 @@ func runConfirmedLibraryScanTool(ctx context.Context, raw string) (string, error
 	}
 	taskID := "ai-library-scan-" + strconv.FormatInt(time.Now().UnixNano(), 10)
 	taskstate.Global.Start(taskID, "scan", "AI 确认的本地扫描", "正在扫描本地媒体库")
-	go func() {
-		if err := service.NewScannerService().ScanAll(); err != nil {
+	GoBackground(func(appCtx context.Context) {
+		if err := service.NewScannerService().ScanAllWithProgressContext(appCtx, nil); err != nil {
 			taskstate.Global.Fail(taskID, err)
 			return
 		}
 		service.NewAgentService().RunAgentForLibrary()
-		if err := service.RequestJellyfinLibraryRefresh(context.Background()); err != nil && !errors.Is(err, service.ErrJellyfinNotConfigured) {
+		if err := service.RequestJellyfinLibraryRefresh(appCtx); err != nil && !errors.Is(err, service.ErrJellyfinNotConfigured) {
 			taskstate.Global.Fail(taskID, err)
 			return
 		}
 		taskstate.Global.Complete(taskID, "本地媒体库扫描完成")
-	}()
+	})
 	return marshalToolResult(map[string]any{"task_id": taskID, "status": "running"})
 }
 

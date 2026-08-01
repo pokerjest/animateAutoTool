@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"html"
 	"log"
@@ -284,7 +285,9 @@ func buildSettingsSaveResponse(c *gin.Context, scope string, warnings []string) 
 		successMsg += RenderAniListStatusOOB()
 	}
 	if scope == "network" {
-		go updater.CheckNow("settings-save")
+		GoBackground(func(context.Context) {
+			updater.CheckNow("settings-save")
+		})
 		successMsg += `<div hx-swap-oob="true" id="repo-update-refresh-trigger" hx-get="/api/settings/repo-update-status" hx-target="#repo-update-container" hx-trigger="load" class="hidden"></div>`
 	}
 	if len(warnings) > 0 {

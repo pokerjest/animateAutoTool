@@ -23,6 +23,10 @@ type RestoreOptions struct {
 	RegenerateNFO bool
 }
 
+func (o RestoreOptions) HasRestoreCategory() bool {
+	return o.Configs || o.Metadata || o.Subscriptions || o.Logs || o.Local || o.Users
+}
+
 type RestoreService struct {
 	BatchSize int
 }
@@ -199,6 +203,8 @@ func (s *RestoreService) readBackupData(srcDB *gorm.DB, options RestoreOptions) 
 
 func validateRestoreOptions(desc BackupDescriptor, options RestoreOptions) error {
 	switch {
+	case !options.HasRestoreCategory():
+		return fmt.Errorf("at least one restore category must be selected")
 	case options.Configs && !desc.HasConfigs:
 		return fmt.Errorf("backup does not contain global configs")
 	case options.Metadata && !desc.HasMetadata:

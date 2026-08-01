@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -216,7 +217,7 @@ func TestProcessSubscriptionRecoversExistingQBTaskAfterFailsResponse(t *testing.
 	if logEntry.Status != downloadLogStatusCompleted {
 		t.Fatalf("expected completed status, got %q", logEntry.Status)
 	}
-	if logEntry.TargetFile != "/downloads/Recovered Show/Recovered Show - 01.mkv" {
+	if logEntry.TargetFile != filepath.Clean(`/downloads/Recovered Show/Recovered Show - 01.mkv`) {
 		t.Fatalf("unexpected recovered target: %q", logEntry.TargetFile)
 	}
 

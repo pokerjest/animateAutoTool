@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"log"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -17,9 +18,11 @@ import (
 )
 
 type Manager struct {
-	ticker *time.Ticker
-	quit   chan struct{}
-	ctx    context.Context
+	ticker   *time.Ticker
+	quit     chan struct{}
+	ctx      context.Context
+	stopOnce sync.Once
+	wg       sync.WaitGroup
 }
 
 var schedulerRunInProgress atomic.Bool
@@ -39,27 +42,37 @@ func NewManagerWithContext(ctx context.Context) *Manager {
 
 func (m *Manager) Start() {
 	log.Println("Scheduler started...")
+	m.wg.Add(2)
 	go func() {
+		defer m.wg.Done()
+		defer m.ticker.Stop()
 		for {
 			select {
 			case <-m.ticker.C:
 				m.CheckUpdatesContext(m.ctx)
 			case <-m.ctx.Done():
-				m.ticker.Stop()
 				return
 			case <-m.quit:
-				m.ticker.Stop()
 				return
 			}
 		}
 	}()
 	// 立即执行一次
-	go m.CheckUpdatesContext(m.ctx)
+	go func() {
+		defer m.wg.Done()
+		m.CheckUpdatesContext(m.ctx)
+	}()
 }
 
 func (m *Manager) Stop() {
-	close(m.quit)
-	log.Println("Scheduler stopped.")
+	m.stopOnce.Do(func() {
+		close(m.quit)
+		log.Println("Scheduler stopped.")
+	})
+}
+
+func (m *Manager) Wait() {
+	m.wg.Wait()
 }
 
 func (m *Manager) CheckUpdates() {

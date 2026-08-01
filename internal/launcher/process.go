@@ -380,7 +380,9 @@ func (m *Manager) startJellyfin() error {
 
 	// Attempt Zero-Config
 	// We do this asynchronously so we don't block the main flow waiting for startup
+	m.wg.Add(1)
 	go func() {
+		defer m.wg.Done()
 		creds, err := bootstrap.LoadJellyfinCredentials()
 		if err != nil || creds.Password == "" {
 			password, genErr := security.RandomPassword(24)
@@ -403,14 +405,14 @@ func (m *Manager) startJellyfin() error {
 		if err := bootstrap.SaveJellyfinCredentials(creds); err != nil {
 			fmt.Printf("Jellyfin bootstrap credential persist failed: %v\n", err)
 		}
-		key, err := jellyfin.AttemptZeroConfig(creds.URL, creds.Username, creds.Password)
+		key, err := jellyfin.AttemptZeroConfigContext(m.Ctx, creds.URL, creds.Username, creds.Password)
 		if err == nil && key != "" {
 			fmt.Println("Jellyfin zero-config succeeded and stored a fresh API key.")
 			creds.APIKey = key
 			if err := bootstrap.SaveJellyfinCredentials(creds); err != nil {
 				fmt.Printf("Jellyfin bootstrap credential update failed: %v\n", err)
 			}
-			if waitForDatabase(30 * time.Second) {
+			if m.waitForDatabase(30 * time.Second) {
 				_ = db.SaveGlobalConfig(model.ConfigKeyJellyfinUrl, creds.URL)
 				_ = db.SaveGlobalConfig(model.ConfigKeyJellyfinUsername, creds.Username)
 				_ = db.SaveGlobalConfig(model.ConfigKeyJellyfinPassword, creds.Password)
@@ -455,18 +457,6 @@ func (m *Manager) waitForManagedProcess(serviceName string, cmd *exec.Cmd, logFi
 		return
 	}
 	log.Printf("WARN: managed service exited unexpectedly service=%s pid=%d exit_status=0", serviceName, pid)
-}
-
-func waitForDatabase(timeout time.Duration) bool {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if db.DB != nil {
-			return true
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
-
-	return false
 }
 
 func managedJellyfinConflictReason(address, baseURL string) string {

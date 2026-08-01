@@ -59,19 +59,40 @@ func v1Page(c *gin.Context, items any, page, pageSize int, total int64) {
 	c.JSON(http.StatusOK, v1Envelope{Data: gin.H{"items": items}, Meta: map[string]any{"page": page, "page_size": pageSize, "total": total}})
 }
 
+const maxPaginationPage = 1_000_000
+
 func v1Pagination(c *gin.Context, defaultSize int) (int, int) {
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", strconv.Itoa(defaultSize)))
-	if page < 1 {
-		page = 1
+	return boundedPagination(c, defaultSize, 200)
+}
+
+func boundedPagination(c *gin.Context, defaultSize, maxSize int) (int, int) {
+	pageValue, err := strconv.ParseInt(c.DefaultQuery("page", "1"), 10, 64)
+	if err != nil || pageValue < 1 {
+		pageValue = 1
 	}
-	if pageSize < 1 {
-		pageSize = defaultSize
+	if pageValue > maxPaginationPage {
+		pageValue = maxPaginationPage
 	}
-	if pageSize > 200 {
-		pageSize = 200
+
+	pageSizeValue, err := strconv.ParseInt(c.DefaultQuery("page_size", strconv.Itoa(defaultSize)), 10, 64)
+	if err != nil || pageSizeValue < 1 {
+		pageSizeValue = int64(defaultSize)
 	}
-	return page, pageSize
+	if maxSize > 0 && pageSizeValue > int64(maxSize) {
+		pageSizeValue = int64(maxSize)
+	}
+	return int(pageValue), int(pageSizeValue)
+}
+
+func paginationOffset(page, pageSize int) int {
+	if page < 1 || pageSize < 1 {
+		return 0
+	}
+	maxInt := int(^uint(0) >> 1)
+	if page-1 > maxInt/pageSize {
+		return maxInt
+	}
+	return (page - 1) * pageSize
 }
 
 func v1Error(c *gin.Context, status int, code, message string) {
@@ -476,19 +497,30 @@ func V1SyncHandler(c *gin.Context) {
 	}
 	const taskID = "manual-sync"
 	taskstate.Global.Start(taskID, "sync", "立即同步", "正在同步订阅、本地媒体和下载状态")
-	go func() {
-		if err := runDashboardSyncNow(context.Background()); err != nil {
+	GoBackground(func(ctx context.Context) {
+		if err := runDashboardSyncNow(ctx); err != nil {
 			log.Printf("manual dashboard sync failed: %v", err)
 			taskstate.Global.Fail(taskID, err)
 			return
 		}
 		taskstate.Global.Complete(taskID, "同步完成")
-	}()
+	})
 	v1Message(c, http.StatusAccepted, "同步任务已经启动", gin.H{"task_id": taskID, "status": "running"})
 }
 
 func V1SubscriptionsHandler(c *gin.Context) {
-	items, err := listSubscriptionsWithMetadata()
+	page, pageSize := v1Pagination(c, 100)
+	store := subscriptionStore()
+	if store == nil {
+		v1Error(c, http.StatusServiceUnavailable, "subscriptions_unavailable", "数据库未初始化")
+		return
+	}
+	total, err := store.Count()
+	if err != nil {
+		v1Error(c, http.StatusInternalServerError, "subscriptions_unavailable", "无法读取订阅总数")
+		return
+	}
+	items, err := store.ListWithMetadataPage(paginationOffset(page, pageSize), pageSize)
 	if err != nil {
 		v1Error(c, http.StatusInternalServerError, "subscriptions_unavailable", "无法读取订阅")
 		return
@@ -502,11 +534,7 @@ func V1SubscriptionsHandler(c *gin.Context) {
 	}
 	cancelSync()
 	populateSubscriptionStats(items)
-	page, pageSize := v1Pagination(c, 100)
-	total := len(items)
-	start := min((page-1)*pageSize, total)
-	end := min(start+pageSize, total)
-	c.JSON(http.StatusOK, v1Envelope{Data: gin.H{"items": items[start:end], "scheduler": schedulerSnapshot(), "trend": loadSubscriptionTrendReport(7)}, Meta: map[string]any{"page": page, "page_size": pageSize, "total": total}})
+	c.JSON(http.StatusOK, v1Envelope{Data: gin.H{"items": items, "scheduler": schedulerSnapshot(), "trend": loadSubscriptionTrendReport(7)}, Meta: map[string]any{"page": page, "page_size": pageSize, "total": total}})
 }
 
 func schedulerSnapshot() any {
@@ -555,9 +583,9 @@ func V1SubscriptionActionHandler(action string) gin.HandlerFunc {
 		case "run":
 			taskID := "subscription-" + c.Param("id")
 			taskstate.Global.Start(taskID, "subscription", "订阅检查", "正在检查 "+sub.Title)
-			go func(target *model.Subscription) {
-				checkErr := runSubscriptionCheck(target, "manual")
-				if reconcileErr := reconcileSubscriptionLibraryState(); reconcileErr != nil {
+			GoBackground(func(ctx context.Context) {
+				checkErr := runSubscriptionCheck(sub, "manual")
+				if reconcileErr := reconcileSubscriptionLibraryState(ctx); reconcileErr != nil {
 					log.Printf("manual subscription library reconciliation failed: %v", reconcileErr)
 				}
 				if checkErr != nil {
@@ -566,7 +594,7 @@ func V1SubscriptionActionHandler(action string) gin.HandlerFunc {
 					return
 				}
 				taskstate.Global.Complete(taskID, "订阅检查完成")
-			}(sub)
+			})
 			v1Message(c, http.StatusAccepted, "订阅检查已经启动", gin.H{"task_id": taskID, "status": "running"})
 			return
 		}
@@ -691,8 +719,16 @@ func libraryItemMatchesSearch(item LibraryItem, search string) bool {
 
 func V1RefreshLibraryHandler(c *gin.Context) {
 	force := c.Query("force") == ValueTrue
-	if !service.NewMetadataService().StartRefreshAllMetadata(force) {
+	metaSvc := service.NewMetadataService()
+	if !metaSvc.BeginRefreshAllMetadata() {
 		v1Message(c, http.StatusAccepted, "元数据已经在刷新中", gin.H{"task_id": "metadata-refresh", "status": "running"})
+		return
+	}
+	if !GoBackground(func(ctx context.Context) {
+		metaSvc.RefreshAllMetadataContext(ctx, force)
+	}) {
+		service.GlobalRefreshStatus.Finish("服务正在关闭，元数据刷新未启动")
+		v1Error(c, http.StatusServiceUnavailable, "service_unavailable", "服务正在关闭，无法启动元数据刷新")
 		return
 	}
 	v1Message(c, http.StatusAccepted, "元数据刷新已经启动", gin.H{"task_id": "metadata-refresh", "status": "running"})
@@ -712,7 +748,7 @@ func V1LocalAnimeHandler(c *gin.Context) {
 			Where(`local_animes.title LIKE ? ESCAPE '\' OR anime_metadata.title LIKE ? ESCAPE '\' OR anime_metadata.title_cn LIKE ? ESCAPE '\' OR anime_metadata.title_jp LIKE ? ESCAPE '\' OR anime_metadata.title_en LIKE ? ESCAPE '\'`, like, like, like, like, like)
 	}
 	query.Count(&total)
-	query.Preload("Metadata").Order("local_animes.id DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&items)
+	query.Preload("Metadata").Order("local_animes.id DESC").Offset(paginationOffset(page, pageSize)).Limit(pageSize).Find(&items)
 	populateLocalAnimeActionHints(items)
 	diagnostics, _ := service.ListOpenLibraryIssues(50)
 	c.JSON(http.StatusOK, v1Envelope{Data: gin.H{"directories": dirs, "items": items, "scan_status": service.GlobalScanStatus.Snapshot(), "diagnostics": diagnostics}, Meta: map[string]any{"page": page, "page_size": pageSize, "total": total}})
@@ -757,9 +793,9 @@ func V1LocalScanHandler(c *gin.Context) {
 	}
 	const taskID = "local-scan"
 	taskstate.Global.Start(taskID, "scan", "本地扫描", "正在扫描本地媒体目录")
-	go func() {
+	GoBackground(func(ctx context.Context) {
 		scanner := service.NewScannerService()
-		if err := scanner.ScanAllWithProgress(func(progress service.ScanProgress) {
+		if err := scanner.ScanAllWithProgressContext(ctx, func(progress service.ScanProgress) {
 			reportLocalScanProgress(taskID, progress)
 		}); err != nil {
 			log.Printf("local scan failed: %v", err)
@@ -772,14 +808,14 @@ func V1LocalScanHandler(c *gin.Context) {
 			taskstate.Global.Fail(taskID, repairErr)
 			return
 		}
-		triggerJellyfinLibraryRefresh(context.Background())
+		triggerJellyfinLibraryRefresh(ctx)
 		summary := service.GlobalScanStatus.Snapshot().LastSummary
 		if summary == "" {
 			summary = "本地扫描完成"
 		}
 		summary = appendMetadataRepairSummary(summary, repairResult)
 		taskstate.Global.Complete(taskID, summary)
-	}()
+	})
 	v1Message(c, http.StatusAccepted, "本地扫描已经启动", gin.H{"task_id": taskID, "status": "running"})
 }
 
@@ -800,8 +836,8 @@ func V1AddLocalDirectoryHandler(c *gin.Context) {
 	}
 	const taskID = "local-scan"
 	taskstate.Global.Start(taskID, "scan", "本地扫描", "目录已添加，正在扫描本地媒体")
-	go func() {
-		if err := service.NewScannerService().ScanAllWithProgress(func(progress service.ScanProgress) {
+	GoBackground(func(ctx context.Context) {
+		if err := service.NewScannerService().ScanAllWithProgressContext(ctx, func(progress service.ScanProgress) {
 			reportLocalScanProgress(taskID, progress)
 		}); err != nil {
 			taskstate.Global.Fail(taskID, err)
@@ -813,12 +849,11 @@ func V1AddLocalDirectoryHandler(c *gin.Context) {
 			taskstate.Global.Fail(taskID, repairErr)
 			return
 		}
-		triggerJellyfinLibraryRefresh(context.Background())
+		triggerJellyfinLibraryRefresh(ctx)
 		taskstate.Global.Complete(taskID, appendMetadataRepairSummary("目录已添加，本地扫描完成", repairResult))
-	}()
+	})
 	v1Message(c, http.StatusAccepted, "目录已添加，扫描任务已经启动", gin.H{"task_id": taskID, "status": "running"})
 }
-
 func reportLocalScanProgress(taskID string, progress service.ScanProgress) {
 	if strings.EqualFold(strings.TrimSpace(progress.Phase), "complete") {
 		startLocalMetadataProgress(taskID)
@@ -908,8 +943,12 @@ func V1BackupHandler(c *gin.Context) {
 }
 
 func V1AnalyzeBackupHandler(c *gin.Context) {
-	file, err := c.FormFile("backup_file")
+	file, err := backupUploadFile(c)
 	if err != nil {
+		if errors.Is(err, errBackupFileTooLarge) {
+			v1Error(c, http.StatusRequestEntityTooLarge, "backup_file_too_large", err.Error())
+			return
+		}
 		v1Error(c, http.StatusBadRequest, "backup_file_missing", "请选择一个备份文件")
 		return
 	}
@@ -951,17 +990,23 @@ func V1RestoreBackupHandler(c *gin.Context) {
 		v1Error(c, http.StatusBadRequest, "restore_token_missing", "没有可恢复的备份文件")
 		return
 	}
+	selected := map[string]bool{}
+	for _, item := range req.Categories {
+		selected[item] = true
+	}
+	options := service.RestoreOptions{Configs: selected["configs"], Metadata: selected["metadata"], Subscriptions: selected["subscriptions"], Logs: selected["logs"], Local: selected["local"], Users: selected["users"], RegenerateNFO: req.RegenerateNFO}
+	if !options.HasRestoreCategory() {
+		v1Error(c, http.StatusBadRequest, "restore_categories_missing", "请至少选择一类要恢复的数据")
+		return
+	}
+
 	tempPath, err := consumeRestoreArtifact(req.RestoreToken)
 	if err != nil {
 		v1Error(c, http.StatusBadRequest, "restore_token_invalid", err.Error())
 		return
 	}
 	defer safeio.Remove(tempPath)
-	selected := map[string]bool{}
-	for _, item := range req.Categories {
-		selected[item] = true
-	}
-	options := service.RestoreOptions{Configs: selected["configs"], Metadata: selected["metadata"], Subscriptions: selected["subscriptions"], Logs: selected["logs"], Local: selected["local"], Users: selected["users"], RegenerateNFO: req.RegenerateNFO}
+
 	if err := service.NewRestoreService().PerformRestore(tempPath, options); err != nil {
 		service.RecordAudit(buildAuditContext(c), service.AuditEntry{Action: service.AuditActionBackupRestore, Outcome: service.AuditOutcomeFailure, Details: map[string]any{"options": options, "error": err.Error()}})
 		v1Error(c, http.StatusInternalServerError, "restore_failed", err.Error())
@@ -969,7 +1014,9 @@ func V1RestoreBackupHandler(c *gin.Context) {
 	}
 	service.RecordAudit(buildAuditContext(c), service.AuditEntry{Action: service.AuditActionBackupRestore, Outcome: service.AuditOutcomeSuccess, Details: map[string]any{"options": options}})
 	if options.RegenerateNFO {
-		go func() { _, _ = service.NewMetadataService().RegenerateAllNFOs() }()
+		GoBackground(func(ctx context.Context) {
+			_, _ = service.NewMetadataService().RegenerateAllNFOsContext(ctx)
+		})
 	}
 	v1Message(c, http.StatusOK, "备份恢复完成", nil)
 }

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"os"
 	"sync"
@@ -67,13 +68,18 @@ func consumeRestoreArtifact(token string) (string, error) {
 
 func ensureRestoreArtifactJanitor() {
 	restoreArtifactsJanitorOnce.Do(func() {
-		go func() {
+		GoBackground(func(ctx context.Context) {
 			ticker := time.NewTicker(restoreTokenCleanupInterval)
 			defer ticker.Stop()
-			for now := range ticker.C {
-				cleanupExpiredRestoreArtifacts(now)
+			for {
+				select {
+				case now := <-ticker.C:
+					cleanupExpiredRestoreArtifacts(now)
+				case <-ctx.Done():
+					return
+				}
 			}
-		}()
+		})
 	})
 }
 

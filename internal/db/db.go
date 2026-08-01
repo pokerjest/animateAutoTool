@@ -1,6 +1,7 @@
 package db
 
 import (
+	"database/sql"
 	"fmt"
 	"log"
 	"os"
@@ -24,35 +25,41 @@ var CurrentDBPath string
 var currentDBGOOS = func() string { return runtime.GOOS }
 
 func InitDB(storagePath string) {
-	CurrentDBPath = storagePath
-	var err error
+	if err := InitDBWithError(storagePath); err != nil {
+		log.Fatalf("failed to initialize database: %v", err)
+	}
+}
 
-	// 确保存储目录存在
+// InitDBWithError initializes the writable application database and returns
+// failures to callers that must unwind other resources before process exit.
+func InitDBWithError(storagePath string) error {
 	if !isInMemoryDB(storagePath) {
 		dir := filepath.Dir(storagePath)
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			log.Fatalf("failed to create storage directory: %v", err)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return fmt.Errorf("create storage directory: %w", err)
 		}
 	}
 
-	var driverPath string
-	if isInMemoryDB(storagePath) {
-		// SQLite keeps plain :memory: databases per connection, which causes tables to
-		// disappear when GORM opens additional pooled connections during tests.
-		driverPath = sqliteSharedMemoryPath
-	} else {
+	driverPath := sqliteSharedMemoryPath
+	if !isInMemoryDB(storagePath) {
 		driverPath = sqliteDriverPath(storagePath)
 	}
 
-	DB, err = gorm.Open(sqlite.Open(driverPath), &gorm.Config{})
+	target, err := gorm.Open(sqlite.Open(driverPath), &gorm.Config{})
 	if err != nil {
-		log.Fatalf("failed to connect database: %v", err)
+		return fmt.Errorf("connect database: %w", err)
 	}
+	sqlDB, err := target.DB()
+	if err != nil {
+		return fmt.Errorf("access sql database handle: %w", err)
+	}
+	closeOnError := true
+	defer func() {
+		if closeOnError {
+			_ = sqlDB.Close()
+		}
+	}()
 
-	sqlDB, err := DB.DB()
-	if err != nil {
-		log.Fatalf("failed to access sql database handle: %v", err)
-	}
 	// SQLite has a single writer. Keeping one application connection prevents
 	// concurrent background metadata jobs from racing for the write lock while
 	// still allowing the driver-level busy timeout to cover external locks.
@@ -60,18 +67,51 @@ func InitDB(storagePath string) {
 	sqlDB.SetMaxIdleConns(1)
 
 	if !isInMemoryDB(storagePath) {
-		if err := CheckIntegrity(DB); err != nil {
-			log.Fatalf("database integrity check failed: %v", err)
+		if err := CheckIntegrity(target); err != nil {
+			return fmt.Errorf("database integrity check failed: %w", err)
 		}
 	}
-
-	err = RunMigrations(DB)
-	if err != nil {
-		log.Fatalf("failed to migrate database: %v", err)
+	if err := RunMigrations(target); err != nil {
+		return fmt.Errorf("migrate database: %w", err)
 	}
-	if version := CurrentSchemaVersion(DB); version != "" {
+
+	DB = target
+	CurrentDBPath = storagePath
+	closeOnError = false
+	if version := CurrentSchemaVersion(target); version != "" {
 		log.Printf("database schema is now at %s", version)
 	}
+	return nil
+}
+
+// OpenReadOnly opens an existing SQLite database without creating directories,
+// running migrations, or changing the package-level DB handle.
+func OpenReadOnly(storagePath string) (*gorm.DB, *sql.DB, error) {
+	if isInMemoryDB(storagePath) {
+		return nil, nil, fmt.Errorf("read-only database requires a file path")
+	}
+	info, err := os.Stat(storagePath)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, nil, fmt.Errorf("database path is not a regular file: %s", storagePath)
+	}
+	readDB, err := gorm.Open(sqlite.Open(sqliteReadOnlyPath(storagePath)), &gorm.Config{})
+	if err != nil {
+		return nil, nil, err
+	}
+	sqlDB, err := readDB.DB()
+	if err != nil {
+		return nil, nil, err
+	}
+	sqlDB.SetMaxOpenConns(1)
+	sqlDB.SetMaxIdleConns(1)
+	if err := readDB.Exec("PRAGMA query_only = ON").Error; err != nil {
+		_ = sqlDB.Close()
+		return nil, nil, err
+	}
+	return readDB, sqlDB, nil
 }
 
 func CloseDB() error {
@@ -182,4 +222,12 @@ func sqliteDriverPath(storagePath string) string {
 	// durability characteristics closer to the default mode while avoiding the
 	// most fragile rollback-journal path.
 	return driverPath + "&_pragma=journal_mode(WAL)"
+}
+
+func sqliteReadOnlyPath(storagePath string) string {
+	separator := "?"
+	if strings.Contains(storagePath, "?") {
+		separator = "&"
+	}
+	return "file:" + storagePath + separator + "mode=ro"
 }

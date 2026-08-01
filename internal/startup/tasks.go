@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/pokerjest/animateAutoTool/internal/config"
@@ -24,9 +25,24 @@ type recoveryCompletion struct {
 	allowBackground bool
 }
 
+// Lifecycle owns startup workers that must finish before SQLite closes.
+type Lifecycle struct {
+	ctx       context.Context
+	cancel    context.CancelFunc
+	recovery  *recoveryCompletion
+	workers   sync.WaitGroup
+	closeOnce sync.Once
+}
+
 // Run performs runtime-only initialization that should not happen as a side
 // effect of constructing HTTP routes.
-func Run(ctx context.Context) func() {
+func Run(parent context.Context) *Lifecycle {
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithCancel(parent)
+	lifecycle := &Lifecycle{ctx: ctx, cancel: cancel}
+
 	sessionResult, err := runtimejournal.BeginSession(appversion.AppVersion)
 	recovery := completedRecovery(true)
 	if err != nil {
@@ -34,8 +50,11 @@ func Run(ctx context.Context) func() {
 	} else {
 		recovery = handlePreviousRuntimeSession(ctx, sessionResult)
 	}
+	lifecycle.recovery = recovery
 
+	lifecycle.workers.Add(1)
 	go func() {
+		defer lifecycle.workers.Done()
 		select {
 		case <-recovery.done:
 			if !recovery.allowBackground {
@@ -48,24 +67,53 @@ func Run(ctx context.Context) func() {
 			service.NewAuthService().EnsureDefaultUser()
 			service.NewScannerService().CleanupGarbage()
 			worker.StartMetadataWorker()
-			service.NewMetadataService().StartMetadataMigration()
-			worker.StartDownloadLogSyncWorker(ctx)
+
+			var backgroundWorkers sync.WaitGroup
+			backgroundWorkers.Add(3)
+			go func() {
+				defer backgroundWorkers.Done()
+				service.NewMetadataService().RunMetadataMigration(ctx)
+			}()
+			go func() {
+				defer backgroundWorkers.Done()
+				worker.RunDownloadLogSyncWorker(ctx)
+			}()
+			go func() {
+				defer backgroundWorkers.Done()
+				runRuntimeMonitor(ctx)
+			}()
 			updater.Start()
+			backgroundWorkers.Wait()
 		case <-ctx.Done():
 		}
 	}()
 
-	startRuntimeMonitor()
-	return func() {
-		// Do not close SQLite while a crash-recovery pass is still reconciling
-		// media, metadata, or subscription state.
-		<-recovery.done
-		if err := runtimejournal.EndSession(); err != nil {
-			log.Printf("WARN: failed to clear runtime session marker during shutdown: %v", err)
-		}
-	}
+	return lifecycle
 }
 
+// Stop cancels startup workers and prevents the updater loop from scheduling
+// additional periodic work.
+func (l *Lifecycle) Stop() {
+	if l == nil {
+		return
+	}
+	l.closeOnce.Do(func() {
+		updater.Stop()
+		l.cancel()
+	})
+}
+
+// Wait blocks until recovery and every tracked startup worker have finished.
+func (l *Lifecycle) Wait() {
+	if l == nil {
+		return
+	}
+	if l.recovery != nil {
+		<-l.recovery.done
+	}
+	l.workers.Wait()
+	updater.Wait()
+}
 func handlePreviousRuntimeSession(ctx context.Context, result runtimejournal.StartResult) *recoveryCompletion {
 	recovery := &recoveryCompletion{done: make(chan struct{})}
 	if result.PreviousError != "" {
@@ -157,7 +205,7 @@ func handlePreviousRuntimeSession(ctx context.Context, result runtimejournal.Sta
 		if needsMediaRecovery {
 			taskstate.Global.Progress(taskID, "正在重新扫描媒体库并核对元数据链接", 0, 3)
 			scanner := service.NewScannerService()
-			if err := scanner.ScanAllWithProgress(func(progress service.ScanProgress) {
+			if err := scanner.ScanAllWithProgressContext(ctx, func(progress service.ScanProgress) {
 				taskstate.Global.Progress(taskID, progress.Message, progress.Current, progress.Total)
 			}); err != nil {
 				recoverySucceeded = false

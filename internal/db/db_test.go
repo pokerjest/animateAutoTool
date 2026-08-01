@@ -1,6 +1,8 @@
 package db
 
 import (
+	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -90,5 +92,55 @@ func TestSQLiteDriverPathUsesBusyTimeoutAndWALOnWindows(t *testing.T) {
 				t.Fatalf("sqliteDriverPath(%q) = %q, want %q", tc.input, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestOpenReadOnlyDoesNotCreateMissingDatabase(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "missing.db")
+
+	_, _, err := OpenReadOnly(path)
+	if err == nil {
+		t.Fatal("OpenReadOnly should reject a missing database")
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("OpenReadOnly error = %v, want os.ErrNotExist", err)
+	}
+	if _, statErr := os.Stat(path); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("read-only open created %s: stat error = %v", path, statErr)
+	}
+}
+
+func TestOpenReadOnlyReadsExistingDatabaseAndRejectsWrites(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "existing.db")
+	writable, err := gorm.Open(sqlite.Open(sqliteDriverPath(path)), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open writable database: %v", err)
+	}
+	sqlWritable, err := writable.DB()
+	if err != nil {
+		t.Fatalf("get writable sql handle: %v", err)
+	}
+	if err := writable.Exec("CREATE TABLE checks (id INTEGER PRIMARY KEY, value TEXT)").Error; err != nil {
+		t.Fatalf("create test table: %v", err)
+	}
+	if err := sqlWritable.Close(); err != nil {
+		t.Fatalf("close writable database: %v", err)
+	}
+
+	readOnly, sqlReadOnly, err := OpenReadOnly(path)
+	if err != nil {
+		t.Fatalf("open read-only database: %v", err)
+	}
+	t.Cleanup(func() { _ = sqlReadOnly.Close() })
+
+	var count int
+	if err := readOnly.Raw("SELECT COUNT(*) FROM checks").Scan(&count).Error; err != nil {
+		t.Fatalf("read from read-only database: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("row count = %d, want 0", count)
+	}
+	if err := readOnly.Exec("INSERT INTO checks (value) VALUES (?)", "blocked").Error; err == nil {
+		t.Fatal("read-only database accepted an INSERT")
 	}
 }

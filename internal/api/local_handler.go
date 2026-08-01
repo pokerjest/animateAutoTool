@@ -49,19 +49,8 @@ func LocalAnimePageHandler(c *gin.Context) {
 	db.DB.Find(&dirs)
 
 	var animes []model.LocalAnime
-	pageSize := 200
-	page := 1
-	if raw := c.Query("page_size"); raw != "" {
-		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 && parsed <= 1000 {
-			pageSize = parsed
-		}
-	}
-	if raw := c.Query("page"); raw != "" {
-		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
-			page = parsed
-		}
-	}
-	offset := (page - 1) * pageSize
+	page, pageSize := boundedPagination(c, 200, 1000)
+	offset := paginationOffset(page, pageSize)
 	db.DB.Preload("Metadata").Order("id desc").Limit(pageSize).Offset(offset).Find(&animes)
 	populateLocalAnimeActionHints(animes)
 
@@ -75,15 +64,6 @@ func LocalAnimePageHandler(c *gin.Context) {
 
 	serverId := ""
 	if jellyfinURL != "" && jellyfinAPIKey != "" {
-		// Best effort fetch of Server ID
-		// We could cache this, but fetching here ensures freshness if server changes
-		// Or we can rely on cached status if we had one. Simple fetch is safe enough for page load.
-		go func() {
-			// Optional: Async check or sync?
-			// Doing it sync for page load might be slow if JF is down.
-			// Ideally we cache this in DB or memory on startup.
-			// For now, let's just create a client and try quickly.
-		}()
 
 		// Let's try to fetch it quickly with short timeout or rely on stored config if we had it?
 		// Better: We can store it in DB when we test connection?
@@ -214,15 +194,13 @@ func AddLocalDirectoryHandler(c *gin.Context) {
 	}
 
 	// Trigger immediate scan and Jellyfin sync
-	go func() {
-		// Sync to Jellyfin
+	GoBackground(func(ctx context.Context) {
 		jellyfinURL := configValue(model.ConfigKeyJellyfinUrl)
 		jellyfinAPIKey := configValue(model.ConfigKeyJellyfinApiKey)
 
 		if jellyfinURL != "" && jellyfinAPIKey != "" {
 			client := newConfiguredJellyfinClient(jellyfinURL, jellyfinAPIKey)
 			libName := filepath.Base(path)
-			// Use "tvshows" as default for Anime
 			if err := client.CreateLibrary(libName, path, "tvshows"); err != nil {
 				log.Printf("Failed to auto-create Jellyfin library: %v", err)
 			} else {
@@ -231,12 +209,12 @@ func AddLocalDirectoryHandler(c *gin.Context) {
 		}
 
 		scanner := service.NewScannerService()
-		if err := scanner.ScanAll(); err != nil {
+		if err := scanner.ScanAllWithProgressContext(ctx, nil); err != nil {
 			fmt.Printf("Error scanning all directories: %v\n", err)
 			return
 		}
-		triggerJellyfinLibraryRefresh(context.Background())
-	}()
+		triggerJellyfinLibraryRefresh(ctx)
+	})
 
 	c.Header("HX-Redirect", "/local-anime")
 	c.Status(http.StatusOK)
@@ -285,18 +263,16 @@ func ScanLocalDirectoryHandler(c *gin.Context) {
 		return
 	}
 	scanner := service.NewScannerService()
-	go func() {
-		// Phase 1: Scanner (Events emitted via EventBus)
-		if err := scanner.ScanAll(); err != nil {
+	GoBackground(func(ctx context.Context) {
+		if err := scanner.ScanAllWithProgressContext(ctx, nil); err != nil {
 			fmt.Printf("Error scanning all directories: %v\n", err)
 			return
 		}
 
-		// Phase 2: Agent (Should also be triggered via EventBus in future, but explicit here for now)
 		agent := service.NewAgentService()
 		agent.RunAgentForLibrary()
-		triggerJellyfinLibraryRefresh(context.Background())
-	}()
+		triggerJellyfinLibraryRefresh(ctx)
+	})
 
 	c.JSON(http.StatusOK, gin.H{"status": "started", "message": "扫描已在后台启动"})
 }
@@ -310,14 +286,14 @@ func triggerJellyfinLibraryRefresh(ctx context.Context) {
 // RegenerateNFOHandler 手动触发 NFO 重建
 func RegenerateNFOHandler(c *gin.Context) {
 	metaSvc := service.NewMetadataService()
-	go func() {
-		count, err := metaSvc.RegenerateAllNFOs()
+	GoBackground(func(ctx context.Context) {
+		count, err := metaSvc.RegenerateAllNFOsContext(ctx)
 		if err != nil {
 			log.Printf("ERROR: NFO Regeneration failed: %v", err)
 		} else {
 			log.Printf("INFO: NFO Regeneration completed. Processed %d series.", count)
 		}
-	}()
+	})
 
 	c.String(http.StatusOK, "NFO 重建任务已在后台启动，详情请查看日志")
 }

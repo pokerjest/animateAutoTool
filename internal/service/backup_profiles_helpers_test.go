@@ -83,9 +83,10 @@ func TestBackupContainsConfigsOnly(t *testing.T) {
 func TestCleanBackupPath(t *testing.T) {
 	t.Parallel()
 	cases := map[string]string{
-		"./foo/bar":       "foo/bar",
-		"foo//bar":        "foo/bar",
-		"foo/./bar/../qz": "foo/qz",
+		"./foo/bar":                    "foo/bar",
+		"foo//bar":                     "foo/bar",
+		"foo/./bar/../qz":              "foo/qz",
+		`C:\library\Show\..\Season 01`: "C:/library/Season 01",
 	}
 	for input, want := range cases {
 		assert.Equal(t, want, CleanBackupPath(input), "input=%q", input)

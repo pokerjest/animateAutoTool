@@ -144,8 +144,8 @@ var enrichSubscriptionMetadata = func(metadata *model.AnimeMetadata, title strin
 	service.NewMetadataService().EnrichMetadata(metadata, title)
 }
 
-func reconcileSubscriptionLibraryState() error {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+func reconcileSubscriptionLibraryState(parent context.Context) error {
+	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
 	defer cancel()
 
 	_, err := service.SyncJellyfinLibraryMappings(ctx)
@@ -261,12 +261,12 @@ func createSubscriptionInternal(sub *model.Subscription) error {
 	}
 
 	// Trigger run asynchronously
-	go func() {
+	GoBackground(func(context.Context) {
 		log.Printf("DEBUG: Async ProcessSubscription started for %s", sub.Title)
 		if err := runSubscriptionCheck(sub, "create"); err != nil {
 			log.Printf("WARN: Skipping async subscription run for %s: %v", sub.Title, err)
 		}
-	}()
+	})
 
 	return nil
 }
@@ -467,7 +467,7 @@ func RunSubscriptionHandler(c *gin.Context) {
 	}
 
 	checkErr := runSubscriptionCheck(sub, "manual")
-	if reconcileErr := reconcileSubscriptionLibraryState(); reconcileErr != nil {
+	if reconcileErr := reconcileSubscriptionLibraryState(c.Request.Context()); reconcileErr != nil {
 		log.Printf("RunSubscription: local library reconciliation failed: %v", reconcileErr)
 	}
 	if checkErr != nil {
@@ -624,7 +624,7 @@ func ValidateSubscriptionRSSHandler(c *gin.Context) {
 	}
 
 	parserClient := newConfiguredMikanParser()
-	primaryEpisodes, primaryErr := parserClient.ParseContext(context.Background(), sub.RSSUrl)
+	primaryEpisodes, primaryErr := parserClient.ParseContext(c.Request.Context(), sub.RSSUrl)
 	response := RSSValidationResponse{}
 	if primaryErr == nil {
 		response.PrimaryCount = len(primaryEpisodes)
@@ -651,7 +651,7 @@ func ValidateSubscriptionRSSHandler(c *gin.Context) {
 	}
 
 	if sub.BackupRSSUrl != "" && sub.BackupRSSUrl != sub.RSSUrl {
-		backupEpisodes, backupErr := parserClient.ParseContext(context.Background(), sub.BackupRSSUrl)
+		backupEpisodes, backupErr := parserClient.ParseContext(c.Request.Context(), sub.BackupRSSUrl)
 		if backupErr != nil {
 			response.Warnings = append(response.Warnings, "备用 RSS 当前也不可用。")
 		} else {
@@ -787,7 +787,7 @@ func RefreshSubscriptionLibraryHandler(c *gin.Context) {
 		return
 	}
 
-	triggerJellyfinLibraryRefresh(context.Background())
+	triggerJellyfinLibraryRefresh(c.Request.Context())
 
 	cardSub, err := loadSubscriptionCard(sub.ID)
 	if err != nil {

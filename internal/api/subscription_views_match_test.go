@@ -104,3 +104,72 @@ func TestFindSubscriptionLocalAnimesRejectsMetadataOnlyCollision(t *testing.T) {
 		t.Fatalf("metadata-only collision must not make another series playable: %+v", matches)
 	}
 }
+
+func TestPopulateSubscriptionStatsSharesPreloadedLibraryIndexAcrossNonExactTitles(t *testing.T) {
+	anime := model.LocalAnime{
+		Title:            "Shared Show Season 2",
+		Path:             "/library/Shared Show Season 2",
+		JellyfinSeriesID: "shared-show-series",
+	}
+	if err := db.DB.Create(&anime).Error; err != nil {
+		t.Fatalf("create local anime: %v", err)
+	}
+	episodes := []model.LocalEpisode{
+		{
+			LocalAnimeID:   anime.ID,
+			Title:          "Shared Show - 01",
+			EpisodeNum:     1,
+			SeasonNum:      2,
+			Path:           "/library/Shared Show Season 2/S02E01.mkv",
+			JellyfinItemID: "shared-show-episode-1",
+		},
+		{
+			LocalAnimeID: anime.ID,
+			Title:        "Shared Show - 02",
+			EpisodeNum:   2,
+			SeasonNum:    2,
+			Path:         "/library/Shared Show Season 2/S02E02.mkv",
+		},
+	}
+	for i := range episodes {
+		if err := db.DB.Create(&episodes[i]).Error; err != nil {
+			t.Fatalf("create local episode %d: %v", i, err)
+		}
+	}
+	subs := []model.Subscription{
+		{Title: "Shared Show", RSSUrl: "https://example.test/shared-show"},
+		{Title: "Shared Show 2026", RSSUrl: "https://example.test/shared-show-2026"},
+	}
+	for i := range subs {
+		if err := db.DB.Create(&subs[i]).Error; err != nil {
+			t.Fatalf("create subscription %d: %v", i, err)
+		}
+	}
+	t.Cleanup(func() {
+		_ = db.DB.Unscoped().Where("subscription_id IN ?", []uint{subs[0].ID, subs[1].ID}).Delete(&model.SubscriptionResource{}).Error
+		_ = db.DB.Unscoped().Delete(&subs[0]).Error
+		_ = db.DB.Unscoped().Delete(&subs[1]).Error
+		_ = db.DB.Unscoped().Where("local_anime_id = ?", anime.ID).Delete(&model.LocalEpisode{}).Error
+		_ = db.DB.Unscoped().Delete(&anime).Error
+	})
+
+	libraryIndex, err := loadSubscriptionLibraryIndex()
+	if err != nil {
+		t.Fatalf("load shared library index: %v", err)
+	}
+	if _, ok := libraryIndex.statsByAnime[anime.ID]; !ok {
+		t.Fatalf("local anime %d was not included in the shared library index", anime.ID)
+	}
+	for i := range subs {
+		populateSubscriptionStatWithLibraryIndex(&subs[i], libraryIndex)
+		if subs[i].LocalAnimeID != anime.ID {
+			t.Fatalf("subscription %d matched local anime %d, want %d", i, subs[i].LocalAnimeID, anime.ID)
+		}
+		if subs[i].LibraryEpisodeCount != 2 {
+			t.Fatalf("subscription %d episode count = %d, want 2", i, subs[i].LibraryEpisodeCount)
+		}
+		if !subs[i].Playable {
+			t.Fatalf("subscription %d should be playable", i)
+		}
+	}
+}

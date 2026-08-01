@@ -148,6 +148,11 @@ func TestSettingsBackupOmitsSecretsAndRestorePreservesCurrentCredentials(t *test
 	if err != nil {
 		t.Fatalf("open settings backup: %v", err)
 	}
+	backupSQLDB, err := backupDB.DB()
+	if err != nil {
+		t.Fatalf("get settings backup sql handle: %v", err)
+	}
+	t.Cleanup(func() { _ = backupSQLDB.Close() })
 	var backedUp []model.GlobalConfig
 	if err := backupDB.Find(&backedUp).Error; err != nil {
 		t.Fatalf("load backed up settings: %v", err)
@@ -156,6 +161,9 @@ func TestSettingsBackupOmitsSecretsAndRestorePreservesCurrentCredentials(t *test
 		if IsSensitiveConfigKey(cfg.Key) {
 			t.Fatalf("sensitive config %q was written to selective backup", cfg.Key)
 		}
+	}
+	if err := backupSQLDB.Close(); err != nil {
+		t.Fatalf("close settings backup sql handle: %v", err)
 	}
 
 	if err := db.SaveGlobalConfig(model.ConfigKeyQBUrl, "http://current-qb:8080"); err != nil {

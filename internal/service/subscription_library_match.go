@@ -30,6 +30,53 @@ func LocalAnimeMatchesSubscription(sub *model.Subscription, anime *model.LocalAn
 	)
 }
 
+const subscriptionMatchIndexGramSize = 6
+
+// SubscriptionLocalMatchIndexKeys returns conservative lookup keys used to
+// narrow candidates before LocalAnimeMatchesSubscription performs final checks.
+func SubscriptionLocalMatchIndexKeys(sub *model.Subscription) ([]string, bool) {
+	if sub == nil {
+		return nil, false
+	}
+	titles := []string{sub.Title}
+	titles = append(titles, metadataIdentityTitles(subscriptionMetadataForMatch(sub))...)
+	return subscriptionMatchIndexKeys(titles)
+}
+
+func LocalAnimeSubscriptionIndexKeys(anime *model.LocalAnime) ([]string, bool) {
+	if anime == nil {
+		return nil, false
+	}
+	return subscriptionMatchIndexKeys(localAnimeIdentityTitles(anime.Title, anime.Path))
+}
+
+func subscriptionMatchIndexKeys(titles []string) ([]string, bool) {
+	seen := make(map[string]struct{})
+	keys := make([]string, 0)
+	requiresFallback := false
+	for _, title := range titles {
+		for _, variant := range titleRuleVariants(title) {
+			normalized := []rune(compactRuleTitle(variant))
+			if len(normalized) == 0 {
+				continue
+			}
+			if len(normalized) < subscriptionMatchIndexGramSize {
+				requiresFallback = true
+				continue
+			}
+			for i := 0; i+subscriptionMatchIndexGramSize <= len(normalized); i++ {
+				key := string(normalized[i : i+subscriptionMatchIndexGramSize])
+				if _, exists := seen[key]; exists {
+					continue
+				}
+				seen[key] = struct{}{}
+				keys = append(keys, key)
+			}
+		}
+	}
+	return keys, requiresFallback
+}
+
 func localEpisodeCandidateMatchesSubscription(
 	sub model.Subscription,
 	releaseTitle string,

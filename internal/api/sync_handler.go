@@ -32,7 +32,7 @@ var runDashboardSyncNow = func(ctx context.Context) error {
 	}
 
 	scanner := service.NewScannerService()
-	if err := scanner.ScanAll(); err != nil {
+	if err := scanner.ScanAllWithProgressContext(ctx, nil); err != nil {
 		errs = append(errs, fmt.Sprintf("本地扫描失败: %v", err))
 	} else {
 		steps = append(steps, "本地扫描")
@@ -96,11 +96,11 @@ func DashboardSyncHandler(c *gin.Context) {
 		htmlServerError(c, "立即同步", runtimejournal.ErrRecoveryInProgress)
 		return
 	}
-	go func() {
-		if err := runDashboardSyncNow(context.Background()); err != nil {
+	GoBackground(func(ctx context.Context) {
+		if err := runDashboardSyncNow(ctx); err != nil {
 			log.Printf("Dashboard sync failed: %v", err)
 		}
-	}()
+	})
 
 	message := "已在后台启动订阅检查、本地扫描和下载状态同步"
 	triggerAppToast(c, message, "success")

@@ -558,6 +558,13 @@ func CurrentSchemaVersion(target *gorm.DB) string {
 	return row.ID
 }
 
+func LatestSchemaVersion() string {
+	if len(migrations) == 0 {
+		return ""
+	}
+	return migrations[len(migrations)-1].ID
+}
+
 type migrationLock struct {
 	path string
 	file *os.File

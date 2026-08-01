@@ -91,6 +91,10 @@ type Manager struct {
 	mu                  sync.RWMutex
 	status              Status
 	quit                chan struct{}
+	stopOnce            sync.Once
+	taskMu              sync.Mutex
+	stopping            bool
+	wg                  sync.WaitGroup
 	etag                string
 	cachedRelease       *githubRelease
 	cachedRepoOwner     string
@@ -126,10 +130,33 @@ func Start() {
 	startOnce.Do(func() {
 		manager = &Manager{quit: make(chan struct{})}
 		manager.setDisabledHintIfNeeded()
-		go manager.loop()
+		manager.wg.Add(1)
+		go func() {
+			defer manager.wg.Done()
+			manager.loop()
+		}()
 	})
 }
 
+// Stop prevents new periodic work from starting and signals the updater loop.
+func Stop() {
+	if manager == nil {
+		return
+	}
+	manager.taskMu.Lock()
+	manager.stopping = true
+	manager.stopOnce.Do(func() {
+		close(manager.quit)
+	})
+	manager.taskMu.Unlock()
+}
+
+// Wait blocks until the updater loop and tracked asynchronous checks exit.
+func Wait() {
+	if manager != nil {
+		manager.wg.Wait()
+	}
+}
 func Snapshot() Status {
 	if manager == nil {
 		return Status{LastResult: "not_started", LastMessage: "更新服务尚未启动"}
@@ -242,12 +269,23 @@ func (m *Manager) runCheckVersion(source, version string) Status {
 }
 
 func (m *Manager) runCheckAsync(source string, applyWhenBehind bool) Status {
+	m.taskMu.Lock()
+	if m.stopping {
+		m.taskMu.Unlock()
+		return Snapshot()
+	}
 	cfg := loadSettings()
 	snapshot, started := m.beginRun(cfg, source, applyWhenBehind)
 	if !started {
+		m.taskMu.Unlock()
 		return snapshot
 	}
-	go m.runCheckInternal(source, applyWhenBehind, true, "")
+	m.wg.Add(1)
+	m.taskMu.Unlock()
+	go func() {
+		defer m.wg.Done()
+		m.runCheckInternal(source, applyWhenBehind, true, "")
+	}()
 	return snapshot
 }
 

@@ -1,6 +1,8 @@
 package api
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -18,6 +20,13 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/service"
 	"gorm.io/gorm"
 )
+
+const (
+	maxBackupFileBytes    int64 = 8 << 30
+	maxBackupRequestBytes int64 = maxBackupFileBytes + 1<<20
+)
+
+var errBackupFileTooLarge = errors.New("备份文件超过 8 GiB 限制")
 
 type BackupStats struct {
 	SubscriptionCount  int64
@@ -101,8 +110,12 @@ func BackupPageHandler(c *gin.Context) {
 }
 
 func AnalyzeBackupHandler(c *gin.Context) {
-	file, err := c.FormFile("backup_file")
+	file, err := backupUploadFile(c)
 	if err != nil {
+		if errors.Is(err, errBackupFileTooLarge) {
+			htmlStringError(c, http.StatusRequestEntityTooLarge, err.Error())
+			return
+		}
 		htmlBadRequest(c, "请选择一个备份文件")
 		return
 	}
@@ -142,6 +155,19 @@ func ExecuteRestoreHandler(c *gin.Context) {
 		htmlBadRequest(c, "没有可恢复的备份文件")
 		return
 	}
+	options := service.RestoreOptions{
+		Configs:       c.PostForm("restore_configs") == "on",
+		Metadata:      c.PostForm("restore_metadata") == "on",
+		Subscriptions: c.PostForm("restore_subscriptions") == "on",
+		Logs:          c.PostForm("restore_logs") == "on",
+		Local:         c.PostForm("restore_local") == "on",
+		Users:         c.PostForm("restore_users") == "on",
+		RegenerateNFO: c.PostForm("restore_nfo") == "on",
+	}
+	if !options.HasRestoreCategory() {
+		htmlBadRequest(c, "请至少选择一类要恢复的数据")
+		return
+	}
 
 	tempPath, err := consumeRestoreArtifact(restoreToken)
 	if err != nil {
@@ -153,23 +179,6 @@ func ExecuteRestoreHandler(c *gin.Context) {
 	// Also ensure it's a valid SQLite file before passing to service
 	if !isValidSQLite(tempPath) {
 		htmlBadRequest(c, "无效的数据库备份文件")
-		return
-	}
-
-	// Read restore options from form
-	options := service.RestoreOptions{
-		Configs:       c.PostForm("restore_configs") == "on",
-		Metadata:      c.PostForm("restore_metadata") == "on",
-		Subscriptions: c.PostForm("restore_subscriptions") == "on",
-		Logs:          c.PostForm("restore_logs") == "on",
-		Local:         c.PostForm("restore_local") == "on",
-		Users:         c.PostForm("restore_users") == "on",
-		RegenerateNFO: c.PostForm("restore_nfo") == "on",
-	}
-
-	// Validate at least one option selected
-	if !options.Configs && !options.Metadata && !options.Subscriptions && !options.Logs && !options.Local && !options.Users {
-		htmlBadRequest(c, "请至少选择一类要恢复的数据")
 		return
 	}
 
@@ -193,16 +202,16 @@ func ExecuteRestoreHandler(c *gin.Context) {
 
 	// Optional: Regenerate NFOs
 	if options.RegenerateNFO {
-		go func() {
+		GoBackground(func(ctx context.Context) {
 			log.Println("Restore: Triggering NFO regeneration...")
 			metaSvc := service.NewMetadataService()
-			count, err := metaSvc.RegenerateAllNFOs()
+			count, err := metaSvc.RegenerateAllNFOsContext(ctx)
 			if err != nil {
 				log.Printf("Restore: NFO regeneration failed: %v", err)
 			} else {
 				log.Printf("Restore: NFO regeneration completed. Processed %d series.", count)
 			}
-		}()
+		})
 	}
 
 	// Success response: Send HTMX trigger or redirect
@@ -296,7 +305,29 @@ func ImportBackupHandler(c *gin.Context) {
 	htmlBadRequest(c, "已经禁用直接恢复，请先通过分析/预览流程确认备份内容。")
 }
 
+func backupUploadFile(c *gin.Context) (*multipart.FileHeader, error) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBackupRequestBytes)
+	file, err := c.FormFile("backup_file")
+	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			return nil, errBackupFileTooLarge
+		}
+		return nil, err
+	}
+	if file.Size > maxBackupFileBytes {
+		return nil, errBackupFileTooLarge
+	}
+	return file, nil
+}
+
 func saveUploadedBackup(file *multipart.FileHeader) (string, error) {
+	if file == nil {
+		return "", errors.New("备份文件不能为空")
+	}
+	if file.Size > maxBackupFileBytes {
+		return "", errBackupFileTooLarge
+	}
 	tempFile, err := os.CreateTemp("", "restore_analyze_*")
 	if err != nil {
 		return "", err
@@ -316,8 +347,12 @@ func saveUploadedBackup(file *multipart.FileHeader) (string, error) {
 	}
 	defer safeio.Close(src)
 
-	if _, err := io.Copy(tempFile, src); err != nil {
+	written, err := io.Copy(tempFile, io.LimitReader(src, maxBackupFileBytes+1))
+	if err != nil {
 		return "", err
+	}
+	if written > maxBackupFileBytes {
+		return "", errBackupFileTooLarge
 	}
 	if err := tempFile.Close(); err != nil {
 		return "", err

@@ -1,10 +1,12 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pokerjest/animateAutoTool/internal/anilist"
@@ -161,8 +163,15 @@ func GetLibraryHandler(c *gin.Context) {
 func RefreshLibraryMetadataHandler(c *gin.Context) {
 	force := c.Query("force") == ValueTrue
 	metaSvc := service.NewMetadataService()
-	if !metaSvc.StartRefreshAllMetadata(force) {
+	if !metaSvc.BeginRefreshAllMetadata() {
 		c.JSON(http.StatusOK, gin.H{"message": "已经在刷新中", "status": "running"})
+		return
+	}
+	if !GoBackground(func(ctx context.Context) {
+		metaSvc.RefreshAllMetadataContext(ctx, force)
+	}) {
+		service.GlobalRefreshStatus.Finish("服务正在关闭，元数据刷新未启动")
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "服务正在关闭，无法启动元数据刷新"})
 		return
 	}
 
@@ -496,18 +505,28 @@ func ProxyTMDBImageHandler(c *gin.Context) {
 	db.DB.Where("key = ?", model.ConfigKeyTMDBToken).First(&token)
 
 	tmdbClient := tmdb.NewClient(token.Value, configuredProxyURL(model.ConfigKeyProxyTMDB))
-	resp, err := tmdbClient.ProxyImage(path)
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+	defer cancel()
+	resp, err := tmdbClient.ProxyImageContext(ctx, path)
 	if err != nil {
-		c.Status(http.StatusInternalServerError)
+		c.Status(http.StatusBadRequest)
 		return
 	}
-
 	if resp.IsError() {
 		c.Status(resp.StatusCode())
 		return
 	}
+	contentType := strings.ToLower(strings.TrimSpace(resp.Header().Get("Content-Type")))
+	if !isAllowedTMDBProxyImage(contentType, len(resp.Body())) {
+		c.Status(http.StatusBadGateway)
+		return
+	}
+	c.Header("Cache-Control", "public, max-age=86400")
+	c.Data(http.StatusOK, contentType, resp.Body())
+}
 
-	c.Data(http.StatusOK, resp.Header().Get("Content-Type"), resp.Body())
+func isAllowedTMDBProxyImage(contentType string, bodySize int) bool {
+	return bodySize >= 0 && bodySize <= tmdb.MaxProxyImageBytes && strings.HasPrefix(strings.ToLower(strings.TrimSpace(contentType)), "image/")
 }
 
 func randomBackgroundURL() (string, error) {

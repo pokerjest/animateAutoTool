@@ -28,24 +28,28 @@ import (
 const downloadLogSyncInterval = 15 * time.Second
 
 func StartDownloadLogSyncWorker(ctx context.Context) {
+	go RunDownloadLogSyncWorker(ctx)
+}
+
+// RunDownloadLogSyncWorker runs the periodic worker until ctx is canceled.
+// Startup uses the synchronous form so shutdown can wait before closing SQLite.
+func RunDownloadLogSyncWorker(ctx context.Context) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	go func() {
-		syncDownloadLogStatuses(ctx)
+	syncDownloadLogStatuses(ctx)
 
-		ticker := time.NewTicker(downloadLogSyncInterval)
-		defer ticker.Stop()
+	ticker := time.NewTicker(downloadLogSyncInterval)
+	defer ticker.Stop()
 
-		for {
-			select {
-			case <-ticker.C:
-				syncDownloadLogStatuses(ctx)
-			case <-ctx.Done():
-				return
-			}
+	for {
+		select {
+		case <-ticker.C:
+			syncDownloadLogStatuses(ctx)
+		case <-ctx.Done():
+			return
 		}
-	}()
+	}
 }
 
 func syncDownloadLogStatuses(ctx context.Context) {
@@ -175,14 +179,17 @@ func (c *completedDownloadRescanCoordinator) flush() {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if run != nil {
+	if ctx.Err() == nil && run != nil {
 		run(ctx, targets, animeIDs)
 	}
 
 	c.mu.Lock()
 	c.running = false
-	if len(c.pendingTarget) > 0 && c.timer == nil {
+	if ctx.Err() == nil && len(c.pendingTarget) > 0 && c.timer == nil {
 		c.timer = time.AfterFunc(c.delay, c.flush)
+	} else if ctx.Err() != nil {
+		c.pendingTarget = make(map[string]struct{})
+		c.pendingAnime = make(map[uint]struct{})
 	}
 	c.mu.Unlock()
 }

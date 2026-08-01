@@ -116,7 +116,7 @@ func TestUnzipExtractsFiles(t *testing.T) {
 }
 
 // TestUnzipRejectsPathTraversal ensures entries that escape the
-// destination directory are silently skipped, not written outside.
+// destination directory fail extraction and are not written outside.
 func TestUnzipRejectsPathTraversal(t *testing.T) {
 	t.Parallel()
 	tmp := t.TempDir()
@@ -133,7 +133,7 @@ func TestUnzipRejectsPathTraversal(t *testing.T) {
 
 	dest := filepath.Join(tmp, "out")
 	require.NoError(t, os.MkdirAll(dest, 0o755))
-	require.NoError(t, unzip(zipPath, dest))
+	require.Error(t, unzip(zipPath, dest))
 
 	_, err = os.Stat(filepath.Join(tmp, "escape.txt"))
 	assert.True(t, os.IsNotExist(err), "path-traversal entry must not be written")
@@ -180,7 +180,7 @@ func TestUntarExtractsTarGz(t *testing.T) {
 }
 
 // TestUntarRejectsPathTraversal verifies that tar entries which escape
-// the destination directory are silently skipped.
+// the destination directory fail extraction.
 func TestUntarRejectsPathTraversal(t *testing.T) {
 	t.Parallel()
 	tmp := t.TempDir()
@@ -204,7 +204,7 @@ func TestUntarRejectsPathTraversal(t *testing.T) {
 
 	dest := filepath.Join(tmp, "out")
 	require.NoError(t, os.MkdirAll(dest, 0o755))
-	require.NoError(t, untar(archivePath, dest))
+	require.Error(t, untar(archivePath, dest))
 
 	_, err = os.Stat(filepath.Join(tmp, "escape.txt"))
 	assert.True(t, os.IsNotExist(err), "path-traversal entry must not escape dest")

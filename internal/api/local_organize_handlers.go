@@ -102,17 +102,19 @@ func startLocalOrganizePlan(owner, planID string, includedIDs []uint) (string, e
 
 	taskID := "local-organize-" + shortOrganizePlanID(plan.PlanID)
 	taskstate.Global.Start(taskID, "organize", "整理本地番剧", "正在复核文件并准备整理")
-	go runLocalOrganizeTask(taskID, organizer, plan, includedIDs)
+	GoBackground(func(ctx context.Context) {
+		runLocalOrganizeTask(ctx, taskID, organizer, plan, includedIDs)
+	})
 	return taskID, nil
 }
 
-func runLocalOrganizeTask(taskID string, organizer *service.LocalOrganizer, plan *service.LocalOrganizePreview, included []uint) {
+func runLocalOrganizeTask(ctx context.Context, taskID string, organizer *service.LocalOrganizer, plan *service.LocalOrganizePreview, included []uint) {
 	defer func() {
 		localOrganizeRunMu.Lock()
 		localOrganizeRunning = false
 		localOrganizeRunMu.Unlock()
 	}()
-	result, err := organizer.Execute(context.Background(), plan, included, func(message string, current, total int64) {
+	result, err := organizer.Execute(ctx, plan, included, func(message string, current, total int64) {
 		taskstate.Global.Progress(taskID, message, current, total)
 	})
 	if err != nil {
@@ -124,11 +126,11 @@ func runLocalOrganizeTask(taskID string, organizer *service.LocalOrganizer, plan
 	if result.Moved > 0 {
 		current, _ := taskstate.Global.Get(taskID)
 		taskstate.Global.Progress(taskID, "文件整理完成，正在重新扫描本地媒体", current.Total, current.Total)
-		if scanErr := service.NewScannerService().ScanAll(); scanErr != nil {
+		if scanErr := service.NewScannerService().ScanAllWithProgressContext(ctx, nil); scanErr != nil {
 			taskstate.Global.Fail(taskID, fmt.Errorf("%s；重新扫描失败: %w", summary, scanErr))
 			return
 		}
-		if refreshErr := service.RequestJellyfinLibraryRefresh(context.Background()); refreshErr != nil && !errors.Is(refreshErr, service.ErrJellyfinNotConfigured) {
+		if refreshErr := service.RequestJellyfinLibraryRefresh(ctx); refreshErr != nil && !errors.Is(refreshErr, service.ErrJellyfinNotConfigured) {
 			log.Printf("Local organize Jellyfin refresh failed: %v", refreshErr)
 			summary += "；Jellyfin 刷新请求失败，可稍后手动刷新"
 		}

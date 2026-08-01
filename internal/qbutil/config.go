@@ -8,6 +8,7 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/launcher"
 	"github.com/pokerjest/animateAutoTool/internal/model"
+	"gorm.io/gorm"
 )
 
 const (
@@ -25,18 +26,24 @@ type Config struct {
 }
 
 func LoadConfig() Config {
+	return LoadConfigFromDB(db.DB)
+}
+
+// LoadConfigFromDB reads qBittorrent settings from the supplied database
+// handle. It is used by repair --dry-run with an isolated read-only handle.
+func LoadConfigFromDB(database *gorm.DB) Config {
 	cfg := Config{
 		Mode: ModeManaged,
 	}
 
-	if db.DB == nil {
+	if database == nil {
 		applyManagedBootstrapCredentials(&cfg)
 		return cfg
 	}
 
 	rawURL := ""
 	var configs []model.GlobalConfig
-	if err := db.DB.Find(&configs).Error; err != nil {
+	if err := database.Find(&configs).Error; err != nil {
 		log.Printf("Error fetching QB config: %v", err)
 		cfg.URL = DefaultURL
 		return cfg

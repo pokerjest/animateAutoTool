@@ -65,8 +65,8 @@ func startAIAnalysis(c *gin.Context, input service.AIProposalInput, runner aiAna
 		RequestID: requestID, TaskID: taskID, SessionID: aiChatHistoryKey(c), ProposalID: row.ID,
 		UserID: userID, Username: username, Provider: settings.Provider, Model: settings.Model,
 	}
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), aiAnalysisTimeout)
+	GoBackground(func(appCtx context.Context) {
+		ctx, cancel := context.WithTimeout(appCtx, aiAnalysisTimeout)
 		defer cancel()
 		if err := runner(ctx, meta, settings); err != nil {
 			service.FailAIProposal(row.ID, err)
@@ -74,7 +74,7 @@ func startAIAnalysis(c *gin.Context, input service.AIProposalInput, runner aiAna
 			return
 		}
 		taskstate.Global.Complete(taskID, "AI 分析完成，请在原页面核对提案")
-	}()
+	})
 	v1Message(c, http.StatusAccepted, "AI 分析已经启动", gin.H{
 		"task_id": taskID, "proposal_id": row.ID, "status": service.AIProposalStatusAnalyzing,
 	})

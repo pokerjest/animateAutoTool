@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -13,52 +14,90 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/taskstate"
 )
 
-// StartMetadataMigration background task to cache images for existing records
+// StartMetadataMigration starts the compatibility background wrapper.
 func (s *MetadataService) StartMetadataMigration() {
-	go func() {
-		time.Sleep(5 * time.Second)
-		log.Println("Migration: Starting background metadata image migration...")
-		mStore := metadataStore()
-		if mStore == nil {
+	go s.RunMetadataMigration(context.Background())
+}
+
+// RunMetadataMigration caches missing metadata images and returns after ctx is
+// canceled. Startup runs this form as a tracked worker during shutdown.
+func (s *MetadataService) RunMetadataMigration(ctx context.Context) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if !waitForMetadataMigration(ctx, 5*time.Second) {
+		return
+	}
+	log.Println("Migration: Starting background metadata image migration...")
+	mStore := metadataStore()
+	if mStore == nil {
+		return
+	}
+	list, err := mStore.ListWithImageRawMissing()
+	if err != nil {
+		log.Printf("Migration: failed to list metadata for image caching: %v", err)
+		return
+	}
+
+	log.Printf("Migration: Found %d records needing image caching", len(list))
+
+	for _, m := range list {
+		if ctx.Err() != nil {
 			return
 		}
-		list, err := mStore.ListWithImageRawMissing()
-		if err != nil {
-			log.Printf("Migration: failed to list metadata for image caching: %v", err)
+		updated := false
+		if m.BangumiImage != "" && len(m.BangumiImageRaw) == 0 {
+			m.BangumiImageRaw = s.fetchAndCacheImage(m.BangumiImage, model.ConfigKeyProxyBangumi)
+			updated = true
+		}
+		if ctx.Err() != nil {
 			return
 		}
-
-		log.Printf("Migration: Found %d records needing image caching", len(list))
-
-		for _, m := range list {
-			updated := false
-			if m.BangumiImage != "" && len(m.BangumiImageRaw) == 0 {
-				m.BangumiImageRaw = s.fetchAndCacheImage(m.BangumiImage, model.ConfigKeyProxyBangumi)
-				updated = true
-			}
-			if m.TMDBImage != "" && len(m.TMDBImageRaw) == 0 {
-				m.TMDBImageRaw = s.fetchAndCacheImage(m.TMDBImage, model.ConfigKeyProxyTMDB)
-				updated = true
-			}
-			if m.AniListImage != "" && len(m.AniListImageRaw) == 0 {
-				m.AniListImageRaw = s.fetchAndCacheImage(m.AniListImage, model.ConfigKeyProxyAniList)
-				updated = true
-			}
-
-			if updated {
-				m.Image = fmt.Sprintf("/api/v1/posters/%d", m.ID)
-				if err := mStore.Save(&m); err == nil {
-					s.SyncMetadataToModels(&m)
-				}
-			}
-			time.Sleep(1 * time.Second)
+		if m.TMDBImage != "" && len(m.TMDBImageRaw) == 0 {
+			m.TMDBImageRaw = s.fetchAndCacheImage(m.TMDBImage, model.ConfigKeyProxyTMDB)
+			updated = true
 		}
-		log.Println("Migration: Background image migration completed.")
-	}()
+		if ctx.Err() != nil {
+			return
+		}
+		if m.AniListImage != "" && len(m.AniListImageRaw) == 0 {
+			m.AniListImageRaw = s.fetchAndCacheImage(m.AniListImage, model.ConfigKeyProxyAniList)
+			updated = true
+		}
+
+		if updated {
+			m.Image = fmt.Sprintf("/api/v1/posters/%d", m.ID)
+			if err := mStore.Save(&m); err == nil {
+				s.SyncMetadataToModels(&m)
+			}
+		}
+		if !waitForMetadataMigration(ctx, time.Second) {
+			return
+		}
+	}
+	log.Println("Migration: Background image migration completed.")
+}
+
+func waitForMetadataMigration(ctx context.Context, delay time.Duration) bool {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return true
+	case <-ctx.Done():
+		return false
+	}
 }
 
 // RegenerateAllNFOs triggers NFO generation for ALL local animes.
 func (s *MetadataService) RegenerateAllNFOs() (int, error) {
+	return s.RegenerateAllNFOsContext(context.Background())
+}
+
+func (s *MetadataService) RegenerateAllNFOsContext(ctx context.Context) (int, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	laStore := localAnimeStore()
 	if laStore == nil {
 		return 0, nil
@@ -71,6 +110,9 @@ func (s *MetadataService) RegenerateAllNFOs() (int, error) {
 	count := 0
 	nfoGen := NewNFOGeneratorService()
 	for _, anime := range list {
+		if err := ctx.Err(); err != nil {
+			return count, err
+		}
 		if anime.Metadata == nil {
 			continue
 		}
@@ -81,6 +123,9 @@ func (s *MetadataService) RegenerateAllNFOs() (int, error) {
 		_ = nfoGen.SaveLocalImages(&anime)
 		_ = nfoGen.GenerateTVShowNFO(&anime)
 		for _, ep := range anime.Episodes {
+			if err := ctx.Err(); err != nil {
+				return count, err
+			}
 			_ = nfoGen.GenerateEpisodeNFO(&ep, &anime)
 		}
 		count++
@@ -157,19 +202,34 @@ func (s *MetadataService) MatchSeries(animeID uint, source string, sourceID int)
 	}
 }
 
-// RefreshAllMetadata updates metadata records.
-func (s *MetadataService) StartRefreshAllMetadata(force bool) bool {
+// BeginRefreshAllMetadata reserves the global refresh slot without creating a
+// goroutine. API handlers use it before registering the work with app lifecycle.
+func (s *MetadataService) BeginRefreshAllMetadata() bool {
 	if !GlobalRefreshStatus.TryStart() {
 		return false
 	}
-
 	taskstate.Global.Start("metadata-refresh", "metadata", "刷新全部元数据", "正在刷新番剧元数据")
-	go s.RefreshAllMetadata(force)
+	return true
+}
+
+// StartRefreshAllMetadata keeps the compatibility wrapper for non-server callers.
+func (s *MetadataService) StartRefreshAllMetadata(force bool) bool {
+	if !s.BeginRefreshAllMetadata() {
+		return false
+	}
+	go s.RefreshAllMetadataContext(context.Background(), force)
 	return true
 }
 
 // RefreshAllMetadata updates metadata records.
 func (s *MetadataService) RefreshAllMetadata(force bool) int {
+	return s.RefreshAllMetadataContext(context.Background(), force)
+}
+
+func (s *MetadataService) RefreshAllMetadataContext(ctx context.Context, force bool) int {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	log.Printf("Refresh: Starting metadata refresh (force=%v)...", force)
 	mStore := metadataStore()
 	if mStore == nil {
@@ -212,34 +272,52 @@ func (s *MetadataService) RefreshAllMetadata(force bool) int {
 	guard := make(chan struct{}, maxWorkers)
 	var wg sync.WaitGroup
 
+	refreshCanceled := false
+refreshLoop:
 	for i, m := range list {
-		guard <- struct{}{}
+		select {
+		case guard <- struct{}{}:
+		case <-ctx.Done():
+			refreshCanceled = true
+			break refreshLoop
+		}
 		wg.Add(1)
 		go func(idx int, meta model.AnimeMetadata) {
 			defer wg.Done()
 			defer func() { <-guard }()
+			if ctx.Err() != nil {
+				return
+			}
 
 			GlobalRefreshStatus.UpdateProgress(idx+1, meta.Title)
 			taskstate.Global.Progress("metadata-refresh", "正在刷新 "+meta.Title, int64(idx+1), int64(total))
-
 			event.GlobalBus.Publish(event.EventMetadataUpdated, map[string]interface{}{
-				"type":    "progress",
-				"current": idx + 1,
-				"total":   total,
-				"title":   meta.Title,
+				"type": "progress", "current": idx + 1, "total": total, "title": meta.Title,
 			})
 
-			if freshM, err := mStore.GetByID(meta.ID); err == nil {
+			if freshM, err := mStore.GetByID(meta.ID); err == nil && ctx.Err() == nil {
 				s.EnrichMetadata(freshM, metadataRefreshQuery(freshM))
 				updateMu.Lock()
 				updatedCount++
 				updateMu.Unlock()
 			}
-			time.Sleep(500 * time.Millisecond)
+			timer := time.NewTimer(500 * time.Millisecond)
+			defer timer.Stop()
+			select {
+			case <-timer.C:
+			case <-ctx.Done():
+			}
 		}(i, m)
 	}
 	wg.Wait()
-
+	if ctx.Err() != nil {
+		refreshCanceled = true
+	}
+	if refreshCanceled {
+		GlobalRefreshStatus.Finish("元数据刷新已取消")
+		taskstate.Global.Fail("metadata-refresh", ctx.Err())
+		return updatedCount
+	}
 	finalStatus := GlobalRefreshStatus.Finish(fmt.Sprintf("已更新 %d 条", updatedCount))
 
 	event.GlobalBus.Publish(event.EventMetadataUpdated, map[string]interface{}{

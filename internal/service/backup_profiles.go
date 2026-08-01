@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -487,6 +488,6 @@ func BackupContainsConfigsOnly(mode string) bool {
 	return mode == BackupModeSettings || mode == BackupModeCloudflare
 }
 
-func CleanBackupPath(path string) string {
-	return filepath.Clean(path)
+func CleanBackupPath(value string) string {
+	return path.Clean(strings.ReplaceAll(value, "\\", "/"))
 }

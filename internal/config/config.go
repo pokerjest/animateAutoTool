@@ -74,6 +74,17 @@ var userConfigDirFunc = os.UserConfigDir
 var goosOverride string
 
 func LoadConfig(configPath string) error {
+	return loadConfig(configPath, true)
+}
+
+// LoadConfigReadOnly loads configuration without creating or modifying any
+// file. Commands such as doctor and repair --dry-run use this entry point so
+// diagnostics cannot initialize application state as a side effect.
+func LoadConfigReadOnly(configPath string) error {
+	return loadConfig(configPath, false)
+}
+
+func loadConfig(configPath string, allowWrites bool) error {
 	AppPaths = resolveAppPaths(configPath)
 	authSecretFallbackPath = resolvedAuthSecretFallbackPath()
 	ConfigAutoCreated = false
@@ -97,7 +108,7 @@ func LoadConfig(configPath string) error {
 	v.SetConfigType("yaml")
 	v.AddConfigPath(AppPaths.RootDir)
 
-	if !hasConfigFile(AppPaths.RootDir) {
+	if !hasConfigFile(AppPaths.RootDir) && allowWrites {
 		if err := writeDefaultConfigFile(); err != nil {
 			return fmt.Errorf("failed to initialize default config file: %w", err)
 		}
@@ -136,7 +147,7 @@ func LoadConfig(configPath string) error {
 	}
 
 	if AppConfig.Auth.SecretKey == "" || AppConfig.Auth.SecretKey == defaultAuthSecret {
-		secret, created, err := loadOrCreateFallbackAuthSecret()
+		secret, created, err := loadFallbackAuthSecret(allowWrites)
 		if err != nil {
 			return fmt.Errorf("failed to resolve auth secret: %w", err)
 		}
@@ -410,7 +421,7 @@ system_settings:
 	return os.WriteFile(AppPaths.ConfigFile, []byte(content), 0600)
 }
 
-func loadOrCreateFallbackAuthSecret() (secret string, created bool, err error) {
+func loadFallbackAuthSecret(allowWrites bool) (secret string, created bool, err error) {
 	cleanSecretPath := filepath.Clean(authSecretFallbackPath)
 	if data, readErr := os.ReadFile(cleanSecretPath); readErr == nil { //nolint:gosec // path is derived from the app-controlled data directory.
 		secret = strings.TrimSpace(string(data))
@@ -419,6 +430,12 @@ func loadOrCreateFallbackAuthSecret() (secret string, created bool, err error) {
 		}
 	} else if !os.IsNotExist(readErr) {
 		return "", false, readErr
+	}
+
+	if !allowWrites {
+		// Diagnostics must remain usable even when an older installation has no
+		// persisted fallback secret. The value is intentionally kept in memory.
+		return defaultAuthSecret, false, nil
 	}
 
 	secret, err = security.RandomHex(32)

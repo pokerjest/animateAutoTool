@@ -3,6 +3,7 @@
 package tray
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"path/filepath"
@@ -16,11 +17,23 @@ import (
 // Run initializes the system tray and runs the application.
 // startServerFunc is the function to start the main application logic (server).
 // It must run in a separate goroutine because systray.Run blocks the main thread.
-func Run(startServerFunc func()) {
-	systray.Run(func() { onReady(startServerFunc) }, onExit)
+func Run(parent context.Context, startServerFunc func(context.Context) error) error {
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithCancel(parent)
+	serverDone := make(chan error, 1)
+	systray.Run(func() {
+		onReady(ctx, cancel, func() {
+			defer cancel()
+			serverDone <- startServerFunc(ctx)
+		})
+	}, cancel)
+	cancel()
+	return <-serverDone
 }
 
-func onReady(startServerFunc func()) {
+func onReady(ctx context.Context, cancel context.CancelFunc, startServerFunc func()) {
 	fmt.Printf("DEBUG: Embedded IconData size: %d bytes\n", len(IconData))
 
 	// Adapting Icon for Windows
@@ -49,7 +62,13 @@ func onReady(startServerFunc func()) {
 	// Start the main server logic in a separate goroutine
 	go startServerFunc()
 	go func() {
-		time.Sleep(1500 * time.Millisecond)
+		timer := time.NewTimer(1500 * time.Millisecond)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			return
+		}
 		port := config.AppConfig.Server.Port
 		if port == 0 {
 			port = 8306
@@ -73,17 +92,18 @@ func onReady(startServerFunc func()) {
 				dir := filepath.Dir(dataDir)
 				openBrowser(dir)
 			case <-mQuit.ClickedCh:
+				cancel()
 				systray.Quit()
+				return
+			case <-ctx.Done():
 				return
 			}
 		}
 	}()
-}
-
-func onExit() {
-	// Cleanup here if needed.
-	// Since systray.Quit() terminates the app, we might want to ensure graceful shutdown of server.
-	// But simple termination is often acceptable for client apps.
+	go func() {
+		<-ctx.Done()
+		systray.Quit()
+	}()
 }
 
 func openBrowser(url string) {

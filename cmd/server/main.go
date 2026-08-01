@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -22,6 +23,7 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/event"
 	"github.com/pokerjest/animateAutoTool/internal/launcher"
 	applogging "github.com/pokerjest/animateAutoTool/internal/logging"
+	"github.com/pokerjest/animateAutoTool/internal/runtimejournal"
 	"github.com/pokerjest/animateAutoTool/internal/scheduler"
 	"github.com/pokerjest/animateAutoTool/internal/startup"
 	"github.com/pokerjest/animateAutoTool/internal/tray"
@@ -29,16 +31,24 @@ import (
 )
 
 const (
-	serverLogPrefix   = "server"
-	healthLogPrefix   = "health"
-	serverLogMaxFiles = 24 * 7
-	healthLogMaxFiles = 24 * 7
+	serverLogPrefix     = "server"
+	healthLogPrefix     = "health"
+	serverLogMaxFiles   = 24 * 7
+	healthLogMaxFiles   = 24 * 7
+	shutdownTaskTimeout = 45 * time.Second
 )
 
 func main() {
+	if err := run(); err != nil {
+		log.Printf("Server stopped with error: %v", err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
 	launcherMigration, launcherMigrationErr := appidentity.PrepareLocalLauncher()
 	if err := config.LoadConfig(""); err != nil {
-		log.Fatalf("Failed to load config: %v", err)
+		return fmt.Errorf("load config: %w", err)
 	}
 	logCleanup := configureLogging()
 	defer logCleanup()
@@ -48,68 +58,119 @@ func main() {
 		log.Printf("Failed to finish launcher name migration: %v", err)
 	}
 
+	signalCtx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopSignals()
 	if config.AppConfig.Server.Headless {
 		log.Println("Tray integration disabled; starting in headless mode.")
-		runServer()
-		return
+		return runServer(signalCtx)
 	}
 
-	tray.Run(runServer)
+	return tray.Run(signalCtx, runServer)
 }
 
-func runServer() {
+func runServer(parent context.Context) (runErr error) {
 	log.Printf("AnimateAutoTool version: %s", appversion.AppVersion)
 
-	rootCtx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stopSignals()
+	if parent == nil {
+		parent = context.Background()
+	}
+	appCtx, cancelApp := context.WithCancel(context.Background())
 
-	// Managed services must remain available while the HTTP server drains
-	// in-flight requests. StopAll cancels this independent context after the
-	// shutdown sequence completes.
+	// Managed services remain available while the HTTP server drains requests.
 	mgr := launcher.NewManager(context.Background())
+
+	var (
+		databaseOpen bool
+		startupLife  *startup.Lifecycle
+		sch          *scheduler.Manager
+		srv          *http.Server
+	)
+	defer func() {
+		if srv != nil {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			if err := srv.Shutdown(shutdownCtx); err != nil {
+				if closeErr := srv.Close(); closeErr != nil {
+					log.Printf("WARN: forced HTTP close failed: %v", closeErr)
+				}
+				if runErr == nil {
+					runErr = fmt.Errorf("graceful HTTP shutdown: %w", err)
+				}
+			}
+			cancel()
+		}
+		if sch != nil {
+			sch.Stop()
+		}
+		api.StopBackgroundTasks()
+		cancelApp()
+		if startupLife != nil {
+			startupLife.Stop()
+		}
+
+		waits := []func(){api.WaitBackgroundTasks, event.GlobalBus.Wait, mgr.StopAll}
+		if sch != nil {
+			waits = append(waits, sch.Wait)
+		}
+		if startupLife != nil {
+			waits = append(waits, startupLife.Wait)
+		}
+		if err := waitForShutdownTasks(shutdownTaskTimeout, waits...); err != nil {
+			log.Printf("ERROR: %v; leaving SQLite open for process termination", err)
+			databaseOpen = false
+			if runErr == nil {
+				runErr = err
+			}
+			return
+		}
+		if err := runtimejournal.EndSession(); err != nil {
+			log.Printf("WARN: failed to clear runtime session marker during shutdown: %v", err)
+		}
+		if databaseOpen {
+			if err := db.CloseDB(); err != nil {
+				log.Printf("WARN: database close failed during shutdown: %v", err)
+			}
+		}
+	}()
 
 	log.Println("Initializing environment (Checking Alist & qBittorrent)...")
 	if err := mgr.EnsureBinaries(); err != nil {
-		log.Fatalf("Failed to initialize environment: %v", err)
+		return fmt.Errorf("initialize environment: %w", err)
 	}
 
 	log.Println("Starting background services...")
 	if err := mgr.StartAll(); err != nil {
-		log.Fatalf("Failed to start services: %v", err)
+		return fmt.Errorf("start managed services: %w", err)
 	}
-	defer mgr.StopAll()
 
 	gin.SetMode(config.AppConfig.Server.Mode)
 
 	absPath, _ := filepath.Abs(config.AppConfig.Database.Path)
 	log.Printf("Initializing database at: %s", absPath)
-
-	db.InitDB(config.AppConfig.Database.Path)
+	if err := db.InitDBWithError(config.AppConfig.Database.Path); err != nil {
+		return err
+	}
+	databaseOpen = true
+	mgr.NotifyDatabaseReady()
 	if err := db.SyncGlobalConfigsWithConfigFile(); err != nil {
 		log.Printf("Failed to synchronize system settings with %s: %v", config.ConfigFilePath(), err)
 	}
-	cleanupStartup := startup.Run(rootCtx)
-	defer func() {
-		cleanupStartup()
-		if err := db.CloseDB(); err != nil {
-			log.Printf("WARN: database close failed during shutdown: %v", err)
-		}
-	}()
+
+	api.StartBackgroundTasks(appCtx)
+	startupLife = startup.Run(appCtx)
 
 	r := gin.Default()
 	if err := r.SetTrustedProxies(config.AppConfig.Server.TrustedProxies); err != nil {
-		log.Fatalf("Failed to set trusted proxies: %v", err)
+		return fmt.Errorf("set trusted proxies: %w", err)
 	}
 	api.InitRoutes(r)
 	api.InitR2Cache()
 
-	sch := scheduler.NewManagerWithContext(rootCtx)
+	sch = scheduler.NewManagerWithContext(appCtx)
 	sch.Start()
-	defer sch.Stop()
 
 	port := fmt.Sprintf("%d", config.AppConfig.Server.Port)
 	log.Printf("Server starting on port %s", port)
-	srv := &http.Server{
+	srv = &http.Server{
 		Addr:              ":" + port,
 		Handler:           r,
 		ReadHeaderTimeout: 10 * time.Second,
@@ -121,20 +182,41 @@ func runServer() {
 	}()
 
 	select {
-	case <-rootCtx.Done():
+	case <-parent.Done():
 		log.Println("Shutdown signal received, stopping services...")
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-		if err := srv.Shutdown(shutdownCtx); err != nil {
-			log.Printf("Graceful shutdown failed: %v", err)
-		}
-		// Drain in-flight async event handlers before the process exits.
-		event.GlobalBus.Wait()
+		return nil
 	case err := <-errCh:
 		if err == nil || err == http.ErrServerClosed {
-			return
+			return nil
 		}
-		log.Fatal(err)
+		return fmt.Errorf("serve HTTP: %w", err)
+	}
+}
+func waitForShutdownTasks(timeout time.Duration, waits ...func()) error {
+	var wg sync.WaitGroup
+	for _, wait := range waits {
+		if wait == nil {
+			continue
+		}
+		wg.Add(1)
+		go func(wait func()) {
+			defer wg.Done()
+			wait()
+		}(wait)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-done:
+		return nil
+	case <-timer.C:
+		return fmt.Errorf("background shutdown exceeded %s", timeout)
 	}
 }
 

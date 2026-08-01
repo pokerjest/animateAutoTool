@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -115,7 +116,11 @@ func syncPlaybackProgressToJellyfin(input PlaybackProgressInput, episode *model.
 			return err
 		}
 		if anime.Metadata != nil && anime.Metadata.BangumiID != 0 {
-			go syncEndedEpisodeToBangumi(anime.Metadata.BangumiID, episode.EpisodeNum)
+			bangumiID := anime.Metadata.BangumiID
+			episodeNumber := episode.EpisodeNum
+			GoBackground(func(context.Context) {
+				syncEndedEpisodeToBangumi(bangumiID, episodeNumber)
+			})
 		}
 	case playbackEventRestart:
 		if err := client.UnmarkPlayed(itemID); err != nil {

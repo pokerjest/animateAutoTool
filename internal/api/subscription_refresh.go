@@ -56,8 +56,8 @@ func V1RefreshSubscriptionsHandler(c *gin.Context) {
 	}
 
 	taskstate.Global.Start(subscriptionRefreshTaskID, "subscription-refresh", "刷新并修复订阅", "正在核对下载器和订阅状态")
-	go func() {
-		result, err := runSubscriptionRefreshNow(context.Background(), func(progress service.SubscriptionRefreshProgress) {
+	GoBackground(func(ctx context.Context) {
+		result, err := runSubscriptionRefreshNow(ctx, func(progress service.SubscriptionRefreshProgress) {
 			taskstate.Global.Progress(subscriptionRefreshTaskID, progress.Message, progress.Current, progress.Total)
 		})
 		if err != nil {
@@ -65,7 +65,7 @@ func V1RefreshSubscriptionsHandler(c *gin.Context) {
 			return
 		}
 		taskstate.Global.Complete(subscriptionRefreshTaskID, result.Summary())
-	}()
+	})
 
 	v1Message(c, http.StatusAccepted, "订阅刷新与修复任务已经启动", gin.H{"task_id": subscriptionRefreshTaskID, "status": "running"})
 }

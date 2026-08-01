@@ -27,11 +27,15 @@ const (
 )
 
 func populateSubscriptionStats(subs []model.Subscription) {
+	libraryIndex, err := loadSubscriptionLibraryIndex()
+	if err != nil {
+		log.Printf("subscription library index load failed: %v", err)
+		libraryIndex = &subscriptionLibraryIndex{}
+	}
 	for i := range subs {
-		populateSubscriptionStat(&subs[i])
+		populateSubscriptionStatWithLibraryIndex(&subs[i], libraryIndex)
 	}
 }
-
 func loadSubscriptionTrendReport(windowDays int) SubscriptionTrendReport {
 	if windowDays <= 0 {
 		windowDays = 7
@@ -146,6 +150,10 @@ func subscriptionStatusLabel(status string) string {
 }
 
 func populateSubscriptionStat(sub *model.Subscription) {
+	populateSubscriptionStatWithLibraryIndex(sub, nil)
+}
+
+func populateSubscriptionStatWithLibraryIndex(sub *model.Subscription, libraryIndex *subscriptionLibraryIndex) {
 	if sub == nil {
 		return
 	}
@@ -175,9 +183,12 @@ func populateSubscriptionStat(sub *model.Subscription) {
 			}
 		}
 	}
-	populateSubscriptionActionHints(sub)
+	if libraryIndex == nil {
+		populateSubscriptionActionHints(sub)
+		return
+	}
+	populateSubscriptionActionHintsWithLibraryIndex(sub, libraryIndex)
 }
-
 func normalizeSubscriptionRunSummary(summary string) string {
 	summary = strings.TrimSpace(summary)
 	var total int
@@ -215,6 +226,10 @@ func loadSubscriptionCard(id uint) (model.Subscription, error) {
 }
 
 func populateSubscriptionActionHints(sub *model.Subscription) {
+	populateSubscriptionActionHintsWithLibraryIndex(sub, nil)
+}
+
+func populateSubscriptionActionHintsWithLibraryIndex(sub *model.Subscription, libraryIndex *subscriptionLibraryIndex) {
 	if sub == nil {
 		return
 	}
@@ -222,7 +237,11 @@ func populateSubscriptionActionHints(sub *model.Subscription) {
 	resetSubscriptionActionHints(sub)
 	populateSubscriptionProgressHints(sub)
 	populateSubscriptionStaleHints(sub)
-	populateSubscriptionLibraryState(sub)
+	if libraryIndex == nil {
+		populateSubscriptionLibraryState(sub)
+	} else {
+		populateSubscriptionLibraryStateFromIndex(sub, libraryIndex)
+	}
 	sub.HasRepairActions = subscriptionHasRepairActions(sub)
 	if sub.LastRunStatus != service.SubscriptionRunStatusIdle {
 		populateSubscriptionLifecycle(sub)
@@ -244,7 +263,6 @@ func populateSubscriptionActionHints(sub *model.Subscription) {
 	sub.HasRepairActions = subscriptionHasRepairActions(sub)
 	populateSubscriptionLifecycle(sub)
 }
-
 func subscriptionHasReleaseFilters(sub *model.Subscription) bool {
 	if sub == nil {
 		return false
@@ -356,9 +374,23 @@ func appendStrategyHint(sub *model.Subscription, hint string) {
 }
 
 type subscriptionEpisodeStats struct {
-	LocalAnimeID         uint  `gorm:"column:local_anime_id"`
-	EpisodeCount         int64 `gorm:"column:episode_count"`
-	JellyfinEpisodeCount int64 `gorm:"column:jellyfin_episode_count"`
+	LocalAnimeID             uint  `gorm:"column:local_anime_id"`
+	EpisodeCount             int64 `gorm:"column:episode_count"`
+	JellyfinEpisodeCount     int64 `gorm:"column:jellyfin_episode_count"`
+	LowResolutionEpisodeNums []int
+}
+
+type subscriptionLibraryIndex struct {
+	localAnimes           []model.LocalAnime
+	statsByAnime          map[uint]subscriptionEpisodeStats
+	candidateIndexesByKey map[string][]int
+	fallbackIndexes       []int
+}
+
+type subscriptionEpisodeResolution struct {
+	LocalAnimeID    uint `gorm:"column:local_anime_id"`
+	EpisodeNum      int  `gorm:"column:episode_num"`
+	ResolutionScore int  `gorm:"column:resolution_score"`
 }
 
 type subscriptionLocalMatch struct {
@@ -367,6 +399,76 @@ type subscriptionLocalMatch struct {
 	Playable     bool
 }
 
+func loadSubscriptionLibraryIndex() (*subscriptionLibraryIndex, error) {
+	localStore := localAnimeStore()
+	if localStore == nil {
+		return nil, gorm.ErrInvalidDB
+	}
+	localAnimes, err := localStore.ListForSubscriptionMatching()
+	if err != nil {
+		return nil, err
+	}
+	index := &subscriptionLibraryIndex{
+		localAnimes:           localAnimes,
+		statsByAnime:          make(map[uint]subscriptionEpisodeStats, len(localAnimes)),
+		candidateIndexesByKey: make(map[string][]int),
+	}
+	buildSubscriptionCandidateIndex(index)
+	if len(localAnimes) == 0 {
+		return index, nil
+	}
+	animeIDs := make([]uint, 0, len(localAnimes))
+	for _, anime := range localAnimes {
+		animeIDs = append(animeIDs, anime.ID)
+	}
+	if err := loadSubscriptionEpisodeStatsIntoIndex(index, animeIDs); err != nil {
+		return nil, err
+	}
+	return index, nil
+}
+
+func loadSubscriptionEpisodeStatsIntoIndex(index *subscriptionLibraryIndex, animeIDs []uint) error {
+	if index == nil || len(animeIDs) == 0 || db.DB == nil {
+		return nil
+	}
+	var rows []subscriptionEpisodeStats
+	if err := db.DB.Model(&model.LocalEpisode{}).
+		Select("local_anime_id, COUNT(*) AS episode_count, SUM(CASE WHEN jellyfin_item_id <> '' THEN 1 ELSE 0 END) AS jellyfin_episode_count").
+		Where("local_anime_id IN ?", animeIDs).
+		Group("local_anime_id").
+		Scan(&rows).Error; err != nil {
+		return err
+	}
+	for _, row := range rows {
+		index.statsByAnime[row.LocalAnimeID] = row
+	}
+
+	resolutionScoreExpression := `MAX(CASE
+		WHEN instr(lower(resolution), '2160') > 0 OR instr(lower(resolution), '4k') > 0 OR instr(lower(resolution), '3840x2160') > 0 THEN 4
+		WHEN instr(lower(resolution), '1080') > 0 OR instr(lower(resolution), '1920x1080') > 0 OR instr(lower(resolution), 'fhd') > 0 THEN 3
+		WHEN instr(lower(resolution), '720') > 0 OR instr(lower(resolution), '1280x720') > 0 OR instr(lower(resolution), 'hd') > 0 THEN 2
+		WHEN instr(lower(resolution), '480') > 0 OR instr(lower(resolution), '360') > 0 THEN 1
+		ELSE 0 END)`
+	var resolutions []subscriptionEpisodeResolution
+	if err := db.DB.Model(&model.LocalEpisode{}).
+		Select("local_anime_id, episode_num, "+resolutionScoreExpression+" AS resolution_score").
+		Where("local_anime_id IN ? AND episode_num > 0 AND resolution <> ''", animeIDs).
+		Group("local_anime_id, episode_num").
+		Having(resolutionScoreExpression+" > 0 AND "+resolutionScoreExpression+" < ?", resolutionScore(subscriptionResolution1080p)).
+		Scan(&resolutions).Error; err != nil {
+		return err
+	}
+	for _, row := range resolutions {
+		stats := index.statsByAnime[row.LocalAnimeID]
+		stats.LowResolutionEpisodeNums = append(stats.LowResolutionEpisodeNums, row.EpisodeNum)
+		index.statsByAnime[row.LocalAnimeID] = stats
+	}
+	for animeID, stats := range index.statsByAnime {
+		sort.Ints(stats.LowResolutionEpisodeNums)
+		index.statsByAnime[animeID] = stats
+	}
+	return nil
+}
 func findSubscriptionLocalAnimes(sub *model.Subscription) ([]model.LocalAnime, error) {
 	var localAnimes []model.LocalAnime
 	if sub.MetadataID != nil && *sub.MetadataID != 0 {
@@ -414,17 +516,88 @@ func findSubscriptionLocalAnimes(sub *model.Subscription) ([]model.LocalAnime, e
 		}
 		localAnimes = filterSubscriptionLocalAnimes(sub, localAnimes)
 	}
-	// Files organized from a subscription use the subscription metadata title.
-	// Link a single unambiguous fallback match so later Jellyfin reconciliation
-	// can use provider IDs without requiring a manual local-library visit.
-	if len(localAnimes) == 1 && localAnimes[0].MetadataID == nil && sub.MetadataID != nil && *sub.MetadataID != 0 {
-		if err := db.DB.Model(&model.LocalAnime{}).Where("id = ? AND metadata_id IS NULL", localAnimes[0].ID).
-			Update("metadata_id", *sub.MetadataID).Error; err == nil {
-			metadataID := *sub.MetadataID
-			localAnimes[0].MetadataID = &metadataID
+	return backfillSubscriptionLocalAnimeMetadata(sub, localAnimes), nil
+}
+
+func backfillSubscriptionLocalAnimeMetadata(sub *model.Subscription, localAnimes []model.LocalAnime) []model.LocalAnime {
+	if len(localAnimes) != 1 || db.DB == nil || sub == nil || sub.MetadataID == nil || *sub.MetadataID == 0 || localAnimes[0].MetadataID != nil {
+		return localAnimes
+	}
+	result := db.DB.Model(&model.LocalAnime{}).Where("id = ? AND metadata_id IS NULL", localAnimes[0].ID).
+		Update("metadata_id", *sub.MetadataID)
+	if result.Error == nil && result.RowsAffected == 1 {
+		metadataID := *sub.MetadataID
+		localAnimes[0].MetadataID = &metadataID
+	}
+	return localAnimes
+}
+
+func buildSubscriptionCandidateIndex(index *subscriptionLibraryIndex) {
+	if index == nil {
+		return
+	}
+	if index.candidateIndexesByKey == nil {
+		index.candidateIndexesByKey = make(map[string][]int)
+	}
+	for i := range index.localAnimes {
+		keys, requiresFallback := service.LocalAnimeSubscriptionIndexKeys(&index.localAnimes[i])
+		if requiresFallback || len(keys) == 0 {
+			index.fallbackIndexes = append(index.fallbackIndexes, i)
+		}
+		for _, key := range keys {
+			index.candidateIndexesByKey[key] = append(index.candidateIndexesByKey[key], i)
 		}
 	}
-	return localAnimes, nil
+}
+
+func subscriptionLocalAnimeCandidates(sub *model.Subscription, index *subscriptionLibraryIndex) []model.LocalAnime {
+	if sub == nil || index == nil {
+		return nil
+	}
+	keys, requiresFullScan := service.SubscriptionLocalMatchIndexKeys(sub)
+	if requiresFullScan {
+		return index.localAnimes
+	}
+	seen := make(map[int]struct{}, len(index.fallbackIndexes)+len(keys))
+	candidateIndexes := append([]int(nil), index.fallbackIndexes...)
+	for _, candidateIndex := range candidateIndexes {
+		seen[candidateIndex] = struct{}{}
+	}
+	for _, key := range keys {
+		for _, candidateIndex := range index.candidateIndexesByKey[key] {
+			if _, exists := seen[candidateIndex]; exists {
+				continue
+			}
+			seen[candidateIndex] = struct{}{}
+			candidateIndexes = append(candidateIndexes, candidateIndex)
+		}
+	}
+	sort.Ints(candidateIndexes)
+	candidates := make([]model.LocalAnime, 0, len(candidateIndexes))
+	for _, candidateIndex := range candidateIndexes {
+		if candidateIndex >= 0 && candidateIndex < len(index.localAnimes) {
+			candidates = append(candidates, index.localAnimes[candidateIndex])
+		}
+	}
+	return candidates
+}
+
+func findSubscriptionLocalAnimesFromIndex(sub *model.Subscription, libraryIndex *subscriptionLibraryIndex) []model.LocalAnime {
+	if sub == nil || libraryIndex == nil {
+		return nil
+	}
+	matched := filterSubscriptionLocalAnimes(sub, subscriptionLocalAnimeCandidates(sub, libraryIndex))
+	matched = backfillSubscriptionLocalAnimeMetadata(sub, matched)
+	if len(matched) == 1 && matched[0].MetadataID != nil {
+		for i := range libraryIndex.localAnimes {
+			if libraryIndex.localAnimes[i].ID == matched[0].ID && libraryIndex.localAnimes[i].MetadataID == nil {
+				metadataID := *matched[0].MetadataID
+				libraryIndex.localAnimes[i].MetadataID = &metadataID
+				break
+			}
+		}
+	}
+	return matched
 }
 
 func filterSubscriptionLocalAnimes(sub *model.Subscription, candidates []model.LocalAnime) []model.LocalAnime {
@@ -527,6 +700,37 @@ func populateSubscriptionLibraryState(sub *model.Subscription) {
 	if localMatch.AnimeID == 0 {
 		return
 	}
+
+	var episodes []model.LocalEpisode
+	if err := db.DB.Select("episode_num", "resolution").
+		Where("local_anime_id IN ?", animeIDs).
+		Find(&episodes).Error; err != nil {
+		return
+	}
+	applySubscriptionLibraryMatch(sub, localMatch, episodes)
+}
+
+func populateSubscriptionLibraryStateFromIndex(sub *model.Subscription, libraryIndex *subscriptionLibraryIndex) {
+	if sub == nil || libraryIndex == nil {
+		return
+	}
+	localAnimes := findSubscriptionLocalAnimesFromIndex(sub, libraryIndex)
+	if len(localAnimes) == 0 {
+		return
+	}
+	localMatch := selectSubscriptionLocalMatch(localAnimes, libraryIndex.statsByAnime)
+	if localMatch.AnimeID == 0 {
+		return
+	}
+	stats := libraryIndex.statsByAnime[localMatch.AnimeID]
+	applySubscriptionLibraryMatchWithUpgradeEpisodes(sub, localMatch, stats.LowResolutionEpisodeNums)
+}
+
+func applySubscriptionLibraryMatch(sub *model.Subscription, localMatch subscriptionLocalMatch, episodes []model.LocalEpisode) {
+	applySubscriptionLibraryMatchWithUpgradeEpisodes(sub, localMatch, collectUpgradeableEpisodes(episodes))
+}
+
+func applySubscriptionLibraryMatchWithUpgradeEpisodes(sub *model.Subscription, localMatch subscriptionLocalMatch, lowResolutionEpisodes []int) {
 	sub.LocalAnimeID = localMatch.AnimeID
 	sub.LibraryEpisodeCount = localMatch.EpisodeCount
 	sub.Playable = localMatch.Playable
@@ -555,23 +759,18 @@ func populateSubscriptionLibraryState(sub *model.Subscription) {
 		sub.CanRefreshLibrary = true
 	}
 
-	var episodes []model.LocalEpisode
-	if err := db.DB.Select("episode_num", "resolution").
-		Where("local_anime_id IN ?", animeIDs).
-		Find(&episodes).Error; err == nil {
-		lowResEpisodes := collectUpgradeableEpisodes(episodes)
-		if len(lowResEpisodes) > 0 {
-			sub.CanRetryUpgrade = true
-			appendStrategyHint(sub, formatUpgradeHint(lowResEpisodes))
-			if sub.LibraryHint == "" {
-				sub.LibraryHint = formatUpgradeHint(lowResEpisodes)
-			} else {
-				sub.LibraryHint = strings.TrimSpace(sub.LibraryHint + " " + formatUpgradeHint(lowResEpisodes))
-			}
+	lowResEpisodes := lowResolutionEpisodes
+	if len(lowResEpisodes) > 0 {
+		sub.CanRetryUpgrade = true
+		upgradeHint := formatUpgradeHint(lowResEpisodes)
+		appendStrategyHint(sub, upgradeHint)
+		if sub.LibraryHint == "" {
+			sub.LibraryHint = upgradeHint
+		} else {
+			sub.LibraryHint = strings.TrimSpace(sub.LibraryHint + " " + upgradeHint)
 		}
 	}
 }
-
 func waitForSubscriptionJellyfinMatch(ctx context.Context, subscriptionID uint) error {
 	ticker := time.NewTicker(3 * time.Second)
 	defer ticker.Stop()
