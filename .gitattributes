@@ -13,6 +13,7 @@
 *.js text eol=lf
 *.ts text eol=lf
 *.tsx text eol=lf
+*.vue text eol=lf
 
 *.bat text eol=crlf
 *.cmd text eol=crlf
