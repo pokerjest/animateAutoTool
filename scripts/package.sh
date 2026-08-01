@@ -9,7 +9,7 @@ APP_DISPLAY_NAME="Animate Auto Tool"
 APP_BUNDLE_NAME="${APP_DISPLAY_NAME}.app"
 APP_IDENTIFIER="com.pokerjest.animateautotool"
 VERSION_FILE="./VERSION"
-DEFAULT_VERSION="v1.0.0-beta.9"
+DEFAULT_VERSION="v1.0.0-beta.10"
 DIST_DIR="${DIST_DIR:-./dist}"
 SRC_PATH="./cmd/server"
 
@@ -75,6 +75,24 @@ chmod +x scripts/manage.sh
 EOF
 }
 
+create_zip_archive() {
+    local dist_dir="$1"
+    local platform_dir_name="$2"
+
+    (
+        cd "$dist_dir"
+        if command -v zip >/dev/null 2>&1; then
+            zip -rq "${platform_dir_name}.zip" "${platform_dir_name}"
+        elif command -v powershell.exe >/dev/null 2>&1; then
+            powershell.exe -NoProfile -NonInteractive -Command \
+                "Compress-Archive -LiteralPath '${platform_dir_name}' -DestinationPath '${platform_dir_name}.zip' -Force"
+        else
+            echo "zip or Windows PowerShell is required to create ${platform_dir_name}.zip" >&2
+            exit 1
+        fi
+    )
+}
+
 package_archive() {
     local os="$1"
     local arch="$2"
@@ -121,10 +139,7 @@ package_archive() {
         cp scripts/view-logs.bat "$platform_dir/"
         cp scripts/init-config.bat "$platform_dir/"
         cp WINDOWS_QUICKSTART.txt "$platform_dir/"
-        (
-            cd "$DIST_DIR"
-            zip -rq "${platform_dir_name}.zip" "${platform_dir_name}"
-        )
+        create_zip_archive "$DIST_DIR" "$platform_dir_name"
     else
         (
             cd "$DIST_DIR"

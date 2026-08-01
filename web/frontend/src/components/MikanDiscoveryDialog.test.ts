@@ -67,7 +67,7 @@ describe('MikanDiscoveryDialog', () => {
     vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
       const path = String(input)
       if (path.includes('/subscriptions/search?q=%E6%B5%8B%E8%AF%95%E7%95%AA%E5%89%A7')) {
-        return response({ items: [{ mikan_id: '3141', title: '测试番剧 Mikan', image: 'poster.jpg' }] })
+        return response({ items: [{ mikan_id: '3141', title: '测试番剧 Mikan', image: 'https://mikanani.me/images/Bangumi/poster.jpg' }] })
       }
       throw new Error(`unexpected request: ${path}`)
     }))
@@ -75,13 +75,14 @@ describe('MikanDiscoveryDialog', () => {
     const wrapper = mountDialog({ initialSearch: '测试番剧' })
     await waitForText(wrapper, '测试番剧 Mikan')
     expect((wrapper.get('#mikan-search').element as HTMLInputElement).value).toBe('测试番剧')
+    expect(wrapper.get('img[alt="测试番剧 Mikan 海报"]').attributes('src')).toContain('/api/v1/subscriptions/mikan/poster?')
   })
 
   it('searches, previews a subgroup and emits the complete subscription preset', async () => {
     vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
       const path = String(input)
       if (path.includes('/mikan/dashboard')) return response({ season: '2026 夏季番组', days: { '1': [] } })
-      if (path.includes('/subscriptions/search')) return response({ items: [{ mikan_id: '3141', title: '测试番剧', image: 'poster.jpg' }] })
+      if (path.includes('/subscriptions/search')) return response({ items: [{ mikan_id: '3141', title: '测试番剧', image: 'poster.jpg', is_subscribed: true, is_local: true }] })
       if (path.includes('/mikan/subgroups')) return response({ items: [{ id: '', name: '全部字幕组', is_all: true }, { id: '583', name: 'ANi', is_all: false }] })
       if (path.includes('/mikan/episodes')) return response({
         mikan_id: '3141',
@@ -99,8 +100,13 @@ describe('MikanDiscoveryDialog', () => {
     await wrapper.get('#mikan-search').setValue('测试')
     await wrapper.get('form').trigger('submit')
     await waitForText(wrapper, '测试番剧')
+    const searchResults = wrapper.get('[data-testid="mikan-search-results"]')
+    expect(searchResults.text()).toContain('已订阅')
+    expect(searchResults.text()).toContain('本地已有')
     await buttonByText(wrapper, '测试番剧').trigger('click')
     await waitForText(wrapper, 'ANi')
+    expect(wrapper.get('[data-testid="mikan-selected-status"]').text()).toContain('已订阅')
+    expect(wrapper.get('[data-testid="mikan-selected-status"]').text()).toContain('本地已有')
     await buttonByText(wrapper, 'ANi').trigger('click')
     await waitForText(wrapper, '[ANi] 测试番剧 01 [1080P][CHS]')
     expect(wrapper.get('[data-testid="mikan-episode-preview"]').classes()).toEqual(expect.arrayContaining(['mikan-preview-list', 'overflow-y-scroll']))
@@ -152,13 +158,16 @@ describe('MikanDiscoveryDialog', () => {
       if (!path.includes('/mikan/dashboard')) throw new Error(`unexpected request: ${path}`)
       attempts += 1
       if (attempts === 1) return response('季度番组暂时不可用', 502)
-      return response({ season: '2026 夏季番组', days: { '1': [{ mikan_id: '9', title: '恢复成功', image: '' }] } })
+      return response({ season: '2026 夏季番组', days: { '1': [{ mikan_id: '9', title: '恢复成功', image: '', is_subscribed: true, is_local: true }] } })
     }))
 
     const wrapper = mountDialog()
     await waitForText(wrapper, '季度番组加载失败')
     await buttonByText(wrapper, '重试').trigger('click')
     await waitForText(wrapper, '恢复成功')
+    const dashboardResults = wrapper.get('[data-testid="mikan-dashboard-results"]')
+    expect(dashboardResults.text()).toContain('已订阅')
+    expect(dashboardResults.text()).toContain('本地已有')
     expect(attempts).toBe(2)
   })
 })

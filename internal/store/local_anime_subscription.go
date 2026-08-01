@@ -6,7 +6,7 @@ import (
 )
 
 // ListForSubscriptionMatching returns only identity fields needed by the
-// subscription list. Episode rows are aggregated separately so a large media
+// subscription and Mikan discovery views. Episode rows are aggregated separately so a large media
 // library does not materialize every LocalEpisode model in memory.
 func (s *LocalAnimeStore) ListForSubscriptionMatching() ([]model.LocalAnime, error) {
 	if s == nil || s.db == nil {

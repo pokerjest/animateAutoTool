@@ -2118,6 +2118,10 @@ export interface components {
             bangumi_subject_id: string;
             title: string;
             image: string;
+            /** @description Whether a subscription already exists for this Mikan bangumi. */
+            is_subscribed: boolean;
+            /** @description Whether the local media library contains a strongly matched series with indexed episodes. */
+            is_local: boolean;
         };
         MikanDashboard: {
             season: string;

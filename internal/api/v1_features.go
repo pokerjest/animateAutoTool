@@ -51,12 +51,19 @@ type v1MikanDiscoveryItem struct {
 	BangumiSubjectID string `json:"bangumi_subject_id"`
 	Title            string `json:"title"`
 	Image            string `json:"image"`
+	IsSubscribed     bool   `json:"is_subscribed"`
+	IsLocal          bool   `json:"is_local"`
 }
 
 type v1MikanSubgroup struct {
 	ID    string `json:"id"`
 	Name  string `json:"name"`
 	IsAll bool   `json:"is_all"`
+}
+
+type mikanDiscoveryStatusIndex struct {
+	subscriptionsByMikanID map[string][]*model.Subscription
+	library                *subscriptionLibraryIndex
 }
 
 var newV1MikanClient = func() v1MikanClient {
@@ -67,15 +74,88 @@ var enrichV1LocalAnime = func(anime *model.LocalAnime) error {
 	return service.NewMetadataService().EnrichAnime(anime)
 }
 
-func mikanDiscoveryItems(items []parser.SearchResult) []v1MikanDiscoveryItem {
+func loadMikanDiscoveryStatusIndex() (*mikanDiscoveryStatusIndex, error) {
+	subscriptions, err := listSubscriptionsWithMetadata()
+	if err != nil {
+		return nil, err
+	}
+	library, err := loadSubscriptionLocalMatchIndex()
+	if err != nil {
+		return nil, err
+	}
+
+	index := &mikanDiscoveryStatusIndex{
+		subscriptionsByMikanID: make(map[string][]*model.Subscription),
+		library:                library,
+	}
+	for i := range subscriptions {
+		mikanID := strings.TrimSpace(subscriptions[i].MikanID)
+		if mikanID == "" {
+			if parsed, ok := parser.MikanIDFromRSSURL(subscriptions[i].RSSUrl); ok {
+				mikanID = parsed
+			}
+		}
+		if mikanID == "" {
+			continue
+		}
+		index.subscriptionsByMikanID[mikanID] = append(index.subscriptionsByMikanID[mikanID], &subscriptions[i])
+	}
+	return index, nil
+}
+
+func mikanDiscoveryLocalMatch(sub *model.Subscription, library *subscriptionLibraryIndex) bool {
+	if sub == nil || library == nil {
+		return false
+	}
+	candidates := subscriptionProviderAnimeCandidates(sub, library)
+	for i := range candidates {
+		if service.LocalAnimeMatchesSubscription(sub, &candidates[i]) {
+			return true
+		}
+	}
+	candidates = subscriptionLocalAnimeCandidates(sub, library)
+	for i := range candidates {
+		if service.LocalAnimeMatchesSubscription(sub, &candidates[i]) {
+			return true
+		}
+	}
+	return false
+}
+
+func (index *mikanDiscoveryStatusIndex) populate(item *v1MikanDiscoveryItem) {
+	if index == nil || item == nil {
+		return
+	}
+	subscriptions := index.subscriptionsByMikanID[item.MikanID]
+	item.IsSubscribed = len(subscriptions) > 0
+	for _, subscription := range subscriptions {
+		if mikanDiscoveryLocalMatch(subscription, index.library) {
+			item.IsLocal = true
+			return
+		}
+	}
+	if len(subscriptions) > 0 {
+		return
+	}
+
+	candidate := &model.Subscription{Title: item.Title}
+	if bangumiID, err := strconv.Atoi(item.BangumiSubjectID); err == nil && bangumiID > 0 {
+		candidate.Metadata = &model.AnimeMetadata{BangumiID: bangumiID}
+	}
+	item.IsLocal = mikanDiscoveryLocalMatch(candidate, index.library)
+}
+
+func mikanDiscoveryItems(items []parser.SearchResult, statusIndex *mikanDiscoveryStatusIndex) []v1MikanDiscoveryItem {
 	result := make([]v1MikanDiscoveryItem, 0, len(items))
 	for _, item := range items {
-		result = append(result, v1MikanDiscoveryItem{
+		discoveryItem := v1MikanDiscoveryItem{
 			MikanID:          strings.TrimSpace(item.MikanID),
 			BangumiSubjectID: strings.TrimSpace(item.BangumiSubjectID),
 			Title:            strings.TrimSpace(item.Title),
 			Image:            strings.TrimSpace(item.Image),
-		})
+		}
+		statusIndex.populate(&discoveryItem)
+		result = append(result, discoveryItem)
 	}
 	return result
 }
@@ -108,7 +188,12 @@ func V1MikanSearchHandler(c *gin.Context) {
 		v1Error(c, http.StatusBadGateway, "mikan_search_failed", humanizeOperationError(err.Error()))
 		return
 	}
-	v1Data(c, http.StatusOK, gin.H{"items": mikanDiscoveryItems(results)})
+	statusIndex, err := loadMikanDiscoveryStatusIndex()
+	if err != nil {
+		v1Error(c, http.StatusInternalServerError, "mikan_discovery_status_failed", "读取订阅和本地媒体状态失败")
+		return
+	}
+	v1Data(c, http.StatusOK, gin.H{"items": mikanDiscoveryItems(results, statusIndex)})
 }
 
 func V1MikanResolveHandler(c *gin.Context) {
@@ -128,7 +213,12 @@ func V1MikanResolveHandler(c *gin.Context) {
 		v1Error(c, http.StatusBadGateway, "mikan_resolve_failed", humanizeOperationError(err.Error()))
 		return
 	}
-	v1Data(c, http.StatusOK, gin.H{"items": mikanDiscoveryItems(results)})
+	statusIndex, err := loadMikanDiscoveryStatusIndex()
+	if err != nil {
+		v1Error(c, http.StatusInternalServerError, "mikan_discovery_status_failed", "读取订阅和本地媒体状态失败")
+		return
+	}
+	v1Data(c, http.StatusOK, gin.H{"items": mikanDiscoveryItems(results, statusIndex)})
 }
 
 func V1RSSPreviewHandler(c *gin.Context) {
@@ -173,9 +263,14 @@ func V1MikanDashboardHandler(c *gin.Context) {
 		v1Error(c, http.StatusBadGateway, "mikan_dashboard_failed", humanizeOperationError(err.Error()))
 		return
 	}
+	statusIndex, err := loadMikanDiscoveryStatusIndex()
+	if err != nil {
+		v1Error(c, http.StatusInternalServerError, "mikan_discovery_status_failed", "读取订阅和本地媒体状态失败")
+		return
+	}
 	days := make(map[string][]v1MikanDiscoveryItem, len(dashboard.Days))
 	for day, items := range dashboard.Days {
-		days[day] = mikanDiscoveryItems(items)
+		days[day] = mikanDiscoveryItems(items, statusIndex)
 	}
 	v1Data(c, http.StatusOK, gin.H{"season": strings.TrimSpace(dashboard.Season), "days": days})
 }

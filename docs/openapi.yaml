@@ -1262,12 +1262,14 @@ components:
         needs_attention: { type: boolean }
     MikanDiscoveryItem:
       type: object
-      required: [mikan_id, bangumi_subject_id, title, image]
+      required: [mikan_id, bangumi_subject_id, title, image, is_subscribed, is_local]
       properties:
         mikan_id: { type: string, description: Mikan's own bangumi identifier used by Mikan RSS URLs. }
         bangumi_subject_id: { type: string, description: bgm.tv subject identifier when verified from the Mikan detail page; empty when unresolved. }
         title: { type: string }
         image: { type: string }
+        is_subscribed: { type: boolean, description: Whether a subscription already exists for this Mikan bangumi. }
+        is_local: { type: boolean, description: Whether the local media library contains a strongly matched series with indexed episodes. }
     MikanDashboard:
       type: object
       required: [season, days]

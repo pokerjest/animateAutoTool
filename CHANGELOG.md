@@ -8,6 +8,19 @@
 
 ## [Unreleased]
 
+## [1.0.0-beta.10] - 2026-08-01
+
+### Added
+- Mikan 番剧发现结果会显示“已订阅”和“本地已有”状态，并复用来源 ID 与强标题匹配判断本地媒体。
+- 发布流水线新增 Windows 打包二进制 E2E，验证 ZIP 内容、启动脚本、Playwright 页面流程与优雅停止。
+
+### Changed
+- Windows ZIP 打包兼容 zip 和 PowerShell Compress-Archive，Linux CI 可同时生成 Windows E2E 包。
+
+### Fixed
+- Mikan 海报代理会在多个可信镜像间并发取最快有效图片，并统一缓存同一路径，改善部分网络下封面加载失败的问题。
+- 前端海报回退会记录已尝试的代理和原始地址，避免重复请求或回退循环。
+
 ## [1.0.0-beta.9] - 2026-08-01
 
 ### Added
@@ -580,7 +593,8 @@
 
 ---
 
-[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.9...HEAD
+[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.10...HEAD
+[1.0.0-beta.10]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.9...v1.0.0-beta.10
 [1.0.0-beta.9]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.8...v1.0.0-beta.9
 [1.0.0-beta.8]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.7...v1.0.0-beta.8
 [1.0.0-beta.7]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.6...v1.0.0-beta.7

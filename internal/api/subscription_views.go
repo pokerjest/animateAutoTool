@@ -406,7 +406,7 @@ type subscriptionLocalMatch struct {
 	Playable     bool
 }
 
-func loadSubscriptionLibraryIndex() (*subscriptionLibraryIndex, error) {
+func loadSubscriptionLocalMatchIndex() (*subscriptionLibraryIndex, error) {
 	localStore := localAnimeStore()
 	if localStore == nil {
 		return nil, gorm.ErrInvalidDB
@@ -416,21 +416,29 @@ func loadSubscriptionLibraryIndex() (*subscriptionLibraryIndex, error) {
 		return nil, err
 	}
 	index := &subscriptionLibraryIndex{
-		localAnimes:                     localAnimes,
-		statsByAnime:                    make(map[uint]subscriptionEpisodeStats, len(localAnimes)),
-		candidateIndexesByKey:           make(map[string][]int),
-		providerIndexesByKey:            make(map[string][]int),
-		pathLinkedIndexesBySubscription: make(map[uint][]int),
+		localAnimes:           localAnimes,
+		candidateIndexesByKey: make(map[string][]int),
+		providerIndexesByKey:  make(map[string][]int),
 	}
 	buildSubscriptionCandidateIndex(index)
-	if len(localAnimes) == 0 {
+	return index, nil
+}
+
+func loadSubscriptionLibraryIndex() (*subscriptionLibraryIndex, error) {
+	index, err := loadSubscriptionLocalMatchIndex()
+	if err != nil {
+		return nil, err
+	}
+	index.statsByAnime = make(map[uint]subscriptionEpisodeStats, len(index.localAnimes))
+	index.pathLinkedIndexesBySubscription = make(map[uint][]int)
+	if len(index.localAnimes) == 0 {
 		return index, nil
 	}
 	if err := loadSubscriptionPathLinksIntoIndex(index); err != nil {
 		return nil, err
 	}
-	animeIDs := make([]uint, 0, len(localAnimes))
-	for _, anime := range localAnimes {
+	animeIDs := make([]uint, 0, len(index.localAnimes))
+	for _, anime := range index.localAnimes {
 		animeIDs = append(animeIDs, anime.ID)
 	}
 	if err := loadSubscriptionEpisodeStatsIntoIndex(index, animeIDs); err != nil {
