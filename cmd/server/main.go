@@ -18,6 +18,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/pokerjest/animateAutoTool/internal/api"
 	"github.com/pokerjest/animateAutoTool/internal/appidentity"
+	"github.com/pokerjest/animateAutoTool/internal/appshutdown"
 	"github.com/pokerjest/animateAutoTool/internal/config"
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/event"
@@ -60,6 +61,12 @@ func run() error {
 
 	signalCtx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopSignals()
+	controlCleanup, err := appshutdown.StartPlatformListener(signalCtx)
+	if err != nil {
+		log.Printf("WARN: failed to initialize platform shutdown control: %v", err)
+	} else {
+		defer controlCleanup()
+	}
 	if config.AppConfig.Server.Headless {
 		log.Println("Tray integration disabled; starting in headless mode.")
 		return runServer(signalCtx)
@@ -184,6 +191,9 @@ func runServer(parent context.Context) (runErr error) {
 	select {
 	case <-parent.Done():
 		log.Println("Shutdown signal received, stopping services...")
+		return nil
+	case reason := <-appshutdown.Requests():
+		log.Printf("Shutdown requested (%s), stopping services...", reason)
 		return nil
 	case err := <-errCh:
 		if err == nil || err == http.ErrServerClosed {

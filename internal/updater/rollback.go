@@ -8,9 +8,9 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
-	"time"
 
 	"github.com/pokerjest/animateAutoTool/internal/appidentity"
+	"github.com/pokerjest/animateAutoTool/internal/appshutdown"
 	"github.com/pokerjest/animateAutoTool/internal/config"
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/service"
@@ -106,68 +106,109 @@ exit 1
 	if err := cmd.Start(); err != nil {
 		return err
 	}
-	time.AfterFunc(restartDelay, func() { os.Exit(0) })
+	appshutdown.Request("updater-rollback")
 	return nil
 }
 
 func startWindowsRollback(previousBinary, targetBinary string, snapshot service.SafetySnapshot, logPath, readiness string) error {
-	scriptPath := filepath.Join(config.DataDir(), "updates", "rollback_update.bat")
-	script := `@echo off
-setlocal
-set "OLD_PID=%~1"
-set "PREVIOUS_BIN=%~2"
-set "TARGET_BIN=%~3"
-set "SNAPSHOT_DB=%~4"
-set "SNAPSHOT_CONFIG=%~5"
-set "DATABASE_PATH=%~6"
-set "CONFIG_PATH=%~7"
-set "LOG_FILE=%~8"
-set "READY_URL=%~9"
-:waitloop
-tasklist /FI "PID eq %OLD_PID%" | find "%OLD_PID%" >nul
-if %ERRORLEVEL%==0 (
-  timeout /t 1 /nobreak >nul
-  goto waitloop
+	scriptPath := filepath.Join(config.DataDir(), "updates", "rollback_update.ps1")
+	script := `param(
+  [Parameter(Mandatory=$true)][int]$OldPid,
+  [Parameter(Mandatory=$true)][string]$PreviousBinary,
+  [Parameter(Mandatory=$true)][string]$TargetBinary,
+  [Parameter(Mandatory=$true)][string]$SnapshotDatabase,
+  [string]$SnapshotConfig = "",
+  [Parameter(Mandatory=$true)][string]$DatabasePath,
+  [Parameter(Mandatory=$true)][string]$ConfigPath,
+  [Parameter(Mandatory=$true)][string]$LogFile,
+  [Parameter(Mandatory=$true)][string]$ReadyUrl
 )
-copy /Y "%TARGET_BIN%" "%TARGET_BIN%.failed" >nul 2>nul
-copy /Y "%PREVIOUS_BIN%" "%TARGET_BIN%.restore" >nul
-move /Y "%TARGET_BIN%.restore" "%TARGET_BIN%" >nul
-if exist "%DATABASE_PATH%-wal" del /F /Q "%DATABASE_PATH%-wal" >nul 2>nul
-if exist "%DATABASE_PATH%-shm" del /F /Q "%DATABASE_PATH%-shm" >nul 2>nul
-copy /Y "%SNAPSHOT_DB%" "%DATABASE_PATH%.restore" >nul
-move /Y "%DATABASE_PATH%.restore" "%DATABASE_PATH%" >nul
-if not "%SNAPSHOT_CONFIG%"=="" if exist "%SNAPSHOT_CONFIG%" (
-  copy /Y "%SNAPSHOT_CONFIG%" "%CONFIG_PATH%.restore" >nul
-  move /Y "%CONFIG_PATH%.restore" "%CONFIG_PATH%" >nul
-)
-for /F "delims=" %%P in ('powershell -NoProfile -NonInteractive -Command "$p=Start-Process -FilePath $env:TARGET_BIN -WorkingDirectory (Split-Path -Parent $env:TARGET_BIN) -PassThru; $p.Id"') do set "NEW_PID=%%P"
-if not defined NEW_PID (
-  echo [%DATE% %TIME%] failed to start rolled back executable >> "%LOG_FILE%"
-  exit /b 1
-)
-for /L %%I in (1,1,60) do (
-  curl.exe -fsS --max-time 2 "%READY_URL%" >nul 2>nul
-  if not errorlevel 1 (
-    echo [%DATE% %TIME%] manual updater rollback completed >> "%LOG_FILE%"
-    exit /b 0
-  )
-  timeout /t 1 /nobreak >nul
-)
-echo [%DATE% %TIME%] rollback process started but readiness check failed >> "%LOG_FILE%"
-exit /b 1
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = "Stop"
+
+function Write-UpdateLog([string]$Message) {
+  try {
+    Add-Content -LiteralPath $LogFile -Value ("[{0}] {1}" -f (Get-Date -Format "s"), $Message)
+  } catch {}
+}
+
+function Test-Readiness {
+  for ($attempt = 0; $attempt -lt 60; $attempt++) {
+    try {
+      $request = [System.Net.HttpWebRequest]::Create($ReadyUrl)
+      $request.Method = "GET"
+      $request.Timeout = 2000
+      $request.ReadWriteTimeout = 2000
+      $response = $request.GetResponse()
+      try {
+        return $true
+      } finally {
+        $response.Close()
+      }
+    } catch {}
+    Start-Sleep -Seconds 1
+  }
+  return $false
+}
+
+while (Get-Process -Id $OldPid -ErrorAction SilentlyContinue) {
+  Start-Sleep -Seconds 1
+}
+
+try {
+  Copy-Item -LiteralPath $TargetBinary -Destination "$TargetBinary.failed" -Force -ErrorAction SilentlyContinue
+  Copy-Item -LiteralPath $PreviousBinary -Destination "$TargetBinary.restore" -Force
+  if (Test-Path -LiteralPath $TargetBinary) {
+    Remove-Item -LiteralPath $TargetBinary -Force
+  }
+  Move-Item -LiteralPath "$TargetBinary.restore" -Destination $TargetBinary -Force
+
+  Remove-Item -LiteralPath "$DatabasePath-wal" -Force -ErrorAction SilentlyContinue
+  Remove-Item -LiteralPath "$DatabasePath-shm" -Force -ErrorAction SilentlyContinue
+  Copy-Item -LiteralPath $SnapshotDatabase -Destination "$DatabasePath.restore" -Force
+  Move-Item -LiteralPath "$DatabasePath.restore" -Destination $DatabasePath -Force
+  if ($SnapshotConfig -ne "" -and (Test-Path -LiteralPath $SnapshotConfig)) {
+    Copy-Item -LiteralPath $SnapshotConfig -Destination "$ConfigPath.restore" -Force
+    Move-Item -LiteralPath "$ConfigPath.restore" -Destination $ConfigPath -Force
+  }
+
+  Start-Process -FilePath $TargetBinary -WorkingDirectory (Split-Path -Parent $TargetBinary) -WindowStyle Hidden | Out-Null
+  if (Test-Readiness) {
+    Write-UpdateLog "manual updater rollback completed"
+    exit 0
+  }
+  Write-UpdateLog "rollback process started but readiness check failed"
+  exit 1
+} catch {
+  Write-UpdateLog ("rollback helper failed: {0}" -f $_.Exception.Message)
+  exit 1
+}
 `
 	if err := os.WriteFile(scriptPath, []byte(script), 0600); err != nil {
 		return err
 	}
-	// The batch file is generated by AnimateTool and receives paths as separate
-	// arguments; users cannot select an arbitrary executable here.
-	//nolint:gosec
-	cmd := exec.Command("cmd", "/C", scriptPath, strconv.Itoa(os.Getpid()), previousBinary, targetBinary,
-		snapshot.DatabasePath, snapshot.ConfigPath, db.CurrentDBPath, config.ConfigFilePath(), logPath, readiness)
+	helperArgs := []string{
+		"-OldPid", strconv.Itoa(os.Getpid()),
+		"-PreviousBinary", previousBinary,
+		"-TargetBinary", targetBinary,
+		"-SnapshotDatabase", snapshot.DatabasePath,
+	}
+	if snapshot.ConfigPath != "" {
+		helperArgs = append(helperArgs, "-SnapshotConfig", snapshot.ConfigPath)
+	}
+	helperArgs = append(helperArgs,
+		"-DatabasePath", db.CurrentDBPath,
+		"-ConfigPath", config.ConfigFilePath(),
+		"-LogFile", logPath,
+		"-ReadyUrl", readiness,
+	)
+	cmd := powershellScriptCommand(scriptPath, helperArgs...)
+	configureUpdateHelper(cmd)
 	if err := cmd.Start(); err != nil {
 		return err
 	}
-	time.AfterFunc(restartDelay, func() { os.Exit(0) })
+	appshutdown.Request("updater-rollback")
 	return nil
 }
 
@@ -228,6 +269,6 @@ exit 1
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start rollback helper: %w", err)
 	}
-	time.AfterFunc(restartDelay, func() { os.Exit(0) })
+	appshutdown.Request("updater-rollback")
 	return nil
 }

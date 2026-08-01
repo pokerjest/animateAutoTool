@@ -18,6 +18,7 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/downloader"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/parser"
+	"github.com/pokerjest/animateAutoTool/internal/pathutil"
 	"github.com/pokerjest/animateAutoTool/internal/qbutil"
 	"github.com/pokerjest/animateAutoTool/internal/renamer"
 	"gorm.io/gorm"
@@ -877,7 +878,7 @@ func organizerPathWithin(root, target string) bool {
 }
 
 func sameOrganizerPath(a, b string) bool {
-	return filepath.Clean(strings.TrimSpace(a)) == filepath.Clean(strings.TrimSpace(b))
+	return pathutil.Equal(a, b)
 }
 
 func markDuplicateTargets(items []LocalOrganizeAnimePreview) {

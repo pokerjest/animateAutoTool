@@ -19,6 +19,7 @@ type Manager struct {
 	stopOnce          sync.Once
 	databaseReady     chan struct{}
 	databaseReadyOnce sync.Once
+	processControl    *processControl
 
 	startAlistFn      func() error
 	startQBFunc       func() error
@@ -33,11 +34,12 @@ func NewManager(parent context.Context) *Manager {
 	binDir := config.BinDir()
 	dataDir := config.DataDir()
 	return &Manager{
-		BinDir:        binDir,
-		DataDir:       dataDir,
-		Ctx:           ctx,
-		Cancel:        cancel,
-		databaseReady: make(chan struct{}),
+		BinDir:         binDir,
+		DataDir:        dataDir,
+		Ctx:            ctx,
+		Cancel:         cancel,
+		databaseReady:  make(chan struct{}),
+		processControl: newProcessControl(),
 	}
 }
 
@@ -131,6 +133,7 @@ func (m *Manager) StopAll() {
 	}
 	m.stopOnce.Do(func() {
 		m.Cancel()
+		m.closeManagedProcessControl()
 	})
 	m.wg.Wait()
 }

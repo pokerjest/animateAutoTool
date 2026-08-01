@@ -81,6 +81,7 @@ func (m *Manager) startAlist() error {
 
 	//nolint:gosec // binPath and dataDir are internal managed-service paths under the app workspace.
 	cmdSetPass := exec.Command(binPath, managedDefaultUsername, "set", creds.Password, "--data", dataDir)
+	m.configureManagedCommand(cmdSetPass)
 	if output, err := cmdSetPass.CombinedOutput(); err != nil {
 		fmt.Printf("Alist set pass warning: %v, output: %s\n", err, string(output))
 		// might fail if not initialized? usually works.
@@ -99,6 +100,7 @@ func (m *Manager) startAlist() error {
 	// 2. Start Server
 	//nolint:gosec // binPath and dataDir are internal managed-service paths under the app workspace.
 	cmd := exec.CommandContext(m.Ctx, binPath, "server", "--data", dataDir)
+	m.configureManagedCommand(cmd)
 	// Redirect stdout/stderr so we can debug, or suppress
 	// Logging to file would be better
 	logFile, logErr := os.Create(filepath.Join(m.DataDir, "alist.log"))
@@ -111,6 +113,7 @@ func (m *Manager) startAlist() error {
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("failed to start alist: %w", err)
 	}
+	m.attachManagedCommand("alist", cmd)
 	m.wg.Add(1)
 	go m.waitForManagedProcess("alist", cmd, logFile)
 
@@ -147,12 +150,14 @@ func (m *Manager) startQB() error {
 
 	//nolint:gosec // binPath and profileDir are generated from controlled application directories.
 	cmd := exec.CommandContext(m.Ctx, binPath, "--profile="+filepath.Clean(profileDir))
+	m.configureManagedCommand(cmd)
 	// For Linux/Mac nox, usually it stays in foreground unless -d is passed.
 	// We want it in foreground (as child of manager) to control it.
 
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("failed to start qBittorrent: %w", err)
 	}
+	m.attachManagedCommand("qbittorrent", cmd)
 
 	m.wg.Add(1)
 	go m.waitForManagedProcess("qbittorrent", cmd, nil)
@@ -361,6 +366,7 @@ func (m *Manager) startJellyfin() error {
 
 	//nolint:gosec // binPath and args are derived from managed-service configuration under the app workspace.
 	cmd := exec.CommandContext(m.Ctx, binPath, args...)
+	m.configureManagedCommand(cmd)
 
 	logFile, logErr := os.Create(filepath.Clean(filepath.Join(logDir, "startup.log"))) //nolint:gosec // startup log path is created under the managed Jellyfin log directory.
 	if logErr != nil {
@@ -372,6 +378,7 @@ func (m *Manager) startJellyfin() error {
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("failed to start Jellyfin: %w", err)
 	}
+	m.attachManagedCommand("jellyfin", cmd)
 
 	m.wg.Add(1)
 	go m.waitForManagedProcess("jellyfin", cmd, logFile)

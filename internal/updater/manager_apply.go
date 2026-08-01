@@ -12,9 +12,9 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/pokerjest/animateAutoTool/internal/appidentity"
+	"github.com/pokerjest/animateAutoTool/internal/appshutdown"
 	"github.com/pokerjest/animateAutoTool/internal/config"
 	"github.com/pokerjest/animateAutoTool/internal/safeio"
 )
@@ -144,7 +144,7 @@ fi
 		return err
 	}
 
-	time.AfterFunc(restartDelay, func() { os.Exit(0) })
+	appshutdown.Request("self-update")
 	return nil
 }
 
@@ -262,84 +262,123 @@ func applyWindowsUpdate(downloadedExe, snapshotID, readiness, databasePath, conf
 	}
 	targetExecutablePath := appidentity.CanonicalExecutablePath(exePath, runtime.GOOS)
 
-	scriptPath := filepath.Join(updateDir, "apply_update.bat")
+	scriptPath := filepath.Join(updateDir, "apply_update.ps1")
 	logPath := filepath.Join(config.LogsDir(), "updater.log")
-	script := `@echo off
-setlocal
-set "OLD_PID=%~1"
-set "NEW_EXE=%~2"
-set "TARGET_EXE=%~3"
-set "LOG_FILE=%~4"
-set "SNAPSHOT_DIR=%~5"
-set "READY_URL=%~6"
-set "DATABASE_PATH=%~7"
-set "CONFIG_PATH=%~8"
-set "LEGACY_EXE=%~9"
-set "TMP_EXE=%TARGET_EXE%.new"
-set "BAK_EXE=%TARGET_EXE%.bak"
-
-:waitloop
-tasklist /FI "PID eq %OLD_PID%" | find "%OLD_PID%" >nul
-if %ERRORLEVEL%==0 (
-  timeout /t 1 /nobreak >nul
-  goto waitloop
+	script := `param(
+  [Parameter(Mandatory=$true)][int]$OldPid,
+  [Parameter(Mandatory=$true)][string]$NewExe,
+  [Parameter(Mandatory=$true)][string]$TargetExe,
+  [Parameter(Mandatory=$true)][string]$LogFile,
+  [Parameter(Mandatory=$true)][string]$SnapshotDir,
+  [Parameter(Mandatory=$true)][string]$ReadyUrl,
+  [Parameter(Mandatory=$true)][string]$DatabasePath,
+  [Parameter(Mandatory=$true)][string]$ConfigPath,
+  [Parameter(Mandatory=$true)][string]$LegacyExe
 )
 
-copy /Y "%NEW_EXE%" "%TMP_EXE%" >nul
-if %ERRORLEVEL% neq 0 (
-  echo [%DATE% %TIME%] stage copy failed >> "%LOG_FILE%"
-  exit /b 1
-)
+Set-StrictMode -Version Latest
+$ErrorActionPreference = "Stop"
+$TmpExe = "$TargetExe.new"
+$BakExe = "$TargetExe.bak"
 
-if exist "%BAK_EXE%" del /F /Q "%BAK_EXE%" >nul 2>nul
-if exist "%TARGET_EXE%" (
-  ren "%TARGET_EXE%" "%~n3%~x3.bak"
-) else if exist "%LEGACY_EXE%" (
-  ren "%LEGACY_EXE%" "%~n3%~x3.bak"
-)
-if %ERRORLEVEL% neq 0 (
-  echo [%DATE% %TIME%] backup rename failed >> "%LOG_FILE%"
-  del /F /Q "%TMP_EXE%" >nul 2>nul
-  exit /b 1
-)
+function Write-UpdateLog([string]$Message) {
+  try {
+    Add-Content -LiteralPath $LogFile -Value ("[{0}] {1}" -f (Get-Date -Format "s"), $Message)
+  } catch {}
+}
 
-move /Y "%TMP_EXE%" "%TARGET_EXE%" >nul
-if %ERRORLEVEL% neq 0 (
-  echo [%DATE% %TIME%] promote failed >> "%LOG_FILE%"
-  if exist "%BAK_EXE%" move /Y "%BAK_EXE%" "%TARGET_EXE%" >nul 2>nul
-  exit /b 1
-)
+function Test-Readiness {
+  for ($attempt = 0; $attempt -lt 60; $attempt++) {
+    try {
+      $request = [System.Net.HttpWebRequest]::Create($ReadyUrl)
+      $request.Method = "GET"
+      $request.Timeout = 2000
+      $request.ReadWriteTimeout = 2000
+      $response = $request.GetResponse()
+      try {
+        return $true
+      } finally {
+        $response.Close()
+      }
+    } catch {}
+    Start-Sleep -Seconds 1
+  }
+  return $false
+}
 
-for /F "delims=" %%P in ('powershell -NoProfile -NonInteractive -Command "$p=Start-Process -FilePath $env:TARGET_EXE -WorkingDirectory (Split-Path -Parent $env:TARGET_EXE) -PassThru; $p.Id"') do set "NEW_PID=%%P"
-if not defined NEW_PID (
-  echo [%DATE% %TIME%] failed to start updated executable >> "%LOG_FILE%"
-  if exist "%BAK_EXE%" move /Y "%BAK_EXE%" "%TARGET_EXE%" >nul 2>nul
-  exit /b 1
-)
-set "READY=0"
-for /L %%I in (1,1,60) do (
-  curl.exe -fsS --max-time 2 "%READY_URL%" >nul 2>nul
-  if not errorlevel 1 (
-    set "READY=1"
-    goto ready
-  )
-  timeout /t 1 /nobreak >nul
-)
-:ready
-if "%READY%"=="0" (
-  taskkill /F /PID %NEW_PID% /T >nul 2>nul
-  if exist "%DATABASE_PATH%-wal" del /F /Q "%DATABASE_PATH%-wal" >nul 2>nul
-  if exist "%DATABASE_PATH%-shm" del /F /Q "%DATABASE_PATH%-shm" >nul
-  if exist "%SNAPSHOT_DIR%\database.db" copy /Y "%SNAPSHOT_DIR%\database.db" "%DATABASE_PATH%.restore" >nul
-  if exist "%DATABASE_PATH%.restore" move /Y "%DATABASE_PATH%.restore" "%DATABASE_PATH%" >nul
-  if exist "%SNAPSHOT_DIR%\config.yaml" copy /Y "%SNAPSHOT_DIR%\config.yaml" "%CONFIG_PATH%.restore" >nul
-  if exist "%CONFIG_PATH%.restore" move /Y "%CONFIG_PATH%.restore" "%CONFIG_PATH%" >nul
-  if exist "%BAK_EXE%" move /Y "%BAK_EXE%" "%TARGET_EXE%" >nul
-  start "" "%TARGET_EXE%"
-  echo [%DATE% %TIME%] readiness check failed; previous version restored and restarted >> "%LOG_FILE%"
-  exit /b 1
-)
-if exist "%BAK_EXE%" move /Y "%BAK_EXE%" "%SNAPSHOT_DIR%\previous-binary" >nul
+function Restore-PreviousBinary {
+  if (Test-Path -LiteralPath $BakExe) {
+    if (Test-Path -LiteralPath $TargetExe) {
+      Remove-Item -LiteralPath $TargetExe -Force
+    }
+    Move-Item -LiteralPath $BakExe -Destination $TargetExe -Force
+  }
+}
+
+while (Get-Process -Id $OldPid -ErrorAction SilentlyContinue) {
+  Start-Sleep -Seconds 1
+}
+
+try {
+  Copy-Item -LiteralPath $NewExe -Destination $TmpExe -Force
+  if (Test-Path -LiteralPath $BakExe) {
+    Remove-Item -LiteralPath $BakExe -Force
+  }
+  if (Test-Path -LiteralPath $TargetExe) {
+    Move-Item -LiteralPath $TargetExe -Destination $BakExe -Force
+  } elseif (Test-Path -LiteralPath $LegacyExe) {
+    Move-Item -LiteralPath $LegacyExe -Destination $BakExe -Force
+  }
+  Move-Item -LiteralPath $TmpExe -Destination $TargetExe -Force
+
+  $workingDirectory = Split-Path -Parent $TargetExe
+  $process = Start-Process -FilePath $TargetExe -WorkingDirectory $workingDirectory -WindowStyle Hidden -PassThru
+  if (Test-Readiness) {
+    if (Test-Path -LiteralPath $BakExe) {
+      try {
+        $previousBinary = Join-Path $SnapshotDir "previous-binary"
+        if (Test-Path -LiteralPath $previousBinary) {
+          Remove-Item -LiteralPath $previousBinary -Force
+        }
+        Move-Item -LiteralPath $BakExe -Destination $previousBinary -Force
+      } catch {
+        Write-UpdateLog ("updated version is ready, but preserving the previous binary failed: {0}" -f $_.Exception.Message)
+      }
+    }
+    exit 0
+  }
+
+  Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+  Start-Sleep -Seconds 1
+  Remove-Item -LiteralPath "$DatabasePath-wal" -Force -ErrorAction SilentlyContinue
+  Remove-Item -LiteralPath "$DatabasePath-shm" -Force -ErrorAction SilentlyContinue
+  $snapshotDatabase = Join-Path $SnapshotDir "database.db"
+  if (Test-Path -LiteralPath $snapshotDatabase) {
+    Copy-Item -LiteralPath $snapshotDatabase -Destination "$DatabasePath.restore" -Force
+    Move-Item -LiteralPath "$DatabasePath.restore" -Destination $DatabasePath -Force
+  }
+  $snapshotConfig = Join-Path $SnapshotDir "config.yaml"
+  if (Test-Path -LiteralPath $snapshotConfig) {
+    Copy-Item -LiteralPath $snapshotConfig -Destination "$ConfigPath.restore" -Force
+    Move-Item -LiteralPath "$ConfigPath.restore" -Destination $ConfigPath -Force
+  }
+  Restore-PreviousBinary
+  Start-Process -FilePath $TargetExe -WorkingDirectory $workingDirectory -WindowStyle Hidden | Out-Null
+  Write-UpdateLog "readiness check failed; previous version restored and restarted"
+  exit 1
+} catch {
+  Write-UpdateLog ("update helper failed: {0}" -f $_.Exception.Message)
+  Remove-Item -LiteralPath $TmpExe -Force -ErrorAction SilentlyContinue
+  try {
+    Restore-PreviousBinary
+    if (Test-Path -LiteralPath $TargetExe) {
+      Start-Process -FilePath $TargetExe -WorkingDirectory (Split-Path -Parent $TargetExe) -WindowStyle Hidden | Out-Null
+    }
+  } catch {
+    Write-UpdateLog ("failed to restart previous version: {0}" -f $_.Exception.Message)
+  }
+  exit 1
+}
 `
 	if err := os.WriteFile(scriptPath, []byte(script), 0600); err != nil {
 		return err
@@ -347,13 +386,30 @@ if exist "%BAK_EXE%" move /Y "%BAK_EXE%" "%SNAPSHOT_DIR%\previous-binary" >nul
 
 	snapshotDir := filepath.Join(config.DataDir(), "updates", "snapshots", filepath.Base(snapshotID))
 	legacyExecutablePath := filepath.Join(filepath.Dir(exePath), appidentity.LegacyExecutableName(runtime.GOOS))
-	cmd := exec.Command("cmd", "/C", scriptPath, strconv.Itoa(os.Getpid()), downloadedExe, targetExecutablePath, logPath, snapshotDir, readiness, databasePath, configPath, legacyExecutablePath) //nolint:gosec
+	cmd := powershellScriptCommand(scriptPath,
+		"-OldPid", strconv.Itoa(os.Getpid()),
+		"-NewExe", downloadedExe,
+		"-TargetExe", targetExecutablePath,
+		"-LogFile", logPath,
+		"-SnapshotDir", snapshotDir,
+		"-ReadyUrl", readiness,
+		"-DatabasePath", databasePath,
+		"-ConfigPath", configPath,
+		"-LegacyExe", legacyExecutablePath,
+	)
+	configureUpdateHelper(cmd)
 	if err := cmd.Start(); err != nil {
 		return err
 	}
 
-	time.AfterFunc(restartDelay, func() { os.Exit(0) })
+	appshutdown.Request("self-update")
 	return nil
+}
+
+func powershellScriptCommand(scriptPath string, args ...string) *exec.Cmd {
+	powershellArgs := []string{"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", scriptPath}
+	powershellArgs = append(powershellArgs, args...)
+	return exec.Command("powershell.exe", powershellArgs...) //nolint:gosec
 }
 
 func applyDarwinUpdate(downloadedDMG, snapshotID, readiness, databasePath, configPath string) error {
@@ -497,7 +553,7 @@ fi
 		return err
 	}
 
-	time.AfterFunc(restartDelay, func() { os.Exit(0) })
+	appshutdown.Request("self-update")
 	return nil
 }
 

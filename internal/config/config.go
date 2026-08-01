@@ -258,6 +258,15 @@ func defaultAppRoot() string {
 		return appRootOverride
 	}
 
+	if currentGOOS() == goosWindows {
+		if local := strings.TrimSpace(os.Getenv("LOCALAPPDATA")); local != "" {
+			return filepath.Join(local, appName)
+		}
+		if dir, err := userConfigDirFunc(); err == nil && dir != "" {
+			return pathJoinForGOOS(dir, appName)
+		}
+	}
+
 	if exeDir, err := executableDir(); err == nil && strings.TrimSpace(exeDir) != "" {
 		if macOSBundleDataRoot(exeDir) {
 			if dir, err := userConfigDirFunc(); err == nil && dir != "" {
@@ -265,12 +274,6 @@ func defaultAppRoot() string {
 			}
 		}
 		return exeDir
-	}
-
-	if currentGOOS() == goosWindows {
-		if local := strings.TrimSpace(os.Getenv("LOCALAPPDATA")); local != "" {
-			return filepath.Join(local, appName)
-		}
 	}
 
 	if dir, err := userConfigDirFunc(); err == nil && dir != "" {

@@ -8,6 +8,19 @@
 
 ## [Unreleased]
 
+## [1.0.0-beta.9] - 2026-08-01
+
+### Added
+- 新增 Windows 平台的应用退出控制和托管子进程控制，停止、重启、更新与回滚可以等待服务正常收尾。
+
+### Changed
+- Windows 默认数据目录优先使用 LOCALAPPDATA，更新与回滚辅助程序改用隐藏运行的 PowerShell 脚本。
+
+### Fixed
+- 订阅与本地番剧支持通过 Bangumi、TMDB 和 AniList 的命名空间来源 ID 匹配，修复中文译名不同导致播放按钮缺失的问题。
+- 来源 ID 或季度冲突会阻止自动关联；重复身份可通过已完成下载路径消歧，否则生成可重复追踪的库问题。
+- Windows 文件路径比较改为大小写不敏感，并提高 stop.bat 与 restart.bat 对过期 PID 和退出失败的处理安全性。
+
 ## [1.0.0-beta.8] - 2026-08-01
 
 ### Changed
@@ -567,7 +580,8 @@
 
 ---
 
-[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.8...HEAD
+[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.9...HEAD
+[1.0.0-beta.9]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.8...v1.0.0-beta.9
 [1.0.0-beta.8]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.7...v1.0.0-beta.8
 [1.0.0-beta.7]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.6...v1.0.0-beta.7
 [1.0.0-beta.6]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.5...v1.0.0-beta.6
