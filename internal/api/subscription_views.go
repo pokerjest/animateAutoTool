@@ -381,16 +381,23 @@ type subscriptionEpisodeStats struct {
 }
 
 type subscriptionLibraryIndex struct {
-	localAnimes           []model.LocalAnime
-	statsByAnime          map[uint]subscriptionEpisodeStats
-	candidateIndexesByKey map[string][]int
-	fallbackIndexes       []int
+	localAnimes                     []model.LocalAnime
+	statsByAnime                    map[uint]subscriptionEpisodeStats
+	candidateIndexesByKey           map[string][]int
+	providerIndexesByKey            map[string][]int
+	fallbackIndexes                 []int
+	pathLinkedIndexesBySubscription map[uint][]int
 }
 
 type subscriptionEpisodeResolution struct {
 	LocalAnimeID    uint `gorm:"column:local_anime_id"`
 	EpisodeNum      int  `gorm:"column:episode_num"`
 	ResolutionScore int  `gorm:"column:resolution_score"`
+}
+
+type subscriptionLocalPathLink struct {
+	SubscriptionID uint `gorm:"column:subscription_id"`
+	LocalAnimeID   uint `gorm:"column:local_anime_id"`
 }
 
 type subscriptionLocalMatch struct {
@@ -409,13 +416,18 @@ func loadSubscriptionLibraryIndex() (*subscriptionLibraryIndex, error) {
 		return nil, err
 	}
 	index := &subscriptionLibraryIndex{
-		localAnimes:           localAnimes,
-		statsByAnime:          make(map[uint]subscriptionEpisodeStats, len(localAnimes)),
-		candidateIndexesByKey: make(map[string][]int),
+		localAnimes:                     localAnimes,
+		statsByAnime:                    make(map[uint]subscriptionEpisodeStats, len(localAnimes)),
+		candidateIndexesByKey:           make(map[string][]int),
+		providerIndexesByKey:            make(map[string][]int),
+		pathLinkedIndexesBySubscription: make(map[uint][]int),
 	}
 	buildSubscriptionCandidateIndex(index)
 	if len(localAnimes) == 0 {
 		return index, nil
+	}
+	if err := loadSubscriptionPathLinksIntoIndex(index); err != nil {
+		return nil, err
 	}
 	animeIDs := make([]uint, 0, len(localAnimes))
 	for _, anime := range localAnimes {
@@ -425,6 +437,54 @@ func loadSubscriptionLibraryIndex() (*subscriptionLibraryIndex, error) {
 		return nil, err
 	}
 	return index, nil
+}
+
+func loadSubscriptionLocalPathLinks(subscriptionID uint) ([]subscriptionLocalPathLink, error) {
+	if db.DB == nil {
+		return nil, gorm.ErrInvalidDB
+	}
+	var links []subscriptionLocalPathLink
+	query := db.DB.Table("download_logs").
+		Select("download_logs.subscription_id, local_episodes.local_anime_id").
+		Joins(`JOIN local_episodes
+			ON lower(local_episodes.path) = lower(download_logs.target_file)
+			AND local_episodes.deleted_at IS NULL`).
+		Where("download_logs.deleted_at IS NULL").
+		Where("download_logs.status IN ?", []string{"completed", "renamed"}).
+		Where("trim(download_logs.target_file) <> ''")
+	if subscriptionID != 0 {
+		query = query.Where("download_logs.subscription_id = ?", subscriptionID)
+	}
+	err := query.
+		Group("download_logs.subscription_id, local_episodes.local_anime_id").
+		Order("download_logs.subscription_id ASC, local_episodes.local_anime_id ASC").
+		Scan(&links).Error
+	return links, err
+}
+
+func loadSubscriptionPathLinksIntoIndex(index *subscriptionLibraryIndex) error {
+	if index == nil || len(index.localAnimes) == 0 {
+		return nil
+	}
+	links, err := loadSubscriptionLocalPathLinks(0)
+	if err != nil {
+		return err
+	}
+	localAnimeIndexByID := make(map[uint]int, len(index.localAnimes))
+	for i := range index.localAnimes {
+		localAnimeIndexByID[index.localAnimes[i].ID] = i
+	}
+	for _, link := range links {
+		localAnimeIndex, ok := localAnimeIndexByID[link.LocalAnimeID]
+		if !ok {
+			continue
+		}
+		index.pathLinkedIndexesBySubscription[link.SubscriptionID] = append(
+			index.pathLinkedIndexesBySubscription[link.SubscriptionID],
+			localAnimeIndex,
+		)
+	}
+	return nil
 }
 
 func loadSubscriptionEpisodeStatsIntoIndex(index *subscriptionLibraryIndex, animeIDs []uint) error {
@@ -469,10 +529,217 @@ func loadSubscriptionEpisodeStatsIntoIndex(index *subscriptionLibraryIndex, anim
 	}
 	return nil
 }
+
+func subscriptionMetadataForLibraryMatch(sub *model.Subscription) *model.AnimeMetadata {
+	if sub == nil {
+		return nil
+	}
+	if sub.Metadata != nil {
+		return sub.Metadata
+	}
+	if sub.MetadataID == nil || *sub.MetadataID == 0 {
+		return nil
+	}
+	metadataStore := animeMetadataStore()
+	if metadataStore == nil {
+		return nil
+	}
+	metadata, err := metadataStore.GetByID(*sub.MetadataID)
+	if err != nil {
+		return nil
+	}
+	sub.Metadata = metadata
+	return metadata
+}
+
+func loadSubscriptionMatchLocalAnimesByIDs(animeIDs []uint) ([]model.LocalAnime, error) {
+	if len(animeIDs) == 0 {
+		return nil, nil
+	}
+	var localAnimes []model.LocalAnime
+	err := db.DB.Preload("Metadata").
+		Where("id IN ?", animeIDs).
+		Order("local_animes.id ASC").
+		Find(&localAnimes).Error
+	return localAnimes, err
+}
+
+func findSubscriptionPathLinkedLocalAnimes(sub *model.Subscription) ([]model.LocalAnime, error) {
+	if sub == nil || sub.ID == 0 {
+		return nil, nil
+	}
+	links, err := loadSubscriptionLocalPathLinks(sub.ID)
+	if err != nil {
+		return nil, err
+	}
+	animeIDs := make([]uint, 0, len(links))
+	for _, link := range links {
+		animeIDs = append(animeIDs, link.LocalAnimeID)
+	}
+	return loadSubscriptionMatchLocalAnimesByIDs(animeIDs)
+}
+
+func findSubscriptionExternalIDLocalAnimes(sub *model.Subscription) ([]model.LocalAnime, error) {
+	metadata := subscriptionMetadataForLibraryMatch(sub)
+	if metadata == nil || (metadata.BangumiID == 0 && metadata.TMDBID == 0 && metadata.AniListID == 0) {
+		return nil, nil
+	}
+	var localAnimes []model.LocalAnime
+	err := db.DB.Model(&model.LocalAnime{}).
+		Joins("JOIN anime_metadata ON anime_metadata.id = local_animes.metadata_id AND anime_metadata.deleted_at IS NULL").
+		Where(`(
+			(? > 0 AND anime_metadata.bangumi_id = ?) OR
+			(? > 0 AND anime_metadata.tmdb_id = ?) OR
+			(? > 0 AND anime_metadata.ani_list_id = ?)
+		)`, metadata.BangumiID, metadata.BangumiID, metadata.TMDBID, metadata.TMDBID, metadata.AniListID, metadata.AniListID).
+		Where("EXISTS (?)", db.DB.Model(&model.LocalEpisode{}).
+			Select("1").
+			Where("local_episodes.local_anime_id = local_animes.id")).
+		Preload("Metadata").
+		Order("local_animes.id ASC").
+		Find(&localAnimes).Error
+	if err != nil {
+		return nil, err
+	}
+	return filterSubscriptionLocalAnimes(sub, localAnimes), nil
+}
+
+func filterSubscriptionPathLinkedLocalAnimes(sub *model.Subscription, candidates []model.LocalAnime) []model.LocalAnime {
+	matched := make([]model.LocalAnime, 0, len(candidates))
+	for i := range candidates {
+		identity := service.EvaluateSubscriptionLocalIdentity(sub, &candidates[i])
+		if identity.Conflict {
+			reportSubscriptionLocalIdentityConflict(sub, &candidates[i], identity)
+			continue
+		}
+		matched = append(matched, candidates[i])
+	}
+	return matched
+}
+
+func disambiguateSubscriptionExternalMatches(
+	sub *model.Subscription,
+	providerMatches, pathLinked []model.LocalAnime,
+) []model.LocalAnime {
+	if len(providerMatches) <= 1 {
+		return providerMatches
+	}
+	pathLinkedIDs := make(map[uint]struct{}, len(pathLinked))
+	for _, anime := range pathLinked {
+		pathLinkedIDs[anime.ID] = struct{}{}
+	}
+	pathSelected := make([]model.LocalAnime, 0, len(providerMatches))
+	for _, anime := range providerMatches {
+		if _, ok := pathLinkedIDs[anime.ID]; ok {
+			pathSelected = append(pathSelected, anime)
+		}
+	}
+	if len(pathSelected) == 1 {
+		return pathSelected
+	}
+	reportSubscriptionDuplicateExternalIdentity(sub, providerMatches)
+	return nil
+}
+
+func reportSubscriptionLocalIdentityConflict(
+	sub *model.Subscription,
+	anime *model.LocalAnime,
+	identity service.SubscriptionLocalIdentityResult,
+) {
+	if sub == nil || anime == nil || !identity.Conflict {
+		return
+	}
+	providerLabel := strings.ToUpper(identity.Provider)
+	issueType := service.LibraryIssueTypeScrape
+	message := fmt.Sprintf(
+		"订阅“%s”与本地番剧“%s”的 %s ID 冲突：订阅 %d，本地 %d",
+		sub.Title,
+		anime.Title,
+		providerLabel,
+		identity.SubscriptionProviderID,
+		identity.LocalProviderID,
+	)
+	hint := "请在本地番剧详情中修正来源匹配；系统不会在来源 ID 冲突时自动显示播放按钮。"
+	if identity.Provider == "season" {
+		providerLabel = "season"
+		issueType = service.LibraryIssueTypeParse
+		message = fmt.Sprintf(
+			"订阅“%s”与本地番剧“%s”的季度冲突：订阅第 %d 季，本地第 %d 季",
+			sub.Title,
+			anime.Title,
+			identity.SubscriptionProviderID,
+			identity.LocalProviderID,
+		)
+		hint = "请检查订阅标题、保存目录和本地番剧季度；系统不会跨季度自动关联。"
+	}
+	localAnimeID := anime.ID
+	_ = service.ReportLibraryIssue(service.LibraryIssueInput{
+		IssueKey:      fmt.Sprintf("subscription-provider-conflict:%d:%d:%s", sub.ID, anime.ID, providerLabel),
+		IssueType:     issueType,
+		Title:         sub.Title,
+		DirectoryPath: anime.Path,
+		LocalAnimeID:  &localAnimeID,
+		Message:       message,
+		Hint:          hint,
+	})
+}
+
+func reportSubscriptionDuplicateExternalIdentity(sub *model.Subscription, matches []model.LocalAnime) {
+	if sub == nil || len(matches) < 2 {
+		return
+	}
+	identityKeys := service.SubscriptionExternalIdentityKeys(sub)
+	sort.Strings(identityKeys)
+	titles := make([]string, 0, len(matches))
+	for _, anime := range matches {
+		titles = append(titles, anime.Title)
+	}
+	message := fmt.Sprintf(
+		"订阅外部身份 %s 同时匹配到多个本地番剧：%s",
+		strings.Join(identityKeys, ", "),
+		strings.Join(titles, "、"),
+	)
+	for i := range matches {
+		localAnimeID := matches[i].ID
+		_ = service.ReportLibraryIssue(service.LibraryIssueInput{
+			IssueKey:      fmt.Sprintf("subscription-provider-duplicate:%d:%d", sub.ID, matches[i].ID),
+			IssueType:     service.LibraryIssueTypeScrape,
+			Title:         sub.Title,
+			DirectoryPath: matches[i].Path,
+			LocalAnimeID:  &localAnimeID,
+			Message:       message,
+			Hint:          "请修正重复的来源 ID，或保留一条可由完成下载路径唯一确认的本地番剧记录。",
+		})
+	}
+}
+
 func findSubscriptionLocalAnimes(sub *model.Subscription) ([]model.LocalAnime, error) {
+	if sub == nil || db.DB == nil {
+		return nil, gorm.ErrInvalidDB
+	}
+
+	pathLinked, err := findSubscriptionPathLinkedLocalAnimes(sub)
+	if err != nil {
+		return nil, err
+	}
+	providerMatches, err := findSubscriptionExternalIDLocalAnimes(sub)
+	if err != nil {
+		return nil, err
+	}
+	if len(providerMatches) > 0 {
+		matched := disambiguateSubscriptionExternalMatches(sub, providerMatches, pathLinked)
+		return backfillSubscriptionLocalAnimeMetadata(sub, matched), nil
+	}
+	if matched := filterSubscriptionPathLinkedLocalAnimes(sub, pathLinked); len(matched) > 0 {
+		return backfillSubscriptionLocalAnimeMetadata(sub, matched), nil
+	}
+
 	var localAnimes []model.LocalAnime
 	if sub.MetadataID != nil && *sub.MetadataID != 0 {
-		if err := db.DB.Where("metadata_id = ?", *sub.MetadataID).Order("local_animes.id ASC").Find(&localAnimes).Error; err != nil {
+		if err := db.DB.Preload("Metadata").
+			Where("metadata_id = ?", *sub.MetadataID).
+			Order("local_animes.id ASC").
+			Find(&localAnimes).Error; err != nil {
 			return nil, err
 		}
 		if matched := filterSubscriptionLocalAnimes(sub, localAnimes); len(matched) > 0 {
@@ -483,23 +750,15 @@ func findSubscriptionLocalAnimes(sub *model.Subscription) ([]model.LocalAnime, e
 				sub.Title, *sub.MetadataID, len(localAnimes))
 		}
 	}
-	if sub.Metadata != nil && sub.Metadata.BangumiID != 0 {
-		if err := db.DB.Model(&model.LocalAnime{}).
-			Joins("JOIN anime_metadata ON anime_metadata.id = local_animes.metadata_id").
-			Where("anime_metadata.bangumi_id = ?", sub.Metadata.BangumiID).
-			Order("local_animes.id ASC").Find(&localAnimes).Error; err != nil {
-			return nil, err
-		}
-		if matched := filterSubscriptionLocalAnimes(sub, localAnimes); len(matched) > 0 {
-			return matched, nil
-		}
-	}
 
 	titles := subscriptionLocalTitleCandidates(sub)
 	if len(titles) == 0 {
 		return nil, nil
 	}
-	if err := db.DB.Where("title IN ?", titles).Order("local_animes.id ASC").Find(&localAnimes).Error; err != nil {
+	if err := db.DB.Preload("Metadata").
+		Where("title IN ?", titles).
+		Order("local_animes.id ASC").
+		Find(&localAnimes).Error; err != nil {
 		return nil, err
 	}
 	localAnimes = filterSubscriptionLocalAnimes(sub, localAnimes)
@@ -508,7 +767,7 @@ func findSubscriptionLocalAnimes(sub *model.Subscription) ([]model.LocalAnime, e
 		// title lookup can miss a series that the identity matcher recognizes.
 		// Restrict the fallback to series with indexed episodes before applying
 		// the same strong matcher used by the safer metadata paths above.
-		if err := db.DB.
+		if err := db.DB.Preload("Metadata").
 			Where("local_animes.id IN (?)", db.DB.Model(&model.LocalEpisode{}).Select("local_anime_id")).
 			Order("local_animes.id ASC").
 			Find(&localAnimes).Error; err != nil {
@@ -518,7 +777,6 @@ func findSubscriptionLocalAnimes(sub *model.Subscription) ([]model.LocalAnime, e
 	}
 	return backfillSubscriptionLocalAnimeMetadata(sub, localAnimes), nil
 }
-
 func backfillSubscriptionLocalAnimeMetadata(sub *model.Subscription, localAnimes []model.LocalAnime) []model.LocalAnime {
 	if len(localAnimes) != 1 || db.DB == nil || sub == nil || sub.MetadataID == nil || *sub.MetadataID == 0 || localAnimes[0].MetadataID != nil {
 		return localAnimes
@@ -539,13 +797,20 @@ func buildSubscriptionCandidateIndex(index *subscriptionLibraryIndex) {
 	if index.candidateIndexesByKey == nil {
 		index.candidateIndexesByKey = make(map[string][]int)
 	}
+	if index.providerIndexesByKey == nil {
+		index.providerIndexesByKey = make(map[string][]int)
+	}
 	for i := range index.localAnimes {
 		keys, requiresFallback := service.LocalAnimeSubscriptionIndexKeys(&index.localAnimes[i])
+		for _, key := range keys {
+			if strings.Contains(key, ":") {
+				index.providerIndexesByKey[key] = append(index.providerIndexesByKey[key], i)
+				continue
+			}
+			index.candidateIndexesByKey[key] = append(index.candidateIndexesByKey[key], i)
+		}
 		if requiresFallback || len(keys) == 0 {
 			index.fallbackIndexes = append(index.fallbackIndexes, i)
-		}
-		for _, key := range keys {
-			index.candidateIndexesByKey[key] = append(index.candidateIndexesByKey[key], i)
 		}
 	}
 }
@@ -582,11 +847,53 @@ func subscriptionLocalAnimeCandidates(sub *model.Subscription, index *subscripti
 	return candidates
 }
 
+func subscriptionProviderAnimeCandidates(sub *model.Subscription, index *subscriptionLibraryIndex) []model.LocalAnime {
+	if sub == nil || index == nil {
+		return nil
+	}
+	seen := make(map[int]struct{})
+	candidateIndexes := make([]int, 0)
+	for _, key := range service.SubscriptionExternalIdentityKeys(sub) {
+		for _, candidateIndex := range index.providerIndexesByKey[key] {
+			if _, exists := seen[candidateIndex]; exists {
+				continue
+			}
+			seen[candidateIndex] = struct{}{}
+			candidateIndexes = append(candidateIndexes, candidateIndex)
+		}
+	}
+	sort.Ints(candidateIndexes)
+	candidates := make([]model.LocalAnime, 0, len(candidateIndexes))
+	for _, candidateIndex := range candidateIndexes {
+		if candidateIndex >= 0 && candidateIndex < len(index.localAnimes) {
+			candidates = append(candidates, index.localAnimes[candidateIndex])
+		}
+	}
+	return candidates
+}
 func findSubscriptionLocalAnimesFromIndex(sub *model.Subscription, libraryIndex *subscriptionLibraryIndex) []model.LocalAnime {
 	if sub == nil || libraryIndex == nil {
 		return nil
 	}
-	matched := filterSubscriptionLocalAnimes(sub, subscriptionLocalAnimeCandidates(sub, libraryIndex))
+
+	pathLinkedIndexes := libraryIndex.pathLinkedIndexesBySubscription[sub.ID]
+	pathLinked := make([]model.LocalAnime, 0, len(pathLinkedIndexes))
+	for _, localAnimeIndex := range pathLinkedIndexes {
+		if localAnimeIndex >= 0 && localAnimeIndex < len(libraryIndex.localAnimes) {
+			pathLinked = append(pathLinked, libraryIndex.localAnimes[localAnimeIndex])
+		}
+	}
+
+	providerMatches := filterSubscriptionLocalAnimes(sub, subscriptionProviderAnimeCandidates(sub, libraryIndex))
+	var matched []model.LocalAnime
+	switch {
+	case len(providerMatches) > 0:
+		matched = disambiguateSubscriptionExternalMatches(sub, providerMatches, pathLinked)
+	case len(pathLinked) > 0:
+		matched = filterSubscriptionPathLinkedLocalAnimes(sub, pathLinked)
+	default:
+		matched = filterSubscriptionLocalAnimes(sub, subscriptionLocalAnimeCandidates(sub, libraryIndex))
+	}
 	matched = backfillSubscriptionLocalAnimeMetadata(sub, matched)
 	if len(matched) == 1 && matched[0].MetadataID != nil {
 		for i := range libraryIndex.localAnimes {
@@ -599,10 +906,14 @@ func findSubscriptionLocalAnimesFromIndex(sub *model.Subscription, libraryIndex 
 	}
 	return matched
 }
-
 func filterSubscriptionLocalAnimes(sub *model.Subscription, candidates []model.LocalAnime) []model.LocalAnime {
 	matched := make([]model.LocalAnime, 0, len(candidates))
 	for i := range candidates {
+		identity := service.EvaluateSubscriptionLocalIdentity(sub, &candidates[i])
+		if identity.Conflict {
+			reportSubscriptionLocalIdentityConflict(sub, &candidates[i], identity)
+			continue
+		}
 		if service.LocalAnimeMatchesSubscription(sub, &candidates[i]) {
 			matched = append(matched, candidates[i])
 		}

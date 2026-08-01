@@ -15,6 +15,175 @@ import (
 	"gorm.io/gorm"
 )
 
+type SubscriptionLocalIdentityResult struct {
+	ExternalMatch          bool
+	Conflict               bool
+	Provider               string
+	SubscriptionProviderID int
+	LocalProviderID        int
+}
+
+type metadataProviderIdentity struct {
+	provider string
+	id       int
+}
+
+// EvaluateSubscriptionLocalIdentity compares namespaced provider IDs and
+// explicit season evidence before title heuristics are allowed to participate.
+func EvaluateSubscriptionLocalIdentity(sub *model.Subscription, anime *model.LocalAnime) SubscriptionLocalIdentityResult {
+	if sub == nil || anime == nil {
+		return SubscriptionLocalIdentityResult{}
+	}
+
+	subscriptionMetadata := subscriptionMetadataForMatch(sub)
+	localMetadata := localAnimeMetadataForMatch(anime)
+	var matched metadataProviderIdentity
+	if subscriptionMetadata != nil && localMetadata != nil {
+		subscriptionProviders := metadataProviderIdentities(subscriptionMetadata)
+		localProviders := metadataProviderIdentities(localMetadata)
+		for i := range subscriptionProviders {
+			if subscriptionProviders[i].id == 0 || localProviders[i].id == 0 {
+				continue
+			}
+			if subscriptionProviders[i].id != localProviders[i].id {
+				return SubscriptionLocalIdentityResult{
+					Conflict:               true,
+					Provider:               subscriptionProviders[i].provider,
+					SubscriptionProviderID: subscriptionProviders[i].id,
+					LocalProviderID:        localProviders[i].id,
+				}
+			}
+			if matched.id == 0 {
+				matched = subscriptionProviders[i]
+			}
+		}
+	}
+
+	if subscriptionSeason, localSeason, conflict := subscriptionLocalSeasonConflict(sub, anime); conflict {
+		return SubscriptionLocalIdentityResult{
+			Conflict:               true,
+			Provider:               "season",
+			SubscriptionProviderID: subscriptionSeason,
+			LocalProviderID:        localSeason,
+		}
+	}
+	if matched.id != 0 {
+		return SubscriptionLocalIdentityResult{
+			ExternalMatch:          true,
+			Provider:               matched.provider,
+			SubscriptionProviderID: matched.id,
+			LocalProviderID:        matched.id,
+		}
+	}
+	return SubscriptionLocalIdentityResult{}
+}
+
+func SubscriptionExternalIdentityKeys(sub *model.Subscription) []string {
+	if sub == nil {
+		return nil
+	}
+	return metadataExternalIdentityKeys(subscriptionMetadataForMatch(sub))
+}
+
+func LocalAnimeExternalIdentityKeys(anime *model.LocalAnime) []string {
+	if anime == nil {
+		return nil
+	}
+	return metadataExternalIdentityKeys(localAnimeMetadataForMatch(anime))
+}
+
+func metadataExternalIdentityKeys(metadata *model.AnimeMetadata) []string {
+	providers := metadataProviderIdentities(metadata)
+	keys := make([]string, 0, len(providers))
+	for _, provider := range providers {
+		if provider.id > 0 {
+			keys = append(keys, provider.provider+":"+strconv.Itoa(provider.id))
+		}
+	}
+	return keys
+}
+
+func metadataProviderIdentities(metadata *model.AnimeMetadata) []metadataProviderIdentity {
+	if metadata == nil {
+		return nil
+	}
+	return []metadataProviderIdentity{
+		{provider: "bangumi", id: metadata.BangumiID},
+		{provider: "tmdb", id: metadata.TMDBID},
+		{provider: "anilist", id: metadata.AniListID},
+	}
+}
+
+func localAnimeMetadataForMatch(anime *model.LocalAnime) *model.AnimeMetadata {
+	if anime == nil {
+		return nil
+	}
+	if anime.Metadata != nil {
+		return anime.Metadata
+	}
+	if anime.MetadataID == nil || *anime.MetadataID == 0 {
+		return nil
+	}
+	st := metadataStore()
+	if st == nil {
+		return nil
+	}
+	metadata, err := st.GetByID(*anime.MetadataID)
+	if err != nil {
+		return nil
+	}
+	return metadata
+}
+
+func subscriptionLocalSeasonConflict(sub *model.Subscription, anime *model.LocalAnime) (int, int, bool) {
+	subscriptionSeason, subscriptionExplicit := explicitSubscriptionSeason(sub)
+	localSeason, localExplicit := explicitLocalAnimeSeason(anime)
+	return subscriptionSeason, localSeason, subscriptionExplicit && localExplicit && subscriptionSeason != localSeason
+}
+
+func explicitSubscriptionSeason(sub *model.Subscription) (int, bool) {
+	if sub == nil {
+		return 0, false
+	}
+	if season, ok := explicitSeasonFromText(sub.Title); ok {
+		return season, true
+	}
+	return explicitSeasonFromText(sub.Season)
+}
+
+func explicitLocalAnimeSeason(anime *model.LocalAnime) (int, bool) {
+	if anime == nil {
+		return 0, false
+	}
+	if season, ok := explicitSeasonFromText(anime.Title); ok {
+		return season, true
+	}
+	segments := strings.FieldsFunc(strings.ReplaceAll(anime.Path, `\`, "/"), func(r rune) bool {
+		return r == '/'
+	})
+	for i := len(segments) - 1; i >= 0; i-- {
+		if season, ok := explicitSeasonFromText(segments[i]); ok {
+			return season, true
+		}
+	}
+	if anime.Season > 1 {
+		return anime.Season, true
+	}
+	return 0, false
+}
+
+func explicitSeasonFromText(value string) (int, bool) {
+	marker := seasonNoisePattern.FindString(strings.TrimSpace(value))
+	if marker == "" {
+		return 0, false
+	}
+	season := parser.ParseSeason(marker)
+	if season <= 0 {
+		return 0, false
+	}
+	return season, true
+}
+
 // LocalAnimeMatchesSubscription verifies that a local series is independently
 // related to a subscription. A shared metadata_id is deliberately not enough:
 // historical bad links must not make an unrelated local series appear
@@ -22,6 +191,13 @@ import (
 func LocalAnimeMatchesSubscription(sub *model.Subscription, anime *model.LocalAnime) bool {
 	if sub == nil || anime == nil {
 		return false
+	}
+	identity := EvaluateSubscriptionLocalIdentity(sub, anime)
+	if identity.Conflict {
+		return false
+	}
+	if identity.ExternalMatch {
+		return true
 	}
 	return localIdentityMatchesReferences(
 		sub,
@@ -40,14 +216,18 @@ func SubscriptionLocalMatchIndexKeys(sub *model.Subscription) ([]string, bool) {
 	}
 	titles := []string{sub.Title}
 	titles = append(titles, metadataIdentityTitles(subscriptionMetadataForMatch(sub))...)
-	return subscriptionMatchIndexKeys(titles)
+	keys, requiresFallback := subscriptionMatchIndexKeys(titles)
+	keys = append(keys, SubscriptionExternalIdentityKeys(sub)...)
+	return keys, requiresFallback
 }
 
 func LocalAnimeSubscriptionIndexKeys(anime *model.LocalAnime) ([]string, bool) {
 	if anime == nil {
 		return nil, false
 	}
-	return subscriptionMatchIndexKeys(localAnimeIdentityTitles(anime.Title, anime.Path))
+	keys, requiresFallback := subscriptionMatchIndexKeys(localAnimeIdentityTitles(anime.Title, anime.Path))
+	keys = append(keys, LocalAnimeExternalIdentityKeys(anime)...)
+	return keys, requiresFallback
 }
 
 func subscriptionMatchIndexKeys(titles []string) ([]string, bool) {
