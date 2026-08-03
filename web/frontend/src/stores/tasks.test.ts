@@ -78,6 +78,37 @@ describe('task stream store', () => {
     expect(store.taskByID('local-scan')?.detail).toContain('第 2/2 阶段')
   })
 
+  it('does not emit transitions for identical polled snapshots', () => {
+    const store = useTaskStore()
+    const task = { id: 'local-scan', kind: 'scan', phase: 'scan', title: '本地扫描', detail: '正在扫描', current: 2, total: 10, tone: 'running' as const, updatedAt: '2026-08-03T06:00:00Z' }
+
+    store.upsert(task)
+    const revision = store.revision
+    store.consumeTransitions()
+    store.upsert({ ...task })
+
+    expect(store.revision).toBe(revision)
+    expect(store.consumeTransitions()).toEqual([])
+  })
+
+  it('emits progress changes and one completion transition', () => {
+    const store = useTaskStore()
+    store.upsert({ id: 'local-scan', kind: 'scan', phase: 'scan', title: '本地扫描', detail: '正在扫描', current: 1, total: 10, tone: 'running', updatedAt: '2026-08-03T06:00:00Z' })
+    store.consumeTransitions()
+
+    store.upsert({ id: 'local-scan', kind: 'scan', phase: 'scan', title: '本地扫描', detail: '正在扫描', current: 2, total: 10, tone: 'running', updatedAt: '2026-08-03T06:00:01Z' })
+    expect(store.consumeTransitions()).toEqual([
+      expect.objectContaining({ task: expect.objectContaining({ current: 2 }), previousTone: 'running' }),
+    ])
+
+    const completed = { id: 'local-scan', kind: 'scan', phase: 'metadata', title: '本地扫描', detail: '扫描完成', current: 10, total: 10, tone: 'success' as const, updatedAt: '2026-08-03T06:00:02Z' }
+    store.upsert(completed)
+    store.upsert({ ...completed })
+    expect(store.consumeTransitions()).toEqual([
+      expect.objectContaining({ task: expect.objectContaining({ tone: 'success' }), previousTone: 'running' }),
+    ])
+  })
+
   it('ignores stale task updates that arrive after a newer phase', () => {
     const store = useTaskStore()
     store.upsert({ id: 'local-scan', kind: 'scan', phase: 'metadata', title: '本地扫描', detail: '第 2/2 阶段 · 正在整理元数据', current: 1, total: 10, tone: 'running', updatedAt: '2026-07-31T06:00:02Z' })

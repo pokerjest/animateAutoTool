@@ -30,6 +30,18 @@ function toLiveTask(task: TaskUpdate): LiveTask {
   }
 }
 
+function liveTasksEqual(left: LiveTask, right: LiveTask) {
+  return left.id === right.id
+    && left.kind === right.kind
+    && left.phase === right.phase
+    && left.title === right.title
+    && left.detail === right.detail
+    && left.current === right.current
+    && left.total === right.total
+    && left.tone === right.tone
+    && left.updatedAt === right.updatedAt
+}
+
 export const useTaskStore = defineStore('tasks', {
   state: () => ({
     connected: false,
@@ -121,6 +133,7 @@ export const useTaskStore = defineStore('tasks', {
         const incomingTime = Date.parse(task.updatedAt)
         if (Number.isFinite(existingTime) && Number.isFinite(incomingTime) && incomingTime < existingTime) return
       }
+      if (existing && liveTasksEqual(existing, task)) return
       const previousTone = index >= 0 ? this.tasks[index].tone : undefined
       if (index >= 0) this.tasks.splice(index, 1)
       this.tasks.unshift(task)

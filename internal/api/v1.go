@@ -740,17 +740,37 @@ func V1LocalAnimeHandler(c *gin.Context) {
 	page, pageSize := v1Pagination(c, 100)
 	search := strings.TrimSpace(c.Query("q"))
 	var total int64
-	db.DB.Order("id ASC").Find(&dirs)
+	if db.DB == nil {
+		log.Printf("ERROR: local anime request failed: database is not initialized")
+		v1Error(c, http.StatusInternalServerError, "local_anime_unavailable", "无法读取本地番剧")
+		return
+	}
+	if err := db.DB.Order("id ASC").Find(&dirs).Error; err != nil {
+		log.Printf("ERROR: failed to load local anime directories: %v", err)
+		v1Error(c, http.StatusInternalServerError, "local_anime_unavailable", "无法读取本地番剧目录")
+		return
+	}
 	query := db.DB.Model(&model.LocalAnime{})
 	if search != "" {
 		like := "%" + escapeV1Like(search) + "%"
 		query = query.Joins("LEFT JOIN anime_metadata ON anime_metadata.id = local_animes.metadata_id AND anime_metadata.deleted_at IS NULL").
 			Where(`local_animes.title LIKE ? ESCAPE '\' OR anime_metadata.title LIKE ? ESCAPE '\' OR anime_metadata.title_cn LIKE ? ESCAPE '\' OR anime_metadata.title_jp LIKE ? ESCAPE '\' OR anime_metadata.title_en LIKE ? ESCAPE '\'`, like, like, like, like, like)
 	}
-	query.Count(&total)
-	query.Preload("Metadata").Order("local_animes.id DESC").Offset(paginationOffset(page, pageSize)).Limit(pageSize).Find(&items)
+	if err := query.Count(&total).Error; err != nil {
+		log.Printf("ERROR: failed to count local anime: %v", err)
+		v1Error(c, http.StatusInternalServerError, "local_anime_unavailable", "无法统计本地番剧")
+		return
+	}
+	if err := query.Preload("Metadata").Order("local_animes.id DESC").Offset(paginationOffset(page, pageSize)).Limit(pageSize).Find(&items).Error; err != nil {
+		log.Printf("ERROR: failed to load local anime page %d: %v", page, err)
+		v1Error(c, http.StatusInternalServerError, "local_anime_unavailable", "无法读取本地番剧")
+		return
+	}
 	populateLocalAnimeActionHints(items)
-	diagnostics, _ := service.ListOpenLibraryIssues(50)
+	diagnostics, err := service.ListOpenLibraryIssues(50)
+	if err != nil {
+		log.Printf("ERROR: failed to load local anime diagnostics: %v", err)
+	}
 	c.JSON(http.StatusOK, v1Envelope{Data: gin.H{"directories": dirs, "items": items, "scan_status": service.GlobalScanStatus.Snapshot(), "diagnostics": diagnostics}, Meta: map[string]any{"page": page, "page_size": pageSize, "total": total}})
 }
 

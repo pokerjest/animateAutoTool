@@ -134,8 +134,36 @@ func LocalAnimeDiagnosticsHandler(c *gin.Context) {
 }
 
 func populateLocalAnimeActionHints(animes []model.LocalAnime) {
+	ids := make([]uint, 0, len(animes))
 	for i := range animes {
-		populateLocalAnimeActionHint(&animes[i])
+		if animes[i].ID != 0 {
+			ids = append(ids, animes[i].ID)
+		}
+	}
+
+	issueByAnimeID := make(map[uint]*model.LibraryIssue)
+	if db.DB != nil && len(ids) > 0 {
+		var issues []model.LibraryIssue
+		err := db.DB.
+			Where("local_anime_id IN ? AND issue_type = ? AND status = ?", ids, service.LibraryIssueTypeScrape, service.LibraryIssueStatusOpen).
+			Order("updated_at DESC").
+			Find(&issues).Error
+		if err != nil {
+			log.Printf("ERROR: failed to load local anime repair hints: %v", err)
+		} else {
+			for i := range issues {
+				if issues[i].LocalAnimeID == nil {
+					continue
+				}
+				if _, exists := issueByAnimeID[*issues[i].LocalAnimeID]; !exists {
+					issueByAnimeID[*issues[i].LocalAnimeID] = &issues[i]
+				}
+			}
+		}
+	}
+
+	for i := range animes {
+		applyLocalAnimeActionHint(&animes[i], issueByAnimeID[animes[i].ID])
 	}
 }
 
@@ -160,6 +188,23 @@ func populateLocalAnimeActionHint(anime *model.LocalAnime) {
 	}
 
 	if issueFound {
+		applyLocalAnimeActionHint(anime, &issue)
+		return
+	}
+	applyLocalAnimeActionHint(anime, nil)
+}
+
+func applyLocalAnimeActionHint(anime *model.LocalAnime, issue *model.LibraryIssue) {
+	if anime == nil {
+		return
+	}
+
+	anime.HasRepairActions = false
+	anime.CanRetryScrape = false
+	anime.CanFixMatch = false
+	anime.RepairHint = ""
+
+	if issue != nil {
 		anime.HasRepairActions = true
 		anime.CanRetryScrape = true
 		anime.CanFixMatch = true
