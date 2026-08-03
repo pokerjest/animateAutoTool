@@ -2,14 +2,24 @@ import { expect, test } from '@playwright/test'
 
 test('packaged binary serves the embedded app and completes first-run setup', async ({ page }) => {
   const runtimeErrors: string[] = []
+  const isOptionalUpdaterRequest = (url: string) => url.includes('/api/v1/settings/updater/releases')
   page.on('console', message => {
-    if (message.type() === 'error') runtimeErrors.push(`console: ${message.text()}`)
+    if (message.type() !== 'error') return
+    // Chromium reports HTTP failures without the request URL. The response
+    // listener below records actionable URL/status details and applies the
+    // narrow allowlist for optional external update checks.
+    if (message.text().startsWith('Failed to load resource:')) return
+    runtimeErrors.push(`console: ${message.text()}`)
   })
   page.on('pageerror', error => runtimeErrors.push(`page: ${error.message}`))
+  page.on('response', response => {
+    if (response.status() < 400 || isOptionalUpdaterRequest(response.url())) return
+    runtimeErrors.push(`response: ${response.url()} (${response.status()})`)
+  })
   page.on('requestfailed', request => {
     const failure = request.failure()?.errorText || 'failed'
     if (request.url().endsWith('/api/v1/events') && failure.includes('ERR_ABORTED')) return
-    if (request.url().includes('/api/v1/settings/updater/releases') && failure.includes('ERR_ABORTED')) return
+    if (isOptionalUpdaterRequest(request.url()) && failure.includes('ERR_ABORTED')) return
     runtimeErrors.push(`request: ${request.url()} (${failure})`)
   })
 
@@ -43,12 +53,23 @@ test('packaged binary serves the embedded app and completes first-run setup', as
     version: process.env.PACKAGE_E2E_VERSION,
   })
 
+  const waitForSubscriptions = () => page.waitForResponse(response =>
+    response.request().method() === 'GET'
+      && response.url().endsWith('/api/v1/subscriptions')
+      && response.ok(),
+  )
+
+  const initialSubscriptionsResponse = waitForSubscriptions()
   const deepLinkResponse = await page.goto('/subscriptions')
   expect(deepLinkResponse?.status()).toBe(200)
+  await initialSubscriptionsResponse
   await expect(
     page.locator('#main-content').getByRole('heading', { name: '订阅管理', level: 2 }),
   ).toBeVisible()
+
+  const reloadedSubscriptionsResponse = waitForSubscriptions()
   await page.reload()
+  await reloadedSubscriptionsResponse
   await expect(
     page.locator('#main-content').getByRole('heading', { name: '订阅管理', level: 2 }),
   ).toBeVisible()
