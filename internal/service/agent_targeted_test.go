@@ -117,3 +117,52 @@ func TestScanLocalAssetsRepairsMissingMetadataAssociation(t *testing.T) {
 	require.Equal(t, "Recovered from NFO", repaired.Metadata.Title)
 	require.Equal(t, 12345, repaired.Metadata.AniListID)
 }
+
+func TestScanLocalAssetsDetachesUnrelatedSharedMetadata(t *testing.T) {
+	withServiceTestDB(t)
+
+	sharedMetadata := model.AnimeMetadata{
+		Title:        "Original Show",
+		BangumiID:    777,
+		BangumiTitle: "Original Show",
+	}
+	require.NoError(t, db.DB.Create(&sharedMetadata).Error)
+
+	matching := model.LocalAnime{
+		Title:      "Original Show",
+		Path:       t.TempDir(),
+		MetadataID: &sharedMetadata.ID,
+	}
+	unrelatedPath := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(unrelatedPath, "tvshow.nfo"), []byte(`<?xml version="1.0" encoding="UTF-8"?>
+<tvshow>
+  <title>Recovered Independent Show</title>
+  <uniqueid type="anilist">12345</uniqueid>
+</tvshow>`), 0o600))
+	unrelated := model.LocalAnime{
+		Title:      "Recovered Independent Show",
+		Path:       unrelatedPath,
+		MetadataID: &sharedMetadata.ID,
+	}
+	require.NoError(t, db.DB.Create(&matching).Error)
+	require.NoError(t, db.DB.Create(&unrelated).Error)
+
+	var loaded model.LocalAnime
+	require.NoError(t, db.DB.Preload("Metadata").First(&loaded, unrelated.ID).Error)
+	NewAgentService().scanLocalAssets(&loaded)
+
+	var repaired, untouched model.LocalAnime
+	require.NoError(t, db.DB.Preload("Metadata").First(&repaired, unrelated.ID).Error)
+	require.NoError(t, db.DB.Preload("Metadata").First(&untouched, matching.ID).Error)
+	require.NotNil(t, repaired.MetadataID)
+	require.NotEqual(t, sharedMetadata.ID, *repaired.MetadataID)
+	require.Equal(t, "Recovered Independent Show", repaired.Metadata.Title)
+	require.Equal(t, 12345, repaired.Metadata.AniListID)
+	require.NotNil(t, untouched.MetadataID)
+	require.Equal(t, sharedMetadata.ID, *untouched.MetadataID)
+
+	var original model.AnimeMetadata
+	require.NoError(t, db.DB.First(&original, sharedMetadata.ID).Error)
+	require.Equal(t, "Original Show", original.Title)
+	require.Equal(t, 777, original.BangumiID)
+}

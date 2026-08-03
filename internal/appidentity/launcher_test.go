@@ -22,6 +22,30 @@ func TestExecutableNames(t *testing.T) {
 	}
 }
 
+func TestVersionedLauncherNames(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		goos string
+		want bool
+	}{
+		{name: "AnimateAutoTool_v1.0.0-beta.10_windows_amd64.exe", goos: "windows", want: true},
+		{name: "animate-server_v0.7.0_windows_amd64.exe", goos: "windows", want: true},
+		{name: "AnimateAutoTool_v1.0.0-beta.10_linux_arm64", goos: "linux", want: true},
+		{name: "AnimateAutoTool.exe", goos: "windows", want: false},
+		{name: "AnimateAutoTool_v1.0.0-beta.10_windows_amd64.zip", goos: "windows", want: false},
+		{name: "AnimateAutoTool_v1.0.0-beta.10_linux_amd64", goos: "windows", want: false},
+		{name: "AnimateAutoTool_v1.0.0-beta.10_linux_amd64.tar.gz", goos: "linux", want: false},
+		{name: "AnimateAutoTool_v1.0.0-beta.10_darwin_arm64.dmg", goos: "darwin", want: false},
+	}
+	for _, test := range tests {
+		if got := isVersionedLauncherName(test.name, test.goos); got != test.want {
+			t.Errorf("isVersionedLauncherName(%q, %q) = %v, want %v", test.name, test.goos, got, test.want)
+		}
+	}
+}
+
 func TestPrepareLegacyLauncherCopiesCanonicalExecutable(t *testing.T) {
 	t.Parallel()
 
@@ -86,6 +110,60 @@ func TestPrepareLegacyLauncherDoesNotOverwriteNewerCanonical(t *testing.T) {
 	}
 }
 
+func TestPrepareVersionedWindowsLauncherCreatesCanonicalExecutable(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	versionedPath := filepath.Join(dir, "animate-server_v0.7.0_windows_amd64.exe")
+	if err := os.WriteFile(versionedPath, []byte("versioned-binary"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	migration, err := prepareLocalLauncher(versionedPath, "windows")
+	if err != nil {
+		t.Fatalf("prepare versioned launcher: %v", err)
+	}
+	if !migration.RunningVersioned || !migration.NeedsCanonicalRelaunch() {
+		t.Fatalf("versioned launcher was not recognized: %#v", migration)
+	}
+	content, err := os.ReadFile(filepath.Join(dir, "AnimateAutoTool.exe")) //nolint:gosec // path is under t.TempDir().
+	if err != nil {
+		t.Fatalf("read canonical launcher: %v", err)
+	}
+	if string(content) != "versioned-binary" {
+		t.Fatalf("unexpected canonical launcher content: %q", content)
+	}
+}
+
+func TestPrepareOldVersionedLauncherDoesNotOverwriteCanonicalExecutable(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	versionedPath := filepath.Join(dir, "animate-server_v0.7.0_windows_amd64.exe")
+	canonicalPath := filepath.Join(dir, "AnimateAutoTool.exe")
+	if err := os.WriteFile(versionedPath, []byte("old-version"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(canonicalPath, []byte("current-version"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	if err := os.Chtimes(versionedPath, now.Add(time.Minute), now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := prepareLocalLauncher(versionedPath, "windows"); err != nil {
+		t.Fatalf("prepare old versioned launcher: %v", err)
+	}
+	content, err := os.ReadFile(canonicalPath) //nolint:gosec // path is under t.TempDir().
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != "current-version" {
+		t.Fatalf("canonical executable was overwritten: %q", content)
+	}
+}
+
 func TestCompleteMigrationUpdatesScriptsAndCleansLegacyLauncher(t *testing.T) {
 	t.Parallel()
 
@@ -107,6 +185,10 @@ func TestCompleteMigrationUpdatesScriptsAndCleansLegacyLauncher(t *testing.T) {
 	if err := os.WriteFile(legacyPath, []byte("legacy"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	versionedPath := filepath.Join(binDir, "AnimateAutoTool_v1.0.0-beta.10_linux_amd64")
+	if err := os.WriteFile(versionedPath, []byte("versioned"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	managePath := filepath.Join(scriptsDir, "manage.sh")
 	if err := os.WriteFile(managePath, []byte("APP_NAME=\"animate-server\"\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -125,6 +207,9 @@ func TestCompleteMigrationUpdatesScriptsAndCleansLegacyLauncher(t *testing.T) {
 	}
 	if _, err := os.Stat(legacyPath); !os.IsNotExist(err) {
 		t.Fatalf("legacy launcher still exists: %v", err)
+	}
+	if _, err := os.Stat(versionedPath); !os.IsNotExist(err) {
+		t.Fatalf("versioned launcher still exists: %v", err)
 	}
 	for _, scriptPath := range []string{managePath, startPath} {
 		content, readErr := os.ReadFile(filepath.Clean(scriptPath)) //nolint:gosec // paths are under t.TempDir().

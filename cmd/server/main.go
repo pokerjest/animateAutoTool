@@ -48,6 +48,12 @@ func main() {
 
 func run() error {
 	launcherMigration, launcherMigrationErr := appidentity.PrepareLocalLauncher()
+	if launcherMigrationErr == nil && launcherMigration.NeedsCanonicalRelaunch() {
+		if err := launcherMigration.RelaunchCanonical(); err != nil {
+			return fmt.Errorf("relaunch canonical executable: %w", err)
+		}
+		return nil
+	}
 	if err := config.LoadConfig(""); err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}

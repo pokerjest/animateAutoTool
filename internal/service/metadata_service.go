@@ -59,6 +59,8 @@ func (s *MetadataService) EnrichAnime(anime *model.LocalAnime) error {
 
 	log.Printf("MetadataService: Enriching '%s' (Path: %s)", anime.Title, anime.Path)
 
+	detachMismatchedSharedMetadataLink(anime)
+
 	// 1. Ensure Metadata record exists or link to existing
 	if anime.Metadata == nil || anime.MetadataID == nil || *anime.MetadataID == 0 {
 		queryTitle := parser.CleanTitle(anime.Title)

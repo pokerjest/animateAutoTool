@@ -18,6 +18,7 @@ import (
 type SubscriptionLocalIdentityResult struct {
 	ExternalMatch          bool
 	Conflict               bool
+	TitleMatch             bool
 	Provider               string
 	SubscriptionProviderID int
 	LocalProviderID        int
@@ -37,45 +38,69 @@ func EvaluateSubscriptionLocalIdentity(sub *model.Subscription, anime *model.Loc
 
 	subscriptionMetadata := subscriptionMetadataForMatch(sub)
 	localMetadata := localAnimeMetadataForMatch(anime)
+	titleMatch := localIdentityMatchesReferences(
+		sub,
+		[]string{strings.TrimSpace(sub.Title)},
+		localAnimeIdentityTitles(anime.Title, anime.Path),
+	)
 	var matched metadataProviderIdentity
+	var conflict *SubscriptionLocalIdentityResult
 	if subscriptionMetadata != nil && localMetadata != nil {
 		subscriptionProviders := metadataProviderIdentities(subscriptionMetadata)
 		localProviders := metadataProviderIdentities(localMetadata)
 		for i := range subscriptionProviders {
-			if subscriptionProviders[i].id == 0 || localProviders[i].id == 0 {
+			if subscriptionProviders[i].id == 0 {
 				continue
 			}
-			if subscriptionProviders[i].id != localProviders[i].id {
-				return SubscriptionLocalIdentityResult{
-					Conflict:               true,
-					Provider:               subscriptionProviders[i].provider,
-					SubscriptionProviderID: subscriptionProviders[i].id,
-					LocalProviderID:        localProviders[i].id,
+			for j := range localProviders {
+				if localProviders[j].id == 0 || subscriptionProviders[i].provider != localProviders[j].provider {
+					continue
 				}
-			}
-			if matched.id == 0 {
-				matched = subscriptionProviders[i]
+				// Provider IDs are namespaced. A Bangumi ID must only be
+				// compared with another Bangumi ID, never with TMDB/AniList.
+				if subscriptionProviders[i].id == localProviders[j].id {
+					if matched.id == 0 {
+						matched = subscriptionProviders[i]
+					}
+					continue
+				}
+				if conflict == nil {
+					conflict = &SubscriptionLocalIdentityResult{
+						Conflict:               true,
+						Provider:               subscriptionProviders[i].provider,
+						SubscriptionProviderID: subscriptionProviders[i].id,
+						LocalProviderID:        localProviders[j].id,
+					}
+				}
 			}
 		}
 	}
 
 	if subscriptionSeason, localSeason, conflict := subscriptionLocalSeasonConflict(sub, anime); conflict {
 		return SubscriptionLocalIdentityResult{
+			ExternalMatch:          matched.id != 0,
 			Conflict:               true,
+			TitleMatch:             titleMatch,
 			Provider:               "season",
 			SubscriptionProviderID: subscriptionSeason,
 			LocalProviderID:        localSeason,
 		}
 	}
+	if conflict != nil {
+		conflict.ExternalMatch = matched.id != 0
+		conflict.TitleMatch = titleMatch
+		return *conflict
+	}
 	if matched.id != 0 {
 		return SubscriptionLocalIdentityResult{
 			ExternalMatch:          true,
+			TitleMatch:             titleMatch,
 			Provider:               matched.provider,
 			SubscriptionProviderID: matched.id,
 			LocalProviderID:        matched.id,
 		}
 	}
-	return SubscriptionLocalIdentityResult{}
+	return SubscriptionLocalIdentityResult{TitleMatch: titleMatch}
 }
 
 func SubscriptionExternalIdentityKeys(sub *model.Subscription) []string {

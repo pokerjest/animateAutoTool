@@ -8,6 +8,16 @@
 
 ## [Unreleased]
 
+## [1.0.0-beta.11] - 2026-08-03
+
+### Changed
+- Windows 直接运行带版本号的发行二进制时会迁移并切换到固定启动文件，完成启动后清理旧版和历史命名启动器。
+
+### Fixed
+- 订阅与本地番剧的来源冲突只在存在独立身份关联时上报，并自动关闭历史误报，避免无关番剧阻止播放入口识别。
+- 元数据补全会先解除多个无关本地番剧错误共享的元数据记录，再依据各自 NFO 或网络来源重建关联，避免跨番剧污染。
+- 更新器只选择版本号与目标 Release 一致的安装资源，并优先使用当前 `AnimateAutoTool` 命名，避免误装遗留旧版二进制。
+
 ## [1.0.0-beta.10] - 2026-08-01
 
 ### Added
@@ -593,7 +603,8 @@
 
 ---
 
-[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.10...HEAD
+[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.11...HEAD
+[1.0.0-beta.11]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.10...v1.0.0-beta.11
 [1.0.0-beta.10]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.9...v1.0.0-beta.10
 [1.0.0-beta.9]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.8...v1.0.0-beta.9
 [1.0.0-beta.8]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.7...v1.0.0-beta.8

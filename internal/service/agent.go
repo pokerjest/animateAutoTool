@@ -212,6 +212,8 @@ func (s *AgentService) animeNeedsNetwork(anime *model.LocalAnime) bool {
 //
 //nolint:gocyclo // Asset ingestion keeps field-level precedence in one transaction.
 func (s *AgentService) scanLocalAssets(anime *model.LocalAnime) {
+	detachMismatchedSharedMetadataLink(anime)
+
 	// 1. Check NFO
 	nfoPath := filepath.Join(anime.Path, "tvshow.nfo")
 	if _, err := os.Stat(nfoPath); err == nil {

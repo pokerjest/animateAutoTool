@@ -99,6 +99,57 @@ func TestPickAssetForCurrentPlatformSupportsLegacyPrefix(t *testing.T) {
 	}
 }
 
+func TestPickAssetForCurrentPlatformRejectsStaleVersionAsset(t *testing.T) {
+	t.Parallel()
+
+	candidates := platformAssetCandidates(runtime.GOOS, runtime.GOARCH, false)
+	if len(candidates) == 0 {
+		t.Skip("current platform not supported by updater")
+	}
+
+	release := &githubRelease{
+		TagName: "v1.0.0-beta.10",
+		Assets: []releaseAsset{
+			{
+				Name:               "animate-server_v0.7.0" + candidates[0],
+				BrowserDownloadURL: "https://example.com/stale",
+			},
+			{
+				Name:               "AnimateAutoTool_v1.0.0-beta.10" + candidates[0],
+				BrowserDownloadURL: "https://example.com/current",
+			},
+		},
+	}
+
+	asset, err := pickAssetForCurrentPlatform(release)
+	if err != nil {
+		t.Fatalf("pickAssetForCurrentPlatform: %v", err)
+	}
+	if asset == nil || asset.BrowserDownloadURL != "https://example.com/current" {
+		t.Fatalf("stale release asset was selected: %#v", asset)
+	}
+}
+
+func TestPickAssetForCurrentPlatformRequiresReleaseVersionInAssetName(t *testing.T) {
+	t.Parallel()
+
+	candidates := platformAssetCandidates(runtime.GOOS, runtime.GOARCH, false)
+	if len(candidates) == 0 {
+		t.Skip("current platform not supported by updater")
+	}
+
+	release := &githubRelease{
+		TagName: "v1.0.0-beta.10",
+		Assets: []releaseAsset{{
+			Name:               "animate-server_v0.7.0" + candidates[0],
+			BrowserDownloadURL: "https://example.com/stale",
+		}},
+	}
+	if _, err := pickAssetForCurrentPlatform(release); err == nil {
+		t.Fatal("expected stale-version asset to be rejected")
+	}
+}
+
 func TestPlatformAssetCandidates(t *testing.T) {
 	t.Parallel()
 

@@ -31,16 +31,52 @@ func pickAssetForCurrentPlatform(release *githubRelease) (*releaseAsset, error) 
 		return nil, fmt.Errorf("unsupported platform: %s/%s", runtime.GOOS, runtime.GOARCH)
 	}
 
+	var legacyMatch *releaseAsset
 	for _, suffix := range candidates {
 		for i := range release.Assets {
 			asset := &release.Assets[i]
-			if strings.HasSuffix(strings.ToLower(asset.Name), strings.ToLower(suffix)) && strings.TrimSpace(asset.BrowserDownloadURL) != "" {
+			if !strings.HasSuffix(strings.ToLower(asset.Name), strings.ToLower(suffix)) ||
+				strings.TrimSpace(asset.BrowserDownloadURL) == "" {
+				continue
+			}
+			// A platform suffix alone is not enough: old releases can leave
+			// legacy assets such as animate-server_v0.7.0_windows_amd64.exe
+			// attached to a newer Release. Installing that asset would make
+			// the API and startup logs report an older embedded version.
+			if !assetNameMatchesReleaseVersion(asset.Name, release.TagName, suffix) {
+				continue
+			}
+			if strings.HasPrefix(strings.ToLower(filepath.Base(asset.Name)), "animateautotool_") {
 				return asset, nil
+			}
+			if legacyMatch == nil {
+				legacyMatch = asset
 			}
 		}
 	}
+	if legacyMatch != nil {
+		return legacyMatch, nil
+	}
 
-	return nil, fmt.Errorf("asset candidates %q not found in release %s", strings.Join(candidates, ", "), release.TagName)
+	return nil, fmt.Errorf("version-matched asset candidates %q not found in release %s", strings.Join(candidates, ", "), release.TagName)
+}
+
+func assetNameMatchesReleaseVersion(assetName, releaseTag, suffix string) bool {
+	base := strings.ToLower(filepath.Base(strings.TrimSpace(assetName)))
+	suffix = strings.ToLower(strings.TrimSpace(suffix))
+	if base == "" || suffix == "" || !strings.HasSuffix(base, suffix) {
+		return false
+	}
+	stem := strings.TrimSuffix(base, suffix)
+	separator := strings.LastIndexByte(stem, '_')
+	if separator < 0 || separator+1 >= len(stem) {
+		return false
+	}
+	assetVersion := stem[separator+1:]
+	if !ValidReleaseVersion(assetVersion) || !ValidReleaseVersion(releaseTag) {
+		return false
+	}
+	return strings.EqualFold(normalizeVersion(assetVersion), normalizeVersion(releaseTag))
 }
 
 func platformAssetCandidates(goos, goarch string, inAppBundle bool) []string {

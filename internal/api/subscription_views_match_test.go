@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -514,6 +515,102 @@ func TestFindSubscriptionLocalAnimesRejectsDifferentProviderIDAndReportsConflict
 	}
 	if !strings.Contains(issue.Message, "TMDB") || !strings.Contains(issue.Message, "65001") || !strings.Contains(issue.Message, "65002") {
 		t.Fatalf("provider conflict issue = %q, want provider and both IDs", issue.Message)
+	}
+}
+
+func TestFindSubscriptionLocalAnimesDoesNotReportUnrelatedProviderConflicts(t *testing.T) {
+	subMetadata := createSubscriptionMatchMetadata(t, "目标订阅元数据", 590786, 302051, 0)
+	sub := &model.Subscription{
+		Title:      "目标订阅",
+		RSSUrl:     "https://example.test/unrelated-provider-conflicts",
+		MetadataID: &subMetadata.ID,
+		Metadata:   subMetadata,
+	}
+	if err := db.DB.Create(sub).Error; err != nil {
+		t.Fatalf("create subscription: %v", err)
+	}
+	t.Cleanup(func() { _ = db.DB.Unscoped().Delete(sub).Error })
+
+	for i, item := range []struct {
+		title     string
+		bangumiID int
+		tmdbID    int
+	}{
+		{title: "2.5次元的诱惑", bangumiID: 410346, tmdbID: 216074},
+		{title: "Ranma 1/2", bangumiID: 2789, tmdbID: 259140},
+		{title: "杜鹃的婚约", bangumiID: 327606, tmdbID: 78483},
+	} {
+		metadata := createSubscriptionMatchMetadata(t, item.title+" 元数据", item.bangumiID, item.tmdbID, 0)
+		createPlayableSubscriptionMatchAnime(
+			t,
+			metadata,
+			item.title,
+			"/library/unrelated-provider-conflict-"+fmt.Sprint(i),
+			"unrelated-provider-conflict-"+fmt.Sprint(i),
+		)
+	}
+
+	matches, err := findSubscriptionLocalAnimes(sub)
+	if err != nil {
+		t.Fatalf("find unrelated provider matches: %v", err)
+	}
+	if len(matches) != 0 {
+		t.Fatalf("unrelated provider candidates must not match: %+v", matches)
+	}
+
+	var issues []model.LibraryIssue
+	if err := db.DB.Where("title = ?", sub.Title).Find(&issues).Error; err != nil {
+		t.Fatalf("load unrelated provider issues: %v", err)
+	}
+	if len(issues) != 0 {
+		t.Fatalf("unrelated provider candidates produced false conflicts: %+v", issues)
+	}
+}
+
+func TestLoadSubscriptionLocalMatchIndexResolvesHistoricalFalseProviderConflict(t *testing.T) {
+	subMetadata := createSubscriptionMatchMetadata(t, "目标订阅元数据", 590786, 302051, 0)
+	localMetadata := createSubscriptionMatchMetadata(t, "2.5次元的诱惑 元数据", 410346, 216074, 0)
+	sub := &model.Subscription{
+		Title:      "目标订阅",
+		RSSUrl:     "https://example.test/stale-provider-conflict",
+		MetadataID: &subMetadata.ID,
+		Metadata:   subMetadata,
+	}
+	if err := db.DB.Create(sub).Error; err != nil {
+		t.Fatalf("create subscription: %v", err)
+	}
+	t.Cleanup(func() { _ = db.DB.Unscoped().Delete(sub).Error })
+	anime := createPlayableSubscriptionMatchAnime(
+		t,
+		localMetadata,
+		"2.5次元的诱惑",
+		"/library/stale-provider-conflict",
+		"stale-provider-conflict-series",
+	)
+	localAnimeID := anime.ID
+	issue := &model.LibraryIssue{
+		IssueKey:        fmt.Sprintf("subscription-provider-conflict:%d:%d:BANGUMI", sub.ID, anime.ID),
+		IssueType:       "scrape",
+		Status:          "open",
+		Title:           sub.Title,
+		LocalAnimeID:    &localAnimeID,
+		Message:         "historical false positive",
+		OccurrenceCount: 1,
+	}
+	if err := db.DB.Create(issue).Error; err != nil {
+		t.Fatalf("create historical issue: %v", err)
+	}
+	t.Cleanup(func() { _ = db.DB.Unscoped().Delete(issue).Error })
+
+	if _, err := loadSubscriptionLocalMatchIndex(); err != nil {
+		t.Fatalf("load subscription match index: %v", err)
+	}
+	var updated model.LibraryIssue
+	if err := db.DB.First(&updated, issue.ID).Error; err != nil {
+		t.Fatalf("reload historical issue: %v", err)
+	}
+	if updated.Status != "resolved" {
+		t.Fatalf("historical false conflict status = %q, want resolved", updated.Status)
 	}
 }
 

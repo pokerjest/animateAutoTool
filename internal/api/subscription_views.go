@@ -406,6 +406,8 @@ type subscriptionLocalMatch struct {
 	Playable     bool
 }
 
+const subscriptionProviderSeason = "season"
+
 func loadSubscriptionLocalMatchIndex() (*subscriptionLibraryIndex, error) {
 	localStore := localAnimeStore()
 	if localStore == nil {
@@ -421,6 +423,11 @@ func loadSubscriptionLocalMatchIndex() (*subscriptionLibraryIndex, error) {
 		providerIndexesByKey:  make(map[string][]int),
 	}
 	buildSubscriptionCandidateIndex(index)
+	if resolved, cleanupErr := resolveStaleSubscriptionProviderConflicts(index); cleanupErr != nil {
+		log.Printf("WARN: failed to reconcile stale subscription provider conflicts: %v", cleanupErr)
+	} else if resolved > 0 {
+		log.Printf("INFO: resolved %d stale subscription provider conflict issues", resolved)
+	}
 	return index, nil
 }
 
@@ -668,8 +675,8 @@ func reportSubscriptionLocalIdentityConflict(
 		identity.LocalProviderID,
 	)
 	hint := "请在本地番剧详情中修正来源匹配；系统不会在来源 ID 冲突时自动显示播放按钮。"
-	if identity.Provider == "season" {
-		providerLabel = "season"
+	if identity.Provider == subscriptionProviderSeason {
+		providerLabel = subscriptionProviderSeason
 		issueType = service.LibraryIssueTypeParse
 		message = fmt.Sprintf(
 			"订阅“%s”与本地番剧“%s”的季度冲突：订阅第 %d 季，本地第 %d 季",
@@ -751,7 +758,10 @@ func findSubscriptionLocalAnimes(sub *model.Subscription) ([]model.LocalAnime, e
 			return nil, err
 		}
 		if matched := filterSubscriptionLocalAnimes(sub, localAnimes); len(matched) > 0 {
-			return matched, nil
+			// A historical database can contain multiple local rows pointing
+			// at one metadata record. Treat that as ambiguous unless a
+			// completed download path identifies one row.
+			return disambiguateSubscriptionExternalMatches(sub, matched, pathLinked), nil
 		}
 		if len(localAnimes) > 0 {
 			log.Printf("WARN: subscription %q shares metadata_id=%d with %d unrelated local series; ignoring metadata-only library match",
@@ -787,6 +797,21 @@ func findSubscriptionLocalAnimes(sub *model.Subscription) ([]model.LocalAnime, e
 }
 func backfillSubscriptionLocalAnimeMetadata(sub *model.Subscription, localAnimes []model.LocalAnime) []model.LocalAnime {
 	if len(localAnimes) != 1 || db.DB == nil || sub == nil || sub.MetadataID == nil || *sub.MetadataID == 0 || localAnimes[0].MetadataID != nil {
+		return localAnimes
+	}
+	identity := service.EvaluateSubscriptionLocalIdentity(sub, &localAnimes[0])
+	pathLinked := false
+	if sub.ID != 0 {
+		if links, err := loadSubscriptionLocalPathLinks(sub.ID); err == nil {
+			for _, link := range links {
+				if link.LocalAnimeID == localAnimes[0].ID {
+					pathLinked = true
+					break
+				}
+			}
+		}
+	}
+	if identity.Conflict || (!identity.ExternalMatch && !identity.TitleMatch && !pathLinked) {
 		return localAnimes
 	}
 	result := db.DB.Model(&model.LocalAnime{}).Where("id = ? AND metadata_id IS NULL", localAnimes[0].ID).
@@ -919,7 +944,14 @@ func filterSubscriptionLocalAnimes(sub *model.Subscription, candidates []model.L
 	for i := range candidates {
 		identity := service.EvaluateSubscriptionLocalIdentity(sub, &candidates[i])
 		if identity.Conflict {
-			reportSubscriptionLocalIdentityConflict(sub, &candidates[i], identity)
+			// Full-library title fallback intentionally examines many
+			// unrelated rows. Only report a provider conflict when the row is
+			// independently related by title or already shares a provider ID;
+			// otherwise the health dashboard would be flooded with false
+			// positives for every local series.
+			if shouldReportSubscriptionLocalIdentityConflict(sub, &candidates[i], identity) {
+				reportSubscriptionLocalIdentityConflict(sub, &candidates[i], identity)
+			}
 			continue
 		}
 		if service.LocalAnimeMatchesSubscription(sub, &candidates[i]) {
@@ -927,6 +959,101 @@ func filterSubscriptionLocalAnimes(sub *model.Subscription, candidates []model.L
 		}
 	}
 	return matched
+}
+
+func shouldReportSubscriptionLocalIdentityConflict(
+	sub *model.Subscription,
+	anime *model.LocalAnime,
+	identity service.SubscriptionLocalIdentityResult,
+) bool {
+	if sub == nil || anime == nil || !identity.Conflict {
+		return false
+	}
+	metadataLinked := sub.MetadataID != nil && anime.MetadataID != nil && *anime.MetadataID == *sub.MetadataID
+	return identity.TitleMatch || identity.ExternalMatch ||
+		(identity.Provider == subscriptionProviderSeason && metadataLinked)
+}
+
+func resolveStaleSubscriptionProviderConflicts(index *subscriptionLibraryIndex) (int, error) {
+	if db.DB == nil || index == nil {
+		return 0, nil
+	}
+	var issues []model.LibraryIssue
+	if err := db.DB.
+		Where("status = ? AND issue_key LIKE ?", service.LibraryIssueStatusOpen, "subscription-provider-conflict:%").
+		Find(&issues).Error; err != nil {
+		return 0, err
+	}
+	if len(issues) == 0 {
+		return 0, nil
+	}
+
+	localByID := make(map[uint]*model.LocalAnime, len(index.localAnimes))
+	for i := range index.localAnimes {
+		localByID[index.localAnimes[i].ID] = &index.localAnimes[i]
+	}
+	subscriptionIDs := make(map[uint]struct{})
+	type issueIdentity struct {
+		subscriptionID uint
+		provider       string
+	}
+	parsed := make(map[uint]issueIdentity, len(issues))
+	for i := range issues {
+		parts := strings.SplitN(issues[i].IssueKey, ":", 4)
+		if len(parts) != 4 {
+			continue
+		}
+		rawSubscriptionID, err := strconv.ParseUint(parts[1], 10, 32)
+		if err != nil || rawSubscriptionID == 0 {
+			continue
+		}
+		identity := issueIdentity{
+			subscriptionID: uint(rawSubscriptionID),
+			provider:       strings.ToLower(strings.TrimSpace(parts[3])),
+		}
+		parsed[issues[i].ID] = identity
+		subscriptionIDs[identity.subscriptionID] = struct{}{}
+	}
+
+	ids := make([]uint, 0, len(subscriptionIDs))
+	for id := range subscriptionIDs {
+		ids = append(ids, id)
+	}
+	var subscriptions []model.Subscription
+	if len(ids) > 0 {
+		if err := db.DB.Preload("Metadata").Where("id IN ?", ids).Find(&subscriptions).Error; err != nil {
+			return 0, err
+		}
+	}
+	subByID := make(map[uint]*model.Subscription, len(subscriptions))
+	for i := range subscriptions {
+		subByID[subscriptions[i].ID] = &subscriptions[i]
+	}
+
+	resolved := 0
+	for i := range issues {
+		issue := &issues[i]
+		parsedIdentity, ok := parsed[issue.ID]
+		if !ok || issue.LocalAnimeID == nil || *issue.LocalAnimeID == 0 {
+			continue
+		}
+		sub := subByID[parsedIdentity.subscriptionID]
+		anime := localByID[*issue.LocalAnimeID]
+		keepOpen := false
+		if sub != nil && anime != nil {
+			identity := service.EvaluateSubscriptionLocalIdentity(sub, anime)
+			keepOpen = strings.EqualFold(identity.Provider, parsedIdentity.provider) &&
+				shouldReportSubscriptionLocalIdentityConflict(sub, anime, identity)
+		}
+		if keepOpen {
+			continue
+		}
+		if err := service.ResolveLibraryIssue(issue.IssueKey); err != nil {
+			return resolved, err
+		}
+		resolved++
+	}
+	return resolved, nil
 }
 
 func subscriptionLocalTitleCandidates(sub *model.Subscription) []string {

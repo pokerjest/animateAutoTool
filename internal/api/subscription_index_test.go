@@ -83,3 +83,41 @@ func TestBackfillSubscriptionMetadataRequiresUpdatedRow(t *testing.T) {
 		t.Fatalf("stored metadata changed after rejected backfill: %+v", stored.MetadataID)
 	}
 }
+
+func TestBackfillSubscriptionMetadataRequiresIndependentIdentity(t *testing.T) {
+	metadata := model.AnimeMetadata{
+		Title:     "目标订阅",
+		BangumiID: 590786,
+		TMDBID:    302051,
+	}
+	if err := db.DB.Create(&metadata).Error; err != nil {
+		t.Fatalf("create metadata: %v", err)
+	}
+	sub := &model.Subscription{
+		Title:      "目标订阅",
+		MetadataID: &metadata.ID,
+	}
+	anime := &model.LocalAnime{
+		Title: "完全无关番剧",
+		Path:  "/library/完全无关番剧",
+	}
+	if err := db.DB.Create(anime).Error; err != nil {
+		t.Fatalf("create local anime: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = db.DB.Unscoped().Delete(anime).Error
+		_ = db.DB.Unscoped().Delete(&metadata).Error
+	})
+
+	result := backfillSubscriptionLocalAnimeMetadata(sub, []model.LocalAnime{*anime})
+	if result[0].MetadataID != nil {
+		t.Fatalf("unrelated local anime must not receive subscription metadata: %d", *result[0].MetadataID)
+	}
+	var stored model.LocalAnime
+	if err := db.DB.First(&stored, anime.ID).Error; err != nil {
+		t.Fatalf("reload local anime: %v", err)
+	}
+	if stored.MetadataID != nil {
+		t.Fatalf("unrelated local anime metadata was persisted: %d", *stored.MetadataID)
+	}
+}
