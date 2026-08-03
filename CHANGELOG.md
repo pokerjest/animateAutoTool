@@ -8,6 +8,11 @@
 
 ## [Unreleased]
 
+## [1.0.0-beta.12] - 2026-08-03
+
+### Fixed
+- 发行包浏览器 E2E 会等待订阅接口完成，并按请求 URL 与状态码区分真实故障和可选更新源失败，避免 Windows 构建被正常导航取消或外部更新源波动误判为失败。
+
 ## [1.0.0-beta.11] - 2026-08-03
 
 ### Changed
@@ -603,7 +608,8 @@
 
 ---
 
-[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.11...HEAD
+[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.12...HEAD
+[1.0.0-beta.12]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.11...v1.0.0-beta.12
 [1.0.0-beta.11]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.10...v1.0.0-beta.11
 [1.0.0-beta.10]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.9...v1.0.0-beta.10
 [1.0.0-beta.9]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.8...v1.0.0-beta.9
