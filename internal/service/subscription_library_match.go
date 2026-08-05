@@ -231,6 +231,22 @@ func LocalAnimeMatchesSubscription(sub *model.Subscription, anime *model.LocalAn
 	)
 }
 
+// SubscriptionLocalTitleMatchScore measures direct subscription-to-library
+// title evidence without letting shared provider metadata prove the match.
+// Callers can use a unique score of 100 to disambiguate duplicate provider IDs.
+func SubscriptionLocalTitleMatchScore(sub *model.Subscription, anime *model.LocalAnime) int {
+	if sub == nil || anime == nil {
+		return 0
+	}
+	best := 0
+	for _, localTitle := range localAnimeIdentityTitles(anime.Title, anime.Path) {
+		if score := titleMatchScore(sub.Title, localTitle); score > best {
+			best = score
+		}
+	}
+	return best
+}
+
 const subscriptionMatchIndexGramSize = 6
 
 // SubscriptionLocalMatchIndexKeys returns conservative lookup keys used to

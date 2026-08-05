@@ -637,6 +637,7 @@ func disambiguateSubscriptionExternalMatches(
 	providerMatches, pathLinked []model.LocalAnime,
 ) []model.LocalAnime {
 	if len(providerMatches) <= 1 {
+		reconcileSubscriptionDuplicateExternalIdentityIssues(sub, nil)
 		return providerMatches
 	}
 	pathLinkedIDs := make(map[uint]struct{}, len(pathLinked))
@@ -650,9 +651,23 @@ func disambiguateSubscriptionExternalMatches(
 		}
 	}
 	if len(pathSelected) == 1 {
+		reconcileSubscriptionDuplicateExternalIdentityIssues(sub, nil)
 		return pathSelected
 	}
+
+	titleSelected := make([]model.LocalAnime, 0, 1)
+	for i := range providerMatches {
+		if service.SubscriptionLocalTitleMatchScore(sub, &providerMatches[i]) == 100 {
+			titleSelected = append(titleSelected, providerMatches[i])
+		}
+	}
+	if len(titleSelected) == 1 {
+		reconcileSubscriptionDuplicateExternalIdentityIssues(sub, nil)
+		return titleSelected
+	}
+
 	reportSubscriptionDuplicateExternalIdentity(sub, providerMatches)
+	reconcileSubscriptionDuplicateExternalIdentityIssues(sub, providerMatches)
 	return nil
 }
 
@@ -728,6 +743,34 @@ func reportSubscriptionDuplicateExternalIdentity(sub *model.Subscription, matche
 	}
 }
 
+func reconcileSubscriptionDuplicateExternalIdentityIssues(sub *model.Subscription, activeMatches []model.LocalAnime) {
+	if sub == nil || sub.ID == 0 || db.DB == nil {
+		return
+	}
+	var issues []model.LibraryIssue
+	prefix := fmt.Sprintf("subscription-provider-duplicate:%d:", sub.ID)
+	if err := db.DB.
+		Where("status = ? AND issue_key LIKE ?", service.LibraryIssueStatusOpen, prefix+"%").
+		Find(&issues).Error; err != nil {
+		log.Printf("WARN: failed to reconcile duplicate provider issues for subscription_id=%d: %v", sub.ID, err)
+		return
+	}
+	activeIDs := make(map[uint]struct{}, len(activeMatches))
+	for i := range activeMatches {
+		activeIDs[activeMatches[i].ID] = struct{}{}
+	}
+	for i := range issues {
+		if issues[i].LocalAnimeID != nil {
+			if _, keepOpen := activeIDs[*issues[i].LocalAnimeID]; keepOpen {
+				continue
+			}
+		}
+		if err := service.ResolveLibraryIssue(issues[i].IssueKey); err != nil {
+			log.Printf("WARN: failed to resolve duplicate provider issue %q: %v", issues[i].IssueKey, err)
+		}
+	}
+}
+
 func findSubscriptionLocalAnimes(sub *model.Subscription) ([]model.LocalAnime, error) {
 	if sub == nil || db.DB == nil {
 		return nil, gorm.ErrInvalidDB
@@ -741,9 +784,9 @@ func findSubscriptionLocalAnimes(sub *model.Subscription) ([]model.LocalAnime, e
 	if err != nil {
 		return nil, err
 	}
+	disambiguatedProviderMatches := disambiguateSubscriptionExternalMatches(sub, providerMatches, pathLinked)
 	if len(providerMatches) > 0 {
-		matched := disambiguateSubscriptionExternalMatches(sub, providerMatches, pathLinked)
-		return backfillSubscriptionLocalAnimeMetadata(sub, matched), nil
+		return backfillSubscriptionLocalAnimeMetadata(sub, disambiguatedProviderMatches), nil
 	}
 	if matched := filterSubscriptionPathLinkedLocalAnimes(sub, pathLinked); len(matched) > 0 {
 		return backfillSubscriptionLocalAnimeMetadata(sub, matched), nil
@@ -918,10 +961,11 @@ func findSubscriptionLocalAnimesFromIndex(sub *model.Subscription, libraryIndex 
 	}
 
 	providerMatches := filterSubscriptionLocalAnimes(sub, subscriptionProviderAnimeCandidates(sub, libraryIndex))
+	disambiguatedProviderMatches := disambiguateSubscriptionExternalMatches(sub, providerMatches, pathLinked)
 	var matched []model.LocalAnime
 	switch {
 	case len(providerMatches) > 0:
-		matched = disambiguateSubscriptionExternalMatches(sub, providerMatches, pathLinked)
+		matched = disambiguatedProviderMatches
 	case len(pathLinked) > 0:
 		matched = filterSubscriptionPathLinkedLocalAnimes(sub, pathLinked)
 	default:

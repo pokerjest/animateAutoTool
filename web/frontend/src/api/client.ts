@@ -104,8 +104,8 @@ export function posterURL(item: PosterRecord, options: PosterOptions = {}) {
   return normalizePosterURL(image)
 }
 
-export function calendarPosterURL(_subjectID?: number, image?: string, _width = 360) {
-  return normalizePosterURL(image)
+export function calendarPosterURL(subjectID?: number, image?: string, width = 360) {
+  return calendarPosterProxyURL(subjectID, width) || normalizePosterURL(image)
 }
 
 export function calendarPosterProxyURL(subjectID?: number, width = 360) {

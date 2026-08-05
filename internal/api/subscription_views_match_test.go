@@ -7,6 +7,7 @@ import (
 
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/model"
+	"github.com/pokerjest/animateAutoTool/internal/service"
 )
 
 func TestPopulateSubscriptionLibraryStateFindsStrongNonExactTitle(t *testing.T) {
@@ -746,5 +747,68 @@ func TestFindSubscriptionLocalAnimesFromIndexRejectsUnresolvedDuplicateProviderI
 		if !strings.Contains(issue.Message, "tmdb:69001") || !strings.Contains(issue.Message, "无路径重复身份本地") {
 			t.Fatalf("duplicate identity issue = %q, want key and titles", issue.Message)
 		}
+	}
+}
+
+func TestFindSubscriptionLocalAnimesFromIndexPrefersUniqueExactTitleAndResolvesDuplicateIssues(t *testing.T) {
+	metadata := createSubscriptionMatchMetadata(t, "透明之夜元数据", 607340, 305814, 202269)
+	sub := &model.Subscription{
+		Title:      "与奔驰于透明之夜的你，谈一场看不见的恋爱。",
+		RSSUrl:     "https://example.test/duplicate-provider-exact-title",
+		MetadataID: &metadata.ID,
+		Metadata:   metadata,
+	}
+	if err := db.DB.Create(sub).Error; err != nil {
+		t.Fatalf("create subscription: %v", err)
+	}
+	t.Cleanup(func() { _ = db.DB.Unscoped().Delete(sub).Error })
+	exact := createPlayableSubscriptionMatchAnime(
+		t,
+		metadata,
+		"与奔驰于透明之夜的你，谈一场看不见的恋爱。",
+		"/library/duplicate-provider-exact-title",
+		"duplicate-provider-exact-title",
+	)
+	traditional := createPlayableSubscriptionMatchAnime(
+		t,
+		metadata,
+		"與奔馳於透明之夜的你，談一場看不見的戀愛。",
+		"/library/duplicate-provider-traditional-title",
+		"duplicate-provider-traditional-title",
+	)
+	for _, anime := range []*model.LocalAnime{exact, traditional} {
+		localAnimeID := anime.ID
+		issue := &model.LibraryIssue{
+			IssueKey:        fmt.Sprintf("subscription-provider-duplicate:%d:%d", sub.ID, anime.ID),
+			IssueType:       service.LibraryIssueTypeScrape,
+			Status:          service.LibraryIssueStatusOpen,
+			Title:           sub.Title,
+			LocalAnimeID:    &localAnimeID,
+			Message:         "historical duplicate issue",
+			OccurrenceCount: 1,
+		}
+		if err := db.DB.Create(issue).Error; err != nil {
+			t.Fatalf("create historical duplicate issue: %v", err)
+		}
+		t.Cleanup(func() { _ = db.DB.Unscoped().Delete(issue).Error })
+	}
+
+	libraryIndex, err := loadSubscriptionLibraryIndex()
+	if err != nil {
+		t.Fatalf("load library index: %v", err)
+	}
+	matches := findSubscriptionLocalAnimesFromIndex(sub, libraryIndex)
+	if len(matches) != 1 || matches[0].ID != exact.ID {
+		t.Fatalf("exact title disambiguation = %+v, want local anime %d", matches, exact.ID)
+	}
+
+	var openIssues int64
+	if err := db.DB.Model(&model.LibraryIssue{}).
+		Where("status = ? AND issue_key LIKE ?", service.LibraryIssueStatusOpen, fmt.Sprintf("subscription-provider-duplicate:%d:%%", sub.ID)).
+		Count(&openIssues).Error; err != nil {
+		t.Fatalf("count open duplicate issues: %v", err)
+	}
+	if openIssues != 0 {
+		t.Fatalf("open duplicate issues = %d, want 0 after exact disambiguation", openIssues)
 	}
 }

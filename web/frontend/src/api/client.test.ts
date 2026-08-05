@@ -62,8 +62,9 @@ describe('poster URLs', () => {
     expect(posterURL({ ID: 9, UpdatedAt: '2026-07-23T12:00:00Z' }, { width: 360 })).toBe('/api/v1/posters/9?width=360&v=2026-07-23T12%3A00%3A00Z')
   })
 
-  it('keeps direct calendar images and provides a same-origin fallback', () => {
-    expect(calendarPosterURL(99, 'https://lain.bgm.tv/pic/cover/l/test.jpg', 360)).toBe('https://lain.bgm.tv/pic/cover/l/test.jpg')
+  it('prefers same-origin calendar images and keeps the remote source as a fallback', () => {
+    expect(calendarPosterURL(99, 'https://lain.bgm.tv/pic/cover/l/test.jpg', 360)).toBe('/api/v1/calendar/posters/99?width=360')
+    expect(calendarPosterURL(undefined, 'https://lain.bgm.tv/pic/cover/l/test.jpg', 360)).toBe('https://lain.bgm.tv/pic/cover/l/test.jpg')
     expect(calendarPosterProxyURL(99, 360)).toBe('/api/v1/calendar/posters/99?width=360')
     expect(calendarPosterProxyURL(0, 360)).toBe('')
   })
