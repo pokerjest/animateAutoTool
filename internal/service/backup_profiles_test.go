@@ -38,6 +38,10 @@ func TestFullBackupRestoresPlaybackHistoryWithLocalLibrary(t *testing.T) {
 	if err := db.DB.Create(&episode).Error; err != nil {
 		t.Fatalf("seed local episode: %v", err)
 	}
+	user := model.User{Model: gorm.Model{ID: 7}, Username: "restore-playback-user", PasswordHash: "fixture"}
+	if err := db.DB.Create(&user).Error; err != nil {
+		t.Fatalf("seed playback user: %v", err)
+	}
 	watchedAt := time.Date(2026, 7, 26, 12, 30, 0, 0, time.UTC)
 	history := model.PlaybackHistory{UserID: 7, LocalAnimeID: anime.ID, LocalEpisodeID: episode.ID, PositionTicks: 600, DurationTicks: 1000, LastEvent: "pause", LastPlayedAt: watchedAt}
 	if err := db.DB.Create(&history).Error; err != nil {
@@ -64,6 +68,41 @@ func TestFullBackupRestoresPlaybackHistoryWithLocalLibrary(t *testing.T) {
 	}
 	if !restored.LastPlayedAt.Equal(watchedAt) {
 		t.Fatalf("expected last played at %v, got %v", watchedAt, restored.LastPlayedAt)
+	}
+}
+
+func TestRestoreRejectsOrphanPlaybackUser(t *testing.T) {
+	db.InitDB(":memory:")
+	t.Cleanup(func() { _ = db.CloseDB() })
+
+	err := validateRestoreDependencies(db.DB, &restoreData{
+		hasPlayback: true,
+		playback: []model.PlaybackHistory{{
+			Model:          gorm.Model{ID: 1},
+			UserID:         9999,
+			LocalAnimeID:   1,
+			LocalEpisodeID: 1,
+		}},
+	}, RestoreOptions{Local: true})
+	if err == nil || !strings.Contains(err.Error(), "orphan playback_history") {
+		t.Fatalf("expected orphan playback user rejection, got %v", err)
+	}
+}
+
+func TestRestoreRejectsOrphanSubscriptionMetadata(t *testing.T) {
+	db.InitDB(":memory:")
+	t.Cleanup(func() { _ = db.CloseDB() })
+
+	metadataID := uint(4242)
+	err := validateRestoreDependencies(db.DB, &restoreData{
+		hasSubscriptions: true,
+		subs: []model.Subscription{{
+			Model:      gorm.Model{ID: 1},
+			MetadataID: &metadataID,
+		}},
+	}, RestoreOptions{Subscriptions: true})
+	if err == nil || !strings.Contains(err.Error(), "orphan subscription") {
+		t.Fatalf("expected orphan subscription metadata rejection, got %v", err)
 	}
 }
 
@@ -341,6 +380,30 @@ func TestRestoreRejectsBackupWithNewerSchema(t *testing.T) {
 	err = NewRestoreService().PerformRestore(backupPath, RestoreOptions{Configs: true})
 	if err == nil || !strings.Contains(err.Error(), "newer") {
 		t.Fatalf("expected newer schema rejection, got %v", err)
+	}
+}
+
+func TestRestoreRejectsBackupWithUnsupportedFormat(t *testing.T) {
+	db.InitDB(":memory:")
+	t.Cleanup(func() { _ = db.CloseDB() })
+
+	backupPath := filepath.Join(t.TempDir(), "future-format.db")
+	if err := CreateBackupFile(backupPath, BackupModeSettings); err != nil {
+		t.Fatalf("create backup: %v", err)
+	}
+	backupDB, err := gorm.Open(sqlite.Open(backupPath), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open backup: %v", err)
+	}
+	if err := backupDB.Model(&backupManifest{}).Where("id = ?", 1).Update("database_format", db.DatabaseFormat+1).Error; err != nil {
+		t.Fatalf("mark backup as future format: %v", err)
+	}
+	sqlDB, _ := backupDB.DB()
+	_ = sqlDB.Close()
+
+	err = NewRestoreService().PerformRestore(backupPath, RestoreOptions{Configs: true})
+	if err == nil || !strings.Contains(err.Error(), "database format") {
+		t.Fatalf("expected unsupported database format rejection, got %v", err)
 	}
 }
 

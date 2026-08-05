@@ -7,9 +7,11 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 
 	"github.com/glebarez/sqlite"
+	"github.com/pokerjest/animateAutoTool/internal/authsession"
 	"github.com/pokerjest/animateAutoTool/internal/config"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"gorm.io/gorm"
@@ -23,6 +25,8 @@ const (
 var DB *gorm.DB
 var CurrentDBPath string
 var currentDBGOOS = func() string { return runtime.GOOS }
+
+const AuthSessionGenerationConfigKey = "system.auth_session_generation"
 
 func InitDB(storagePath string) {
 	if err := InitDBWithError(storagePath); err != nil {
@@ -71,17 +75,45 @@ func InitDBWithError(storagePath string) error {
 			return fmt.Errorf("database integrity check failed: %w", err)
 		}
 	}
+	// Migration locking and snapshot/report paths are resolved from
+	// CurrentDBPath. Set it before RunMigrations so file-backed startups get
+	// the same protection as direct migration callers. Restore the previous
+	// package state if initialization fails, because the new handle is closed
+	// in that case and must not leave a stale path behind.
+	previousDBPath := CurrentDBPath
+	CurrentDBPath = storagePath
+	defer func() {
+		if closeOnError {
+			CurrentDBPath = previousDBPath
+		}
+	}()
 	if err := RunMigrations(target); err != nil {
 		return fmt.Errorf("migrate database: %w", err)
 	}
+	restoreAuthSessionGeneration(target)
 
 	DB = target
-	CurrentDBPath = storagePath
 	closeOnError = false
 	if version := CurrentSchemaVersion(target); version != "" {
 		log.Printf("database schema is now at %s", version)
 	}
 	return nil
+}
+
+func restoreAuthSessionGeneration(target *gorm.DB) {
+	authsession.Set(1, false)
+	if target == nil || !target.Migrator().HasTable(&model.GlobalConfig{}) {
+		return
+	}
+	var row model.GlobalConfig
+	if err := target.First(&row, "key = ?", AuthSessionGenerationConfigKey).Error; err != nil {
+		return
+	}
+	value, err := strconv.ParseUint(strings.TrimSpace(row.Value), 10, 64)
+	if err != nil || value <= 1 {
+		return
+	}
+	authsession.Set(value, true)
 }
 
 // OpenReadOnly opens an existing SQLite database without creating directories,

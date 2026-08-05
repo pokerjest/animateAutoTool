@@ -1,12 +1,16 @@
 package db
 
 import (
+	"crypto/sha256"
+	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/glebarez/sqlite"
+	"github.com/pokerjest/animateAutoTool/internal/config"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"gorm.io/gorm"
 )
@@ -28,6 +32,19 @@ func TestValidateMigrationOrderRejectsDuplicateAndOutOfOrderIDs(t *testing.T) {
 	migrations = []migration{{ID: "001_same"}, {ID: "002_same"}, {ID: "002_same"}}
 	if err := validateMigrationOrder(); err == nil || !strings.Contains(err.Error(), "duplicate migration id") {
 		t.Fatalf("expected duplicate id failure, got %v", err)
+	}
+
+	migrations = []migration{{ID: "001_missing_fingerprint"}}
+	if err := validateMigrationOrder(); err == nil || !strings.Contains(err.Error(), "missing an immutable fingerprint") {
+		t.Fatalf("expected missing fingerprint failure, got %v", err)
+	}
+
+	migrations = []migration{
+		{ID: "001_first", Fingerprint: strings.Repeat("a", sha256.Size*2)},
+		{ID: "002_second", Fingerprint: strings.Repeat("a", sha256.Size*2)},
+	}
+	if err := validateMigrationOrder(); err == nil || !strings.Contains(err.Error(), "reuses fingerprint") {
+		t.Fatalf("expected duplicate fingerprint failure, got %v", err)
 	}
 }
 
@@ -131,6 +148,140 @@ func TestRunMigrationsRecordsCurrentVersionAndIsIdempotent(t *testing.T) {
 	}
 	if countAfter != count {
 		t.Fatalf("expected schema migration count to remain %d, got %d", count, countAfter)
+	}
+}
+
+func TestInitDBSetsFilePathBeforeMigrationSnapshot(t *testing.T) {
+	if DB != nil {
+		_ = CloseDB()
+	}
+	tempRoot := t.TempDir()
+	databasePath := filepath.Join(tempRoot, "animate.db")
+	previousPaths := config.AppPaths
+	previousDBPath := CurrentDBPath
+	config.AppPaths = config.Paths{DataDir: tempRoot}
+	t.Cleanup(func() {
+		_ = CloseDB()
+		config.AppPaths = previousPaths
+		CurrentDBPath = previousDBPath
+	})
+
+	if err := InitDBWithError(databasePath); err != nil {
+		t.Fatalf("initialize file database: %v", err)
+	}
+	if CurrentDBPath != databasePath {
+		t.Fatalf("expected current database path %q, got %q", databasePath, CurrentDBPath)
+	}
+
+	manifests, err := filepath.Glob(filepath.Join(tempRoot, "updates", "migration-snapshots", "*", "manifest.json"))
+	if err != nil {
+		t.Fatalf("find migration snapshots: %v", err)
+	}
+	if len(manifests) != 1 {
+		t.Fatalf("expected one migration snapshot manifest, got %d", len(manifests))
+	}
+	payload, err := os.ReadFile(manifests[0])
+	if err != nil {
+		t.Fatalf("read migration snapshot manifest: %v", err)
+	}
+	var snapshot migrationSnapshotManifest
+	if err := json.Unmarshal(payload, &snapshot); err != nil {
+		t.Fatalf("decode migration snapshot manifest: %v", err)
+	}
+	if snapshot.DatabasePath != "database.db" || len(snapshot.DatabaseSHA256) != sha256.Size*2 {
+		t.Fatalf("snapshot did not include file database checksum: %+v", snapshot)
+	}
+
+	runPayload, err := os.ReadFile(filepath.Join(tempRoot, "updates", "migration-runs", "current.json")) // #nosec G304 -- path is confined to t.TempDir()
+	if err != nil {
+		t.Fatalf("read migration run manifest: %v", err)
+	}
+	var run migrationRunManifest
+	if err := json.Unmarshal(runPayload, &run); err != nil {
+		t.Fatalf("decode migration run manifest: %v", err)
+	}
+	if run.Status != migrationRunCompleted || run.SnapshotID == "" || len(run.SnapshotSHA256) != sha256.Size*2 {
+		t.Fatalf("migration run manifest missing completed snapshot details: %+v", run)
+	}
+	for _, migrationID := range []string{migration009ID, migration015ID} {
+		reportPayload, err := os.ReadFile(filepath.Join(tempRoot, "updates", "migration-reports", migrationID, "report.json")) // #nosec G304 -- migrationID is a fixed test constant under t.TempDir()
+		if err != nil {
+			t.Fatalf("read %s repair report: %v", migrationID, err)
+		}
+		var report migrationRepairReport
+		if err := json.Unmarshal(reportPayload, &report); err != nil {
+			t.Fatalf("decode %s repair report: %v", migrationID, err)
+		}
+		if report.Status != migrationRunCompleted || report.SnapshotID != run.SnapshotID || report.SnapshotSHA256 != run.SnapshotSHA256 {
+			t.Fatalf("%s repair report is not tied to the committed migration snapshot: %+v", migrationID, report)
+		}
+	}
+	if _, err := os.Stat(databasePath + ".migration.lock"); !os.IsNotExist(err) {
+		t.Fatalf("migration lock should be released after startup, stat error=%v", err)
+	}
+}
+
+func TestRunMigrationsRejectsRewrittenHistoryAndFutureSchema(t *testing.T) {
+	target, err := gorm.Open(sqlite.Open(sqliteMemoryPath), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite db: %v", err)
+	}
+	t.Cleanup(func() { closeTestDB(t, target) })
+	if err := RunMigrations(target); err != nil {
+		t.Fatalf("seed migrations: %v", err)
+	}
+
+	if err := target.Model(&SchemaMigration{}).
+		Where("id = ?", migrations[0].ID).
+		Update("checksum", strings.Repeat("0", sha256.Size*2)).Error; err != nil {
+		t.Fatalf("rewrite checksum: %v", err)
+	}
+	if err := RunMigrations(target); err == nil || !strings.Contains(err.Error(), "checksum mismatch") {
+		t.Fatalf("expected rewritten migration to be rejected, got %v", err)
+	}
+
+	if err := target.Model(&SchemaMigration{}).
+		Where("id = ?", migrations[0].ID).
+		Update("checksum", migrations[0].Fingerprint).Error; err != nil {
+		t.Fatalf("restore checksum: %v", err)
+	}
+	if err := target.Create(&SchemaMigration{ID: "999_future_schema", Sequence: 999, Description: "future"}).Error; err != nil {
+		t.Fatalf("seed future schema: %v", err)
+	}
+	if err := RunMigrations(target); err == nil || !strings.Contains(err.Error(), "unknown or future") {
+		t.Fatalf("expected future schema to be rejected, got %v", err)
+	}
+}
+
+func TestRunMigrationsBackfillsChecksumBaselineOnlyOnce(t *testing.T) {
+	target, err := gorm.Open(sqlite.Open(sqliteMemoryPath), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite db: %v", err)
+	}
+	t.Cleanup(func() { closeTestDB(t, target) })
+	if err := target.AutoMigrate(&SchemaMigration{}); err != nil {
+		t.Fatalf("create migration history: %v", err)
+	}
+	for _, item := range migrations[:len(migrations)-1] {
+		if err := target.Create(&SchemaMigration{ID: item.ID, Description: item.Description}).Error; err != nil {
+			t.Fatalf("seed migration %s: %v", item.ID, err)
+		}
+	}
+	if err := RunMigrations(target); err != nil {
+		t.Fatalf("baseline migration: %v", err)
+	}
+	var missing int64
+	if err := target.Model(&SchemaMigration{}).Where("checksum = '' OR checksum IS NULL").Count(&missing).Error; err != nil {
+		t.Fatalf("count missing checksums: %v", err)
+	}
+	if missing != 0 {
+		t.Fatalf("expected checksum baseline to be complete, missing=%d", missing)
+	}
+	if err := target.Model(&SchemaMigration{}).Where("id = ?", migrations[0].ID).Update("checksum", "").Error; err != nil {
+		t.Fatalf("clear one checksum: %v", err)
+	}
+	if err := RunMigrations(target); err == nil || !strings.Contains(err.Error(), "partial checksum history") {
+		t.Fatalf("expected partial checksum history to be rejected, got %v", err)
 	}
 }
 
@@ -359,7 +510,7 @@ func TestBangumiIDMigrationUsesPartialUniqueIndex(t *testing.T) {
 		t.Fatalf("migrate schema history: %v", err)
 	}
 	for _, item := range migrations {
-		if item.ID == "009_partial_bangumi_id_unique_index" {
+		if item.ID == migration009ID {
 			break
 		}
 		if err := target.Create(&SchemaMigration{ID: item.ID, Description: item.Description}).Error; err != nil {
@@ -415,7 +566,7 @@ func TestLocalAnimeIdentityMigrationMergesPopulatedDuplicates(t *testing.T) {
 		t.Fatalf("migrate schema history: %v", err)
 	}
 	for _, item := range migrations {
-		if item.ID == "015_local_anime_identity" {
+		if item.ID == migration015ID {
 			break
 		}
 		if err := target.Create(&SchemaMigration{ID: item.ID, Description: item.Description}).Error; err != nil {

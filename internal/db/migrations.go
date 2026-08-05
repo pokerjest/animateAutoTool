@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	pathpkg "path"
@@ -24,6 +25,14 @@ import (
 
 const completedResourceState = "completed"
 
+// DatabaseFormat describes the on-disk container/backup contract, while
+// SchemaFormat describes the additive migration protocol. They intentionally
+// evolve independently from the latest migration ID.
+const (
+	DatabaseFormat = 1
+	SchemaFormat   = 1
+)
+
 // SchemaMigration records each explicit schema/data migration that has been
 // applied to a database. We keep this separate from app config so future
 // releases can safely evolve table layouts and data fixes over time.
@@ -31,12 +40,17 @@ type SchemaMigration struct {
 	ID          string    `gorm:"primaryKey;size:64"`
 	Sequence    int       `gorm:"index"`
 	Description string    `gorm:"size:255"`
+	Checksum    string    `gorm:"size:64;index"`
 	AppliedAt   time.Time `gorm:"index"`
 }
 
 type migration struct {
 	ID          string
 	Description string
+	// Fingerprint is intentionally explicit and immutable once a migration is
+	// released. It is persisted in schema_migrations and lets startup reject
+	// rewritten historical migrations before they can touch user data.
+	Fingerprint string
 	Apply       func(tx *gorm.DB) error
 }
 
@@ -44,6 +58,7 @@ var migrations = []migration{
 	{
 		ID:          "001_initial_schema",
 		Description: "Create and align the core application schema",
+		Fingerprint: "c560ed55351c503eb8b3636711bae79c983aceb31966f7d233d786e249fccc5e",
 		Apply: func(tx *gorm.DB) error {
 			return autoMigrateCoreSchema(tx)
 		},
@@ -51,6 +66,7 @@ var migrations = []migration{
 	{
 		ID:          "002_subscription_run_logs",
 		Description: "Create per-run subscription history records",
+		Fingerprint: "07abcdda01b2e5c761a65374e7edd719956c4ff2542d536d03c2b66439f814a5",
 		Apply: func(tx *gorm.DB) error {
 			return tx.AutoMigrate(&model.SubscriptionRunLog{})
 		},
@@ -58,6 +74,7 @@ var migrations = []migration{
 	{
 		ID:          "003_subscription_strategy_fields",
 		Description: "Add advanced subscription strategy fields",
+		Fingerprint: "41c53d3d91e93eee42072deecdd93bd53485886eb708123326659b5326272852",
 		Apply: func(tx *gorm.DB) error {
 			return tx.AutoMigrate(&model.Subscription{})
 		},
@@ -65,6 +82,7 @@ var migrations = []migration{
 	{
 		ID:          "004_audit_logs",
 		Description: "Create audit_logs table for sensitive operation history",
+		Fingerprint: "3a1335dd98e7a6fb114d4444c1294c5db066dff4eae52431652da55471f99cd3",
 		Apply: func(tx *gorm.DB) error {
 			return tx.AutoMigrate(&model.AuditLog{})
 		},
@@ -72,11 +90,13 @@ var migrations = []migration{
 	{
 		ID:          "005_subscription_mikan_ids",
 		Description: "Backfill missing Mikan identifiers from official RSS URLs",
+		Fingerprint: "df6df2b378dc6ad1debc6fb85bc815cb30ce461c90da0f5609ba5a29c21b50a4",
 		Apply:       backfillSubscriptionMikanIDs,
 	},
 	{
 		ID:          "006_subscription_release_filters",
 		Description: "Add resolution and subtitle language filters to subscriptions",
+		Fingerprint: "cf86c6ad68cb8ada871041b193e49b725b55d60ca910fa6a97707d702f4f5d32",
 		Apply: func(tx *gorm.DB) error {
 			return tx.AutoMigrate(&model.Subscription{})
 		},
@@ -84,6 +104,7 @@ var migrations = []migration{
 	{
 		ID:          "007_playback_history",
 		Description: "Create per-user playback history for continue watching",
+		Fingerprint: "dafb2e2c33080625863b5b1a1c2e0bb45d07cb2e741bc1cfb46eada26a545965",
 		Apply: func(tx *gorm.DB) error {
 			return tx.AutoMigrate(&model.PlaybackHistory{})
 		},
@@ -91,16 +112,19 @@ var migrations = []migration{
 	{
 		ID:          "008_remove_redundant_mikan_subgroup_rules",
 		Description: "Remove generated subgroup filters and aggregate fallbacks from subgroup-specific Mikan feeds",
+		Fingerprint: "23358000f1c58f8a2e75fb7a5877eabbb12185c90d77e8c5bd340003f122ebba",
 		Apply:       removeRedundantMikanSubgroupRules,
 	},
 	{
-		ID:          "009_partial_bangumi_id_unique_index",
+		ID:          migration009ID,
 		Description: "Allow multiple unmatched metadata rows while keeping real Bangumi identifiers unique",
+		Fingerprint: "9a8fe467719bfd95ed24bbcf411e65e50648cf38ad6ae69035f346b302d04d6a",
 		Apply:       createPartialBangumiIDUniqueIndex,
 	},
 	{
 		ID:          "010_ai_tool_operations",
 		Description: "Create AI proposals and append-only tool execution logs",
+		Fingerprint: "2a936b05e8b90f0dee156ab02dba92c77e234e502eff6300ed01759242fb741d",
 		Apply: func(tx *gorm.DB) error {
 			return tx.AutoMigrate(&model.AIProposal{}, &model.AIToolRun{})
 		},
@@ -108,16 +132,19 @@ var migrations = []migration{
 	{
 		ID:          "011_schema_migration_sequence",
 		Description: "Track stable numeric migration order for compatibility checks",
+		Fingerprint: "c242a03956f9761c7f277100598f9791640fc8b7c7836b1da3cedf12e8983656",
 		Apply:       backfillSchemaMigrationSequences,
 	},
 	{
 		ID:          "012_subscription_resources",
 		Description: "Create durable RSS candidate reconciliation records and backfill legacy download logs",
+		Fingerprint: "f78e430b7539bc70f9fb570ed8d4308225f9077b1ad12a34b47fee640bdd16d1",
 		Apply:       backfillSubscriptionResources,
 	},
 	{
 		ID:          "013_local_media_parse_metadata",
 		Description: "Store rich local media parsing evidence and incremental scan fingerprints",
+		Fingerprint: "a71d4eb059d9ef2fbff1ad70ad163ca32a81fd1f14d3d7af8c1119afd2e60243",
 		Apply: func(tx *gorm.DB) error {
 			return tx.AutoMigrate(&model.LocalEpisode{})
 		},
@@ -125,16 +152,24 @@ var migrations = []migration{
 	{
 		ID:          "014_anime_metadata_extended_fields",
 		Description: "Add extended metadata fields introduced by the local media scraper",
+		Fingerprint: "dd918d878954c1693b9f1a72c0038c210622cf713e1bc48044cae9f07d592071",
 		Apply:       migrateAnimeMetadataExtendedFields,
 	},
 	{
-		ID:          "015_local_anime_identity",
+		ID:          migration015ID,
 		Description: "Merge duplicate folder series and enforce stable local anime identities",
+		Fingerprint: "c5ff054ac73a3cdb1e192b86c20fb9dd3fa4cc3c8bf4a6820724f2b4f3cde9f0",
 		Apply:       migrateLocalAnimeIdentity,
 	},
 }
 
-const localAnimeIdentityIndexName = "idx_local_anime_scan_key"
+const (
+	localAnimeIdentityIndexName = "idx_local_anime_scan_key"
+	migration009ID              = "009_partial_bangumi_id_unique_index"
+	migration015ID              = "015_local_anime_identity"
+	migrationRunFailed          = "failed"
+	migrationRunCompleted       = "completed"
+)
 
 // migrateLocalAnimeIdentity repairs historical duplicate folder rows before
 // adding the unique index. Loose-file series use the library root as their
@@ -152,6 +187,36 @@ func migrateLocalAnimeIdentity(tx *gorm.DB) error {
 		return err
 	}
 	return ensureLocalAnimeIdentityIndex(tx)
+}
+
+func prepareLocalAnimeIdentityRepair(tx *gorm.DB, snapshot migrationSnapshotManifest) (*migrationRepairReport, error) {
+	if !tx.Migrator().HasTable(&model.LocalAnime{}) {
+		return nil, nil
+	}
+	if !tx.Migrator().HasColumn(&model.LocalAnime{}, "ScanKey") {
+		if err := tx.Migrator().AddColumn(&model.LocalAnime{}, "ScanKey"); err != nil {
+			return nil, fmt.Errorf("add local_animes.scan_key: %w", err)
+		}
+	}
+	report := migrationRepairReport{
+		FormatVersion:    1,
+		MigrationID:      migration015ID,
+		DatabaseVersion:  CurrentSchemaVersion(tx),
+		SnapshotID:       snapshot.ID,
+		SnapshotSHA256:   snapshot.DatabaseSHA256,
+		StartedAt:        time.Now().UTC(),
+		Status:           migrationRunCompleted,
+		RelatedRowsMoved: map[string]int{},
+		FieldMergeCounts: map[string]int{},
+	}
+	if err := repairLocalAnimeIdentityWithReport(tx, &report); err != nil {
+		report.Status = migrationRunFailed
+		report.Error = err.Error()
+		return &report, err
+	}
+	now := time.Now().UTC()
+	report.CompletedAt = &now
+	return &report, nil
 }
 
 // RepairLocalAnimeIdentity is also used after restoring legacy backups, which
@@ -196,6 +261,10 @@ func DropLocalAnimeIdentityIndex(tx *gorm.DB) error {
 }
 
 func repairLocalAnimeIdentity(tx *gorm.DB) error {
+	return repairLocalAnimeIdentityWithReport(tx, nil)
+}
+
+func repairLocalAnimeIdentityWithReport(tx *gorm.DB, report *migrationRepairReport) error {
 	var directories []model.LocalAnimeDirectory
 	if tx.Migrator().HasTable(&model.LocalAnimeDirectory{}) {
 		if err := tx.Unscoped().Find(&directories).Error; err != nil {
@@ -237,8 +306,16 @@ func repairLocalAnimeIdentity(tx *gorm.DB) error {
 		}
 		sortLocalAnimeIdentityGroup(group)
 		survivor := group[0]
+		if report != nil {
+			report.SurvivorCount++
+			report.DuplicateCount += len(group) - 1
+		}
 		for _, duplicate := range group[1:] {
-			if err := mergeLocalAnimeIdentityRows(tx, survivor, duplicate); err != nil {
+			if report != nil {
+				report.Mappings = append(report.Mappings, migrationRepairMapping{SourceID: duplicate.ID, SurvivorID: survivor.ID})
+				report.AffectedRows++
+			}
+			if err := mergeLocalAnimeIdentityRowsWithReport(tx, survivor, duplicate, report); err != nil {
 				return err
 			}
 		}
@@ -265,29 +342,42 @@ func sortLocalAnimeIdentityGroup(group []*model.LocalAnime) {
 	})
 }
 
-func mergeLocalAnimeIdentityRows(tx *gorm.DB, survivor, duplicate *model.LocalAnime) error {
+//nolint:gocyclo // explicit field-by-field preservation is intentional and auditable.
+func mergeLocalAnimeIdentityRowsWithReport(tx *gorm.DB, survivor, duplicate *model.LocalAnime, report *migrationRepairReport) error {
 	if survivor == nil || duplicate == nil || survivor.ID == duplicate.ID {
 		return nil
 	}
 	if tx.Migrator().HasTable(&model.LocalEpisode{}) {
-		if err := tx.Unscoped().Model(&model.LocalEpisode{}).
+		result := tx.Unscoped().Model(&model.LocalEpisode{}).
 			Where("local_anime_id = ?", duplicate.ID).
-			Update("local_anime_id", survivor.ID).Error; err != nil {
-			return fmt.Errorf("reassign episodes %d -> %d: %w", duplicate.ID, survivor.ID, err)
+			Update("local_anime_id", survivor.ID)
+		if result.Error != nil {
+			return fmt.Errorf("reassign episodes %d -> %d: %w", duplicate.ID, survivor.ID, result.Error)
+		}
+		if report != nil {
+			report.RelatedRowsMoved["local_episodes"] += int(result.RowsAffected)
 		}
 	}
 	if tx.Migrator().HasTable(&model.PlaybackHistory{}) {
-		if err := tx.Unscoped().Model(&model.PlaybackHistory{}).
+		result := tx.Unscoped().Model(&model.PlaybackHistory{}).
 			Where("local_anime_id = ?", duplicate.ID).
-			Update("local_anime_id", survivor.ID).Error; err != nil {
-			return fmt.Errorf("reassign playback history %d -> %d: %w", duplicate.ID, survivor.ID, err)
+			Update("local_anime_id", survivor.ID)
+		if result.Error != nil {
+			return fmt.Errorf("reassign playback history %d -> %d: %w", duplicate.ID, survivor.ID, result.Error)
+		}
+		if report != nil {
+			report.RelatedRowsMoved["playback_histories"] += int(result.RowsAffected)
 		}
 	}
 	if tx.Migrator().HasTable(&model.LibraryIssue{}) {
-		if err := tx.Unscoped().Model(&model.LibraryIssue{}).
+		result := tx.Unscoped().Model(&model.LibraryIssue{}).
 			Where("local_anime_id = ?", duplicate.ID).
-			Update("local_anime_id", survivor.ID).Error; err != nil {
-			return fmt.Errorf("reassign library issues %d -> %d: %w", duplicate.ID, survivor.ID, err)
+			Update("local_anime_id", survivor.ID)
+		if result.Error != nil {
+			return fmt.Errorf("reassign library issues %d -> %d: %w", duplicate.ID, survivor.ID, result.Error)
+		}
+		if report != nil {
+			report.RelatedRowsMoved["library_issues"] += int(result.RowsAffected)
 		}
 	}
 
@@ -295,30 +385,57 @@ func mergeLocalAnimeIdentityRows(tx *gorm.DB, survivor, duplicate *model.LocalAn
 	if survivor.MetadataID == nil && duplicate.MetadataID != nil {
 		updates["metadata_id"] = *duplicate.MetadataID
 		survivor.MetadataID = duplicate.MetadataID
+		if report != nil {
+			report.FieldMergeCounts["metadata_id"]++
+		}
 	}
 	if strings.TrimSpace(survivor.Title) == "" {
 		updates["title"] = duplicate.Title
+		if report != nil {
+			report.FieldMergeCounts["title"]++
+		}
 	}
 	if strings.TrimSpace(survivor.Image) == "" {
 		updates["image"] = duplicate.Image
+		if report != nil {
+			report.FieldMergeCounts["image"]++
+		}
 	}
 	if strings.TrimSpace(survivor.JellyfinSeriesID) == "" {
 		updates["jellyfin_series_id"] = duplicate.JellyfinSeriesID
+		if report != nil {
+			report.FieldMergeCounts["jellyfin_series_id"]++
+		}
 	}
 	if strings.TrimSpace(survivor.Summary) == "" {
 		updates["summary"] = duplicate.Summary
+		if report != nil {
+			report.FieldMergeCounts["summary"]++
+		}
 	}
 	if strings.TrimSpace(survivor.AirDate) == "" {
 		updates["air_date"] = duplicate.AirDate
+		if report != nil {
+			report.FieldMergeCounts["air_date"]++
+		}
 	}
 	if survivor.Season == 0 && duplicate.Season != 0 {
 		updates["season"] = duplicate.Season
+		if report != nil {
+			report.FieldMergeCounts["season"]++
+		}
 	}
 	if survivor.FileCount < duplicate.FileCount {
 		updates["file_count"] = duplicate.FileCount
+		if report != nil {
+			report.FieldMergeCounts["file_count"]++
+		}
 	}
 	if survivor.TotalSize < duplicate.TotalSize {
 		updates["total_size"] = duplicate.TotalSize
+		if report != nil {
+			report.FieldMergeCounts["total_size"]++
+		}
 	}
 	if len(updates) > 0 {
 		if err := tx.Model(&model.LocalAnime{}).Where("id = ?", survivor.ID).Updates(updates).Error; err != nil {
@@ -446,6 +563,29 @@ func backfillSchemaMigrationSequences(tx *gorm.DB) error {
 }
 
 func createPartialBangumiIDUniqueIndex(tx *gorm.DB) error {
+	if err := tx.Exec("DROP INDEX IF EXISTS idx_anime_metadata_bangumi_id").Error; err != nil {
+		return err
+	}
+	return tx.Exec(
+		"CREATE UNIQUE INDEX idx_anime_metadata_bangumi_id ON anime_metadata(bangumi_id) WHERE bangumi_id != 0",
+	).Error
+}
+
+func prepareBangumiDuplicateRepair(tx *gorm.DB, snapshot migrationSnapshotManifest) (*migrationRepairReport, error) {
+	if !tx.Migrator().HasTable(&model.AnimeMetadata{}) {
+		return nil, nil
+	}
+	report := migrationRepairReport{
+		FormatVersion:    1,
+		MigrationID:      migration009ID,
+		DatabaseVersion:  CurrentSchemaVersion(tx),
+		SnapshotID:       snapshot.ID,
+		SnapshotSHA256:   snapshot.DatabaseSHA256,
+		StartedAt:        time.Now().UTC(),
+		Status:           migrationRunCompleted,
+		RelatedRowsMoved: map[string]int{},
+		FieldMergeCounts: map[string]int{},
+	}
 	type duplicateBangumiID struct {
 		BangumiID int
 	}
@@ -457,9 +597,10 @@ func createPartialBangumiIDUniqueIndex(tx *gorm.DB) error {
 		Group("bangumi_id").
 		Having("COUNT(*) > 1").
 		Scan(&duplicateIDs).Error; err != nil {
-		return err
+		report.Status = migrationRunFailed
+		report.Error = err.Error()
+		return &report, err
 	}
-
 	for _, duplicate := range duplicateIDs {
 		var rows []model.AnimeMetadata
 		if err := tx.Unscoped().
@@ -467,35 +608,109 @@ func createPartialBangumiIDUniqueIndex(tx *gorm.DB) error {
 			Order("CASE WHEN deleted_at IS NULL THEN 0 ELSE 1 END").
 			Order("id ASC").
 			Find(&rows).Error; err != nil {
-			return err
+			report.Status = migrationRunFailed
+			report.Error = err.Error()
+			return &report, err
 		}
+		if len(rows) == 0 {
+			continue
+		}
+		report.SurvivorCount++
+		report.DuplicateCount += len(rows) - 1
 		for i := 1; i < len(rows); i++ {
-			updates := map[string]any{
-				"bangumi_id":        0,
-				"bangumi_title":     "",
-				"bangumi_image":     "",
-				"bangumi_summary":   "",
-				"bangumi_rating":    0,
-				"bangumi_image_raw": nil,
-			}
-			if rows[i].DataSource == "bangumi" {
+			survivor := &rows[0]
+			duplicateRow := &rows[i]
+			report.Mappings = append(report.Mappings, migrationRepairMapping{SourceID: duplicateRow.ID, SurvivorID: survivor.ID})
+			report.AffectedRows++
+			updates := map[string]any{"bangumi_id": 0}
+			report.ClearedFields = appendUniqueString(report.ClearedFields, "bangumi_id")
+			if duplicateRow.DataSource == "bangumi" {
 				updates["data_source"] = ""
+				report.ClearedFields = appendUniqueString(report.ClearedFields, "data_source")
+			}
+			mergeAnimeMetadataField := func(name, survivorValue, duplicateValue string) {
+				if strings.TrimSpace(survivorValue) == "" && strings.TrimSpace(duplicateValue) != "" {
+					updates[name] = duplicateValue
+					report.FieldMergeCounts[name]++
+				}
+			}
+			mergeAnimeMetadataField("title", survivor.Title, duplicateRow.Title)
+			if strings.TrimSpace(survivor.Title) == "" {
+				survivor.Title = duplicateRow.Title
+			}
+			mergeAnimeMetadataField("image", survivor.Image, duplicateRow.Image)
+			if strings.TrimSpace(survivor.Image) == "" {
+				survivor.Image = duplicateRow.Image
+			}
+			mergeAnimeMetadataField("summary", survivor.Summary, duplicateRow.Summary)
+			if strings.TrimSpace(survivor.Summary) == "" {
+				survivor.Summary = duplicateRow.Summary
+			}
+			mergeAnimeMetadataField("air_date", survivor.AirDate, duplicateRow.AirDate)
+			if strings.TrimSpace(survivor.AirDate) == "" {
+				survivor.AirDate = duplicateRow.AirDate
+			}
+			mergeAnimeMetadataField("title_cn", survivor.TitleCN, duplicateRow.TitleCN)
+			if strings.TrimSpace(survivor.TitleCN) == "" {
+				survivor.TitleCN = duplicateRow.TitleCN
+			}
+			mergeAnimeMetadataField("title_en", survivor.TitleEN, duplicateRow.TitleEN)
+			if strings.TrimSpace(survivor.TitleEN) == "" {
+				survivor.TitleEN = duplicateRow.TitleEN
+			}
+			mergeAnimeMetadataField("title_jp", survivor.TitleJP, duplicateRow.TitleJP)
+			if strings.TrimSpace(survivor.TitleJP) == "" {
+				survivor.TitleJP = duplicateRow.TitleJP
+			}
+			mergeAnimeMetadataField("bangumi_title", survivor.BangumiTitle, duplicateRow.BangumiTitle)
+			if strings.TrimSpace(survivor.BangumiTitle) == "" {
+				survivor.BangumiTitle = duplicateRow.BangumiTitle
+			}
+			mergeAnimeMetadataField("bangumi_image", survivor.BangumiImage, duplicateRow.BangumiImage)
+			if strings.TrimSpace(survivor.BangumiImage) == "" {
+				survivor.BangumiImage = duplicateRow.BangumiImage
+			}
+			mergeAnimeMetadataField("bangumi_summary", survivor.BangumiSummary, duplicateRow.BangumiSummary)
+			if strings.TrimSpace(survivor.BangumiSummary) == "" {
+				survivor.BangumiSummary = duplicateRow.BangumiSummary
+			}
+			mergeAnimeMetadataField("field_sources", survivor.FieldSources, duplicateRow.FieldSources)
+			if strings.TrimSpace(survivor.FieldSources) == "" {
+				survivor.FieldSources = duplicateRow.FieldSources
+			}
+			if survivor.BangumiRating == 0 && duplicateRow.BangumiRating != 0 {
+				updates["bangumi_rating"] = duplicateRow.BangumiRating
+				survivor.BangumiRating = duplicateRow.BangumiRating
+				report.FieldMergeCounts["bangumi_rating"]++
+			}
+			if len(survivor.BangumiImageRaw) == 0 && len(duplicateRow.BangumiImageRaw) > 0 {
+				updates["bangumi_image_raw"] = duplicateRow.BangumiImageRaw
+				survivor.BangumiImageRaw = duplicateRow.BangumiImageRaw
+				report.FieldMergeCounts["bangumi_image_raw"]++
 			}
 			if err := tx.Unscoped().
 				Model(&model.AnimeMetadata{}).
 				Where("id = ?", rows[i].ID).
 				Updates(updates).Error; err != nil {
-				return err
+				report.Status = migrationRunFailed
+				report.Error = err.Error()
+				return &report, err
 			}
 		}
 	}
 
-	if err := tx.Exec("DROP INDEX IF EXISTS idx_anime_metadata_bangumi_id").Error; err != nil {
-		return err
+	now := time.Now().UTC()
+	report.CompletedAt = &now
+	return &report, nil
+}
+
+func appendUniqueString(values []string, value string) []string {
+	for _, existing := range values {
+		if existing == value {
+			return values
+		}
 	}
-	return tx.Exec(
-		"CREATE UNIQUE INDEX idx_anime_metadata_bangumi_id ON anime_metadata(bangumi_id) WHERE bangumi_id != 0",
-	).Error
+	return append(values, value)
 }
 
 func removeRedundantMikanSubgroupRules(tx *gorm.DB) error {
@@ -706,12 +921,12 @@ func legacyResourceCanonicalKey(entry *model.DownloadLog) string {
 
 func legacyResourceState(status string) string {
 	switch strings.ToLower(strings.TrimSpace(status)) {
-	case "completed", "renamed":
-		return "completed"
+	case completedResourceState, "renamed":
+		return completedResourceState
 	case "downloading":
 		return "downloading"
-	case "failed":
-		return "failed"
+	case migrationRunFailed:
+		return migrationRunFailed
 	case "archived":
 		return "archived"
 	default:
@@ -735,7 +950,6 @@ func RunMigrations(target *gorm.DB) error {
 	if err := target.AutoMigrate(&SchemaMigration{}); err != nil {
 		return fmt.Errorf("migrate schema_migrations table: %w", err)
 	}
-	applied := make(map[string]struct{}, len(migrations))
 	var rows []SchemaMigration
 	if err := target.Find(&rows).Error; err != nil {
 		return fmt.Errorf("load applied schema migrations: %w", err)
@@ -746,6 +960,14 @@ func RunMigrations(target *gorm.DB) error {
 	if err := backfillSchemaMigrationSequences(target); err != nil {
 		return fmt.Errorf("backfill schema migration sequences: %w", err)
 	}
+	if err := validateAppliedMigrations(target, rows); err != nil {
+		return err
+	}
+	if err := ensureHistoricalDestructiveMigrationReports(target, rows); err != nil {
+		return err
+	}
+
+	applied := make(map[string]struct{}, len(migrations))
 	for _, row := range rows {
 		applied[row.ID] = struct{}{}
 	}
@@ -756,15 +978,38 @@ func RunMigrations(target *gorm.DB) error {
 			break
 		}
 	}
+	run := migrationRunManifest{
+		FormatVersion: 1,
+		RunID:         time.Now().UTC().Format("20060102T150405.000000000Z"),
+		Status:        "started",
+		StartedAt:     time.Now().UTC(),
+	}
+	if previous, err := loadMigrationRunManifest(); err == nil && previous.Status == migrationRunFailed {
+		run.RetryCount = previous.RetryCount + 1
+	}
+
+	var snapshot migrationSnapshotManifest
 	if needsMigration {
-		if err := createMigrationSnapshot(target); err != nil {
+		if snapshot, err = createMigrationSnapshotManifest(target); err != nil {
 			return fmt.Errorf("create migration snapshot: %w", err)
 		}
+		run.SnapshotID = snapshot.ID
+		run.SnapshotSHA256 = snapshot.DatabaseSHA256
+	}
+	if err := writeMigrationRunManifest(run); err != nil {
+		return fmt.Errorf("write migration run manifest: %w", err)
 	}
 
 	for sequence, m := range migrations {
 		if _, ok := applied[m.ID]; ok {
 			continue
+		}
+		if err := runMigrationRepairPreflight(target, m, snapshot); err != nil {
+			run.Status = migrationRunFailed
+			run.FailedMigration = m.ID
+			run.LastError = err.Error()
+			_ = writeMigrationRunManifest(run)
+			return fmt.Errorf("preflight migration %s: %w", m.ID, err)
 		}
 
 		if err := target.Transaction(func(tx *gorm.DB) error {
@@ -776,10 +1021,21 @@ func RunMigrations(target *gorm.DB) error {
 				ID:          m.ID,
 				Sequence:    sequence + 1,
 				Description: m.Description,
+				Checksum:    m.Fingerprint,
 				AppliedAt:   time.Now().UTC(),
 			}).Error
 		}); err != nil {
+			run.Status = migrationRunFailed
+			run.FailedMigration = m.ID
+			run.LastError = err.Error()
+			_ = writeMigrationRunManifest(run)
 			return fmt.Errorf("apply migration %s: %w", m.ID, err)
+		}
+		applied[m.ID] = struct{}{}
+		run.FailedMigration = ""
+		run.LastError = ""
+		if err := writeMigrationRunManifest(run); err != nil {
+			return fmt.Errorf("write migration run manifest: %w", err)
 		}
 	}
 
@@ -787,9 +1043,140 @@ func RunMigrations(target *gorm.DB) error {
 	// databases from builds that marked 014 as applied while still missing one
 	// or more columns, without requiring users to delete migration history.
 	if err := ensureAnimeMetadataExtendedFields(target); err != nil {
+		run.Status = migrationRunFailed
+		run.LastError = err.Error()
+		_ = writeMigrationRunManifest(run)
 		return err
 	}
 
+	run.Status = migrationRunCompleted
+	now := time.Now().UTC()
+	run.CompletedAt = &now
+	_ = writeMigrationRunManifest(run)
+	return nil
+}
+
+func validateAppliedMigrations(target *gorm.DB, rows []SchemaMigration) error {
+	known := make(map[string]migration, len(migrations))
+	for _, item := range migrations {
+		known[item.ID] = item
+	}
+	var missingChecksum []SchemaMigration
+	for _, row := range rows {
+		item, ok := known[row.ID]
+		if !ok {
+			return fmt.Errorf("database contains unknown or future schema migration %q (sequence %d); restore a compatible snapshot before starting", row.ID, row.Sequence)
+		}
+		expectedSequence := migrationSequence(row.ID)
+		if row.Sequence > len(migrations) || row.Sequence > migrationSequence(migrations[len(migrations)-1].ID) {
+			return fmt.Errorf("database schema sequence %d is newer than this application supports", row.Sequence)
+		}
+		if row.Sequence != 0 && row.Sequence != expectedSequence {
+			return fmt.Errorf("migration %s has sequence %d, expected %d", row.ID, row.Sequence, expectedSequence)
+		}
+		if strings.TrimSpace(row.Description) != "" && row.Description != item.Description {
+			return fmt.Errorf("historical migration %s description was rewritten; restore a trusted snapshot", row.ID)
+		}
+		if strings.TrimSpace(row.Checksum) == "" {
+			missingChecksum = append(missingChecksum, row)
+			continue
+		}
+		if !strings.EqualFold(row.Checksum, item.Fingerprint) {
+			return fmt.Errorf("historical migration %s checksum mismatch; restore a trusted snapshot", row.ID)
+		}
+	}
+	if len(missingChecksum) == 0 {
+		return nil
+	}
+	if len(missingChecksum) != len(rows) {
+		return fmt.Errorf("schema_migrations contains a partial checksum history; explicit baseline is required before startup")
+	}
+	// A checksum-less history is accepted only once as an explicit baseline
+	// operation. Every row must be known; subsequent starts require checksums.
+	for _, row := range missingChecksum {
+		item := known[row.ID]
+		updates := map[string]any{"checksum": item.Fingerprint}
+		if strings.TrimSpace(row.Description) == "" {
+			updates["description"] = item.Description
+		}
+		if row.Sequence == 0 {
+			updates["sequence"] = migrationSequence(row.ID)
+		}
+		if err := target.Model(&SchemaMigration{}).Where("id = ?", row.ID).Updates(updates).Error; err != nil {
+			return fmt.Errorf("backfill trusted migration checksum for %s: %w", row.ID, err)
+		}
+	}
+	return nil
+}
+
+func ensureHistoricalDestructiveMigrationReports(target *gorm.DB, rows []SchemaMigration) error {
+	for _, row := range rows {
+		if row.ID != migration009ID && row.ID != migration015ID {
+			continue
+		}
+		reportPath := filepath.Join(config.DataPath("updates", "migration-reports", row.ID), "report.json")
+		if _, err := os.Stat(reportPath); err == nil {
+			continue
+		} else if !os.IsNotExist(err) {
+			return err
+		}
+		report := migrationRepairReport{
+			FormatVersion:   1,
+			MigrationID:     row.ID,
+			DatabaseVersion: CurrentSchemaVersion(target),
+			StartedAt:       row.AppliedAt,
+			Status:          "already_executed_irreversible",
+			Error:           "migration was executed by an earlier release; original data can only be recovered from its pre-migration snapshot",
+		}
+		if report.StartedAt.IsZero() {
+			report.StartedAt = time.Now().UTC()
+		}
+		now := time.Now().UTC()
+		report.CompletedAt = &now
+		if err := writeMigrationRepairReport(report); err != nil {
+			return fmt.Errorf("write historical migration report %s: %w", row.ID, err)
+		}
+	}
+	return nil
+}
+
+func runMigrationRepairPreflight(target *gorm.DB, item migration, snapshot migrationSnapshotManifest) error {
+	var report *migrationRepairReport
+	var runErr error
+	prepare := func(tx *gorm.DB) error {
+		switch item.ID {
+		case migration009ID:
+			report, runErr = prepareBangumiDuplicateRepair(tx, snapshot)
+		case migration015ID:
+			report, runErr = prepareLocalAnimeIdentityRepair(tx, snapshot)
+		default:
+			return nil
+		}
+		return runErr
+	}
+	switch item.ID {
+	case migration009ID:
+		if err := target.Transaction(prepare); err != nil {
+			if report != nil {
+				_ = writeMigrationRepairReport(*report)
+			}
+			return err
+		}
+	case migration015ID:
+		if err := target.Transaction(prepare); err != nil {
+			if report != nil {
+				_ = writeMigrationRepairReport(*report)
+			}
+			return err
+		}
+	default:
+		return nil
+	}
+	if report != nil {
+		if err := writeMigrationRepairReport(*report); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -852,50 +1239,219 @@ func releaseMigrationLock(lock migrationLock) {
 }
 
 type migrationSnapshotManifest struct {
+	ID                string    `json:"id"`
 	FormatVersion     int       `json:"format_version"`
 	AppVersion        string    `json:"app_version"`
 	OperationType     string    `json:"operation_type"`
 	RollbackSupported bool      `json:"rollback_supported"`
+	RollbackScope     string    `json:"rollback_scope"`
+	DatabaseFormat    int       `json:"database_format"`
+	SchemaFormat      int       `json:"schema_format"`
 	CreatedAt         time.Time `json:"created_at"`
 	DatabasePath      string    `json:"database_path"`
+	DatabaseSHA256    string    `json:"database_sha256"`
 	SchemaVersion     string    `json:"schema_version,omitempty"`
 }
 
-func createMigrationSnapshot(target *gorm.DB) error {
+type migrationRunManifest struct {
+	FormatVersion   int        `json:"format_version"`
+	RunID           string     `json:"run_id"`
+	Status          string     `json:"status"`
+	StartedAt       time.Time  `json:"started_at"`
+	CompletedAt     *time.Time `json:"completed_at,omitempty"`
+	FailedMigration string     `json:"failed_migration,omitempty"`
+	LastError       string     `json:"last_error,omitempty"`
+	RetryCount      int        `json:"retry_count"`
+	SnapshotID      string     `json:"snapshot_id,omitempty"`
+	SnapshotSHA256  string     `json:"snapshot_sha256,omitempty"`
+}
+
+type migrationRepairMapping struct {
+	SourceID   uint `json:"source_id"`
+	SurvivorID uint `json:"survivor_id"`
+}
+
+type migrationRepairReport struct {
+	FormatVersion    int                      `json:"format_version"`
+	MigrationID      string                   `json:"migration_id"`
+	DatabaseVersion  string                   `json:"database_version"`
+	SnapshotID       string                   `json:"snapshot_id,omitempty"`
+	SnapshotSHA256   string                   `json:"snapshot_sha256,omitempty"`
+	StartedAt        time.Time                `json:"started_at"`
+	CompletedAt      *time.Time               `json:"completed_at,omitempty"`
+	Status           string                   `json:"status"`
+	AffectedRows     int                      `json:"affected_rows"`
+	SurvivorCount    int                      `json:"survivor_count"`
+	DuplicateCount   int                      `json:"duplicate_count"`
+	RelatedRowsMoved map[string]int           `json:"related_rows_moved,omitempty"`
+	FieldMergeCounts map[string]int           `json:"field_merge_counts,omitempty"`
+	ClearedFields    []string                 `json:"cleared_fields,omitempty"`
+	Mappings         []migrationRepairMapping `json:"mappings,omitempty"`
+	Error            string                   `json:"error,omitempty"`
+}
+
+func createMigrationSnapshotManifest(target *gorm.DB) (migrationSnapshotManifest, error) {
 	if CurrentDBPath == "" || CurrentDBPath == sqliteMemoryPath {
-		return nil
+		return migrationSnapshotManifest{}, nil
 	}
 	if _, err := os.Stat(CurrentDBPath); err != nil {
 		if os.IsNotExist(err) {
-			return nil
+			return migrationSnapshotManifest{}, nil
 		}
-		return err
+		return migrationSnapshotManifest{}, err
 	}
 	root := config.DataPath("updates", "migration-snapshots")
 	if err := os.MkdirAll(root, 0700); err != nil {
-		return err
+		return migrationSnapshotManifest{}, err
 	}
 	now := time.Now().UTC()
 	id := now.Format("20060102T150405.000000000Z")
 	dir := filepath.Join(root, id)
 	if err := os.MkdirAll(dir, 0700); err != nil {
-		return err
+		return migrationSnapshotManifest{}, err
 	}
 	databasePath := filepath.Join(dir, "database.db")
 	if err := target.Exec("VACUUM INTO ?", databasePath).Error; err != nil {
 		_ = os.RemoveAll(dir)
-		return err
+		return migrationSnapshotManifest{}, err
 	}
-	payload, _ := json.MarshalIndent(migrationSnapshotManifest{
+	databaseSHA, err := migrationFileSHA256(databasePath)
+	if err != nil {
+		_ = os.RemoveAll(dir)
+		return migrationSnapshotManifest{}, err
+	}
+	manifest := migrationSnapshotManifest{
+		ID:                id,
 		FormatVersion:     1,
 		AppVersion:        appversion.AppVersion,
 		OperationType:     "migration",
-		RollbackSupported: true,
+		RollbackSupported: false,
+		RollbackScope:     "database_only",
+		DatabaseFormat:    DatabaseFormat,
+		SchemaFormat:      SchemaFormat,
 		CreatedAt:         now,
 		DatabasePath:      filepath.Base(databasePath),
+		DatabaseSHA256:    databaseSHA,
 		SchemaVersion:     CurrentSchemaVersion(target),
-	}, "", "  ")
-	return os.WriteFile(filepath.Join(dir, "manifest.json"), append(payload, '\n'), 0600)
+	}
+	payload, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		_ = os.RemoveAll(dir)
+		return migrationSnapshotManifest{}, err
+	}
+	if err := writeMigrationJSON(filepath.Join(dir, "manifest.json"), payload); err != nil {
+		_ = os.RemoveAll(dir)
+		return migrationSnapshotManifest{}, err
+	}
+	return manifest, nil
+}
+
+func migrationRunManifestPath() string {
+	return config.DataPath("updates", "migration-runs", "current.json")
+}
+
+func loadMigrationRunManifest() (migrationRunManifest, error) {
+	data, err := os.ReadFile(filepath.Clean(migrationRunManifestPath()))
+	if err != nil {
+		return migrationRunManifest{}, err
+	}
+	var manifest migrationRunManifest
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		return migrationRunManifest{}, err
+	}
+	return manifest, nil
+}
+
+func writeMigrationRunManifest(manifest migrationRunManifest) error {
+	if err := os.MkdirAll(filepath.Dir(migrationRunManifestPath()), 0700); err != nil {
+		return err
+	}
+	payload, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return err
+	}
+	return writeMigrationJSON(migrationRunManifestPath(), payload)
+}
+
+func writeMigrationJSON(path string, payload []byte) error {
+	tmp := filepath.Clean(path) + ".part"
+	if err := os.WriteFile(tmp, append(payload, '\n'), 0600); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, filepath.Clean(path)); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
+}
+
+func writeMigrationRepairReport(report migrationRepairReport) error {
+	root := config.DataPath("updates", "migration-reports", report.MigrationID)
+	if err := os.MkdirAll(root, 0700); err != nil {
+		return err
+	}
+	payload, err := json.MarshalIndent(report, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := writeMigrationJSON(filepath.Join(root, "report.json"), payload); err != nil {
+		return err
+	}
+	summary := fmt.Sprintf(
+		"migration: %s\nstatus: %s\ndatabase_version: %s\nsnapshot_id: %s\nsnapshot_sha256: %s\naffected_rows: %d\nsurvivor_count: %d\nduplicate_count: %d\n",
+		report.MigrationID,
+		report.Status,
+		report.DatabaseVersion,
+		report.SnapshotID,
+		report.SnapshotSHA256,
+		report.AffectedRows,
+		report.SurvivorCount,
+		report.DuplicateCount,
+	)
+	if len(report.FieldMergeCounts) > 0 {
+		summary += "field_merges:\n"
+		keys := make([]string, 0, len(report.FieldMergeCounts))
+		for key := range report.FieldMergeCounts {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			summary += fmt.Sprintf("  %s: %d\n", key, report.FieldMergeCounts[key])
+		}
+	}
+	if len(report.ClearedFields) > 0 {
+		summary += "cleared_or_unrecoverable_fields:\n"
+		for _, key := range report.ClearedFields {
+			summary += fmt.Sprintf("  - %s\n", key)
+		}
+	}
+	if report.Error != "" {
+		summary += "error: " + report.Error + "\n"
+	}
+	return os.WriteFile(filepath.Join(root, "summary.txt"), []byte(summary), 0600)
+}
+
+func migrationFileSHA256(path string) (string, error) {
+	file, err := os.Open(filepath.Clean(path))
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = file.Close() }()
+	hash := sha256.New()
+	buf := make([]byte, 128*1024)
+	for {
+		n, readErr := file.Read(buf)
+		if n > 0 {
+			_, _ = hash.Write(buf[:n])
+		}
+		if readErr != nil {
+			if readErr == io.EOF {
+				break
+			}
+			return "", readErr
+		}
+	}
+	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
 func migrationSequence(id string) int {
@@ -920,6 +1476,21 @@ func validateMigrationOrder() error {
 			return fmt.Errorf("migration %s is not in strictly increasing numeric order", item.ID)
 		}
 		lastSequence = sequence
+	}
+
+	seenFingerprints := make(map[string]string, len(migrations))
+	for _, item := range migrations {
+		fingerprint := strings.TrimSpace(item.Fingerprint)
+		if fingerprint == "" {
+			return fmt.Errorf("migration %s is missing an immutable fingerprint", item.ID)
+		}
+		if len(fingerprint) != sha256.Size*2 {
+			return fmt.Errorf("migration %s has an invalid fingerprint", item.ID)
+		}
+		if previousID, ok := seenFingerprints[strings.ToLower(fingerprint)]; ok {
+			return fmt.Errorf("migration %s reuses fingerprint from %s", item.ID, previousID)
+		}
+		seenFingerprints[strings.ToLower(fingerprint)] = item.ID
 	}
 	return nil
 }

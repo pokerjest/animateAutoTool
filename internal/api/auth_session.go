@@ -5,6 +5,7 @@ import (
 
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
+	"github.com/pokerjest/animateAutoTool/internal/authsession"
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/store"
@@ -22,6 +23,9 @@ func currentSessionUserID(c *gin.Context) (uint, error) {
 	session := sessions.Default(c)
 	userID := session.Get("user_id")
 	if userID == nil {
+		return 0, errNoActiveSession
+	}
+	if authsession.Required() && !authsession.Valid(session.Get("auth_generation")) {
 		return 0, errNoActiveSession
 	}
 

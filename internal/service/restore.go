@@ -3,9 +3,11 @@ package service
 import (
 	"fmt"
 	"log"
+	"strconv"
 	"time"
 
 	"github.com/glebarez/sqlite"
+	"github.com/pokerjest/animateAutoTool/internal/authsession"
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/safeio"
@@ -57,6 +59,12 @@ func (s *RestoreService) PerformRestore(sourcePath string, options RestoreOption
 			)
 		}
 	}
+	if descriptor.DatabaseFormat > 0 && descriptor.DatabaseFormat != db.DatabaseFormat {
+		return fmt.Errorf("backup database format %d is not supported by the current format %d", descriptor.DatabaseFormat, db.DatabaseFormat)
+	}
+	if descriptor.SchemaFormat > 0 && descriptor.SchemaFormat != db.SchemaFormat {
+		return fmt.Errorf("backup schema format %d is not supported by the current format %d", descriptor.SchemaFormat, db.SchemaFormat)
+	}
 	snapshot, err := CreateSafetySnapshot("backup-restore")
 	if err != nil {
 		return fmt.Errorf("failed to create pre-restore snapshot: %w", err)
@@ -84,7 +92,13 @@ func (s *RestoreService) PerformRestore(sourcePath string, options RestoreOption
 
 	// 3. Transaction Write Phase
 	if err := db.DB.Transaction(func(tx *gorm.DB) error {
+		if err := validateRestoreDependencies(tx, data, options); err != nil {
+			return err
+		}
 		if err := s.writeRestoreData(tx, data, options, descriptor); err != nil {
+			return err
+		}
+		if err := validateRestoredDatabase(tx, data, options); err != nil {
 			return err
 		}
 		log.Printf("RestoreService: Transaction committed successfully in %v", time.Since(start))
@@ -92,12 +106,21 @@ func (s *RestoreService) PerformRestore(sourcePath string, options RestoreOption
 	}); err != nil {
 		return err
 	}
+	if currentSchema := db.CurrentSchemaVersion(db.DB); currentSchema != db.LatestSchemaVersion() {
+		return fmt.Errorf("restore completed but database schema version is %s, expected %s", currentSchema, db.LatestSchemaVersion())
+	}
 	if options.Configs {
 		if err := db.ExportGlobalConfigsToConfigFile(); err != nil {
 			if snapshot.ID != "" {
 				_ = RestoreSafetySnapshot(snapshot.ID)
 			}
 			return fmt.Errorf("sync restored settings to config.yaml: %w", err)
+		}
+	}
+	if options.Users {
+		authsession.InvalidateAll()
+		if err := db.SaveGlobalConfig(db.AuthSessionGenerationConfigKey, strconv.FormatUint(authsession.Current(), 10)); err != nil {
+			return fmt.Errorf("persist restored-session invalidation generation: %w", err)
 		}
 	}
 	return nil
@@ -227,6 +250,256 @@ func validateRestoreOptions(desc BackupDescriptor, options RestoreOptions) error
 	default:
 		return nil
 	}
+}
+
+//nolint:gocyclo // selected restore categories require explicit dependency checks.
+func validateRestoreDependencies(tx *gorm.DB, d *restoreData, options RestoreOptions) error {
+	if tx == nil || d == nil {
+		return fmt.Errorf("restore data is unavailable")
+	}
+	userIDs := make(map[uint]struct{}, len(d.users))
+	for _, user := range d.users {
+		userIDs[user.ID] = struct{}{}
+	}
+	animeIDs := make(map[uint]struct{}, len(d.animes))
+	for _, anime := range d.animes {
+		animeIDs[anime.ID] = struct{}{}
+	}
+	episodeIDs := make(map[uint]struct{}, len(d.episodes))
+	for _, episode := range d.episodes {
+		episodeIDs[episode.ID] = struct{}{}
+	}
+	metadataIDs := make(map[uint]struct{}, len(d.metas))
+	for _, metadata := range d.metas {
+		metadataIDs[metadata.ID] = struct{}{}
+	}
+	directoryIDs := make(map[uint]struct{}, len(d.dirs))
+	for _, directory := range d.dirs {
+		directoryIDs[directory.ID] = struct{}{}
+	}
+	subscriptionIDs := make(map[uint]struct{}, len(d.subs))
+	for _, subscription := range d.subs {
+		subscriptionIDs[subscription.ID] = struct{}{}
+	}
+
+	exists := func(table any, id uint) (bool, error) {
+		if id == 0 {
+			return false, nil
+		}
+		var count int64
+		if err := tx.Model(table).Where("id = ?", id).Count(&count).Error; err != nil {
+			return false, err
+		}
+		return count > 0, nil
+	}
+	hasUser := func(id uint) (bool, error) {
+		if options.Users && d.hasUsers {
+			_, ok := userIDs[id]
+			return ok, nil
+		}
+		return exists(&model.User{}, id)
+	}
+	hasAnime := func(id uint) (bool, error) {
+		if options.Local && d.hasAnimes {
+			_, ok := animeIDs[id]
+			return ok, nil
+		}
+		return exists(&model.LocalAnime{}, id)
+	}
+	hasEpisode := func(id uint) (bool, error) {
+		if options.Local && d.hasEpisodes {
+			_, ok := episodeIDs[id]
+			return ok, nil
+		}
+		return exists(&model.LocalEpisode{}, id)
+	}
+	hasMetadata := func(id uint) (bool, error) {
+		if options.Metadata && d.hasMetadata {
+			_, ok := metadataIDs[id]
+			return ok, nil
+		}
+		return exists(&model.AnimeMetadata{}, id)
+	}
+	hasDirectory := func(id uint) (bool, error) {
+		if options.Local && d.hasDirs {
+			_, ok := directoryIDs[id]
+			return ok, nil
+		}
+		return exists(&model.LocalAnimeDirectory{}, id)
+	}
+	hasSubscription := func(id uint) (bool, error) {
+		if options.Subscriptions && d.hasSubscriptions {
+			_, ok := subscriptionIDs[id]
+			return ok, nil
+		}
+		return exists(&model.Subscription{}, id)
+	}
+
+	if options.Logs {
+		validateSubscriptionID := func(table string, rowID, subscriptionID uint) error {
+			if subscriptionID == 0 {
+				return nil
+			}
+			ok, err := hasSubscription(subscriptionID)
+			if err != nil {
+				return fmt.Errorf("validate %s %d subscription: %w", table, rowID, err)
+			}
+			if !ok {
+				return fmt.Errorf("restore would create orphan %s %d -> subscription %d", table, rowID, subscriptionID)
+			}
+			return nil
+		}
+		if d.hasDownloadLogs {
+			for _, entry := range d.logs {
+				if err := validateSubscriptionID("download_log", entry.ID, entry.SubscriptionID); err != nil {
+					return err
+				}
+			}
+		}
+		if d.hasResources {
+			for _, entry := range d.resources {
+				if err := validateSubscriptionID("subscription_resource", entry.ID, entry.SubscriptionID); err != nil {
+					return err
+				}
+			}
+		}
+		if d.hasRunLogs {
+			for _, entry := range d.runLogs {
+				if err := validateSubscriptionID("subscription_run_log", entry.ID, entry.SubscriptionID); err != nil {
+					return err
+				}
+			}
+		}
+	}
+
+	if options.Local && d.hasEpisodes {
+		for _, episode := range d.episodes {
+			ok, err := hasAnime(episode.LocalAnimeID)
+			if err != nil {
+				return fmt.Errorf("validate local episode %d parent: %w", episode.ID, err)
+			}
+			if !ok {
+				return fmt.Errorf("restore would create orphan local_episode %d -> local_anime %d", episode.ID, episode.LocalAnimeID)
+			}
+		}
+	}
+	if options.Local && d.hasPlayback {
+		for _, history := range d.playback {
+			ok, err := hasUser(history.UserID)
+			if err != nil {
+				return fmt.Errorf("validate playback history %d user: %w", history.ID, err)
+			}
+			if !ok {
+				return fmt.Errorf("restore would create orphan playback_history %d -> user %d", history.ID, history.UserID)
+			}
+			ok, err = hasEpisode(history.LocalEpisodeID)
+			if err != nil {
+				return fmt.Errorf("validate playback history %d episode: %w", history.ID, err)
+			}
+			if !ok {
+				return fmt.Errorf("restore would create orphan playback_history %d -> local_episode %d", history.ID, history.LocalEpisodeID)
+			}
+			ok, err = hasAnime(history.LocalAnimeID)
+			if err != nil {
+				return fmt.Errorf("validate playback history %d anime: %w", history.ID, err)
+			}
+			if !ok {
+				return fmt.Errorf("restore would create orphan playback_history %d -> local_anime %d", history.ID, history.LocalAnimeID)
+			}
+		}
+	}
+	if options.Local && d.hasAnimes {
+		for _, anime := range d.animes {
+			if anime.DirectoryID != 0 {
+				ok, err := hasDirectory(anime.DirectoryID)
+				if err != nil {
+					return fmt.Errorf("validate local anime %d directory: %w", anime.ID, err)
+				}
+				if !ok {
+					return fmt.Errorf("restore would create orphan local_anime %d -> directory %d", anime.ID, anime.DirectoryID)
+				}
+			}
+			if anime.MetadataID == nil || *anime.MetadataID == 0 {
+				continue
+			}
+			ok, err := hasMetadata(*anime.MetadataID)
+			if err != nil {
+				return fmt.Errorf("validate local anime %d metadata: %w", anime.ID, err)
+			}
+			if !ok {
+				return fmt.Errorf("restore would create orphan local_anime %d -> metadata %d", anime.ID, *anime.MetadataID)
+			}
+		}
+	}
+	if options.Subscriptions && d.hasSubscriptions {
+		for _, subscription := range d.subs {
+			if subscription.MetadataID == nil || *subscription.MetadataID == 0 {
+				continue
+			}
+			ok, err := hasMetadata(*subscription.MetadataID)
+			if err != nil {
+				return fmt.Errorf("validate subscription %d metadata: %w", subscription.ID, err)
+			}
+			if !ok {
+				return fmt.Errorf("restore would create orphan subscription %d -> metadata %d", subscription.ID, *subscription.MetadataID)
+			}
+		}
+	}
+	return nil
+}
+
+func validateRestoredDatabase(tx *gorm.DB, d *restoreData, options RestoreOptions) error {
+	var quick string
+	if err := tx.Raw("PRAGMA quick_check").Scan(&quick).Error; err != nil {
+		return fmt.Errorf("sqlite quick_check: %w", err)
+	}
+	if quick != "" && quick != "ok" {
+		return fmt.Errorf("sqlite quick_check failed: %s", quick)
+	}
+	var foreignKeys []struct {
+		Table  string
+		RowID  int
+		Parent string
+		FKID   int
+	}
+	if err := tx.Raw("PRAGMA foreign_key_check").Scan(&foreignKeys).Error; err != nil {
+		return fmt.Errorf("sqlite foreign_key_check: %w", err)
+	}
+	if len(foreignKeys) > 0 {
+		return fmt.Errorf("restore left %d foreign-key violations", len(foreignKeys))
+	}
+	checkCount := func(table string, expected int, enabled bool) error {
+		if !enabled {
+			return nil
+		}
+		var count int64
+		if err := tx.Table(table).Count(&count).Error; err != nil {
+			return err
+		}
+		if count != int64(expected) {
+			return fmt.Errorf("restored %s count=%d, expected=%d", table, count, expected)
+		}
+		return nil
+	}
+	if err := checkCount("anime_metadata", len(d.metas), options.Metadata && d.hasMetadata); err != nil {
+		return err
+	}
+	if err := checkCount("subscriptions", len(d.subs), options.Subscriptions && d.hasSubscriptions); err != nil {
+		return err
+	}
+	if err := checkCount("users", len(d.users), options.Users && d.hasUsers); err != nil {
+		return err
+	}
+	if err := checkCount("local_animes", len(d.animes), options.Local && d.hasAnimes); err != nil {
+		return err
+	}
+	if err := checkCount("local_episodes", len(d.episodes), options.Local && d.hasEpisodes); err != nil {
+		return err
+	}
+	if err := checkCount("playback_histories", len(d.playback), options.Local && d.hasPlayback); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (s *RestoreService) writeRestoreData(tx *gorm.DB, d *restoreData, options RestoreOptions, desc BackupDescriptor) error {

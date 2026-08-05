@@ -733,8 +733,11 @@ func V1UpdaterSnapshotsHandler(c *gin.Context) {
 			"operation_type":     snapshot.OperationType,
 			"app_version":        snapshot.AppVersion,
 			"schema_version":     snapshot.SchemaVersion,
+			"database_format":    snapshot.DatabaseFormat,
+			"schema_format":      snapshot.SchemaFormat,
 			"created_at":         snapshot.CreatedAt,
 			"rollback_supported": snapshot.RollbackSupported,
+			"rollback_scope":     snapshot.RollbackScope,
 		})
 	}
 	v1Data(c, http.StatusOK, gin.H{"items": items})

@@ -3,6 +3,8 @@ package updater
 import (
 	"strings"
 	"testing"
+
+	"github.com/pokerjest/animateAutoTool/internal/db"
 )
 
 func compatibleStableManifest() ReleaseManifest {
@@ -11,6 +13,8 @@ func compatibleStableManifest() ReleaseManifest {
 		Version:                  "v1.0.0",
 		Channel:                  string(ReleaseChannelStable),
 		SchemaVersion:            "011",
+		DatabaseFormat:           db.DatabaseFormat,
+		SchemaFormat:             db.SchemaFormat,
 		MinUpgradeFrom:           "0.9.0",
 		MinReadableSchema:        "001",
 		MaxReadableSchema:        "011",
@@ -73,5 +77,20 @@ func TestReleaseManifestValidationMatchesChannelAndSchemaRange(t *testing.T) {
 	manifest.MaxReadableSchema = "011"
 	if err := manifest.validForRelease("v1.0.0"); err == nil {
 		t.Fatal("expected reversed schema range to be rejected")
+	}
+}
+
+func TestReleaseManifestRejectsUnsupportedDatabaseOrSchemaFormat(t *testing.T) {
+	manifest := compatibleStableManifest()
+	manifest.DatabaseFormat++
+	if err := manifest.validForRelease("v1.0.0"); err == nil || !strings.Contains(err.Error(), "format") {
+		t.Fatalf("expected unsupported database format rejection, got %v", err)
+	}
+
+	manifest = compatibleStableManifest()
+	manifest.SchemaFormat++
+	allowed, reason := manifest.allows("v0.9.9", "011", "v1.0.0")
+	if allowed || !strings.Contains(reason, "format") {
+		t.Fatalf("expected unsupported schema format rejection, got allowed=%v reason=%q", allowed, reason)
 	}
 }

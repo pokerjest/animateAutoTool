@@ -57,6 +57,8 @@ type BackupDescriptor struct {
 	HasLocalEpisodes         bool
 	HasPlaybackHistory       bool
 	FormatVersion            int
+	DatabaseFormat           int
+	SchemaFormat             int
 	AppVersion               string
 	SchemaVersion            string
 	ContainsSecrets          bool
@@ -66,6 +68,8 @@ type BackupDescriptor struct {
 type backupManifest struct {
 	ID              uint `gorm:"primaryKey"`
 	FormatVersion   int
+	DatabaseFormat  int
+	SchemaFormat    int
 	Mode            string
 	Label           string
 	Description     string
@@ -228,6 +232,8 @@ func InspectBackup(path string) (BackupDescriptor, error) {
 			desc.Description = manifest.Description
 			desc.ConfigStrategy = manifest.ConfigStrategy
 			desc.FormatVersion = manifest.FormatVersion
+			desc.DatabaseFormat = manifest.DatabaseFormat
+			desc.SchemaFormat = manifest.SchemaFormat
 			desc.AppVersion = manifest.AppVersion
 			desc.SchemaVersion = manifest.SchemaVersion
 			desc.ContainsSecrets = manifest.ContainsSecrets
@@ -322,6 +328,8 @@ func annotateBackupFile(destPath string, mode string) error {
 	}
 	return destDB.Create(&backupManifest{
 		FormatVersion:   1,
+		DatabaseFormat:  db.DatabaseFormat,
+		SchemaFormat:    db.SchemaFormat,
 		Mode:            mode,
 		Label:           BackupModeLabel(mode),
 		Description:     BackupModeDescription(mode),
@@ -357,6 +365,8 @@ func createSelectiveBackupFile(destPath string, mode string) error {
 
 	return destDB.Create(&backupManifest{
 		FormatVersion:   1,
+		DatabaseFormat:  db.DatabaseFormat,
+		SchemaFormat:    db.SchemaFormat,
 		Mode:            mode,
 		Label:           BackupModeLabel(mode),
 		Description:     BackupModeDescription(mode),

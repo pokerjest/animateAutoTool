@@ -16,6 +16,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/pokerjest/animateAutoTool/internal/ai"
+	"github.com/pokerjest/animateAutoTool/internal/authsession"
 	"github.com/pokerjest/animateAutoTool/internal/bangumi"
 	"github.com/pokerjest/animateAutoTool/internal/bootstrap"
 	"github.com/pokerjest/animateAutoTool/internal/config"
@@ -307,6 +308,7 @@ func V1BootstrapSessionHandler(c *gin.Context) {
 
 	session := sessions.Default(c)
 	session.Set("user_id", user.ID)
+	session.Set("auth_generation", authsession.Current())
 	session.Options(sessionCookieOptions(c, 0))
 	if err := session.Save(); err != nil {
 		v1Error(c, http.StatusInternalServerError, "session_save_failed", "无法保存初始化登录状态")
@@ -346,6 +348,7 @@ func V1LoginHandler(c *gin.Context) {
 	clearFailedLoginAttempts(clientIP)
 	session := sessions.Default(c)
 	session.Set("user_id", user.ID)
+	session.Set("auth_generation", authsession.Current())
 	maxAge := 0
 	if req.RememberMe {
 		maxAge = 3600 * 24 * 30

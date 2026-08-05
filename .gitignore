@@ -28,6 +28,9 @@ go.work
 *.db
 *.db-shm
 *.db-wal
+!testdata/
+!testdata/historical/
+!testdata/historical/*.db
 /data/
 
 # Log files
@@ -78,6 +81,7 @@ animateTool
 .appdata_test*/
 appdata_test*/
 internal/api/data/
+internal/*/data/
 
 # MkDocs documentation build output
 /build/docs-site/

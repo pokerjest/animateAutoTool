@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
+	"github.com/pokerjest/animateAutoTool/internal/authsession"
 	"github.com/pokerjest/animateAutoTool/internal/bootstrap"
 	"github.com/pokerjest/animateAutoTool/internal/config"
 	"github.com/pokerjest/animateAutoTool/internal/service"
@@ -88,6 +89,7 @@ func LoginPostHandler(c *gin.Context) {
 
 	session := sessions.Default(c)
 	session.Set("user_id", user.ID)
+	session.Set("auth_generation", authsession.Current())
 
 	maxAge := 0
 	if req.RememberMe {
