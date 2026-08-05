@@ -2,6 +2,7 @@ package event
 
 import (
 	"log"
+	"runtime/debug"
 	"sync"
 
 	"github.com/google/uuid"
@@ -110,7 +111,13 @@ func (b *InMemoryBus) Publish(topic EventType, payload interface{}) {
 			defer b.wg.Done()
 			defer func() {
 				if r := recover(); r != nil {
-					log.Printf("event bus handler panic topic=%s sub_id=%s err=%v", topic, subID, r)
+					log.Printf(
+						"ERROR: EventBus: handler panic topic=%s sub_id=%s recovery_action=continue_other_handlers panic=%v\n%s",
+						topic,
+						subID,
+						r,
+						debug.Stack(),
+					)
 				}
 			}()
 			handler(evt)

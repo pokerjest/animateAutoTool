@@ -27,3 +27,12 @@ func TestWaitForShutdownTasksTimesOut(t *testing.T) {
 		t.Fatalf("expected shutdown timeout, got %v", err)
 	}
 }
+
+func TestWaitForShutdownTasksReportsWaiterPanic(t *testing.T) {
+	err := waitForShutdownTasks(time.Second, func() {
+		panic("shutdown-boom")
+	})
+	if err == nil || !strings.Contains(err.Error(), "shutdown waiter panic") {
+		t.Fatalf("expected shutdown waiter panic, got %v", err)
+	}
+}

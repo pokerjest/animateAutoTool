@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log"
 	"net/http"
 	"path/filepath"
@@ -255,7 +254,7 @@ func AddLocalDirectoryHandler(c *gin.Context) {
 
 		scanner := service.NewScannerService()
 		if err := scanner.ScanAllWithProgressContext(ctx, nil); err != nil {
-			fmt.Printf("Error scanning all directories: %v\n", err)
+			log.Printf("ERROR: LocalLibrary: background scan failed recovery_action=retain_previous_index_and_retry error=%v", err)
 			return
 		}
 		triggerJellyfinLibraryRefresh(ctx)
@@ -310,7 +309,7 @@ func ScanLocalDirectoryHandler(c *gin.Context) {
 	scanner := service.NewScannerService()
 	GoBackground(func(ctx context.Context) {
 		if err := scanner.ScanAllWithProgressContext(ctx, nil); err != nil {
-			fmt.Printf("Error scanning all directories: %v\n", err)
+			log.Printf("ERROR: LocalLibrary: background scan failed recovery_action=retain_previous_index_and_retry error=%v", err)
 			return
 		}
 

@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"path"
 	"regexp"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -421,6 +422,22 @@ func (p *MikanParser) ResolveBangumiSubjectContext(ctx context.Context, subjectI
 		wg.Add(1)
 		go func(candidateIndex int, candidateMikanID string) {
 			defer wg.Done()
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					panicErr := fmt.Errorf("mikan Bangumi mapping panic candidate=%s: %v", candidateMikanID, recovered)
+					resultMu.Lock()
+					if firstErr == nil {
+						firstErr = panicErr
+					}
+					resultMu.Unlock()
+					log.Printf(
+						"ERROR: MikanParser: mapping worker panic candidate_index=%d recovery_action=continue_other_candidates panic=%v\n%s",
+						candidateIndex,
+						recovered,
+						debug.Stack(),
+					)
+				}
+			}()
 			select {
 			case semaphore <- struct{}{}:
 				defer func() { <-semaphore }()

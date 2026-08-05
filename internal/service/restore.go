@@ -3,7 +3,10 @@ package service
 import (
 	"fmt"
 	"log"
+	"path/filepath"
+	"runtime/debug"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/glebarez/sqlite"
@@ -38,14 +41,55 @@ func NewRestoreService() *RestoreService {
 }
 
 // PerformRestore executes the high-performance parallel read / batch write restore
-func (s *RestoreService) PerformRestore(sourcePath string, options RestoreOptions) error {
-	log.Printf("RestoreService: Starting restore from %s", sourcePath)
+func (s *RestoreService) PerformRestore(sourcePath string, options RestoreOptions) (retErr error) {
 	start := time.Now()
+	sourceLabel := filepath.Base(filepath.Clean(sourcePath))
+	optionSummary := restoreOptionsSummary(options)
+	log.Printf("RestoreService: restore starting source=%s categories=%s", sourceLabel, optionSummary)
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			retErr = fmt.Errorf("restore panic: %v", recovered)
+			log.Printf(
+				"ERROR: RestoreService: panic source=%s categories=%s recovery_action=transaction_rollback_and_restore_snapshot panic=%v\n%s",
+				sourceLabel,
+				optionSummary,
+				recovered,
+				debug.Stack(),
+			)
+		}
+		if retErr != nil {
+			log.Printf(
+				"ERROR: RestoreService: restore failed source=%s categories=%s duration=%s recovery_action=inspect_pre_restore_snapshot error=%v",
+				sourceLabel,
+				optionSummary,
+				time.Since(start).Round(time.Millisecond),
+				retErr,
+			)
+			return
+		}
+		log.Printf(
+			"RestoreService: restore completed source=%s categories=%s duration=%s schema=%s",
+			sourceLabel,
+			optionSummary,
+			time.Since(start).Round(time.Millisecond),
+			db.CurrentSchemaVersion(db.DB),
+		)
+	}()
 
 	descriptor, err := InspectBackup(sourcePath)
 	if err != nil {
 		return fmt.Errorf("failed to inspect backup file: %v", err)
 	}
+	log.Printf(
+		"RestoreService: backup inspected source=%s mode=%s app_version=%s schema=%s database_format=%d schema_format=%d contains_secrets=%t",
+		sourceLabel,
+		descriptor.Mode,
+		descriptor.AppVersion,
+		descriptor.SchemaVersion,
+		descriptor.DatabaseFormat,
+		descriptor.SchemaFormat,
+		descriptor.ContainsSecrets,
+	)
 	if err := validateRestoreOptions(descriptor, options); err != nil {
 		return err
 	}
@@ -69,6 +113,16 @@ func (s *RestoreService) PerformRestore(sourcePath string, options RestoreOption
 	if err != nil {
 		return fmt.Errorf("failed to create pre-restore snapshot: %w", err)
 	}
+	if snapshot.ID == "" {
+		log.Printf("RestoreService: pre-restore snapshot skipped source=%s reason=non_file_database", sourceLabel)
+	} else {
+		log.Printf(
+			"RestoreService: pre-restore snapshot completed source=%s snapshot_id=%s snapshot_sha256=%s",
+			sourceLabel,
+			snapshot.ID,
+			snapshot.DatabaseSHA256,
+		)
+	}
 
 	// 1. Open Source DB (ReadOnly)
 	srcDB, err := gorm.Open(sqlite.Open(sourcePath), &gorm.Config{
@@ -84,46 +138,113 @@ func (s *RestoreService) PerformRestore(sourcePath string, options RestoreOption
 	// 2. Read Data
 	data, err := s.readBackupData(srcDB, options)
 	if err != nil {
-		log.Printf("RestoreService: Read error (potentially partial backup): %v", err)
+		log.Printf("ERROR: RestoreService: read phase failed source=%s error=%v", sourceLabel, err)
 		return err
 	}
 
-	log.Printf("RestoreService: Read phase complete.")
+	log.Printf(
+		"RestoreService: read phase completed source=%s configs=%d metadata=%d subscriptions=%d logs=%d resources=%d run_logs=%d directories=%d animes=%d episodes=%d playback=%d users=%d",
+		sourceLabel,
+		len(data.configs),
+		len(data.metas),
+		len(data.subs),
+		len(data.logs),
+		len(data.resources),
+		len(data.runLogs),
+		len(data.dirs),
+		len(data.animes),
+		len(data.episodes),
+		len(data.playback),
+		len(data.users),
+	)
 
 	// 3. Transaction Write Phase
+	log.Printf("RestoreService: transaction starting source=%s categories=%s", sourceLabel, optionSummary)
 	if err := db.DB.Transaction(func(tx *gorm.DB) error {
+		log.Printf("RestoreService: dependency validation starting source=%s", sourceLabel)
 		if err := validateRestoreDependencies(tx, data, options); err != nil {
+			log.Printf("ERROR: RestoreService: dependency validation failed source=%s error=%v", sourceLabel, err)
 			return err
 		}
+		log.Printf("RestoreService: dependency validation completed source=%s", sourceLabel)
+		log.Printf("RestoreService: write phase starting source=%s", sourceLabel)
 		if err := s.writeRestoreData(tx, data, options, descriptor); err != nil {
+			log.Printf("ERROR: RestoreService: write phase failed source=%s error=%v", sourceLabel, err)
 			return err
 		}
+		log.Printf("RestoreService: write phase completed source=%s", sourceLabel)
+		log.Printf("RestoreService: post-restore validation starting source=%s", sourceLabel)
 		if err := validateRestoredDatabase(tx, data, options); err != nil {
+			log.Printf("ERROR: RestoreService: post-restore validation failed source=%s error=%v", sourceLabel, err)
 			return err
 		}
-		log.Printf("RestoreService: Transaction committed successfully in %v", time.Since(start))
+		log.Printf("RestoreService: post-restore validation completed source=%s", sourceLabel)
 		return nil
 	}); err != nil {
 		return err
 	}
+	log.Printf("RestoreService: transaction committed source=%s duration=%s", sourceLabel, time.Since(start).Round(time.Millisecond))
 	if currentSchema := db.CurrentSchemaVersion(db.DB); currentSchema != db.LatestSchemaVersion() {
 		return fmt.Errorf("restore completed but database schema version is %s, expected %s", currentSchema, db.LatestSchemaVersion())
 	}
 	if options.Configs {
+		log.Printf("RestoreService: config mirror export starting source=%s", sourceLabel)
 		if err := db.ExportGlobalConfigsToConfigFile(); err != nil {
 			if snapshot.ID != "" {
-				_ = RestoreSafetySnapshot(snapshot.ID)
+				if restoreErr := RestoreSafetySnapshot(snapshot.ID); restoreErr != nil {
+					log.Printf(
+						"ERROR: RestoreService: automatic snapshot rollback failed snapshot_id=%s error=%v",
+						snapshot.ID,
+						restoreErr,
+					)
+				} else {
+					log.Printf("WARN: RestoreService: restored pre-restore snapshot after config export failure snapshot_id=%s", snapshot.ID)
+				}
 			}
 			return fmt.Errorf("sync restored settings to config.yaml: %w", err)
 		}
+		log.Printf("RestoreService: config mirror export completed source=%s", sourceLabel)
 	}
 	if options.Users {
+		previousGeneration := authsession.Current()
 		authsession.InvalidateAll()
 		if err := db.SaveGlobalConfig(db.AuthSessionGenerationConfigKey, strconv.FormatUint(authsession.Current(), 10)); err != nil {
 			return fmt.Errorf("persist restored-session invalidation generation: %w", err)
 		}
+		log.Printf(
+			"RestoreService: auth sessions invalidated source=%s previous_generation=%d current_generation=%d",
+			sourceLabel,
+			previousGeneration,
+			authsession.Current(),
+		)
 	}
 	return nil
+}
+
+func restoreOptionsSummary(options RestoreOptions) string {
+	categories := make([]string, 0, 6)
+	if options.Configs {
+		categories = append(categories, "configs")
+	}
+	if options.Metadata {
+		categories = append(categories, "metadata")
+	}
+	if options.Subscriptions {
+		categories = append(categories, "subscriptions")
+	}
+	if options.Logs {
+		categories = append(categories, "logs")
+	}
+	if options.Local {
+		categories = append(categories, "local")
+	}
+	if options.Users {
+		categories = append(categories, "users")
+	}
+	if len(categories) == 0 {
+		return "none"
+	}
+	return strings.Join(categories, ",")
 }
 
 type restoreData struct {

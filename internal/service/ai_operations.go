@@ -6,7 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
+	"log"
 	"regexp"
 	"strconv"
 	"strings"
@@ -366,7 +366,7 @@ func RecordAIToolRun(event ai.ToolRunEvent) {
 		ConfirmationValidated: event.ConfirmationValidated,
 	}
 	if err := db.DB.Create(&row).Error; err != nil {
-		fmt.Printf("AI tool log: failed to record %s: %v\n", event.Name, err)
+		log.Printf("ERROR: AIToolAudit: execution record failed tool=%s request_id=%s task_id=%s recovery_action=retain_runtime_result error=%v", event.Name, row.RequestID, row.TaskID, err)
 	}
 }
 

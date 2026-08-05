@@ -6,11 +6,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/url"
 	"os"
 	pathpkg "path"
 	"path/filepath"
 	"regexp"
+	"runtime/debug"
 	"sort"
 	"strconv"
 	"strings"
@@ -938,32 +940,68 @@ func legacyResourceState(status string) string {
 // the schema_migrations table. New releases should append to the migrations
 // slice instead of relying on ad-hoc AutoMigrate calls spread around the app.
 func RunMigrations(target *gorm.DB) error {
+	startedAt := time.Now()
+	databaseLabel := migrationDatabaseLabel()
+	log.Printf(
+		"DatabaseMigration: run starting database=%s database_format=%d schema_format=%d latest_schema=%s",
+		databaseLabel,
+		DatabaseFormat,
+		SchemaFormat,
+		LatestSchemaVersion(),
+	)
 	if err := validateMigrationOrder(); err != nil {
+		log.Printf("ERROR: DatabaseMigration: protocol validation failed database=%s error=%v", databaseLabel, err)
 		return err
 	}
 	lock, err := acquireMigrationLock()
 	if err != nil {
+		log.Printf("ERROR: DatabaseMigration: lock acquisition failed database=%s error=%v", databaseLabel, err)
 		return err
 	}
-	defer releaseMigrationLock(lock)
+	if lock.path != "" {
+		log.Printf("DatabaseMigration: lock acquired database=%s lock=%s", databaseLabel, filepath.Base(lock.path))
+	}
+	defer func() {
+		releaseMigrationLock(lock)
+		if lock.path != "" {
+			log.Printf("DatabaseMigration: lock released database=%s lock=%s", databaseLabel, filepath.Base(lock.path))
+		}
+	}()
 
 	if err := target.AutoMigrate(&SchemaMigration{}); err != nil {
+		log.Printf("ERROR: DatabaseMigration: schema_migrations table alignment failed database=%s error=%v", databaseLabel, err)
 		return fmt.Errorf("migrate schema_migrations table: %w", err)
 	}
 	var rows []SchemaMigration
 	if err := target.Find(&rows).Error; err != nil {
+		log.Printf("ERROR: DatabaseMigration: applied migration history load failed database=%s error=%v", databaseLabel, err)
 		return fmt.Errorf("load applied schema migrations: %w", err)
 	}
+	log.Printf(
+		"DatabaseMigration: history loaded database=%s current_schema=%s applied=%d known=%d",
+		databaseLabel,
+		CurrentSchemaVersion(target),
+		len(rows),
+		len(migrations),
+	)
 	// A sequence backfill may itself have been marked applied by an older
 	// database before this code learned to persist numeric order. Keep the
 	// compatibility column correct even when that migration is already present.
 	if err := backfillSchemaMigrationSequences(target); err != nil {
+		log.Printf("ERROR: DatabaseMigration: sequence baseline failed database=%s error=%v", databaseLabel, err)
 		return fmt.Errorf("backfill schema migration sequences: %w", err)
 	}
 	if err := validateAppliedMigrations(target, rows); err != nil {
+		log.Printf(
+			"ERROR: DatabaseMigration: history rejected database=%s current_schema=%s recovery_action=restore_compatible_snapshot error=%v",
+			databaseLabel,
+			CurrentSchemaVersion(target),
+			err,
+		)
 		return err
 	}
 	if err := ensureHistoricalDestructiveMigrationReports(target, rows); err != nil {
+		log.Printf("ERROR: DatabaseMigration: historical repair report check failed database=%s error=%v", databaseLabel, err)
 		return err
 	}
 
@@ -986,17 +1024,44 @@ func RunMigrations(target *gorm.DB) error {
 	}
 	if previous, err := loadMigrationRunManifest(); err == nil && previous.Status == migrationRunFailed {
 		run.RetryCount = previous.RetryCount + 1
+		log.Printf(
+			"WARN: DatabaseMigration: retrying previously failed run database=%s failed_migration=%s retry_count=%d",
+			databaseLabel,
+			previous.FailedMigration,
+			run.RetryCount,
+		)
 	}
 
 	var snapshot migrationSnapshotManifest
 	if needsMigration {
+		log.Printf(
+			"DatabaseMigration: snapshot starting database=%s current_schema=%s",
+			databaseLabel,
+			CurrentSchemaVersion(target),
+		)
 		if snapshot, err = createMigrationSnapshotManifest(target); err != nil {
+			log.Printf(
+				"ERROR: DatabaseMigration: snapshot failed database=%s recovery_action=stop_before_schema_change error=%v",
+				databaseLabel,
+				err,
+			)
 			return fmt.Errorf("create migration snapshot: %w", err)
 		}
 		run.SnapshotID = snapshot.ID
 		run.SnapshotSHA256 = snapshot.DatabaseSHA256
+		if snapshot.ID == "" {
+			log.Printf("DatabaseMigration: snapshot skipped database=%s reason=non_file_database", databaseLabel)
+		} else {
+			log.Printf(
+				"DatabaseMigration: snapshot completed database=%s snapshot_id=%s snapshot_sha256=%s",
+				databaseLabel,
+				snapshot.ID,
+				snapshot.DatabaseSHA256,
+			)
+		}
 	}
 	if err := writeMigrationRunManifest(run); err != nil {
+		log.Printf("ERROR: DatabaseMigration: run manifest write failed database=%s run_id=%s error=%v", databaseLabel, run.RunID, err)
 		return fmt.Errorf("write migration run manifest: %w", err)
 	}
 
@@ -1004,16 +1069,37 @@ func RunMigrations(target *gorm.DB) error {
 		if _, ok := applied[m.ID]; ok {
 			continue
 		}
-		if err := runMigrationRepairPreflight(target, m, snapshot); err != nil {
+		migrationStartedAt := time.Now()
+		log.Printf(
+			"DatabaseMigration: migration starting database=%s run_id=%s migration=%s sequence=%d description=%q",
+			databaseLabel,
+			run.RunID,
+			m.ID,
+			sequence+1,
+			m.Description,
+		)
+		if err := runMigrationPhaseSafely(m.ID, "preflight", func() error {
+			return runMigrationRepairPreflight(target, m, snapshot)
+		}); err != nil {
 			run.Status = migrationRunFailed
 			run.FailedMigration = m.ID
 			run.LastError = err.Error()
 			_ = writeMigrationRunManifest(run)
+			log.Printf(
+				"ERROR: DatabaseMigration: preflight failed database=%s run_id=%s migration=%s duration=%s retryable=true recovery_action=inspect_report_or_restore_snapshot error=%v",
+				databaseLabel,
+				run.RunID,
+				m.ID,
+				time.Since(migrationStartedAt).Round(time.Millisecond),
+				err,
+			)
 			return fmt.Errorf("preflight migration %s: %w", m.ID, err)
 		}
 
 		if err := target.Transaction(func(tx *gorm.DB) error {
-			if err := m.Apply(tx); err != nil {
+			if err := runMigrationPhaseSafely(m.ID, "apply", func() error {
+				return m.Apply(tx)
+			}); err != nil {
 				return err
 			}
 
@@ -1029,14 +1115,36 @@ func RunMigrations(target *gorm.DB) error {
 			run.FailedMigration = m.ID
 			run.LastError = err.Error()
 			_ = writeMigrationRunManifest(run)
+			log.Printf(
+				"ERROR: DatabaseMigration: migration failed database=%s run_id=%s migration=%s duration=%s transaction=rolled_back retryable=true recovery_action=restart_after_fix error=%v",
+				databaseLabel,
+				run.RunID,
+				m.ID,
+				time.Since(migrationStartedAt).Round(time.Millisecond),
+				err,
+			)
 			return fmt.Errorf("apply migration %s: %w", m.ID, err)
 		}
 		applied[m.ID] = struct{}{}
 		run.FailedMigration = ""
 		run.LastError = ""
 		if err := writeMigrationRunManifest(run); err != nil {
+			log.Printf(
+				"ERROR: DatabaseMigration: progress manifest write failed database=%s run_id=%s migration=%s error=%v",
+				databaseLabel,
+				run.RunID,
+				m.ID,
+				err,
+			)
 			return fmt.Errorf("write migration run manifest: %w", err)
 		}
+		log.Printf(
+			"DatabaseMigration: migration completed database=%s run_id=%s migration=%s duration=%s",
+			databaseLabel,
+			run.RunID,
+			m.ID,
+			time.Since(migrationStartedAt).Round(time.Millisecond),
+		)
 	}
 
 	// Keep this invariant check outside the "new migration" branch. It repairs
@@ -1046,14 +1154,65 @@ func RunMigrations(target *gorm.DB) error {
 		run.Status = migrationRunFailed
 		run.LastError = err.Error()
 		_ = writeMigrationRunManifest(run)
+		log.Printf(
+			"ERROR: DatabaseMigration: post-migration invariant repair failed database=%s run_id=%s error=%v",
+			databaseLabel,
+			run.RunID,
+			err,
+		)
 		return err
 	}
 
 	run.Status = migrationRunCompleted
 	now := time.Now().UTC()
 	run.CompletedAt = &now
-	_ = writeMigrationRunManifest(run)
+	if err := writeMigrationRunManifest(run); err != nil {
+		log.Printf(
+			"ERROR: DatabaseMigration: completion manifest write failed database=%s run_id=%s error=%v",
+			databaseLabel,
+			run.RunID,
+			err,
+		)
+		return fmt.Errorf("write completed migration run manifest: %w", err)
+	}
+	log.Printf(
+		"DatabaseMigration: run completed database=%s run_id=%s schema=%s migrations_applied=%d duration=%s",
+		databaseLabel,
+		run.RunID,
+		CurrentSchemaVersion(target),
+		len(applied),
+		time.Since(startedAt).Round(time.Millisecond),
+	)
 	return nil
+}
+
+func migrationDatabaseLabel() string {
+	path := strings.TrimSpace(CurrentDBPath)
+	switch {
+	case path == "", path == sqliteMemoryPath, strings.HasPrefix(path, "file:"):
+		return "memory"
+	default:
+		return filepath.Base(filepath.Clean(path))
+	}
+}
+
+func runMigrationPhaseSafely(migrationID, phase string, run func() error) (err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = fmt.Errorf("migration %s %s panic: %v", migrationID, phase, recovered)
+			log.Printf(
+				"ERROR: DatabaseMigration: phase panic migration=%s phase=%s recovery_action=rollback_and_refuse_start panic=%v\n%s",
+				migrationID,
+				phase,
+				recovered,
+				debug.Stack(),
+			)
+		}
+	}()
+	if run == nil {
+		return nil
+	}
+	return run()
 }
 
 func validateAppliedMigrations(target *gorm.DB, rows []SchemaMigration) error {
@@ -1176,6 +1335,15 @@ func runMigrationRepairPreflight(target *gorm.DB, item migration, snapshot migra
 		if err := writeMigrationRepairReport(*report); err != nil {
 			return err
 		}
+		log.Printf(
+			"DatabaseMigration: destructive preflight completed migration=%s affected_rows=%d survivors=%d duplicates=%d snapshot_id=%s report_status=%s",
+			report.MigrationID,
+			report.AffectedRows,
+			report.SurvivorCount,
+			report.DuplicateCount,
+			report.SnapshotID,
+			report.Status,
+		)
 	}
 	return nil
 }

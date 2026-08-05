@@ -1,12 +1,33 @@
 package logging
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestRedactingWriterProtectsPersistentLogSink(t *testing.T) {
+	var output bytes.Buffer
+	writer := RedactingWriter{Writer: &output}
+	input := []byte("request token=secret-value url=https://user:password@example.test/path\n")
+	written, err := writer.Write(input)
+	if err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if written != len(input) {
+		t.Fatalf("expected original byte count %d, got %d", len(input), written)
+	}
+	logged := output.String()
+	if strings.Contains(logged, "secret-value") || strings.Contains(logged, "password@") {
+		t.Fatalf("persistent sink leaked secret: %s", logged)
+	}
+	if !strings.Contains(logged, "[REDACTED]") {
+		t.Fatalf("expected redaction marker: %s", logged)
+	}
+}
 
 func TestHealthWriterCreatesFilesOnlyForIssues(t *testing.T) {
 	dir := t.TempDir()

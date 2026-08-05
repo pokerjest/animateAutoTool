@@ -3,6 +3,7 @@ package launcher
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"sync"
 	"time"
@@ -81,7 +82,7 @@ func (m *Manager) EnsureBinaries() error {
 
 	// Check and download Alist
 	if err := m.ensureAlist(); err != nil {
-		fmt.Printf("AList setup warning: %v\n", err)
+		log.Printf("WARN: managed service setup failed service=alist recovery_action=continue_without_optional_service error=%v", err)
 	}
 
 	// Check and download QBittorrent
@@ -91,7 +92,7 @@ func (m *Manager) EnsureBinaries() error {
 
 	// Check and download Jellyfin
 	if err := m.EnsureJellyfin(); err != nil {
-		fmt.Printf("Jellyfin setup warning: %v\n", err)
+		log.Printf("WARN: managed service setup failed service=jellyfin recovery_action=continue_without_optional_service error=%v", err)
 		// Don't fail the whole app for optional component
 	}
 
@@ -121,7 +122,7 @@ func (m *Manager) StartAll() error {
 		startJellyfin = m.startJellyfinFunc
 	}
 	if err := startJellyfin(); err != nil {
-		fmt.Printf("Jellyfin start warning: %v\n", err)
+		log.Printf("WARN: managed service start failed service=jellyfin recovery_action=continue_without_optional_service error=%v", err)
 	}
 
 	return nil

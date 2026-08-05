@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"runtime"
@@ -121,11 +122,13 @@ func V1ExportHealthDiagnosticsHandler(c *gin.Context) {
 	now := time.Now()
 	attachments, err := buildHealthDiagnosticAttachments(now)
 	if err != nil {
+		log.Printf("ERROR: HealthDiagnostics: snapshot build failed error=%v", err)
 		v1Error(c, http.StatusInternalServerError, "health_diagnostics_snapshot_failed", "生成健康诊断快照失败")
 		return
 	}
 	path, filename, included, err := applogging.CreateHealthArchive(config.LogsDir(), "health", healthDiagnosticLogFileCount, now, attachments)
 	if err != nil {
+		log.Printf("ERROR: HealthDiagnostics: archive creation failed error=%v", err)
 		v1Error(c, http.StatusInternalServerError, "health_diagnostics_export_failed", "打包健康诊断失败")
 		return
 	}
@@ -146,8 +149,14 @@ func V1ExportHealthDiagnosticsHandler(c *gin.Context) {
 	if err := applogging.RemoveArchivedHourlyLogs(config.LogsDir(), "health", included); err != nil {
 		// The archive has already been served successfully. Retaining an event
 		// log is safer than turning a completed download into an HTTP failure.
-		fmt.Printf("health diagnostics cleanup failed: %v\n", err)
+		log.Printf("WARN: HealthDiagnostics: consumed log cleanup failed error=%v", err)
 	}
+	log.Printf(
+		"HealthDiagnostics: export completed attachments=%d health_logs=%d filename=%s",
+		len(attachments),
+		healthLogCount,
+		filename,
+	)
 }
 
 func buildHealthDiagnosticAttachments(now time.Time) ([]applogging.ArchiveAttachment, error) {
@@ -196,8 +205,11 @@ func buildHealthDiagnosticAttachments(now time.Time) ([]applogging.ArchiveAttach
 	}
 	attachments := []applogging.ArchiveAttachment{{
 		Name: "README.txt",
-		Data: []byte("AnimateTool 健康诊断包\n\n此压缩包用于提交给开发者处理无法通过界面修复、需要调整代码的问题。\nhealth-*.log 只记录异常事件，不包含普通运行流水。\nJSON 文件保存导出时的健康、运行时、数据库及失败任务快照。\n密钥、Token 和密码不会写入快照；异常日志会遮盖常见凭据。\n注意：为便于定位扫描和媒体问题，条目名称与本地媒体路径可能包含在诊断中，请在分享前确认。\n"),
-	}, {Name: "current-problems.txt", Data: []byte(currentProblems)}}
+		Data: []byte("AnimateTool 健康诊断包\n\n此压缩包用于提交给开发者处理无法通过界面修复、需要调整代码的问题。\nhealth-*.log 只记录异常事件，不包含普通运行流水。\nJSON 文件保存导出时的健康、运行时、数据库及失败任务快照。\ngoroutines.txt 保存导出瞬间的 Go goroutine 堆栈，用于定位卡死、泄漏和阻塞。\n密钥、Token 和密码不会写入快照；异常日志会遮盖常见凭据。\n注意：为便于定位扫描和媒体问题，条目名称与本地媒体路径可能包含在诊断中，请在分享前确认。\n"),
+	}, {Name: "current-problems.txt", Data: []byte(currentProblems)}, {
+		Name: "goroutines.txt",
+		Data: buildGoroutineDump(),
+	}}
 	for _, item := range values {
 		data, marshalErr := json.MarshalIndent(item.value, "", "  ")
 		if marshalErr != nil {
@@ -210,6 +222,19 @@ func buildHealthDiagnosticAttachments(now time.Time) ([]applogging.ArchiveAttach
 		attachments = append(attachments, applogging.ArchiveAttachment{Name: item.name, Data: append(redacted, '\n')})
 	}
 	return attachments, nil
+}
+
+func buildGoroutineDump() []byte {
+	size := 1 << 20
+	for size <= 8<<20 {
+		buffer := make([]byte, size)
+		written := runtime.Stack(buffer, true)
+		if written < len(buffer) {
+			return buffer[:written]
+		}
+		size *= 2
+	}
+	return []byte("goroutine dump exceeded 8 MiB and was omitted\n")
 }
 
 // redactHealthJSON redacts string values after decoding the snapshot. Applying

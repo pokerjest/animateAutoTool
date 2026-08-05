@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -126,11 +127,11 @@ func (m *Manager) ensureAlist() error {
 		return nil
 	}
 	if config.AppConfig != nil && !config.AppConfig.Managed.DownloadMissing {
-		fmt.Println("AList auto-download disabled by configuration; skipping download.")
+		log.Printf("Managed service download skipped service=alist reason=auto_download_disabled")
 		return nil
 	}
 
-	fmt.Printf("Downloading Alist for %s/%s...\n", runtime.GOOS, runtime.GOARCH)
+	log.Printf("Managed service download starting service=alist platform=%s/%s", runtime.GOOS, runtime.GOARCH)
 
 	url, isTarGz, err := getAlistUrl()
 	if err != nil {
@@ -182,11 +183,11 @@ func (m *Manager) ensureQB() error {
 			return nil
 		}
 		// Fallback or warning
-		fmt.Printf("Warning: %v. Please install qBittorrent manually.\n", err)
+		log.Printf("WARN: managed service download unavailable service=qbittorrent recovery_action=manual_install error=%v", err)
 		return nil // Non-fatal
 	}
 
-	fmt.Printf("Downloading qBittorrent for %s/%s...\n", runtime.GOOS, runtime.GOARCH)
+	log.Printf("Managed service download starting service=qbittorrent platform=%s/%s", runtime.GOOS, runtime.GOARCH)
 
 	tmpZip := filepath.Join(m.BinDir, "qb.zip")
 	spec, err := downloadSpecForURL(url)
@@ -241,11 +242,11 @@ func (m *Manager) ensureManagedJellyfinServer(jellyfinDir string) error {
 		return nil
 	}
 	if config.AppConfig != nil && !config.AppConfig.Managed.DownloadMissing {
-		fmt.Println("Jellyfin auto-download disabled by configuration; skipping download.")
+		log.Printf("Managed service download skipped service=jellyfin reason=auto_download_disabled")
 		return nil
 	}
 
-	fmt.Printf("Downloading Jellyfin for %s/%s...\n", runtime.GOOS, runtime.GOARCH)
+	log.Printf("Managed service download starting service=jellyfin platform=%s/%s", runtime.GOOS, runtime.GOARCH)
 	url, err := getJellyfinUrl()
 	if err != nil {
 		return err
@@ -265,7 +266,7 @@ func (m *Manager) ensureManagedFFmpeg(ffmpegDir string) error {
 		return nil
 	}
 
-	fmt.Printf("Downloading FFmpeg for %s...\n", runtime.GOOS)
+	log.Printf("Managed service download starting service=ffmpeg platform=%s", runtime.GOOS)
 	url, err := getFFmpegUrl()
 	if err != nil {
 		return err
@@ -445,13 +446,13 @@ func downloadFile(spec downloadSpec, filePath string) error {
 	var lastErr error
 	for attempt := 1; attempt <= 3; attempt++ {
 		if attempt > 1 {
-			fmt.Printf("Retrying download (%d/3)...\n", attempt)
+			log.Printf("WARN: managed service download retry attempt=%d/3", attempt)
 		}
 		lastErr = downloadFileOnce(spec, filePath)
 		if lastErr == nil {
 			return nil
 		}
-		fmt.Printf("Download failed: %v\n", lastErr)
+		log.Printf("ERROR: managed service download attempt failed error=%v", lastErr)
 		safeio.Remove(filePath)
 	}
 	return fmt.Errorf("failed after 3 retries: %w", lastErr)

@@ -180,8 +180,13 @@ func (m *SubscriptionManager) ProcessSubscriptionWithSourceContext(ctx context.C
 
 	unlock := lockSubscriptionRun(sub.ID)
 	defer unlock()
-	log.Printf("DEBUG: Processing subscription %s (URL: %s)", sub.Title, sub.RSSUrl)
 	checkedAt := time.Now()
+	log.Printf(
+		"SubscriptionManager: run starting subscription_id=%d title=%q source=%s",
+		sub.ID,
+		sub.Title,
+		normalizeRunSource(source),
+	)
 
 	episodes, activeRSS, fallbackUsed, primaryErr, err := m.parseRSSWithFallback(ctx, sub)
 	if err != nil {
@@ -228,7 +233,14 @@ func (m *SubscriptionManager) ProcessSubscriptionWithSourceContext(ctx context.C
 		if err != nil {
 			log.Printf("SubscriptionManager: failed to load durable resources for %s: %v", sub.Title, err)
 		}
-		_ = resourceStore.MarkAllNotCurrent(sub.ID)
+		if err := resourceStore.MarkAllNotCurrent(sub.ID); err != nil {
+			log.Printf(
+				"ERROR: SubscriptionManager: failed to mark resources stale subscription_id=%d title=%q recovery_action=continue_with_existing_ledger error=%v",
+				sub.ID,
+				sub.Title,
+				err,
+			)
+		}
 	}
 
 	// Build a canonical identity index once per run. Matching by full release
@@ -298,7 +310,7 @@ func (m *SubscriptionManager) ProcessSubscriptionWithSourceContext(ctx context.C
 					existing.State == SubscriptionResourceStateDownloading ||
 					existing.State == SubscriptionResourceStatePending ||
 					existing.State == SubscriptionResourceStateFailed) {
-				_ = resourceStore.UpdateByID(resource.ID, map[string]any{
+				logSubscriptionResourceUpdate(resourceStore, sub, resource.ID, "mark_superseded_existing_selection", map[string]any{
 					"state":        SubscriptionResourceStateSuperseded,
 					"state_reason": "同季同集已有已选资源，V2/V3 仅保留为候选",
 					"selected":     false,
@@ -326,7 +338,7 @@ func (m *SubscriptionManager) ProcessSubscriptionWithSourceContext(ctx context.C
 			if _, exists := existingKeys[identityKey]; exists {
 				log.Printf("DEBUG: Duplicate check skipped: %s (same canonical episode already exists)", ep.Title)
 				if resource != nil && resourceStore != nil {
-					_ = resourceStore.UpdateByID(resource.ID, map[string]any{
+					logSubscriptionResourceUpdate(resourceStore, sub, resource.ID, "mark_superseded_download_history", map[string]any{
 						"state":        SubscriptionResourceStateSuperseded,
 						"state_reason": "兼容下载历史已存在",
 						"selected":     false,
@@ -338,7 +350,7 @@ func (m *SubscriptionManager) ProcessSubscriptionWithSourceContext(ctx context.C
 			if _, exists := seenKeys[identityKey]; exists {
 				log.Printf("DEBUG: Duplicate check skipped: %s (same canonical episode already returned by RSS)", ep.Title)
 				if resource != nil && resourceStore != nil {
-					_ = resourceStore.UpdateByID(resource.ID, map[string]any{
+					logSubscriptionResourceUpdate(resourceStore, sub, resource.ID, "mark_superseded_rss_duplicate", map[string]any{
 						"state":        SubscriptionResourceStateSuperseded,
 						"state_reason": "RSS 中同集重复候选",
 						"selected":     false,
@@ -391,7 +403,7 @@ func (m *SubscriptionManager) ProcessSubscriptionWithSourceContext(ctx context.C
 		if !recoveredExisting {
 			if resource != nil && resourceStore != nil {
 				now := time.Now().UTC()
-				_ = resourceStore.UpdateByID(resource.ID, map[string]any{
+				logSubscriptionResourceUpdate(resourceStore, sub, resource.ID, "mark_pending", map[string]any{
 					"state":           SubscriptionResourceStatePending,
 					"state_reason":    "等待提交到 qBittorrent",
 					"attempt_count":   resource.AttemptCount + 1,
@@ -437,7 +449,7 @@ func (m *SubscriptionManager) ProcessSubscriptionWithSourceContext(ctx context.C
 		if addErr != nil {
 			log.Printf("Failed to add torrent for %s - %s: %v", sub.Title, ep.Title, addErr)
 			if resource != nil && resourceStore != nil {
-				_ = resourceStore.UpdateByID(resource.ID, map[string]any{
+				logSubscriptionResourceUpdate(resourceStore, sub, resource.ID, "mark_failed", map[string]any{
 					"state":        SubscriptionResourceStateFailed,
 					"state_reason": "qBittorrent 拒绝或提交失败",
 					"last_error":   addErr.Error(),
@@ -508,7 +520,7 @@ func (m *SubscriptionManager) ProcessSubscriptionWithSourceContext(ctx context.C
 			if status == downloadLogStatusCompleted || status == downloadLogStatusRenamed {
 				updates["completed_at"] = &now
 			}
-			_ = resourceStore.UpdateByID(resource.ID, updates)
+			logSubscriptionResourceUpdate(resourceStore, sub, resource.ID, "confirm_download_state", updates)
 		}
 		logEntry := model.DownloadLog{
 			SubscriptionID: sub.ID,
@@ -534,7 +546,9 @@ func (m *SubscriptionManager) ProcessSubscriptionWithSourceContext(ctx context.C
 			if val, err := strconv.Atoi(episodeNum); err == nil {
 				if val > sub.LastEp {
 					sub.LastEp = val
-					_ = store.NewSubscriptionStore(m.DB).UpdateLastEpisodeIfGreater(sub.ID, val)
+					if err := store.NewSubscriptionStore(m.DB).UpdateLastEpisodeIfGreater(sub.ID, val); err != nil {
+						log.Printf("ERROR: SubscriptionManager: failed to update progress subscription_id=%d episode=%d error=%v", sub.ID, val, err)
+					}
 				}
 			} else {
 				// Try float roughly
@@ -542,7 +556,9 @@ func (m *SubscriptionManager) ProcessSubscriptionWithSourceContext(ctx context.C
 					val = int(f)
 					if val > sub.LastEp {
 						sub.LastEp = val
-						_ = store.NewSubscriptionStore(m.DB).UpdateLastEpisodeIfGreater(sub.ID, val)
+						if err := store.NewSubscriptionStore(m.DB).UpdateLastEpisodeIfGreater(sub.ID, val); err != nil {
+							log.Printf("ERROR: SubscriptionManager: failed to update progress subscription_id=%d episode=%d error=%v", sub.ID, val, err)
+						}
 					}
 				}
 			}
@@ -622,6 +638,47 @@ func (m *SubscriptionManager) ProcessSubscriptionWithSourceContext(ctx context.C
 	}
 
 	m.persistRunState(sub, state)
+	log.Printf(
+		"SubscriptionManager: run completed subscription_id=%d title=%q source=%s status=%s episodes=%d added=%d failed=%d filtered=%d duplicates=%d duration=%s",
+		sub.ID,
+		sub.Title,
+		state.Source,
+		state.Status,
+		state.TotalEpisodes,
+		state.NewDownloads,
+		state.FailedDownloads,
+		state.FilteredCount,
+		state.DuplicateCount,
+		time.Since(checkedAt).Round(time.Millisecond),
+	)
+}
+
+func logSubscriptionResourceUpdate(
+	resourceStore *store.SubscriptionResourceStore,
+	sub *model.Subscription,
+	resourceID uint,
+	phase string,
+	updates map[string]any,
+) {
+	if resourceStore == nil || resourceID == 0 {
+		return
+	}
+	if err := resourceStore.UpdateByID(resourceID, updates); err != nil {
+		var subscriptionID uint
+		var title string
+		if sub != nil {
+			subscriptionID = sub.ID
+			title = sub.Title
+		}
+		log.Printf(
+			"ERROR: SubscriptionManager: durable resource update failed subscription_id=%d title=%q resource_id=%d phase=%s recovery_action=retry_next_reconciliation error=%v",
+			subscriptionID,
+			title,
+			resourceID,
+			phase,
+			err,
+		)
+	}
 }
 
 func subscriptionAcceptedSummary(accepted, recovered int) string {

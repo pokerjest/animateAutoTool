@@ -1,7 +1,10 @@
 package api
 
 import (
+	"bytes"
 	"context"
+	"log"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -74,5 +77,33 @@ func TestStopBackgroundTasksCancelsWaitsAndRejectsNewWork(t *testing.T) {
 	case <-finished:
 	default:
 		t.Fatal("expected cancellation-aware task to finish before Wait returned")
+	}
+}
+
+func TestGoBackgroundLogsTaskIdentityAndPanicStack(t *testing.T) {
+	resetBackgroundTasksForTest(t)
+
+	var output bytes.Buffer
+	previousWriter := log.Writer()
+	previousFlags := log.Flags()
+	log.SetOutput(&output)
+	log.SetFlags(0)
+	t.Cleanup(func() {
+		log.SetOutput(previousWriter)
+		log.SetFlags(previousFlags)
+	})
+
+	if !GoBackground(func(context.Context) {
+		panic("background-boom")
+	}, "panic-probe") {
+		t.Fatal("expected background task to be accepted")
+	}
+	WaitBackgroundTasks()
+
+	logged := output.String()
+	for _, expected := range []string{"API background task panic", "task=panic-probe", "background-boom", "lifecycle_test.go"} {
+		if !strings.Contains(logged, expected) {
+			t.Fatalf("background panic log missing %q: %s", expected, logged)
+		}
 	}
 }

@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -44,7 +45,7 @@ func (m *Manager) startAlist() error {
 	}
 	binPath := filepath.Join(m.BinDir, exeName)
 	if _, err := os.Stat(binPath); os.IsNotExist(err) {
-		fmt.Println("AList binary not found, skipping managed start.")
+		log.Printf("Managed service start skipped service=alist reason=binary_missing")
 		return nil
 	}
 	dataDir := filepath.Join(m.DataDir, "alist")
@@ -53,7 +54,7 @@ func (m *Manager) startAlist() error {
 	}
 
 	if reason := managedAListConflictReason("127.0.0.1:5244", managedAListURL); reason != "" {
-		fmt.Printf("AList managed start skipped: %s\n", reason)
+		log.Printf("Managed service start skipped service=alist reason=%q", reason)
 		return nil
 	}
 
@@ -83,7 +84,7 @@ func (m *Manager) startAlist() error {
 	cmdSetPass := exec.Command(binPath, managedDefaultUsername, "set", creds.Password, "--data", dataDir)
 	m.configureManagedCommand(cmdSetPass)
 	if output, err := cmdSetPass.CombinedOutput(); err != nil {
-		fmt.Printf("Alist set pass warning: %v, output: %s\n", err, string(output))
+		log.Printf("WARN: managed service bootstrap command failed service=alist error=%v output_bytes=%d", err, len(output))
 		// might fail if not initialized? usually works.
 	}
 
@@ -93,7 +94,7 @@ func (m *Manager) startAlist() error {
 		newContent := strings.Replace(string(content), `"type": "sqlite"`, `"type": "sqlite3"`, 1)
 		if newContent != string(content) {
 			_ = os.WriteFile(configFile, []byte(newContent), 0600)
-			fmt.Println("Patched alist config to use sqlite3")
+			log.Printf("Managed service config migrated service=alist database_driver=sqlite3")
 		}
 	}
 
@@ -117,7 +118,7 @@ func (m *Manager) startAlist() error {
 	m.wg.Add(1)
 	go m.waitForManagedProcess("alist", cmd, logFile)
 
-	fmt.Println("Alist started (Port 5244)")
+	log.Printf("Managed service started service=alist pid=%d port=5244", cmd.Process.Pid)
 	return nil
 }
 
@@ -126,7 +127,7 @@ func (m *Manager) startQB() error {
 
 	// Check if binary exists (might be skipped on macOS)
 	if _, err := os.Stat(binPath); os.IsNotExist(err) {
-		fmt.Println("qBittorrent binary not found, skipping managed start.")
+		log.Printf("Managed service start skipped service=qbittorrent reason=binary_missing")
 		return nil
 	}
 
@@ -162,7 +163,7 @@ func (m *Manager) startQB() error {
 	m.wg.Add(1)
 	go m.waitForManagedProcess("qbittorrent", cmd, nil)
 
-	fmt.Println("qBittorrent started (Port 8080)")
+	log.Printf("Managed service started service=qbittorrent pid=%d port=8080", cmd.Process.Pid)
 	return nil
 }
 
@@ -309,12 +310,12 @@ func (m *Manager) startJellyfin() error {
 	binPath := filepath.Join(binDir, jellyfinExecutableName())
 
 	if _, err := os.Stat(binPath); os.IsNotExist(err) {
-		fmt.Println("Jellyfin binary not found, skipping managed start.")
+		log.Printf("Managed service start skipped service=jellyfin reason=binary_missing")
 		return nil
 	}
 
 	if reason := managedJellyfinConflictReason("127.0.0.1:8096", managedJellyfinURL); reason != "" {
-		fmt.Printf("Jellyfin managed start skipped: %s\n", reason)
+		log.Printf("Managed service start skipped service=jellyfin reason=%q", reason)
 		return nil
 	}
 
@@ -383,18 +384,27 @@ func (m *Manager) startJellyfin() error {
 	m.wg.Add(1)
 	go m.waitForManagedProcess("jellyfin", cmd, logFile)
 
-	fmt.Println("Jellyfin started (Port 8096)")
+	log.Printf("Managed service started service=jellyfin pid=%d port=8096", cmd.Process.Pid)
 
 	// Attempt Zero-Config
 	// We do this asynchronously so we don't block the main flow waiting for startup
 	m.wg.Add(1)
 	go func() {
 		defer m.wg.Done()
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				log.Printf(
+					"ERROR: managed service bootstrap panic service=jellyfin recovery_action=continue_without_zero_config panic=%v\n%s",
+					recovered,
+					debug.Stack(),
+				)
+			}
+		}()
 		creds, err := bootstrap.LoadJellyfinCredentials()
 		if err != nil || creds.Password == "" {
 			password, genErr := security.RandomPassword(24)
 			if genErr != nil {
-				fmt.Printf("Jellyfin bootstrap password generation failed: %v\n", genErr)
+				log.Printf("ERROR: managed service bootstrap password generation failed service=jellyfin error=%v", genErr)
 				return
 			}
 			creds = bootstrap.JellyfinCredentials{
@@ -410,26 +420,35 @@ func (m *Manager) startJellyfin() error {
 			creds.Username = managedDefaultUsername
 		}
 		if err := bootstrap.SaveJellyfinCredentials(creds); err != nil {
-			fmt.Printf("Jellyfin bootstrap credential persist failed: %v\n", err)
+			log.Printf("ERROR: managed service bootstrap credential persist failed service=jellyfin error=%v", err)
 		}
 		key, err := jellyfin.AttemptZeroConfigContext(m.Ctx, creds.URL, creds.Username, creds.Password)
 		if err == nil && key != "" {
-			fmt.Println("Jellyfin zero-config succeeded and stored a fresh API key.")
+			log.Printf("Managed service zero-config completed service=jellyfin api_key_stored=true")
 			creds.APIKey = key
 			if err := bootstrap.SaveJellyfinCredentials(creds); err != nil {
-				fmt.Printf("Jellyfin bootstrap credential update failed: %v\n", err)
+				log.Printf("ERROR: managed service bootstrap credential update failed service=jellyfin error=%v", err)
 			}
 			if m.waitForDatabase(30 * time.Second) {
-				_ = db.SaveGlobalConfig(model.ConfigKeyJellyfinUrl, creds.URL)
-				_ = db.SaveGlobalConfig(model.ConfigKeyJellyfinUsername, creds.Username)
-				_ = db.SaveGlobalConfig(model.ConfigKeyJellyfinPassword, creds.Password)
-				_ = db.SaveGlobalConfig(model.ConfigKeyJellyfinApiKey, creds.APIKey)
+				settings := map[string]string{
+					model.ConfigKeyJellyfinUrl:      creds.URL,
+					model.ConfigKeyJellyfinUsername: creds.Username,
+					model.ConfigKeyJellyfinPassword: creds.Password,
+					model.ConfigKeyJellyfinApiKey:   creds.APIKey,
+				}
+				for keyName, value := range settings {
+					if saveErr := db.SaveGlobalConfig(keyName, value); saveErr != nil {
+						log.Printf("ERROR: managed service setting persist failed service=jellyfin key=%s error=%v", keyName, saveErr)
+					}
+				}
+			} else {
+				log.Printf("WARN: managed service zero-config database persist skipped service=jellyfin reason=database_not_ready")
 			}
 		} else if err != nil {
 			if errors.Is(err, jellyfin.ErrAlreadyConfigured) {
-				fmt.Printf("Jellyfin zero-config skipped: %v\n", err)
+				log.Printf("Managed service zero-config skipped service=jellyfin reason=already_configured")
 			} else {
-				fmt.Printf("Jellyfin Zero-Config note: %v\n", err)
+				log.Printf("WARN: managed service zero-config failed service=jellyfin recovery_action=manual_configuration error=%v", err)
 			}
 		}
 	}()

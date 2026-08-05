@@ -5,6 +5,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -111,8 +112,12 @@ func (s *MetadataService) EnrichAnime(anime *model.LocalAnime) error {
 
 	// 5. NFO Generation (Phase 4)
 	nfoGen := NewNFOGeneratorService()
-	_ = nfoGen.SaveLocalImages(anime)
-	_ = nfoGen.GenerateTVShowNFO(anime)
+	if err := nfoGen.SaveLocalImages(anime); err != nil {
+		log.Printf("WARN: MetadataService: local image write failed local_anime_id=%d recovery_action=retry_nfo_generation error=%v", anime.ID, err)
+	}
+	if err := nfoGen.GenerateTVShowNFO(anime); err != nil {
+		log.Printf("WARN: MetadataService: tvshow NFO write failed local_anime_id=%d recovery_action=retry_nfo_generation error=%v", anime.ID, err)
+	}
 
 	return nil
 }
@@ -135,23 +140,29 @@ func (s *MetadataService) EnrichMetadata(m *model.AnimeMetadata, query string) {
 	// 1. Bangumi Task
 	go func() {
 		defer wg.Done()
-		s.enrichBangumi(m, bgmClient, queryTitle, &mu)
+		runMetadataProvider("bangumi", m, func() {
+			s.enrichBangumi(m, bgmClient, queryTitle, &mu)
+		})
 	}()
 
 	// 2. AniList Task
 	go func() {
 		defer wg.Done()
-		if anilistClient != nil {
-			s.processAniList(m, anilistClient, candidates, &mu)
-		}
+		runMetadataProvider("anilist", m, func() {
+			if anilistClient != nil {
+				s.processAniList(m, anilistClient, candidates, &mu)
+			}
+		})
 	}()
 
 	// 3. TMDB Task
 	go func() {
 		defer wg.Done()
-		if tmdbClient != nil {
-			s.processTMDB(m, tmdbClient, candidates, &mu)
-		}
+		runMetadataProvider("tmdb", m, func() {
+			if tmdbClient != nil {
+				s.processTMDB(m, tmdbClient, candidates, &mu)
+			}
+		})
 	}()
 
 	wg.Wait()
@@ -165,13 +176,19 @@ func (s *MetadataService) EnrichMetadata(m *model.AnimeMetadata, query string) {
 	crossReferenceTitles := getCandidateTitles(m, queryTitle)
 	mu.Unlock()
 	if m.BangumiID == 0 {
-		s.enrichBangumi(m, bgmClient, queryTitle, &mu)
+		runMetadataProvider("bangumi-cross-reference", m, func() {
+			s.enrichBangumi(m, bgmClient, queryTitle, &mu)
+		})
 	}
 	if m.TMDBID == 0 && tmdbClient != nil {
-		s.processTMDB(m, tmdbClient, crossReferenceTitles, &mu)
+		runMetadataProvider("tmdb-cross-reference", m, func() {
+			s.processTMDB(m, tmdbClient, crossReferenceTitles, &mu)
+		})
 	}
 	if m.AniListID == 0 && anilistClient != nil {
-		s.processAniList(m, anilistClient, crossReferenceTitles, &mu)
+		runMetadataProvider("anilist-cross-reference", m, func() {
+			s.processAniList(m, anilistClient, crossReferenceTitles, &mu)
+		})
 	}
 
 	// 5. Save and Consolidate
@@ -186,6 +203,31 @@ func (s *MetadataService) EnrichMetadata(m *model.AnimeMetadata, query string) {
 		}
 	}
 	s.SyncMetadataToModels(m)
+}
+
+func runMetadataProvider(provider string, metadata *model.AnimeMetadata, run func()) {
+	defer recoverMetadataProviderPanic(provider, metadata)
+	if run != nil {
+		run()
+	}
+}
+
+func recoverMetadataProviderPanic(provider string, metadata *model.AnimeMetadata) {
+	recovered := recover()
+	if recovered == nil {
+		return
+	}
+	var metadataID uint
+	if metadata != nil {
+		metadataID = metadata.ID
+	}
+	log.Printf(
+		"ERROR: MetadataService: provider panic provider=%s metadata_id=%d recovery_action=continue_other_providers panic=%v\n%s",
+		provider,
+		metadataID,
+		recovered,
+		debug.Stack(),
+	)
 }
 
 func (s *MetadataService) initClients() (*bangumi.Client, *tmdb.Client, *anilist.Client) {

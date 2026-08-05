@@ -1,8 +1,11 @@
 package db
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -250,6 +253,60 @@ func TestRunMigrationsRejectsRewrittenHistoryAndFutureSchema(t *testing.T) {
 	}
 	if err := RunMigrations(target); err == nil || !strings.Contains(err.Error(), "unknown or future") {
 		t.Fatalf("expected future schema to be rejected, got %v", err)
+	}
+}
+
+func TestRunMigrationsFailureLogIncludesMigrationAndRecoveryContext(t *testing.T) {
+	originalMigrations := append([]migration(nil), migrations...)
+	originalPaths := config.AppPaths
+	originalDBPath := CurrentDBPath
+	migrations = []migration{{
+		ID:          "001_fault_injection",
+		Description: "fault injection",
+		Fingerprint: strings.Repeat("a", sha256.Size*2),
+		Apply: func(*gorm.DB) error {
+			return errors.New("injected migration failure")
+		},
+	}}
+	config.AppPaths = config.Paths{DataDir: t.TempDir()}
+	CurrentDBPath = sqliteMemoryPath
+	t.Cleanup(func() {
+		migrations = originalMigrations
+		config.AppPaths = originalPaths
+		CurrentDBPath = originalDBPath
+	})
+
+	target, err := gorm.Open(sqlite.Open(sqliteMemoryPath), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite db: %v", err)
+	}
+	t.Cleanup(func() { closeTestDB(t, target) })
+
+	var output bytes.Buffer
+	previousWriter := log.Writer()
+	previousFlags := log.Flags()
+	log.SetOutput(&output)
+	log.SetFlags(0)
+	t.Cleanup(func() {
+		log.SetOutput(previousWriter)
+		log.SetFlags(previousFlags)
+	})
+
+	err = RunMigrations(target)
+	if err == nil {
+		t.Fatal("expected injected migration failure")
+	}
+	logged := output.String()
+	for _, expected := range []string{
+		"DatabaseMigration: migration failed",
+		"migration=001_fault_injection",
+		"transaction=rolled_back",
+		"retryable=true",
+		"injected migration failure",
+	} {
+		if !strings.Contains(logged, expected) {
+			t.Fatalf("migration failure log missing %q: %s", expected, logged)
+		}
 	}
 }
 

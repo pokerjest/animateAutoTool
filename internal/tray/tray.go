@@ -5,6 +5,7 @@ package tray
 import (
 	"context"
 	"fmt"
+	"log"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -34,19 +35,19 @@ func Run(parent context.Context, startServerFunc func(context.Context) error) er
 }
 
 func onReady(ctx context.Context, cancel context.CancelFunc, startServerFunc func()) {
-	fmt.Printf("DEBUG: Embedded IconData size: %d bytes\n", len(IconData))
+	log.Printf("Tray: icon initialization bytes=%d", len(IconData))
 
 	// Adapting Icon for Windows
 	icon := IconData
 	if runtime.GOOS == "windows" {
 		if ico, err := PngToIco(IconData); err == nil {
-			fmt.Printf("DEBUG: Converted to ICO successfully. Size: %d bytes\n", len(ico))
+			log.Printf("Tray: icon converted format=ico bytes=%d", len(ico))
 			icon = ico
 		} else {
-			fmt.Printf("DEBUG: Failed to convert icon to ICO: %v\n", err)
+			log.Printf("WARN: Tray: icon conversion failed recovery_action=use_png_fallback error=%v", err)
 		}
 	} else {
-		fmt.Println("DEBUG: Skipping ICO conversion (not Windows)")
+		log.Printf("Tray: icon conversion skipped reason=non_windows")
 	}
 	systray.SetIcon(icon)
 	systray.SetTitle("AnimateAutoTool")
@@ -122,6 +123,6 @@ func openBrowser(url string) {
 		err = fmt.Errorf("unsupported platform")
 	}
 	if err != nil {
-		fmt.Printf("Error opening browser: %v\n", err)
+		log.Printf("ERROR: Tray: browser open failed target=%s error=%v", url, err)
 	}
 }

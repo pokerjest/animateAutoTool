@@ -1,9 +1,12 @@
 package worker
 
 import (
+	"bytes"
 	"context"
+	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -215,6 +218,35 @@ func TestCompletedDownloadJellyfinBatchWaitsForEveryPendingSeries(t *testing.T) 
 	}
 	if !completedDownloadJellyfinBatchSettled(service.JellyfinLibrarySyncResult{}) {
 		t.Fatal("batch with no pending series should settle immediately")
+	}
+}
+
+func TestDownloadLogWorkerCycleRecoversPanicAndLogsStack(t *testing.T) {
+	var output bytes.Buffer
+	previousWriter := log.Writer()
+	previousFlags := log.Flags()
+	log.SetOutput(&output)
+	log.SetFlags(0)
+	t.Cleanup(func() {
+		log.SetOutput(previousWriter)
+		log.SetFlags(previousFlags)
+	})
+
+	runDownloadLogSyncCycleWith(context.Background(), "fault-injection", func(context.Context) {
+		panic("worker-boom")
+	})
+
+	logged := output.String()
+	for _, expected := range []string{
+		"DownloadLogWorker: cycle panic",
+		"trigger=fault-injection",
+		"worker-boom",
+		"download_log_worker_test.go",
+		"recovery_action=continue_next_cycle",
+	} {
+		if !strings.Contains(logged, expected) {
+			t.Fatalf("worker panic log missing %q: %s", expected, logged)
+		}
 	}
 }
 

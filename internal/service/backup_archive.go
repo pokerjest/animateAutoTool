@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -62,7 +63,34 @@ func IsBackupArchive(path string) bool {
 // CreateEncryptedBackupArchive wraps an annotated SQLite backup in an
 // AES-256 encrypted ZIP archive. The source database is read in a stream, so
 // memory usage stays bounded while compression happens before R2 upload.
-func CreateEncryptedBackupArchive(databasePath, archivePath, mode, password string) error {
+func CreateEncryptedBackupArchive(databasePath, archivePath, mode, password string) (retErr error) {
+	startedAt := time.Now()
+	archiveLabel := filepath.Base(filepath.Clean(archivePath))
+	mode = NormalizeBackupMode(mode)
+	log.Printf("BackupService: encryption starting mode=%s archive=%s", mode, archiveLabel)
+	defer func() {
+		if retErr != nil {
+			log.Printf(
+				"ERROR: BackupService: encryption failed mode=%s archive=%s duration=%s partial_removed=true error=%v",
+				mode,
+				archiveLabel,
+				time.Since(startedAt).Round(time.Millisecond),
+				retErr,
+			)
+			return
+		}
+		var size int64
+		if info, err := os.Stat(filepath.Clean(archivePath)); err == nil {
+			size = info.Size()
+		}
+		log.Printf(
+			"BackupService: encryption completed mode=%s archive=%s bytes=%d duration=%s",
+			mode,
+			archiveLabel,
+			size,
+			time.Since(startedAt).Round(time.Millisecond),
+		)
+	}()
 	if strings.TrimSpace(password) == "" {
 		return errors.New("备份压缩包密码不能为空")
 	}
@@ -109,7 +137,7 @@ func CreateEncryptedBackupArchive(databasePath, archivePath, mode, password stri
 		FormatVersion:  BackupArchiveFormatVersion,
 		AppVersion:     currentBackupAppVersion(),
 		SchemaVersion:  currentBackupSchemaVersion(),
-		BackupMode:     NormalizeBackupMode(mode),
+		BackupMode:     mode,
 		DatabaseSHA256: sha256File(databasePath),
 		DatabaseSize:   info.Size(),
 		CreatedAt:      time.Now().UTC(),
@@ -143,7 +171,30 @@ func CreateEncryptedBackupArchive(databasePath, archivePath, mode, password stri
 // caller-owned path. It verifies the encrypted manifest and database digest
 // before returning, so a wrong password or damaged archive cannot reach the
 // restore transaction.
-func ExtractEncryptedBackupArchive(archivePath, password, databasePath string) (BackupArchiveManifest, error) {
+func ExtractEncryptedBackupArchive(archivePath, password, databasePath string) (manifest BackupArchiveManifest, retErr error) {
+	startedAt := time.Now()
+	archiveLabel := filepath.Base(filepath.Clean(archivePath))
+	log.Printf("BackupService: encrypted archive extraction starting archive=%s", archiveLabel)
+	defer func() {
+		if retErr != nil {
+			log.Printf(
+				"ERROR: BackupService: encrypted archive extraction failed archive=%s duration=%s partial_removed=true error=%v",
+				archiveLabel,
+				time.Since(startedAt).Round(time.Millisecond),
+				retErr,
+			)
+			return
+		}
+		log.Printf(
+			"BackupService: encrypted archive extraction completed archive=%s mode=%s schema=%s bytes=%d sha256=%s duration=%s",
+			archiveLabel,
+			manifest.BackupMode,
+			manifest.SchemaVersion,
+			manifest.DatabaseSize,
+			manifest.DatabaseSHA256,
+			time.Since(startedAt).Round(time.Millisecond),
+		)
+	}()
 	if strings.TrimSpace(password) == "" {
 		return BackupArchiveManifest{}, errors.New("请输入备份压缩包密码")
 	}
@@ -159,7 +210,7 @@ func ExtractEncryptedBackupArchive(archivePath, password, databasePath string) (
 		return BackupArchiveManifest{}, err
 	}
 
-	manifest, err := readEncryptedBackupManifest(manifestEntry, password)
+	manifest, err = readEncryptedBackupManifest(manifestEntry, password)
 	if err != nil {
 		return BackupArchiveManifest{}, err
 	}

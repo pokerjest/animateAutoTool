@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"runtime/debug"
 	"strconv"
 	"sync"
 	"time"
@@ -16,7 +17,18 @@ import (
 
 // StartMetadataMigration starts the compatibility background wrapper.
 func (s *MetadataService) StartMetadataMigration() {
-	go s.RunMetadataMigration(context.Background())
+	go func() {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				log.Printf(
+					"ERROR: MetadataService: background image migration panic recovery_action=retry_next_start panic=%v\n%s",
+					recovered,
+					debug.Stack(),
+				)
+			}
+		}()
+		s.RunMetadataMigration(context.Background())
+	}()
 }
 
 // RunMetadataMigration caches missing metadata images and returns after ctx is
@@ -67,7 +79,9 @@ func (s *MetadataService) RunMetadataMigration(ctx context.Context) {
 
 		if updated {
 			m.Image = fmt.Sprintf("/api/v1/posters/%d", m.ID)
-			if err := mStore.Save(&m); err == nil {
+			if err := mStore.Save(&m); err != nil {
+				log.Printf("ERROR: MetadataService: image cache persist failed metadata_id=%d error=%v", m.ID, err)
+			} else {
 				s.SyncMetadataToModels(&m)
 			}
 		}
@@ -217,7 +231,21 @@ func (s *MetadataService) StartRefreshAllMetadata(force bool) bool {
 	if !s.BeginRefreshAllMetadata() {
 		return false
 	}
-	go s.RefreshAllMetadataContext(context.Background(), force)
+	go func() {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				err := fmt.Errorf("metadata refresh panic: %v", recovered)
+				GlobalRefreshStatus.Finish("元数据刷新异常中止")
+				taskstate.Global.Fail("metadata-refresh", err)
+				log.Printf(
+					"ERROR: MetadataService: refresh panic recovery_action=retry_refresh panic=%v\n%s",
+					recovered,
+					debug.Stack(),
+				)
+			}
+		}()
+		s.RefreshAllMetadataContext(context.Background(), force)
+	}()
 	return true
 }
 
@@ -285,6 +313,17 @@ refreshLoop:
 		go func(idx int, meta model.AnimeMetadata) {
 			defer wg.Done()
 			defer func() { <-guard }()
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					log.Printf(
+						"ERROR: MetadataService: refresh worker panic metadata_id=%d index=%d recovery_action=continue_other_records panic=%v\n%s",
+						meta.ID,
+						idx,
+						recovered,
+						debug.Stack(),
+					)
+				}
+			}()
 			if ctx.Err() != nil {
 				return
 			}

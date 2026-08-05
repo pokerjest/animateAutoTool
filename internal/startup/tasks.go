@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -48,6 +49,17 @@ func Run(parent context.Context) *Lifecycle {
 	if err != nil {
 		log.Printf("ERROR: failed to create durable runtime session marker: %v", err)
 	} else {
+		if sessionResult.Previous != nil {
+			log.Printf(
+				"Startup: previous runtime session found pid=%d version=%s started_at=%s operations=%d",
+				sessionResult.Previous.PID,
+				sessionResult.Previous.AppVersion,
+				sessionResult.Previous.StartedAt.Format(time.RFC3339),
+				len(sessionResult.Previous.Operations),
+			)
+		} else {
+			log.Printf("Startup: durable runtime session created; no previous unclean session detected")
+		}
 		recovery = handlePreviousRuntimeSession(ctx, sessionResult)
 	}
 	lifecycle.recovery = recovery
@@ -55,36 +67,57 @@ func Run(parent context.Context) *Lifecycle {
 	lifecycle.workers.Add(1)
 	go func() {
 		defer lifecycle.workers.Done()
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				log.Printf(
+					"ERROR: Startup: background supervisor panic recovery_action=restart_service panic=%v\n%s",
+					recovered,
+					debug.Stack(),
+				)
+			}
+		}()
 		select {
 		case <-recovery.done:
 			if !recovery.allowBackground {
-				log.Printf("ERROR: background workers remain disabled because startup recovery is blocked")
+				log.Printf("ERROR: Startup: background workers remain disabled because startup recovery is blocked recovery_action=maintenance_restore")
 				return
 			}
 			if ctx.Err() != nil {
+				log.Printf("Startup: background worker launch canceled before start reason=%v", ctx.Err())
 				return
 			}
+			log.Printf("Startup: background initialization starting")
 			service.NewAuthService().EnsureDefaultUser()
 			service.NewScannerService().CleanupGarbage()
 			worker.StartMetadataWorker()
+			log.Printf("Startup: metadata event worker started")
 
 			var backgroundWorkers sync.WaitGroup
 			backgroundWorkers.Add(3)
 			go func() {
 				defer backgroundWorkers.Done()
+				log.Printf("Startup: metadata migration worker started")
+				defer func() { log.Printf("Startup: metadata migration worker stopped reason=%v", ctx.Err()) }()
 				service.NewMetadataService().RunMetadataMigration(ctx)
 			}()
 			go func() {
 				defer backgroundWorkers.Done()
+				log.Printf("Startup: download log worker started")
+				defer func() { log.Printf("Startup: download log worker stopped reason=%v", ctx.Err()) }()
 				worker.RunDownloadLogSyncWorker(ctx)
 			}()
 			go func() {
 				defer backgroundWorkers.Done()
+				log.Printf("Startup: runtime monitor worker started")
+				defer func() { log.Printf("Startup: runtime monitor worker stopped reason=%v", ctx.Err()) }()
 				runRuntimeMonitor(ctx)
 			}()
 			updater.Start()
+			log.Printf("Startup: updater worker started")
 			backgroundWorkers.Wait()
+			log.Printf("Startup: background workers stopped")
 		case <-ctx.Done():
+			log.Printf("Startup: worker launch wait canceled reason=%v", ctx.Err())
 		}
 	}()
 
@@ -122,6 +155,7 @@ func handlePreviousRuntimeSession(ctx context.Context, result runtimejournal.Sta
 	if result.Previous == nil {
 		recovery.allowBackground = true
 		close(recovery.done)
+		log.Printf("Startup: recovery not required")
 		return recovery
 	}
 
@@ -161,6 +195,7 @@ func handlePreviousRuntimeSession(ctx context.Context, result runtimejournal.Sta
 			Hint:      "请停止服务并从最近的本地安全快照或备份恢复数据库；恢复前不要继续执行扫描或订阅任务。",
 		})
 		runtimejournal.SetRecoveryBlocked(true)
+		log.Printf("ERROR: Startup: recovery blocked by database integrity failure; business workers will not start")
 		close(recovery.done)
 		return recovery
 	}
@@ -174,6 +209,7 @@ func handlePreviousRuntimeSession(ctx context.Context, result runtimejournal.Sta
 		log.Printf("WARN: previous process ended without a clean shutdown marker; SQLite integrity check passed")
 		recovery.allowBackground = true
 		close(recovery.done)
+		log.Printf("Startup: unclean-session recovery completed with integrity-only check")
 		return recovery
 	}
 
@@ -184,6 +220,14 @@ func handlePreviousRuntimeSession(ctx context.Context, result runtimejournal.Sta
 		log.Printf("WARN: failed to persist startup recovery marker: %v", err)
 	}
 	go func() {
+		recoveryStartedAt := time.Now()
+		log.Printf(
+			"Startup: crash recovery started task_id=%s media=%t subscriptions=%t operations=%s",
+			taskID,
+			needsMediaRecovery,
+			needsSubscriptionRecovery,
+			operationSummary,
+		)
 		recoverySucceeded := true
 		defer func() {
 			// Only a failed integrity check blocks normal workers. Other
@@ -192,6 +236,12 @@ func handlePreviousRuntimeSession(ctx context.Context, result runtimejournal.Sta
 			// such as qBittorrent come back online.
 			recovery.allowBackground = true
 			close(recovery.done)
+			log.Printf(
+				"Startup: crash recovery finished task_id=%s succeeded=%t duration=%s",
+				taskID,
+				recoverySucceeded,
+				time.Since(recoveryStartedAt).Round(time.Millisecond),
+			)
 		}()
 		defer func() {
 			if recoverySucceeded {
@@ -201,6 +251,20 @@ func handlePreviousRuntimeSession(ctx context.Context, result runtimejournal.Sta
 			}
 		}()
 		defer runtimejournal.SetRecoveryInProgress(false)
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				recoverySucceeded = false
+				err := fmt.Errorf("startup recovery panic: %v", recovered)
+				taskstate.Global.Fail(taskID, err)
+				log.Printf(
+					"ERROR: Startup: crash recovery panic task_id=%s operations=%s recovery_action=inspect_logs_and_rerun_recovery panic=%v\n%s",
+					taskID,
+					operationSummary,
+					recovered,
+					debug.Stack(),
+				)
+			}
+		}()
 
 		if needsMediaRecovery {
 			taskstate.Global.Progress(taskID, "正在重新扫描媒体库并核对元数据链接", 0, 3)
@@ -209,6 +273,7 @@ func handlePreviousRuntimeSession(ctx context.Context, result runtimejournal.Sta
 				taskstate.Global.Progress(taskID, progress.Message, progress.Current, progress.Total)
 			}); err != nil {
 				recoverySucceeded = false
+				log.Printf("ERROR: Startup: crash recovery media scan failed task_id=%s error=%v", taskID, err)
 				taskstate.Global.Fail(taskID, fmt.Errorf("异常退出后的媒体库重扫失败: %w", err))
 				return
 			}
@@ -216,12 +281,14 @@ func handlePreviousRuntimeSession(ctx context.Context, result runtimejournal.Sta
 			taskstate.Global.Progress(taskID, "文件重扫完成，正在恢复元数据并复核订阅链接", task.Current, task.Total)
 			if _, err := service.NewAgentService().RunAgentForLibraryWithRepair(nil); err != nil {
 				recoverySucceeded = false
+				log.Printf("ERROR: Startup: crash recovery metadata repair failed task_id=%s error=%v", taskID, err)
 				taskstate.Global.Fail(taskID, fmt.Errorf("异常退出后的元数据恢复失败: %w", err))
 				return
 			}
 			taskstate.Global.Progress(taskID, "元数据恢复完成，正在复核订阅与本地媒体链接", 2, 3)
 			if _, err := service.RepairDownloadLogsFromLocalLibrary(0); err != nil {
 				recoverySucceeded = false
+				log.Printf("ERROR: Startup: crash recovery download-log repair failed task_id=%s error=%v", taskID, err)
 				taskstate.Global.Fail(taskID, fmt.Errorf("异常退出后的订阅链接复核失败: %w", err))
 				return
 			}
@@ -231,6 +298,7 @@ func handlePreviousRuntimeSession(ctx context.Context, result runtimejournal.Sta
 			taskstate.Global.Progress(taskID, "正在恢复被中断的订阅对账", 2, 3)
 			if err := recoverInterruptedSubscriptionSync(ctx); err != nil {
 				recoverySucceeded = false
+				log.Printf("ERROR: Startup: crash recovery subscription reconciliation failed task_id=%s error=%v", taskID, err)
 				_ = service.ReportLibraryIssue(service.LibraryIssueInput{
 					IssueKey:  "runtime:subscription-recovery",
 					IssueType: service.LibraryIssueTypeScan,

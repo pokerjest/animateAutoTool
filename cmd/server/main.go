@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"syscall"
@@ -100,6 +101,7 @@ func runServer(parent context.Context) (runErr error) {
 	)
 	defer func() {
 		if srv != nil {
+			log.Printf("Shutdown: HTTP graceful shutdown starting timeout=15s")
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			if err := srv.Shutdown(shutdownCtx); err != nil {
 				if closeErr := srv.Close(); closeErr != nil {
@@ -110,6 +112,7 @@ func runServer(parent context.Context) (runErr error) {
 				}
 			}
 			cancel()
+			log.Printf("Shutdown: HTTP server stopped")
 		}
 		if sch != nil {
 			sch.Stop()
@@ -135,14 +138,18 @@ func runServer(parent context.Context) (runErr error) {
 			}
 			return
 		}
+		log.Printf("Shutdown: background tasks and managed services stopped")
 		if err := runtimejournal.EndSession(); err != nil {
 			log.Printf("WARN: failed to clear runtime session marker during shutdown: %v", err)
 		}
 		if databaseOpen {
 			if err := db.CloseDB(); err != nil {
 				log.Printf("WARN: database close failed during shutdown: %v", err)
+			} else {
+				log.Printf("Shutdown: database closed")
 			}
 		}
+		log.Printf("Shutdown: sequence completed")
 	}()
 
 	log.Println("Initializing environment (Checking Alist & qBittorrent)...")
@@ -171,7 +178,8 @@ func runServer(parent context.Context) (runErr error) {
 	api.StartBackgroundTasks(appCtx)
 	startupLife = startup.Run(appCtx)
 
-	r := gin.Default()
+	r := gin.New()
+	r.Use(api.RequestLoggingMiddleware(), api.RecoveryLoggingMiddleware())
 	if err := r.SetTrustedProxies(config.AppConfig.Server.TrustedProxies); err != nil {
 		return fmt.Errorf("set trusted proxies: %w", err)
 	}
@@ -186,7 +194,10 @@ func runServer(parent context.Context) (runErr error) {
 	srv = &http.Server{
 		Addr:              ":" + port,
 		Handler:           r,
+		ErrorLog:          log.Default(),
 		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       2 * time.Minute,
+		MaxHeaderBytes:    1 << 20,
 	}
 
 	errCh := make(chan error, 1)
@@ -210,6 +221,7 @@ func runServer(parent context.Context) (runErr error) {
 }
 func waitForShutdownTasks(timeout time.Duration, waits ...func()) error {
 	var wg sync.WaitGroup
+	panicErrors := make(chan error, len(waits))
 	for _, wait := range waits {
 		if wait == nil {
 			continue
@@ -217,6 +229,17 @@ func waitForShutdownTasks(timeout time.Duration, waits ...func()) error {
 		wg.Add(1)
 		go func(wait func()) {
 			defer wg.Done()
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					err := fmt.Errorf("shutdown waiter panic: %v", recovered)
+					panicErrors <- err
+					log.Printf(
+						"ERROR: Shutdown: waiter panic recovery_action=continue_other_waiters panic=%v\n%s",
+						recovered,
+						debug.Stack(),
+					)
+				}
+			}()
 			wait()
 		}(wait)
 	}
@@ -230,7 +253,12 @@ func waitForShutdownTasks(timeout time.Duration, waits ...func()) error {
 	defer timer.Stop()
 	select {
 	case <-done:
-		return nil
+		select {
+		case err := <-panicErrors:
+			return err
+		default:
+			return nil
+		}
 	case <-timer.C:
 		return fmt.Errorf("background shutdown exceeded %s", timeout)
 	}
@@ -254,6 +282,7 @@ func configureLogging() func() {
 		log.Printf("Failed to initialize hourly logs in %s: %v", logDir, err)
 		return func() {}
 	}
+	persistentLog := applogging.RedactingWriter{Writer: file}
 	healthFile, err := applogging.NewHealthWriter(logDir, healthLogPrefix, healthLogMaxFiles)
 	if err != nil {
 		log.Printf("Failed to initialize health diagnostics in %s: %v", logDir, err)
@@ -262,9 +291,9 @@ func configureLogging() func() {
 
 	releaseMode := strings.EqualFold(strings.TrimSpace(config.AppConfig.Server.Mode), "release")
 	if runtime.GOOS == "windows" && releaseMode {
-		output := io.Writer(file)
+		output := io.Writer(persistentLog)
 		if healthFile != nil {
-			output = io.MultiWriter(file, healthFile)
+			output = io.MultiWriter(persistentLog, healthFile)
 		}
 		log.SetOutput(output)
 		gin.DefaultWriter = output
@@ -277,8 +306,8 @@ func configureLogging() func() {
 		}
 	}
 
-	stdoutWriters := []io.Writer{os.Stdout, file}
-	stderrWriters := []io.Writer{os.Stderr, file}
+	stdoutWriters := []io.Writer{os.Stdout, persistentLog}
+	stderrWriters := []io.Writer{os.Stderr, persistentLog}
 	if healthFile != nil {
 		stdoutWriters = append(stdoutWriters, healthFile)
 		stderrWriters = append(stderrWriters, healthFile)
