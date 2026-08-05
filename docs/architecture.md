@@ -167,6 +167,7 @@ var migrations = []migration{
     {ID: "001_initial_schema", Apply: ...},
     // ...
     {ID: "014_anime_metadata_extended_fields", Apply: ...},
+    {ID: "015_local_anime_identity", Apply: ...},
 }
 ```
 

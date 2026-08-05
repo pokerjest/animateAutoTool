@@ -9,7 +9,7 @@ APP_DISPLAY_NAME="Animate Auto Tool"
 APP_BUNDLE_NAME="${APP_DISPLAY_NAME}.app"
 APP_IDENTIFIER="com.pokerjest.animateautotool"
 VERSION_FILE="./VERSION"
-DEFAULT_VERSION="v1.0.0-beta.13"
+DEFAULT_VERSION="v1.0.0-beta.14"
 DIST_DIR="${DIST_DIR:-./dist}"
 SRC_PATH="./cmd/server"
 
@@ -272,10 +272,10 @@ write_release_manifest() {
   "format_version": 1,
   "version": "$VERSION",
   "channel": "$channel",
-  "schema_version": "014",
+  "schema_version": "015",
   "min_upgrade_from": "0.9.0",
   "min_readable_schema": "001",
-  "max_readable_schema": "014",
+  "max_readable_schema": "015",
   "switchable_from_prerelease": true,
   "rollback_supported": false
 }

@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	pathpkg "path"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -125,6 +127,247 @@ var migrations = []migration{
 		Description: "Add extended metadata fields introduced by the local media scraper",
 		Apply:       migrateAnimeMetadataExtendedFields,
 	},
+	{
+		ID:          "015_local_anime_identity",
+		Description: "Merge duplicate folder series and enforce stable local anime identities",
+		Apply:       migrateLocalAnimeIdentity,
+	},
+}
+
+const localAnimeIdentityIndexName = "idx_local_anime_scan_key"
+
+// migrateLocalAnimeIdentity repairs historical duplicate folder rows before
+// adding the unique index. Loose-file series use the library root as their
+// path and deliberately keep a NULL identity so they can coexist.
+func migrateLocalAnimeIdentity(tx *gorm.DB) error {
+	if !tx.Migrator().HasTable(&model.LocalAnime{}) {
+		return nil
+	}
+	if !tx.Migrator().HasColumn(&model.LocalAnime{}, "ScanKey") {
+		if err := tx.Migrator().AddColumn(&model.LocalAnime{}, "ScanKey"); err != nil {
+			return fmt.Errorf("add local_animes.scan_key: %w", err)
+		}
+	}
+	if err := repairLocalAnimeIdentity(tx); err != nil {
+		return err
+	}
+	return ensureLocalAnimeIdentityIndex(tx)
+}
+
+// RepairLocalAnimeIdentity is also used after restoring legacy backups, which
+// may contain duplicate rows and may not have the scan_key column at all.
+func RepairLocalAnimeIdentity(tx *gorm.DB) error {
+	if tx == nil || !tx.Migrator().HasTable(&model.LocalAnime{}) {
+		return nil
+	}
+	if !tx.Migrator().HasColumn(&model.LocalAnime{}, "ScanKey") {
+		if err := tx.Migrator().AddColumn(&model.LocalAnime{}, "ScanKey"); err != nil {
+			return fmt.Errorf("add local_animes.scan_key: %w", err)
+		}
+	}
+	if err := repairLocalAnimeIdentity(tx); err != nil {
+		return err
+	}
+	return ensureLocalAnimeIdentityIndex(tx)
+}
+
+func ensureLocalAnimeIdentityIndex(tx *gorm.DB) error {
+	if err := DropLocalAnimeIdentityIndex(tx); err != nil {
+		return err
+	}
+	return tx.Exec(
+		"CREATE UNIQUE INDEX " + localAnimeIdentityIndexName +
+			" ON local_animes(scan_key) WHERE deleted_at IS NULL AND scan_key IS NOT NULL AND scan_key != ''",
+	).Error
+}
+
+// DropLocalAnimeIdentityIndex temporarily removes the identity constraint while
+// a legacy restore is loading and consolidating duplicate rows.
+func DropLocalAnimeIdentityIndex(tx *gorm.DB) error {
+	if tx == nil {
+		return gorm.ErrInvalidDB
+	}
+	for _, name := range []string{localAnimeIdentityIndexName, "idx_local_animes_scan_key"} {
+		if err := tx.Exec("DROP INDEX IF EXISTS " + name).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func repairLocalAnimeIdentity(tx *gorm.DB) error {
+	var directories []model.LocalAnimeDirectory
+	if tx.Migrator().HasTable(&model.LocalAnimeDirectory{}) {
+		if err := tx.Unscoped().Find(&directories).Error; err != nil {
+			return fmt.Errorf("load local anime directories: %w", err)
+		}
+	}
+	rootByID := make(map[uint]string, len(directories))
+	for _, directory := range directories {
+		rootByID[directory.ID] = migrationPathKey(directory.Path)
+	}
+
+	var animes []model.LocalAnime
+	query := tx.Unscoped().Where("deleted_at IS NULL")
+	if tx.Migrator().HasTable(&model.LocalEpisode{}) {
+		query = query.Preload("Episodes")
+	}
+	if err := query.Find(&animes).Error; err != nil {
+		return fmt.Errorf("load local anime rows: %w", err)
+	}
+	groups := make(map[string][]*model.LocalAnime)
+	for i := range animes {
+		anime := &animes[i]
+		key := migrationLocalAnimeKey(anime.Path, rootByID[anime.DirectoryID])
+		if key == "" {
+			if err := tx.Model(&model.LocalAnime{}).Where("id = ?", anime.ID).Update("scan_key", nil).Error; err != nil {
+				return err
+			}
+			continue
+		}
+		if err := tx.Model(&model.LocalAnime{}).Where("id = ?", anime.ID).Update("scan_key", key).Error; err != nil {
+			return err
+		}
+		groups[key] = append(groups[key], anime)
+	}
+
+	for _, group := range groups {
+		if len(group) < 2 {
+			continue
+		}
+		sortLocalAnimeIdentityGroup(group)
+		survivor := group[0]
+		for _, duplicate := range group[1:] {
+			if err := mergeLocalAnimeIdentityRows(tx, survivor, duplicate); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func sortLocalAnimeIdentityGroup(group []*model.LocalAnime) {
+	sort.SliceStable(group, func(i, j int) bool {
+		left, right := group[i], group[j]
+		if (len(left.Episodes) > 0) != (len(right.Episodes) > 0) {
+			return len(left.Episodes) > 0
+		}
+		if (left.MetadataID != nil) != (right.MetadataID != nil) {
+			return left.MetadataID != nil
+		}
+		if (left.JellyfinSeriesID != "") != (right.JellyfinSeriesID != "") {
+			return left.JellyfinSeriesID != ""
+		}
+		if len(left.Episodes) != len(right.Episodes) {
+			return len(left.Episodes) > len(right.Episodes)
+		}
+		return left.ID < right.ID
+	})
+}
+
+func mergeLocalAnimeIdentityRows(tx *gorm.DB, survivor, duplicate *model.LocalAnime) error {
+	if survivor == nil || duplicate == nil || survivor.ID == duplicate.ID {
+		return nil
+	}
+	if tx.Migrator().HasTable(&model.LocalEpisode{}) {
+		if err := tx.Unscoped().Model(&model.LocalEpisode{}).
+			Where("local_anime_id = ?", duplicate.ID).
+			Update("local_anime_id", survivor.ID).Error; err != nil {
+			return fmt.Errorf("reassign episodes %d -> %d: %w", duplicate.ID, survivor.ID, err)
+		}
+	}
+	if tx.Migrator().HasTable(&model.PlaybackHistory{}) {
+		if err := tx.Unscoped().Model(&model.PlaybackHistory{}).
+			Where("local_anime_id = ?", duplicate.ID).
+			Update("local_anime_id", survivor.ID).Error; err != nil {
+			return fmt.Errorf("reassign playback history %d -> %d: %w", duplicate.ID, survivor.ID, err)
+		}
+	}
+	if tx.Migrator().HasTable(&model.LibraryIssue{}) {
+		if err := tx.Unscoped().Model(&model.LibraryIssue{}).
+			Where("local_anime_id = ?", duplicate.ID).
+			Update("local_anime_id", survivor.ID).Error; err != nil {
+			return fmt.Errorf("reassign library issues %d -> %d: %w", duplicate.ID, survivor.ID, err)
+		}
+	}
+
+	updates := map[string]any{}
+	if survivor.MetadataID == nil && duplicate.MetadataID != nil {
+		updates["metadata_id"] = *duplicate.MetadataID
+		survivor.MetadataID = duplicate.MetadataID
+	}
+	if strings.TrimSpace(survivor.Title) == "" {
+		updates["title"] = duplicate.Title
+	}
+	if strings.TrimSpace(survivor.Image) == "" {
+		updates["image"] = duplicate.Image
+	}
+	if strings.TrimSpace(survivor.JellyfinSeriesID) == "" {
+		updates["jellyfin_series_id"] = duplicate.JellyfinSeriesID
+	}
+	if strings.TrimSpace(survivor.Summary) == "" {
+		updates["summary"] = duplicate.Summary
+	}
+	if strings.TrimSpace(survivor.AirDate) == "" {
+		updates["air_date"] = duplicate.AirDate
+	}
+	if survivor.Season == 0 && duplicate.Season != 0 {
+		updates["season"] = duplicate.Season
+	}
+	if survivor.FileCount < duplicate.FileCount {
+		updates["file_count"] = duplicate.FileCount
+	}
+	if survivor.TotalSize < duplicate.TotalSize {
+		updates["total_size"] = duplicate.TotalSize
+	}
+	if len(updates) > 0 {
+		if err := tx.Model(&model.LocalAnime{}).Where("id = ?", survivor.ID).Updates(updates).Error; err != nil {
+			return fmt.Errorf("preserve duplicate anime fields %d -> %d: %w", duplicate.ID, survivor.ID, err)
+		}
+	}
+	if err := tx.Unscoped().Delete(&model.LocalAnime{}, duplicate.ID).Error; err != nil {
+		return fmt.Errorf("delete duplicate local anime %d: %w", duplicate.ID, err)
+	}
+	if tx.Migrator().HasTable(&model.LocalEpisode{}) {
+		var stats struct {
+			FileCount int
+			TotalSize int64
+		}
+		if err := tx.Unscoped().Model(&model.LocalEpisode{}).
+			Select("COUNT(*) AS file_count, COALESCE(SUM(file_size), 0) AS total_size").
+			Where("local_anime_id = ? AND deleted_at IS NULL", survivor.ID).
+			Scan(&stats).Error; err != nil {
+			return fmt.Errorf("recount local anime %d: %w", survivor.ID, err)
+		}
+		if err := tx.Model(&model.LocalAnime{}).Where("id = ?", survivor.ID).
+			Updates(map[string]any{"file_count": stats.FileCount, "total_size": stats.TotalSize}).Error; err != nil {
+			return fmt.Errorf("save local anime stats %d: %w", survivor.ID, err)
+		}
+	}
+	return nil
+}
+
+func migrationPathKey(raw string) string {
+	raw = strings.TrimSpace(strings.ReplaceAll(raw, `\`, `/`))
+	if raw == "" {
+		return ""
+	}
+	raw = pathpkg.Clean(raw)
+	if regexp.MustCompile(`(?i)^[a-z]:/|^//`).MatchString(raw) {
+		raw = strings.ToLower(raw)
+	}
+	return raw
+}
+
+func migrationLocalAnimeKey(path, root string) string {
+	pathKey := migrationPathKey(path)
+	// Without a matching configured library root we cannot distinguish a
+	// folder series from a loose file series restored from a partial backup.
+	// Leave the key NULL rather than risk collapsing unrelated root records.
+	if pathKey == "" || root == "" || pathKey == root {
+		return ""
+	}
+	return "folder:" + pathKey
 }
 
 // migrateAnimeMetadataExtendedFields repairs databases created before the

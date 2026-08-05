@@ -401,3 +401,82 @@ func TestBangumiIDMigrationUsesPartialUniqueIndex(t *testing.T) {
 		t.Fatalf("expected partial Bangumi index, got %q", indexSQL)
 	}
 }
+
+func TestLocalAnimeIdentityMigrationMergesPopulatedDuplicates(t *testing.T) {
+	target, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "local-anime-identity.db")), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite db: %v", err)
+	}
+	t.Cleanup(func() { closeTestDB(t, target) })
+	if err := autoMigrateCoreSchema(target); err != nil {
+		t.Fatalf("migrate core schema: %v", err)
+	}
+	if err := target.AutoMigrate(&SchemaMigration{}); err != nil {
+		t.Fatalf("migrate schema history: %v", err)
+	}
+	for _, item := range migrations {
+		if item.ID == "015_local_anime_identity" {
+			break
+		}
+		if err := target.Create(&SchemaMigration{ID: item.ID, Description: item.Description}).Error; err != nil {
+			t.Fatalf("seed migration %s: %v", item.ID, err)
+		}
+	}
+
+	dir := model.LocalAnimeDirectory{Path: `E:\Bangumi`}
+	if err := target.Create(&dir).Error; err != nil {
+		t.Fatalf("create directory: %v", err)
+	}
+	metadata := model.AnimeMetadata{Title: "Transparent Night", AniListID: 202269}
+	if err := target.Create(&metadata).Error; err != nil {
+		t.Fatalf("create metadata: %v", err)
+	}
+	first := model.LocalAnime{Model: gorm.Model{ID: 229}, DirectoryID: dir.ID, Title: "Transparent Night", Path: `E:\Bangumi\与奔驰于透明之夜的你，谈一场看不见的恋爱。`, MetadataID: &metadata.ID, JellyfinSeriesID: "series-229"}
+	second := model.LocalAnime{Model: gorm.Model{ID: 249}, DirectoryID: dir.ID, Title: "Transparent Night", Path: first.Path, FileCount: 3, TotalSize: 300, JellyfinSeriesID: "series-249"}
+	if err := target.Create(&first).Error; err != nil {
+		t.Fatalf("create first duplicate: %v", err)
+	}
+	if err := target.Create(&second).Error; err != nil {
+		t.Fatalf("create second duplicate: %v", err)
+	}
+	episodes := []model.LocalEpisode{
+		{LocalAnimeID: first.ID, EpisodeNum: 1, Path: first.Path + `\01.mkv`, FileSize: 100},
+		{LocalAnimeID: second.ID, EpisodeNum: 2, Path: second.Path + `\02.mkv`, FileSize: 200},
+	}
+	if err := target.Create(&episodes).Error; err != nil {
+		t.Fatalf("create episodes: %v", err)
+	}
+	history := model.PlaybackHistory{LocalAnimeID: second.ID, LocalEpisodeID: episodes[1].ID}
+	if err := target.Create(&history).Error; err != nil {
+		t.Fatalf("create playback history: %v", err)
+	}
+	issue := model.LibraryIssue{IssueKey: "scrape:249", LocalAnimeID: &second.ID}
+	if err := target.Create(&issue).Error; err != nil {
+		t.Fatalf("create library issue: %v", err)
+	}
+
+	if err := RunMigrations(target); err != nil {
+		t.Fatalf("run identity migration: %v", err)
+	}
+	var rows []model.LocalAnime
+	if err := target.Preload("Episodes").Find(&rows).Error; err != nil {
+		t.Fatalf("load merged local anime: %v", err)
+	}
+	if len(rows) != 1 || rows[0].ID != first.ID {
+		t.Fatalf("expected populated survivor %d, got %+v", first.ID, rows)
+	}
+	if len(rows[0].Episodes) != 2 || rows[0].MetadataID == nil || rows[0].JellyfinSeriesID != "series-229" {
+		t.Fatalf("merged fields were not preserved: %+v", rows[0])
+	}
+	var gotHistory model.PlaybackHistory
+	if err := target.First(&gotHistory).Error; err != nil || gotHistory.LocalAnimeID != first.ID {
+		t.Fatalf("playback history was not reassigned: %+v, %v", gotHistory, err)
+	}
+	var gotIssue model.LibraryIssue
+	if err := target.First(&gotIssue).Error; err != nil || gotIssue.LocalAnimeID == nil || *gotIssue.LocalAnimeID != first.ID {
+		t.Fatalf("library issue was not reassigned: %+v, %v", gotIssue, err)
+	}
+	if rows[0].ScanKey == nil || !strings.HasPrefix(*rows[0].ScanKey, "folder:") {
+		t.Fatalf("expected stable scan key, got %v", rows[0].ScanKey)
+	}
+}

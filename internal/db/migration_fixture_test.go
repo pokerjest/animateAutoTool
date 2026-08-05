@@ -195,8 +195,8 @@ func TestAnimeMetadataExtendedFieldsMigrationRepairsLegacyTable(t *testing.T) {
 	if metadata.Title != "保留的旧数据" {
 		t.Fatalf("legacy metadata was not preserved: %+v", metadata)
 	}
-	if got := CurrentSchemaVersion(target); got != "014_anime_metadata_extended_fields" {
-		t.Fatalf("expected current schema 014, got %q", got)
+	if got := CurrentSchemaVersion(target); got != migrations[len(migrations)-1].ID {
+		t.Fatalf("expected current schema %q, got %q", migrations[len(migrations)-1].ID, got)
 	}
 
 	// A second run must not attempt to add the columns again.

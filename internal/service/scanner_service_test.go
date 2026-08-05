@@ -128,6 +128,29 @@ func TestScannerKeepsLooseSeriesMetadataSeparatedAcrossRescans(t *testing.T) {
 	require.Equal(t, "Loose Beta", rescanned[1].Metadata.Title)
 }
 
+func TestScannerPersistsFolderIdentityAndLeavesLooseIdentityNullable(t *testing.T) {
+	withServiceTestDB(t)
+	root := t.TempDir()
+	writeScannerFixture(t, filepath.Join(root, "Folder Show", "Season 01", "Folder Show - 01.mkv"))
+	writeScannerFixture(t, filepath.Join(root, "[ANi] Loose Show - 01.mkv"))
+	directory := createScannerDirectory(t, root)
+
+	_, err := NewScannerService().ScanDirectory(&directory)
+	require.NoError(t, err)
+
+	var animes []model.LocalAnime
+	require.NoError(t, db.DB.Order("title").Find(&animes).Error)
+	require.Len(t, animes, 2)
+	for _, anime := range animes {
+		if anime.Title == "Folder Show" {
+			require.NotNil(t, anime.ScanKey)
+			require.Contains(t, *anime.ScanKey, "folder:")
+		} else {
+			require.Nil(t, anime.ScanKey)
+		}
+	}
+}
+
 func TestScannerUsesSeriesAndEpisodeNFOData(t *testing.T) {
 	withServiceTestDB(t)
 	root := t.TempDir()

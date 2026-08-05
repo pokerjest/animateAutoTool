@@ -395,15 +395,18 @@ type LocalAnimeDirectory struct {
 // LocalAnime 扫描出的本地番剧系列
 type LocalAnime struct {
 	gorm.Model
-	DirectoryID uint   `json:"directory_id" gorm:"index"`  // 所属根目录ID
-	Title       string `json:"title"`                      // 剧集标题 (通常是文件夹名)
-	Image       string `json:"image"`                      // 封面图片链接
-	Path        string `json:"path"`                       // 系列绝对路径
-	FileCount   int    `json:"file_count"`                 // 视频文件数量 (mkv, mp4, etc.)
-	TotalSize   int64  `json:"total_size"`                 // 总大小 (bytes)
-	AirDate     string `json:"air_date" gorm:"default:''"` // 放送日期
-	Summary     string `json:"summary"`                    // 当前显示的简介 (Deprecated: moved to Metadata)
-	Season      int    `json:"season" gorm:"default:1"`    // 季度号 (默认 1)
+	DirectoryID uint   `json:"directory_id" gorm:"index"` // 所属根目录ID
+	Title       string `json:"title"`                     // 剧集标题 (通常是文件夹名)
+	Image       string `json:"image"`                     // 封面图片链接
+	Path        string `json:"path"`                      // 系列绝对路径
+	// ScanKey is populated for folder-based series. Loose files intentionally
+	// leave it NULL because several unrelated series can share the library root.
+	ScanKey   *string `json:"-" gorm:"column:scan_key"`
+	FileCount int     `json:"file_count"`                 // 视频文件数量 (mkv, mp4, etc.)
+	TotalSize int64   `json:"total_size"`                 // 总大小 (bytes)
+	AirDate   string  `json:"air_date" gorm:"default:''"` // 放送日期
+	Summary   string  `json:"summary"`                    // 当前显示的简介 (Deprecated: moved to Metadata)
+	Season    int     `json:"season" gorm:"default:1"`    // 季度号 (默认 1)
 
 	JellyfinSeriesID string `json:"jellyfin_series_id" gorm:"index"` // Cached Jellyfin Series ID
 

@@ -174,7 +174,14 @@ func (s *RestoreService) readBackupData(srcDB *gorm.DB, options RestoreOptions) 
 		}
 		if srcDB.Migrator().HasTable(&model.LocalAnime{}) {
 			d.hasAnimes = true
-			eg.Go(func() error { return srcDB.Find(&d.animes).Error })
+			// Select only source columns so backups created before scan_key was
+			// introduced remain readable by the current model.
+			eg.Go(func() error {
+				return srcDB.Table("local_animes").
+					Where("deleted_at IS NULL").
+					Select("*").
+					Scan(&d.animes).Error
+			})
 		}
 		if srcDB.Migrator().HasTable(&model.LocalEpisode{}) {
 			d.hasEpisodes = true
@@ -370,6 +377,11 @@ func writeRestoreLogs(tx *gorm.DB, d *restoreData, createBatch restoreBatchWrite
 }
 
 func writeRestoreLocalLibrary(tx *gorm.DB, d *restoreData, createBatch restoreBatchWriter) error {
+	if d.hasAnimes {
+		if err := db.DropLocalAnimeIdentityIndex(tx); err != nil {
+			return err
+		}
+	}
 	if d.hasPlayback {
 		if err := tx.Exec("DELETE FROM playback_histories").Error; err != nil {
 			return err
@@ -407,7 +419,12 @@ func writeRestoreLocalLibrary(tx *gorm.DB, d *restoreData, createBatch restoreBa
 		}
 	}
 	if d.hasPlayback && len(d.playback) > 0 {
-		return createBatch(&d.playback)
+		if err := createBatch(&d.playback); err != nil {
+			return err
+		}
+	}
+	if d.hasAnimes {
+		return db.RepairLocalAnimeIdentity(tx)
 	}
 	return nil
 }

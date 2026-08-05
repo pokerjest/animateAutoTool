@@ -456,6 +456,7 @@ func (s *ScannerService) scanScopeContext(
 				DirectoryID: dir.ID,
 				Title:       candidate.Title,
 				Path:        candidate.Path,
+				ScanKey:     localAnimeScanKey(candidate.Path, candidate.AllLoose),
 				Season:      candidateSeason(candidate),
 			}
 			if err := st.CreateAnime(anime); err != nil {
@@ -1275,6 +1276,11 @@ func updateAnimeFromCandidate(anime *model.LocalAnime, directoryID uint, candida
 		anime.Path = candidate.Path
 		changed = true
 	}
+	nextScanKey := localAnimeScanKey(candidate.Path, candidate.AllLoose)
+	if !sameOptionalString(anime.ScanKey, nextScanKey) {
+		anime.ScanKey = nextScanKey
+		changed = true
+	}
 	if anime.MetadataID == nil && anime.Title != candidate.Title {
 		anime.Title = candidate.Title
 		changed = true
@@ -1293,6 +1299,25 @@ func updateAnimeFromCandidate(anime *model.LocalAnime, directoryID uint, candida
 		changed = true
 	}
 	return changed
+}
+
+func localAnimeScanKey(path string, loose bool) *string {
+	if loose || strings.TrimSpace(path) == "" {
+		return nil
+	}
+	pathKey := canonicalComparisonPath(path)
+	if pathKey == "" {
+		return nil
+	}
+	key := "folder:" + pathKey
+	return &key
+}
+
+func sameOptionalString(left, right *string) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return *left == *right
 }
 
 func (s *ScannerService) syncCandidateEpisodes(st interface {
