@@ -106,6 +106,24 @@ func calendarPosterSourcesFor(subjectID int) []string {
 	return sources
 }
 
+func cachedCalendarPosterImage(sources []string) ([]byte, bool) {
+	for _, source := range sources {
+		parsed, err := validateBangumiPosterURL(source)
+		if err != nil {
+			continue
+		}
+		cacheKey := parsed.String()
+		if data, ok := calendarPosterOriginals.get(cacheKey); ok {
+			return data, true
+		}
+		if data, ok := loadPosterDiskCache(cacheKey, maxCalendarPosterBytes); ok {
+			calendarPosterOriginals.put(cacheKey, data)
+			return data, true
+		}
+	}
+	return nil, false
+}
+
 func V1CalendarPosterHandler(c *gin.Context) {
 	subjectID, err := strconv.Atoi(c.Param("id"))
 	if err != nil || subjectID <= 0 {
@@ -116,6 +134,10 @@ func V1CalendarPosterHandler(c *gin.Context) {
 	sources := calendarPosterSourcesFor(subjectID)
 	if len(sources) == 0 {
 		c.Status(http.StatusNotFound)
+		return
+	}
+	if data, ok := cachedCalendarPosterImage(sources); ok {
+		servePosterImage(c, data)
 		return
 	}
 	select {
@@ -201,9 +223,17 @@ func fetchCalendarPosterImage(ctx context.Context, rawURL string) ([]byte, error
 	if data, ok := calendarPosterOriginals.get(cacheKey); ok {
 		return data, nil
 	}
+	if data, ok := loadPosterDiskCache(cacheKey, maxCalendarPosterBytes); ok {
+		calendarPosterOriginals.put(cacheKey, data)
+		return data, nil
+	}
 
 	value, err, _ := calendarPosterFetches.Do(cacheKey, func() (any, error) {
 		if data, ok := calendarPosterOriginals.get(cacheKey); ok {
+			return data, nil
+		}
+		if data, ok := loadPosterDiskCache(cacheKey, maxCalendarPosterBytes); ok {
+			calendarPosterOriginals.put(cacheKey, data)
 			return data, nil
 		}
 		request, requestErr := http.NewRequestWithContext(ctx, http.MethodGet, cacheKey, nil)
@@ -241,6 +271,7 @@ func fetchCalendarPosterImage(ctx context.Context, rawURL string) ([]byte, error
 			return nil, fmt.Errorf("calendar poster response is not an image")
 		}
 		calendarPosterOriginals.put(cacheKey, data)
+		savePosterDiskCache(cacheKey, data, maxCalendarPosterBytes)
 		return data, nil
 	})
 	if err != nil {

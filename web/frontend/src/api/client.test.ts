@@ -22,11 +22,11 @@ describe('poster URLs', () => {
 
   it('keeps direct Mikan images and provides a same-origin fallback URL', () => {
     expect(normalizePosterURL('https://mikanani.me/images/poster.jpg')).toBe('https://mikanani.me/images/poster.jpg')
-    expect(mikanPosterProxyURL('https://mikanani.me/images/poster.jpg')).toBe('/api/v1/subscriptions/mikan/poster?url=https%3A%2F%2Fmikanani.me%2Fimages%2Fposter.jpg&width=360')
-    expect(mikanPosterProxyURL('https://mikanime.tv/images/poster.jpg', 160)).toBe('/api/v1/subscriptions/mikan/poster?url=https%3A%2F%2Fmikanime.tv%2Fimages%2Fposter.jpg&width=160')
-    expect(mikanPosterProxyURL('https://mikanani.kas.pub/images/poster.jpg')).toBe('/api/v1/subscriptions/mikan/poster?url=https%3A%2F%2Fmikanani.kas.pub%2Fimages%2Fposter.jpg&width=360')
+    expect(mikanPosterProxyURL('https://mikanani.me/images/poster.jpg')).toBe('/api/v1/subscriptions/mikan/poster?url=https%3A%2F%2Fmikanani.me%2Fimages%2Fposter.jpg&width=360&v=hjjbtb0')
+    expect(mikanPosterProxyURL('https://mikanime.tv/images/poster.jpg', 160)).toBe('/api/v1/subscriptions/mikan/poster?url=https%3A%2F%2Fmikanime.tv%2Fimages%2Fposter.jpg&width=160&v=h11n3hp5')
+    expect(mikanPosterProxyURL('https://mikanani.kas.pub/images/poster.jpg')).toBe('/api/v1/subscriptions/mikan/poster?url=https%3A%2F%2Fmikanani.kas.pub%2Fimages%2Fposter.jpg&width=360&v=h15gzt9i')
     expect(mikanPosterProxyURL('https://user:pass@mikanani.me/images/poster.jpg')).toBe('')
-    expect(mikanDiscoveryPosterURL('https://mikanani.me/images/poster.jpg', 160)).toBe('/api/v1/subscriptions/mikan/poster?url=https%3A%2F%2Fmikanani.me%2Fimages%2Fposter.jpg&width=160')
+    expect(mikanDiscoveryPosterURL('https://mikanani.me/images/poster.jpg', 160)).toBe('/api/v1/subscriptions/mikan/poster?url=https%3A%2F%2Fmikanani.me%2Fimages%2Fposter.jpg&width=160&v=hjjbtb0')
     expect(normalizePosterURL('https://example.com/poster.jpg')).toBe('https://example.com/poster.jpg')
     expect(normalizePosterURL()).toBe('/static/img/no_poster.svg')
   })
@@ -35,7 +35,7 @@ describe('poster URLs', () => {
     const image = document.createElement('img')
     image.setAttribute('src', 'https://mikanani.me/images/poster.jpg')
     handlePosterError({ currentTarget: image } as unknown as Event)
-    expect(image.getAttribute('src')).toBe('/api/v1/subscriptions/mikan/poster?url=https%3A%2F%2Fmikanani.me%2Fimages%2Fposter.jpg&width=360')
+    expect(image.getAttribute('src')).toBe('/api/v1/subscriptions/mikan/poster?url=https%3A%2F%2Fmikanani.me%2Fimages%2Fposter.jpg&width=360&v=hjjbtb0')
     handlePosterError({ currentTarget: image } as unknown as Event)
     expect(image.getAttribute('src')).toBe('/static/img/no_poster.svg')
   })
@@ -63,9 +63,9 @@ describe('poster URLs', () => {
   })
 
   it('prefers same-origin calendar images and keeps the remote source as a fallback', () => {
-    expect(calendarPosterURL(99, 'https://lain.bgm.tv/pic/cover/l/test.jpg', 360)).toBe('/api/v1/calendar/posters/99?width=360')
+    expect(calendarPosterURL(99, 'https://lain.bgm.tv/pic/cover/l/test.jpg', 360)).toBe('/api/v1/calendar/posters/99?width=360&v=hgs895u')
     expect(calendarPosterURL(undefined, 'https://lain.bgm.tv/pic/cover/l/test.jpg', 360)).toBe('https://lain.bgm.tv/pic/cover/l/test.jpg')
-    expect(calendarPosterProxyURL(99, 360)).toBe('/api/v1/calendar/posters/99?width=360')
+    expect(calendarPosterProxyURL(99, 360)).toBe('/api/v1/calendar/posters/99?width=360&v=h5tpkvr')
     expect(calendarPosterProxyURL(0, 360)).toBe('')
   })
 

@@ -40,7 +40,10 @@ const ui = useUIStore()
 const aiProposalID = ref('')
 const query = useQuery({
   queryKey: ['health'],
-  queryFn: async () => ({ health: await api<Health>('/health'), runtime: await api<Runtime>('/runtime') }),
+  queryFn: async () => {
+    const [health, runtime] = await Promise.all([api<Health>('/health'), api<Runtime>('/runtime')])
+    return { health, runtime }
+  },
   refetchInterval: 30_000,
 })
 const size = (n: number) => `${(n / 1024 / 1024).toFixed(1)} MB`

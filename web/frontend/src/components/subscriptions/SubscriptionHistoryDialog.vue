@@ -153,7 +153,7 @@ function formatSpeed(value: number) {
           :alt="`${title} 海报`"
           decoding="async"
           class="h-28 w-20 rounded-xl object-cover"
-          @error="handlePosterError($event, subscriptionPosterURL(item.ID, 'mikan', 160), subscriptionPosterURL(item.ID, 'local', 160))"
+          @error="handlePosterError($event, subscriptionPosterURL(item.ID, 'mikan', 160, item.UpdatedAt || item.updated_at || item.metadata?.UpdatedAt || item.metadata?.updated_at || item.image), subscriptionPosterURL(item.ID, 'local', 160, item.UpdatedAt || item.updated_at || item.metadata?.UpdatedAt || item.metadata?.updated_at || item.image))"
         />
         <div class="min-w-0">
           <div class="flex flex-wrap items-center gap-2">
