@@ -58,9 +58,17 @@ func fetchMikanPosterImage(ctx context.Context, rawURL string) ([]byte, error) {
 	if data, ok := mikanPosterOriginals.get(cacheKey); ok {
 		return data, nil
 	}
+	if data, ok := loadPosterDiskCache("mikan:"+cacheKey, maxMikanPosterBytes); ok {
+		mikanPosterOriginals.put(cacheKey, data)
+		return data, nil
+	}
 
 	value, err, _ := mikanPosterFetches.Do(cacheKey, func() (any, error) {
 		if data, ok := mikanPosterOriginals.get(cacheKey); ok {
+			return data, nil
+		}
+		if data, ok := loadPosterDiskCache("mikan:"+cacheKey, maxMikanPosterBytes); ok {
+			mikanPosterOriginals.put(cacheKey, data)
 			return data, nil
 		}
 		select {
@@ -82,6 +90,7 @@ func fetchMikanPosterImage(ctx context.Context, rawURL string) ([]byte, error) {
 			return nil, fetchErr
 		}
 		mikanPosterOriginals.put(cacheKey, data)
+		savePosterDiskCache("mikan:"+cacheKey, data, maxMikanPosterBytes)
 		return data, nil
 	})
 	if err != nil {

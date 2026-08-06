@@ -87,14 +87,14 @@ describe('CalendarView', () => {
 
     await vi.waitFor(() => expect(wrapper.text()).toContain('测试番剧'))
     expect(wrapper.text()).not.toContain('查看详情')
-    expect(wrapper.get('img').attributes('src')).toBe('/api/v1/calendar/posters/99?width=360')
+    expect(wrapper.get('img').attributes('src')).toBe('/api/v1/calendar/posters/99?width=360&v=hx03jdz')
     await wrapper.get('img').trigger('error')
     expect(wrapper.get('img').attributes('src')).toBe('https://lain.bgm.tv/pic/cover/l/poster.jpg')
 
     await wrapper.get('[data-testid="poster-open"]').trigger('click')
     expect(wrapper.text()).toContain('从 Mikan 添加订阅')
     const detailPoster = wrapper.findAll('img').find(image => image.classes().includes('rounded-2xl'))
-    expect(detailPoster?.attributes('src')).toBe('/api/v1/calendar/posters/99?width=720')
+    expect(detailPoster?.attributes('src')).toBe('/api/v1/calendar/posters/99?width=720&v=hx03jdz')
     await detailPoster?.trigger('error')
     expect(detailPoster?.attributes('src')).toBe('https://lain.bgm.tv/pic/cover/l/poster.jpg')
     await buttonByText(wrapper, '从 Mikan 添加订阅').trigger('click')

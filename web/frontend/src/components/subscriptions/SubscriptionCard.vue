@@ -95,7 +95,7 @@ function isRepairBusy(name: string) {
       decoding="async"
       fetchpriority="low"
       class="pointer-events-none relative z-10 h-24 w-16 rounded-xl object-cover md:h-20 md:w-14"
-      @error="handlePosterError($event, subscriptionPosterURL(item.ID, 'mikan', 160), subscriptionPosterURL(item.ID, 'local', 160))"
+      @error="handlePosterError($event, subscriptionPosterURL(item.ID, 'mikan', 160, item.UpdatedAt || item.updated_at || item.metadata?.UpdatedAt || item.metadata?.updated_at || item.image), subscriptionPosterURL(item.ID, 'local', 160, item.UpdatedAt || item.updated_at || item.metadata?.UpdatedAt || item.metadata?.updated_at || item.image))"
     />
 
     <div class="pointer-events-none relative z-10 min-w-0">

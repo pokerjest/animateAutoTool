@@ -90,7 +90,10 @@ func populateSubscriptionMediaHealth(report *HealthReport) {
 		return
 	}
 	var localAnimes []model.LocalAnime
-	if err := db.DB.Find(&localAnimes).Error; err != nil {
+	// Health checks evaluate every subscription against the local library.
+	// Preload metadata once so identity matching does not issue one metadata
+	// query for every subscription/anime pair.
+	if err := db.DB.Preload("Metadata").Find(&localAnimes).Error; err != nil {
 		return
 	}
 

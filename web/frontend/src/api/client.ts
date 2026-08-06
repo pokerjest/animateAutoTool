@@ -40,6 +40,15 @@ export const jsonBody = (value: unknown): RequestInit => ({ body: JSON.stringify
 const noPosterURL = '/static/img/no_poster.svg'
 const posterAttemptsKey = 'posterAttempts'
 
+function stablePosterVersion(value: string) {
+  let hash = 2166136261
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index)
+    hash = Math.imul(hash, 16777619)
+  }
+  return `h${(hash >>> 0).toString(36)}`
+}
+
 export function normalizePosterURL(image?: string) {
   const value = image?.trim()
   if (!value) return noPosterURL
@@ -71,6 +80,7 @@ export function mikanPosterProxyURL(image?: string, width = 360) {
   const params = new URLSearchParams({
     url: source,
     width: String(Math.max(64, Math.min(1280, Math.round(width)))),
+    v: stablePosterVersion(source),
   })
   return `/api/v1/subscriptions/mikan/poster?${params}`
 }
@@ -105,17 +115,26 @@ export function posterURL(item: PosterRecord, options: PosterOptions = {}) {
 }
 
 export function calendarPosterURL(subjectID?: number, image?: string, width = 360) {
-  return calendarPosterProxyURL(subjectID, width) || normalizePosterURL(image)
+  return calendarPosterProxyURL(subjectID, width, image) || normalizePosterURL(image)
 }
 
-export function calendarPosterProxyURL(subjectID?: number, width = 360) {
+export function calendarPosterProxyURL(subjectID?: number, width = 360, image?: string) {
   if (!subjectID) return ''
-  return `/api/v1/calendar/posters/${subjectID}?width=${Math.max(64, Math.min(1280, Math.round(width)))}`
+  const params = new URLSearchParams({
+    width: String(Math.max(64, Math.min(1280, Math.round(width)))),
+    v: stablePosterVersion(image?.trim() || String(subjectID)),
+  })
+  return `/api/v1/calendar/posters/${subjectID}?${params}`
 }
 
-export function subscriptionPosterURL(id?: number, source: 'mikan' | 'local' = 'mikan', width = 360) {
+export function subscriptionPosterURL(id?: number, source: 'mikan' | 'local' = 'mikan', width = 360, version?: string) {
   if (!id) return ''
-  return `/api/v1/subscriptions/${id}/poster?source=${source}&width=${Math.max(64, Math.min(1280, Math.round(width)))}`
+  const params = new URLSearchParams({
+    source,
+    width: String(Math.max(64, Math.min(1280, Math.round(width)))),
+  })
+  if (version?.trim()) params.set('v', stablePosterVersion(version.trim()))
+  return `/api/v1/subscriptions/${id}/poster?${params}`
 }
 
 function posterAttempts(image: HTMLImageElement) {

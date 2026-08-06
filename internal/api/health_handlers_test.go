@@ -2,15 +2,18 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/stretchr/testify/assert"
+	"gorm.io/gorm"
 )
 
 func TestHealthPageAndReportHandlers(t *testing.T) {
@@ -129,5 +132,63 @@ func TestHealthReportDoesNotTreatFreshDownloadsAsBlocked(t *testing.T) {
 		if strings.Contains(recommendation, "下载状态修复") {
 			t.Fatalf("fresh downloads should not request repair: %#v", recommendation)
 		}
+	}
+}
+
+func TestPopulateSubscriptionMediaHealthPreloadsMetadata(t *testing.T) {
+	const callbackName = "test:count-health-metadata-queries"
+	var metadataQueries atomic.Int64
+	if err := db.DB.Callback().Query().After("gorm:query").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement != nil && tx.Statement.Table == "anime_metadata" {
+			metadataQueries.Add(1)
+		}
+	}); err != nil {
+		t.Fatalf("register query counter: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = db.DB.Callback().Query().Remove(callbackName)
+	})
+
+	for i := 0; i < 4; i++ {
+		metadata := model.AnimeMetadata{
+			Title:     fmt.Sprintf("Health Metadata %d", i),
+			TitleCN:   fmt.Sprintf("健康元数据 %d", i),
+			BangumiID: 700000 + i,
+		}
+		if err := db.DB.Create(&metadata).Error; err != nil {
+			t.Fatalf("create metadata %d: %v", i, err)
+		}
+		metadataID := metadata.ID
+		anime := model.LocalAnime{
+			Title:            metadata.TitleCN,
+			Path:             fmt.Sprintf("/library/health-metadata-%d", i),
+			MetadataID:       &metadataID,
+			JellyfinSeriesID: fmt.Sprintf("health-series-%d", i),
+		}
+		if err := db.DB.Create(&anime).Error; err != nil {
+			t.Fatalf("create local anime %d: %v", i, err)
+		}
+		subscription := model.Subscription{
+			Title:      metadata.TitleCN,
+			RSSUrl:     fmt.Sprintf("https://example.test/health-metadata-%d", i),
+			MetadataID: &metadataID,
+		}
+		if err := db.DB.Create(&subscription).Error; err != nil {
+			t.Fatalf("create subscription %d: %v", i, err)
+		}
+		t.Cleanup(func() {
+			_ = db.DB.Unscoped().Delete(&subscription).Error
+			_ = db.DB.Unscoped().Delete(&anime).Error
+			_ = db.DB.Unscoped().Delete(&metadata).Error
+		})
+	}
+
+	report := HealthReport{}
+	populateSubscriptionMediaHealth(&report)
+	if got := metadataQueries.Load(); got > 2 {
+		t.Fatalf("metadata queries = %d, want at most 2 batch preload queries", got)
+	}
+	if report.SubscriptionsPlayable < 4 {
+		t.Fatalf("playable subscriptions = %d, want at least 4", report.SubscriptionsPlayable)
 	}
 }

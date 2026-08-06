@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUTPUT_DIR="${ANIMATE_HISTORICAL_FIXTURE_DIR:-$ROOT_DIR/testdata/historical}"
 WRITE_FIXTURES="${ANIMATE_HISTORICAL_WRITE_FIXTURES:-0}"
-TAGS=(v0.9.9 v1.0.0-beta.1 v1.0.0-beta.7 v1.0.0-beta.14 v1.0.0-beta.15 v1.0.0-beta.16)
+TAGS=(v0.9.9 v1.0.0-beta.1 v1.0.0-beta.7 v1.0.0-beta.14 v1.0.0-beta.15 v1.0.0-beta.16 v1.0.0-beta.17)
 
 command -v git >/dev/null
 command -v go >/dev/null
