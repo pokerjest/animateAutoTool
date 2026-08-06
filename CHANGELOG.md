@@ -8,6 +8,12 @@
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-08-06
+
+### Changed
+
+- 汇总 1.0.1 beta 通道中的订阅匹配、健康诊断和历史误报告警修复，发布稳定版本。
+
 ## [1.0.1-beta.3] - 2026-08-06
 
 ### Fixed
@@ -697,7 +703,8 @@
 
 ---
 
-[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.1-beta.3...HEAD
+[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.1-beta.3...v1.0.1
 [1.0.1-beta.3]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.1-beta.2...v1.0.1-beta.3
 [1.0.1-beta.2]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.1-beta.1...v1.0.1-beta.2
 [1.0.1-beta.1]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0...v1.0.1-beta.1
