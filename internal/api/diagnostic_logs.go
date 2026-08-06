@@ -314,6 +314,9 @@ func buildCurrentProblemsText(report HealthReport, issues []healthLibraryIssue, 
 }
 
 func healthLibraryIssues() ([]healthLibraryIssue, error) {
+	if _, err := loadSubscriptionLocalMatchIndex(); err != nil {
+		log.Printf("WARN: failed to reconcile subscription conflicts before health snapshot: %v", err)
+	}
 	issues, err := service.ListOpenLibraryIssues(100)
 	if err != nil {
 		return nil, err

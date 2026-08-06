@@ -568,6 +568,58 @@ func TestFindSubscriptionLocalAnimesDoesNotReportUnrelatedProviderConflicts(t *t
 	}
 }
 
+func TestHealthLibraryIssuesResolvesHistoricalFalseProviderConflict(t *testing.T) {
+	subMetadata := createSubscriptionMatchMetadata(t, "无职转生 第三季元数据", 277554, 94664, 0)
+	localMetadata := createSubscriptionMatchMetadata(t, "落第贤者元数据", 630163, 314554, 0)
+	// Reproduce historical metadata contamination: the subscription metadata
+	// contains a local title alias even though provider IDs and metadata differ.
+	subMetadata.TitleEN = "From Overshadowed to Overpowered"
+	subMetadata.TMDBTitle = "From Overshadowed to Overpowered"
+	sub := &model.Subscription{
+		Title:      "无职转生 第三季 ～到了异世界就拿出真本事～",
+		Season:     "Season 3",
+		RSSUrl:     "https://example.test/health-stale-season-conflict",
+		MetadataID: &subMetadata.ID,
+		Metadata:   subMetadata,
+	}
+	if err := db.DB.Create(sub).Error; err != nil {
+		t.Fatalf("create subscription: %v", err)
+	}
+	t.Cleanup(func() { _ = db.DB.Unscoped().Delete(sub).Error })
+	anime := createPlayableSubscriptionMatchAnime(t, localMetadata, "From Overshadowed to Overpowered Season 1", "/library/health-stale-season-conflict", "health-stale-season-series")
+	localAnimeID := anime.ID
+	issue := &model.LibraryIssue{
+		IssueKey:        fmt.Sprintf("subscription-provider-conflict:%d:%d:season", sub.ID, anime.ID),
+		IssueType:       "parse",
+		Status:          "open",
+		Title:           sub.Title,
+		LocalAnimeID:    &localAnimeID,
+		Message:         "historical false season conflict",
+		OccurrenceCount: 1,
+	}
+	if err := db.DB.Create(issue).Error; err != nil {
+		t.Fatalf("create historical issue: %v", err)
+	}
+	t.Cleanup(func() { _ = db.DB.Unscoped().Delete(issue).Error })
+
+	issues, err := healthLibraryIssues()
+	if err != nil {
+		t.Fatalf("load health issues: %v", err)
+	}
+	for _, healthIssue := range issues {
+		if healthIssue.IssueKey == issue.IssueKey {
+			t.Fatalf("health snapshot retained stale conflict: %+v", healthIssue)
+		}
+	}
+	var updated model.LibraryIssue
+	if err := db.DB.First(&updated, issue.ID).Error; err != nil {
+		t.Fatalf("reload historical issue: %v", err)
+	}
+	if updated.Status != "resolved" {
+		t.Fatalf("historical false conflict status = %q, want resolved", updated.Status)
+	}
+}
+
 func TestLoadSubscriptionLocalMatchIndexResolvesHistoricalFalseProviderConflict(t *testing.T) {
 	subMetadata := createSubscriptionMatchMetadata(t, "目标订阅元数据", 590786, 302051, 0)
 	localMetadata := createSubscriptionMatchMetadata(t, "2.5次元的诱惑 元数据", 410346, 216074, 0)
@@ -677,6 +729,50 @@ func TestFindSubscriptionLocalAnimesRejectsExplicitSeasonConflict(t *testing.T) 
 	}
 	if !strings.Contains(issue.Message, "季度冲突") || !strings.Contains(issue.Message, "2") || !strings.Contains(issue.Message, "3") {
 		t.Fatalf("season issue = %q, want both seasons", issue.Message)
+	}
+}
+
+func TestFindSubscriptionLocalAnimesIgnoresUnrelatedPathLinkedSeasonConflict(t *testing.T) {
+	metadata := createSubscriptionMatchMetadata(t, "无职转生 第三季元数据", 277554, 94664, 0)
+	localMetadata := createSubscriptionMatchMetadata(t, "落第贤者元数据", 630163, 314554, 0)
+	sub := &model.Subscription{
+		Title:      "目标订阅 第三季",
+		Season:     "Season 3",
+		RSSUrl:     "https://example.test/unrelated-path-season-conflict",
+		MetadataID: &metadata.ID,
+		Metadata:   metadata,
+	}
+	if err := db.DB.Create(sub).Error; err != nil {
+		t.Fatalf("create subscription: %v", err)
+	}
+	t.Cleanup(func() { _ = db.DB.Unscoped().Delete(sub).Error })
+	anime := createPlayableSubscriptionMatchAnime(t, localMetadata, "From Overshadowed to Overpowered Season 1", "/library/unrelated-path-season-conflict", "unrelated-path-season-conflict-series")
+	if err := db.DB.Exec("UPDATE local_animes SET season = ?, metadata_id = NULL WHERE id = ?", 1, anime.ID).Error; err != nil {
+		t.Fatalf("make local anime unrelated: %v", err)
+	}
+	logEntry := &model.DownloadLog{
+		SubscriptionID: sub.ID,
+		Status:         "completed",
+		TargetFile:     anime.Path + "/S01E01.mkv",
+	}
+	if err := db.DB.Create(logEntry).Error; err != nil {
+		t.Fatalf("create path link: %v", err)
+	}
+	t.Cleanup(func() { _ = db.DB.Unscoped().Delete(logEntry).Error })
+
+	matches, err := findSubscriptionLocalAnimes(sub)
+	if err != nil {
+		t.Fatalf("find unrelated path-linked season conflict: %v", err)
+	}
+	if len(matches) != 0 {
+		t.Fatalf("unrelated path-linked candidate must not match: %+v", matches)
+	}
+	var issues []model.LibraryIssue
+	if err := db.DB.Where("title = ?", sub.Title).Find(&issues).Error; err != nil {
+		t.Fatalf("load path-linked issues: %v", err)
+	}
+	if len(issues) != 0 {
+		t.Fatalf("unrelated path-linked candidate produced false conflicts: %+v", issues)
 	}
 }
 

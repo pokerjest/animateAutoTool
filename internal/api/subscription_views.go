@@ -624,7 +624,11 @@ func filterSubscriptionPathLinkedLocalAnimes(sub *model.Subscription, candidates
 	for i := range candidates {
 		identity := service.EvaluateSubscriptionLocalIdentity(sub, &candidates[i])
 		if identity.Conflict {
-			reportSubscriptionLocalIdentityConflict(sub, &candidates[i], identity)
+			// Path links can be stale or point at an unrelated local row. Only
+			// report conflicts when the candidate has independent identity evidence.
+			if shouldReportSubscriptionLocalIdentityConflict(sub, &candidates[i], identity) {
+				reportSubscriptionLocalIdentityConflict(sub, &candidates[i], identity)
+			}
 			continue
 		}
 		matched = append(matched, candidates[i])
@@ -1014,8 +1018,14 @@ func shouldReportSubscriptionLocalIdentityConflict(
 		return false
 	}
 	metadataLinked := sub.MetadataID != nil && anime.MetadataID != nil && *anime.MetadataID == *sub.MetadataID
-	return identity.TitleMatch || identity.ExternalMatch ||
-		(identity.Provider == subscriptionProviderSeason && metadataLinked)
+	if identity.Provider == subscriptionProviderSeason {
+		// Alias titles from subscription metadata are not independent evidence:
+		// a stale or contaminated alias can otherwise keep an unrelated season
+		// conflict open. Require a direct title, provider, or metadata link.
+		return identity.ExternalMatch || metadataLinked ||
+			service.SubscriptionLocalTitleMatchScore(sub, anime) == 100
+	}
+	return identity.TitleMatch || identity.ExternalMatch
 }
 
 func resolveStaleSubscriptionProviderConflicts(index *subscriptionLibraryIndex) (int, error) {
