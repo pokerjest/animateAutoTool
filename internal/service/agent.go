@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -15,6 +16,8 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/parser"
+	"github.com/pokerjest/animateAutoTool/internal/runtimejournal"
+	"github.com/pokerjest/animateAutoTool/internal/store"
 	"gorm.io/gorm"
 )
 
@@ -80,8 +83,53 @@ func (s *AgentService) RunAgentForAnimeIDs(ids []uint) {
 // workers have stopped, when the database is least likely to be busy again.
 func (s *AgentService) RunAgentForLibraryWithRepair(report MetadataIssueRepairProgressFunc) (MetadataIssueRepairResult, error) {
 	log.Println("Agent: Starting metadata enrichment (Agent Phase)...")
+	if runtimejournal.RecoveryBlocked() {
+		return MetadataIssueRepairResult{}, runtimejournal.ErrRecoveryBlocked
+	}
+	if err := runtimejournal.BeginOperation(runtimejournal.OperationMetadataEnrich); err != nil {
+		log.Printf("WARN: failed to persist metadata operation marker: %v", err)
+	}
+	defer func() {
+		if err := runtimejournal.EndOperation(runtimejournal.OperationMetadataEnrich); err != nil {
+			log.Printf("WARN: failed to clear metadata operation marker: %v", err)
+		}
+	}()
+
+	var totalAnimes int64
+	if err := db.DB.Model(&model.LocalAnime{}).Count(&totalAnimes).Error; err != nil {
+		return MetadataIssueRepairResult{}, err
+	}
+	if report != nil {
+		report(MetadataIssueRepairProgress{
+			Phase:   "metadata",
+			Message: fmt.Sprintf("正在整理 %d 部本地番剧的元数据", totalAnimes),
+			Total:   totalAnimes,
+		})
+	}
+
+	var progressMu sync.Mutex
+	var completedAnimes int64
+	reportAnimeComplete := func(_ uint, title string) {
+		if report == nil {
+			return
+		}
+		progressMu.Lock()
+		defer progressMu.Unlock()
+		completedAnimes++
+		message := fmt.Sprintf("正在整理元数据 %d/%d", completedAnimes, totalAnimes)
+		if strings.TrimSpace(title) != "" {
+			message += "：" + strings.TrimSpace(title)
+		}
+		report(MetadataIssueRepairProgress{
+			Phase:   "metadata",
+			Message: message,
+			Current: completedAnimes,
+			Total:   totalAnimes,
+		})
+	}
 
 	networkQueue := make(chan uint, 1000)
+	producerErr := make(chan error, 1)
 	var wg sync.WaitGroup
 
 	// Start Network Workers
@@ -89,12 +137,21 @@ func (s *AgentService) RunAgentForLibraryWithRepair(report MetadataIssueRepairPr
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			s.networkWorker(networkQueue)
+			s.networkWorker(networkQueue, reportAnimeComplete)
 		}()
 	}
 
 	// Producer
 	go func() {
+		defer close(networkQueue)
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				err := fmt.Errorf("metadata producer panic: %v", recovered)
+				log.Printf("ERROR: %v\n%s", err, debug.Stack())
+				producerErr <- err
+			}
+			close(producerErr)
+		}()
 		var animes []model.LocalAnime
 		batchSize := 100
 		err := db.DB.Preload("Metadata").FindInBatches(&animes, batchSize, func(tx *gorm.DB, batch int) error {
@@ -105,18 +162,31 @@ func (s *AgentService) RunAgentForLibraryWithRepair(report MetadataIssueRepairPr
 				// 2. Decide if Network Needed
 				if s.animeNeedsNetwork(&anime) {
 					networkQueue <- anime.ID
+				} else {
+					reportAnimeComplete(anime.ID, anime.Title)
 				}
 			}
 			return nil
 		}).Error
 		if err != nil {
 			log.Printf("Agent: FindInBatches failed: %v", err)
+			producerErr <- err
 		}
-		close(networkQueue)
 	}()
 
 	wg.Wait()
+	if err := <-producerErr; err != nil {
+		return MetadataIssueRepairResult{}, err
+	}
 	log.Println("Agent: Metadata enrichment completed.")
+	if report != nil {
+		report(MetadataIssueRepairProgress{
+			Phase:   "metadata",
+			Message: "元数据整理完成，正在检查历史数据库冲突",
+			Current: totalAnimes,
+			Total:   totalAnimes,
+		})
+	}
 	return s.RepairDatabaseMetadataIssues(context.Background(), report)
 }
 
@@ -142,6 +212,8 @@ func (s *AgentService) animeNeedsNetwork(anime *model.LocalAnime) bool {
 //
 //nolint:gocyclo // Asset ingestion keeps field-level precedence in one transaction.
 func (s *AgentService) scanLocalAssets(anime *model.LocalAnime) {
+	detachMismatchedSharedMetadataLink(anime)
+
 	// 1. Check NFO
 	nfoPath := filepath.Join(anime.Path, "tvshow.nfo")
 	if _, err := os.Stat(nfoPath); err == nil {
@@ -149,7 +221,7 @@ func (s *AgentService) scanLocalAssets(anime *model.LocalAnime) {
 		if err == nil {
 			log.Printf("Agent: Found local NFO for %s", anime.Title)
 			// Upsert Metadata
-			if anime.MetadataID == nil || *anime.MetadataID == 0 {
+			if anime.Metadata == nil || anime.MetadataID == nil || *anime.MetadataID == 0 {
 				m := &model.AnimeMetadata{}
 				anime.Metadata = m
 			}
@@ -249,7 +321,7 @@ func (s *AgentService) scanLocalAssets(anime *model.LocalAnime) {
 
 			data, err := os.ReadFile(filepath.Clean(imgPath)) //nolint:gosec // imgPath is constrained to known local image names inside the anime directory.
 			if err == nil && len(data) > 0 {
-				if anime.MetadataID == nil || *anime.MetadataID == 0 {
+				if anime.Metadata == nil || anime.MetadataID == nil || *anime.MetadataID == 0 {
 					anime.Metadata = &model.AnimeMetadata{Title: anime.Title}
 				}
 
@@ -301,37 +373,44 @@ func (s *AgentService) persistLocalAssetMetadata(anime *model.LocalAnime) error 
 	if anime == nil || anime.Metadata == nil {
 		return fmt.Errorf("local metadata is empty")
 	}
-	mStore := metadataStore()
-	laStore := localAnimeStore()
-	if mStore == nil || laStore == nil {
+	if db.DB == nil {
 		return gorm.ErrInvalidDB
 	}
 
-	if anime.Metadata.ID == 0 {
-		if err := mStore.Create(anime.Metadata); err != nil {
-			return err
-		}
-	} else if err := mStore.Save(anime.Metadata); err != nil {
-		return err
-	}
-	if len(anime.Metadata.BangumiImageRaw) > 0 || len(anime.Metadata.TMDBImageRaw) > 0 || len(anime.Metadata.AniListImageRaw) > 0 {
-		posterURL := fmt.Sprintf("/api/v1/posters/%d", anime.Metadata.ID)
-		if anime.Metadata.Image != posterURL {
-			anime.Metadata.Image = posterURL
-			if err := mStore.Save(anime.Metadata); err != nil {
+	return db.DB.Transaction(func(tx *gorm.DB) error {
+		mStore := store.NewAnimeMetadataStore(tx)
+		laStore := store.NewLocalAnimeStore(tx)
+		if anime.Metadata.ID == 0 {
+			if err := mStore.Create(anime.Metadata); err != nil {
 				return err
 			}
+		} else if err := mStore.Save(anime.Metadata); err != nil {
+			return err
 		}
-	}
+		if len(anime.Metadata.BangumiImageRaw) > 0 || len(anime.Metadata.TMDBImageRaw) > 0 || len(anime.Metadata.AniListImageRaw) > 0 {
+			posterURL := fmt.Sprintf("/api/v1/posters/%d", anime.Metadata.ID)
+			if anime.Metadata.Image != posterURL {
+				anime.Metadata.Image = posterURL
+				if err := mStore.Save(anime.Metadata); err != nil {
+					return err
+				}
+			}
+		}
 
-	anime.MetadataID = &anime.Metadata.ID
-	anime.Image = anime.Metadata.Image
-	anime.Summary = anime.Metadata.Summary
-	if err := laStore.SaveAnime(anime); err != nil {
-		return err
-	}
-	s.metadataService().SyncMetadataToModels(anime.Metadata)
-	return nil
+		anime.MetadataID = &anime.Metadata.ID
+		anime.Image = anime.Metadata.Image
+		anime.Summary = anime.Metadata.Summary
+		if err := laStore.SaveAnime(anime); err != nil {
+			return err
+		}
+		updates := map[string]interface{}{"image": anime.Metadata.Image, "summary": anime.Metadata.Summary}
+		if err := mStore.PropagateToSubscriptions(anime.Metadata.ID, updates); err != nil {
+			return err
+		}
+		return mStore.PropagateToLocalAnimes(anime.Metadata.ID, map[string]interface{}{
+			"image": anime.Metadata.Image, "summary": anime.Metadata.Summary, "air_date": anime.Metadata.AirDate,
+		})
+	})
 }
 
 func (s *AgentService) metadataService() *MetadataService {
@@ -348,20 +427,32 @@ func (s *AgentService) enrich(anime *model.LocalAnime) error {
 	return s.metadataService().EnrichAnime(anime)
 }
 
-func (s *AgentService) networkWorker(queue <-chan uint) {
+func (s *AgentService) networkWorker(queue <-chan uint, complete func(uint, string)) {
 	for id := range queue {
-		// Rate Limit
-		time.Sleep(s.NetworkRateLimit)
+		title := ""
+		func() {
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					log.Printf("ERROR: metadata worker panic local_anime_id=%d error=%v\n%s", id, recovered, debug.Stack())
+				}
+				if complete != nil {
+					complete(id, title)
+				}
+			}()
+			// Rate Limit
+			time.Sleep(s.NetworkRateLimit)
 
-		var anime model.LocalAnime
-		if err := db.DB.Preload("Metadata").First(&anime, id).Error; err != nil {
-			continue
-		}
+			var anime model.LocalAnime
+			if err := db.DB.Preload("Metadata").First(&anime, id).Error; err != nil {
+				return
+			}
+			title = anime.Title
 
-		// The metadata clients already enforce request timeouts. Run enrichment
-		// synchronously inside the worker so wg.Wait truly means every database
-		// writer has stopped before the serial repair pass begins.
-		s.enrichAndReport(&anime)
+			// The metadata clients already enforce request timeouts. Run enrichment
+			// synchronously inside the worker so wg.Wait truly means every database
+			// writer has stopped before the serial repair pass begins.
+			s.enrichAndReport(&anime)
+		}()
 	}
 }
 
@@ -375,7 +466,7 @@ func (s *AgentService) runNetworkWorkers(queue <-chan uint) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			s.networkWorker(queue)
+			s.networkWorker(queue, nil)
 		}()
 	}
 	wg.Wait()

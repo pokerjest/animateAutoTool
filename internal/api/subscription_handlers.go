@@ -18,6 +18,7 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/parser"
 	"github.com/pokerjest/animateAutoTool/internal/qbutil"
+	"github.com/pokerjest/animateAutoTool/internal/runtimejournal"
 	"github.com/pokerjest/animateAutoTool/internal/scheduler"
 	"github.com/pokerjest/animateAutoTool/internal/service"
 	"gorm.io/gorm"
@@ -114,6 +115,12 @@ var runSubscriptionCheck = func(sub *model.Subscription, source string) error {
 	if sub == nil {
 		return fmt.Errorf("subscription is nil")
 	}
+	if runtimejournal.RecoveryBlocked() {
+		return runtimejournal.ErrRecoveryBlocked
+	}
+	if runtimejournal.RecoveryInProgress() {
+		return runtimejournal.ErrRecoveryInProgress
+	}
 
 	qbCfg := qbutil.LoadConfig()
 	if qbutil.ManagedBinaryMissing(qbCfg, config.BinDir()) {
@@ -137,22 +144,30 @@ var enrichSubscriptionMetadata = func(metadata *model.AnimeMetadata, title strin
 	service.NewMetadataService().EnrichMetadata(metadata, title)
 }
 
+func reconcileSubscriptionLibraryState(parent context.Context) error {
+	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
+	defer cancel()
+
+	_, err := service.SyncJellyfinLibraryMappings(ctx)
+	if errors.Is(err, service.ErrJellyfinNotConfigured) {
+		return nil
+	}
+	return err
+}
+
 func SubscriptionsHandler(c *gin.Context) {
 	skip := IsHTMX(c)
 	subs, err := listSubscriptionsWithMetadata()
 	if err != nil {
 		log.Printf("Error fetching subscriptions: %v", err)
 	}
-	populateSubscriptionStats(subs)
 	syncContext, cancelSync := context.WithTimeout(c.Request.Context(), 5*time.Second)
-	syncResult, syncErr := service.SyncJellyfinLibraryMappings(syncContext)
+	_, syncErr := service.SyncJellyfinLibraryMappings(syncContext)
 	if syncErr != nil && !errors.Is(syncErr, service.ErrJellyfinNotConfigured) {
 		log.Printf("subscription Jellyfin state reconciliation failed: %v", syncErr)
 	}
 	cancelSync()
-	if syncResult.MatchedSeries > 0 {
-		populateSubscriptionStats(subs)
-	}
+	populateSubscriptionStats(subs)
 
 	data := SubscriptionsData{
 		SkipLayout:      skip,
@@ -246,12 +261,12 @@ func createSubscriptionInternal(sub *model.Subscription) error {
 	}
 
 	// Trigger run asynchronously
-	go func() {
+	GoBackground(func(context.Context) {
 		log.Printf("DEBUG: Async ProcessSubscription started for %s", sub.Title)
 		if err := runSubscriptionCheck(sub, "create"); err != nil {
 			log.Printf("WARN: Skipping async subscription run for %s: %v", sub.Title, err)
 		}
-	}()
+	})
 
 	return nil
 }
@@ -451,9 +466,13 @@ func RunSubscriptionHandler(c *gin.Context) {
 		return
 	}
 
-	if err := runSubscriptionCheck(sub, "manual"); err != nil {
-		log.Printf("RunSubscription: QB Login failed: %v", err)
-		subscriptionSaveError(c, "立即检查订阅", fmt.Errorf("QBittorrent 连接失败: %w", err))
+	checkErr := runSubscriptionCheck(sub, "manual")
+	if reconcileErr := reconcileSubscriptionLibraryState(c.Request.Context()); reconcileErr != nil {
+		log.Printf("RunSubscription: local library reconciliation failed: %v", reconcileErr)
+	}
+	if checkErr != nil {
+		log.Printf("RunSubscription: QB Login failed: %v", checkErr)
+		subscriptionSaveError(c, "立即检查订阅", fmt.Errorf("QBittorrent 连接失败: %w", checkErr))
 		return
 	}
 
@@ -605,7 +624,7 @@ func ValidateSubscriptionRSSHandler(c *gin.Context) {
 	}
 
 	parserClient := newConfiguredMikanParser()
-	primaryEpisodes, primaryErr := parserClient.ParseContext(context.Background(), sub.RSSUrl)
+	primaryEpisodes, primaryErr := parserClient.ParseContext(c.Request.Context(), sub.RSSUrl)
 	response := RSSValidationResponse{}
 	if primaryErr == nil {
 		response.PrimaryCount = len(primaryEpisodes)
@@ -632,7 +651,7 @@ func ValidateSubscriptionRSSHandler(c *gin.Context) {
 	}
 
 	if sub.BackupRSSUrl != "" && sub.BackupRSSUrl != sub.RSSUrl {
-		backupEpisodes, backupErr := parserClient.ParseContext(context.Background(), sub.BackupRSSUrl)
+		backupEpisodes, backupErr := parserClient.ParseContext(c.Request.Context(), sub.BackupRSSUrl)
 		if backupErr != nil {
 			response.Warnings = append(response.Warnings, "备用 RSS 当前也不可用。")
 		} else {
@@ -768,7 +787,7 @@ func RefreshSubscriptionLibraryHandler(c *gin.Context) {
 		return
 	}
 
-	triggerJellyfinLibraryRefresh(context.Background())
+	triggerJellyfinLibraryRefresh(c.Request.Context())
 
 	cardSub, err := loadSubscriptionCard(sub.ID)
 	if err != nil {

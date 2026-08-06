@@ -17,9 +17,11 @@ const stopTaskWatch = watch(() => tasks.revision, () => {
   for (const transition of tasks.consumeTransitions()) {
     const task = transition.task
     if (task.tone === 'running') continue
-    if (transition.previousTone === 'running' && task.kind !== 'backup') {
+    const justFinished = transition.previousTone === 'running'
+    if (justFinished && task.kind !== 'backup') {
       ui.toast(task.tone === 'error' ? `${task.title}失败：${task.detail}` : `${task.title}已完成`, task.tone === 'error' ? 'error' : 'success')
     }
+    if (!justFinished) continue
     if (task.kind === 'sync') void queryClient.invalidateQueries()
     if (task.kind === 'scan') { void queryClient.invalidateQueries({ queryKey: ['local-anime'] }); void queryClient.invalidateQueries({ queryKey: ['dashboard'] }) }
     if (task.kind === 'metadata') { void queryClient.invalidateQueries({ queryKey: ['library'] }); void queryClient.invalidateQueries({ queryKey: ['local-anime'] }); void queryClient.invalidateQueries({ queryKey: ['subscriptions'] }) }

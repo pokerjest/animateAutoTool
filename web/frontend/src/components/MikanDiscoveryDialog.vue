@@ -2,7 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
 import { ArrowLeft, CalendarDays, Check, Film, Search, Users } from '@lucide/vue'
-import { api, handlePosterError, normalizePosterURL } from '../api/client'
+import { api, handlePosterError, mikanDiscoveryPosterURL, normalizePosterURL } from '../api/client'
 import type {
   MikanDashboard,
   MikanDiscoveryItem,
@@ -240,8 +240,14 @@ function confirmSelection() {
         <StateBlock v-else-if="!dashboardItems.length" class="mt-5" state="empty" title="这一天暂时没有番组" description="可切换其他日期、OVA 或剧场版。" />
         <div v-else class="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4" data-testid="mikan-dashboard-results">
           <button v-for="item in dashboardItems" :key="item.mikan_id" class="panel-muted group overflow-hidden text-left" @click="chooseAnime(item, dashboard.data.value?.season || `${selectedYear} ${selectedSeason}季`)">
-            <img :src="normalizePosterURL(item.image)" :alt="`${item.title} 海报`" loading="lazy" decoding="async" fetchpriority="low" class="aspect-[3/4] w-full object-cover transition group-hover:scale-[1.02]" @error="handlePosterError($event)" />
-            <span class="block p-3 text-sm font-extrabold leading-5">{{ item.title }}</span>
+            <img :src="mikanDiscoveryPosterURL(item.image, 360)" :alt="`${item.title} 海报`" loading="lazy" decoding="async" fetchpriority="low" class="aspect-[3/4] w-full object-cover transition group-hover:scale-[1.02]" @error="handlePosterError($event, normalizePosterURL(item.image))" />
+            <span class="block p-3">
+              <span class="block text-sm font-extrabold leading-5">{{ item.title }}</span>
+              <span v-if="item.is_subscribed || item.is_local" class="mt-2 flex flex-wrap gap-1.5" data-testid="mikan-discovery-status">
+                <span v-if="item.is_subscribed" class="badge badge-success">已订阅</span>
+                <span v-if="item.is_local" class="badge badge-success">本地已有</span>
+              </span>
+            </span>
           </button>
         </div>
       </section>
@@ -260,8 +266,15 @@ function confirmSelection() {
         <div v-else class="mt-5 grid gap-3 sm:grid-cols-2" data-testid="mikan-search-results">
           <p v-if="exactItems.length" class="badge col-span-full w-fit">已通过 Bangumi ID 精确匹配</p>
           <button v-for="item in displayedSearchItems" :key="item.mikan_id" class="panel-muted flex min-h-28 items-center gap-4 p-3 text-left" @click="chooseAnime(item)">
-            <img :src="normalizePosterURL(item.image)" :alt="`${item.title} 海报`" loading="lazy" decoding="async" fetchpriority="low" class="h-24 w-16 rounded-xl object-cover" @error="handlePosterError($event)" />
-            <span class="min-w-0"><strong class="line-clamp-2">{{ item.title }}</strong><small class="muted mt-2 block">Mikan #{{ item.mikan_id }}</small></span>
+            <img :src="mikanDiscoveryPosterURL(item.image, 160)" :alt="`${item.title} 海报`" loading="lazy" decoding="async" fetchpriority="low" class="h-24 w-16 rounded-xl object-cover" @error="handlePosterError($event, normalizePosterURL(item.image))" />
+            <span class="min-w-0">
+              <strong class="line-clamp-2">{{ item.title }}</strong>
+              <small class="muted mt-2 block">Mikan #{{ item.mikan_id }}</small>
+              <span v-if="item.is_subscribed || item.is_local" class="mt-2 flex flex-wrap gap-1.5" data-testid="mikan-discovery-status">
+                <span v-if="item.is_subscribed" class="badge badge-success">已订阅</span>
+                <span v-if="item.is_local" class="badge badge-success">本地已有</span>
+              </span>
+            </span>
           </button>
         </div>
       </section>
@@ -270,8 +283,16 @@ function confirmSelection() {
     <template v-else>
       <button class="btn btn-quiet mb-4 px-2" type="button" @click="backToBrowse"><ArrowLeft :size="17" />返回番剧列表</button>
       <div v-if="selectedAnime" class="panel-muted mb-5 flex items-center gap-4 p-4">
-        <img :src="normalizePosterURL(selectedAnime.image)" :alt="`${selectedAnime.title} 海报`" decoding="async" class="h-24 w-16 rounded-xl object-cover" @error="handlePosterError($event)" />
-        <div class="min-w-0"><p class="eyebrow">MIKAN #{{ selectedAnime.mikan_id }}</p><h3 class="mt-1 text-lg font-black">{{ selectedAnime.title }}</h3><p class="muted mt-1 text-sm">{{ selectedAnime.season || '搜索结果' }}</p></div>
+        <img :src="mikanDiscoveryPosterURL(selectedAnime.image, 160)" :alt="`${selectedAnime.title} 海报`" decoding="async" class="h-24 w-16 rounded-xl object-cover" @error="handlePosterError($event, normalizePosterURL(selectedAnime.image))" />
+        <div class="min-w-0">
+          <p class="eyebrow">MIKAN #{{ selectedAnime.mikan_id }}</p>
+          <h3 class="mt-1 text-lg font-black">{{ selectedAnime.title }}</h3>
+          <p class="muted mt-1 text-sm">{{ selectedAnime.season || '搜索结果' }}</p>
+          <div v-if="selectedAnime.is_subscribed || selectedAnime.is_local" class="mt-2 flex flex-wrap gap-1.5" data-testid="mikan-selected-status">
+            <span v-if="selectedAnime.is_subscribed" class="badge badge-success">已订阅</span>
+            <span v-if="selectedAnime.is_local" class="badge badge-success">本地已有</span>
+          </div>
+        </div>
       </div>
 
       <StateBlock v-if="subgroups.isLoading.value" state="loading" title="正在读取字幕组" />

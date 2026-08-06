@@ -85,6 +85,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/session/change-username": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Changes the current administrator login name after verifying the current password. The active session remains valid because it is bound to the user ID. */
+        post: operations["changeUsername"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/recovery/reset": {
         parameters: {
             query?: never;
@@ -436,6 +453,23 @@ export interface paths {
         put: operations["updateSubscription"];
         post?: never;
         delete: operations["deleteSubscription"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/subscriptions/{id}/poster": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Retry a subscription poster from Mikan or the local metadata cache. The server returns image bytes and never proxies an arbitrary remote URL. */
+        get: operations["getSubscriptionPoster"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -1978,6 +2012,11 @@ export interface components {
             /** @default false */
             remember_me: boolean;
         };
+        ChangeUsernameInput: {
+            /** Format: password */
+            current_password: string;
+            new_username: string;
+        };
         BackupArchivePasswordInput: {
             /**
              * Format: password
@@ -2079,6 +2118,10 @@ export interface components {
             bangumi_subject_id: string;
             title: string;
             image: string;
+            /** @description Whether a subscription already exists for this Mikan bangumi. */
+            is_subscribed: boolean;
+            /** @description Whether the local media library contains a strongly matched series with indexed episodes. */
+            is_local: boolean;
         };
         MikanDashboard: {
             season: string;
@@ -2540,6 +2583,7 @@ export interface components {
             title: string;
             /** @enum {string} */
             status: "queued" | "running" | "completed" | "error";
+            phase?: string;
             message: string;
             /** Format: int64 */
             current?: number;
@@ -2826,6 +2870,24 @@ export interface operations {
         responses: {
             200: components["responses"]["Success"];
             400: components["responses"]["Error"];
+        };
+    };
+    changeUsername: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChangeUsernameInput"];
+            };
+        };
+        responses: {
+            200: components["responses"]["Success"];
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
         };
     };
     recoverPassword: {
@@ -3210,6 +3272,53 @@ export interface operations {
         requestBody?: never;
         responses: {
             200: components["responses"]["Success"];
+        };
+    };
+    getSubscriptionPoster: {
+        parameters: {
+            query: {
+                source: "mikan" | "local";
+                width?: number;
+            };
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Same-origin subscription poster */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/jpeg": string;
+                    "image/png": string;
+                };
+            };
+            /** @description Invalid subscription ID or source */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Subscription not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Requested poster source unavailable */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
     toggleSubscription: {

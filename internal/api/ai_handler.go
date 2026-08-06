@@ -159,7 +159,7 @@ func AIChatHandler(c *gin.Context) {
 			Tools:    tools,
 		}
 
-		resp, err := client.CreateChatCompletion(context.Background(), req)
+		resp, err := client.CreateChatCompletion(c.Request.Context(), req)
 		if err != nil {
 			log.Printf("AI API error: %s", aiSafeErrorSummary(err))
 			msg := "抱歉，调用大模型接口失败，请检查设置中的 Base URL 和 API Key 或网络连通性。"
@@ -192,7 +192,7 @@ func AIChatHandler(c *gin.Context) {
 		// Execute tools
 		for _, toolCall := range choice.ToolCalls {
 			log.Printf("AI Assistant executing tool: %s", toolCall.Function.Name)
-			toolCtx := ai.WithToolExecutionMeta(context.Background(), toolMeta)
+			toolCtx := ai.WithToolExecutionMeta(c.Request.Context(), toolMeta)
 			resultStr, err := GlobalAIRegistry.ExecuteTool(toolCtx, toolCall.Function.Name, toolCall.Function.Arguments)
 			if err != nil {
 				log.Printf("Tool error: %v", err)
@@ -342,7 +342,7 @@ func GetAIModelsHandler(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	models, err := client.ListModels(context.Background())
+	models, err := client.ListModels(c.Request.Context())
 	if err != nil {
 		log.Printf("AI models (%s): %s", settings.Provider, aiSafeErrorSummary(err))
 		if fallback, source := fallbackAIModelCatalog(settings); len(fallback) > 0 {

@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-APP_NAME="${APP_NAME:-animate-server}"
+APP_NAME="${APP_NAME:-AnimateAutoTool}"
 VERSION_FILE="${VERSION_FILE:-./VERSION}"
 DIST_DIR="${DIST_DIR:-./dist}"
 WINDOWS_ARCHES="${WINDOWS_ARCHES:-amd64}"
@@ -105,12 +105,15 @@ required = (
     "format_version",
     "version",
     "channel",
+    "database_format",
+    "schema_format",
     "schema_version",
     "min_upgrade_from",
     "min_readable_schema",
     "max_readable_schema",
     "switchable_from_prerelease",
     "rollback_supported",
+    "rollback_scope",
 )
 missing = [key for key in required if key not in manifest]
 if missing:
@@ -121,12 +124,18 @@ if normalize(manifest["version"]) != normalize(expected):
     raise SystemExit("manifest version does not match requested package version")
 if manifest["format_version"] != 1:
     raise SystemExit("unsupported manifest format_version")
+if manifest["database_format"] != 1 or manifest["schema_format"] != 1:
+    raise SystemExit("unsupported database/schema format")
+if manifest["rollback_supported"] and manifest["rollback_scope"] != "bundle_snapshot":
+    raise SystemExit("rollback-supported manifest must declare bundle_snapshot scope")
 if manifest["channel"] not in ("stable", "beta"):
     raise SystemExit("manifest channel must be stable or beta")
 if manifest["channel"] == "beta" and "-" not in normalize(expected):
     raise SystemExit("beta manifest requires a prerelease version")
 if manifest["channel"] == "stable" and "-" in normalize(expected):
     raise SystemExit("stable manifest cannot describe a prerelease version")
+if normalize(expected) == "1.0.0" and normalize(manifest["min_upgrade_from"]) != "0.9.9":
+    raise SystemExit("v1.0.0 manifest must require min_upgrade_from 0.9.9")
 for key in ("schema_version", "min_readable_schema", "max_readable_schema"):
     if not re.fullmatch(r"\d+(?:_[A-Za-z0-9.-]+)?", str(manifest[key])):
         raise SystemExit(f"invalid schema field: {key}")

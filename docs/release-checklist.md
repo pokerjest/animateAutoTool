@@ -6,18 +6,20 @@
 2. Run `go test ./internal/db -count=1`.
 3. Run `go test ./internal/api -count=1`.
 4. Run `go test ./... -race`.
-5. Run `make vulncheck` to verify both npm and Go dependencies.
-6. Run `make package-e2e` to validate the extracted release archive with headless Chromium.
-7. Run `./scripts/package.sh` and verify new artifacts exist in `dist/`.
-8. Run `bash ./scripts/check_release_assets.sh` to validate updater-required assets and `SHA256SUMS.txt`.
-9. Smoke-check core flows on a live server:
+5. Run `bash ./scripts/test_historical_upgrade_matrix.sh` for the supported real-tag fixtures.
+6. Run `make vulncheck` to verify both npm and Go dependencies.
+7. Run `make package-e2e` to validate the extracted release archive with headless Chromium.
+8. Run `./scripts/package.sh` and verify new artifacts exist in `dist/`.
+9. Run `bash ./scripts/check_release_assets.sh` to validate updater-required assets and `SHA256SUMS.txt`.
+10. Confirm `animate-release-manifest.json` declares `database_format`, `schema_format`, and `min_upgrade_from: 0.9.9` for 1.0 stable.
+11. Smoke-check core flows on a live server:
    - `/login`
    - `/calendar`
    - `/subscriptions`
    - `/local-anime`
    - `/backup`
-10. Verify the latest schema migration was applied and startup logs show the expected schema version.
-11. Review `git status` and confirm no accidental local files are about to ship.
+12. Verify the latest schema migration was applied and startup logs show the expected schema version.
+13. Review `git status` and confirm no accidental local files are about to ship.
 
 ## After pushing the release tag
 
@@ -43,13 +45,15 @@ The app updater currently recognizes these release asset suffixes:
 
 Recommended filenames:
 
-1. `animate-server_<version>_windows_amd64.exe`
-2. `animate-server_<version>_linux_amd64.tar.gz`
-3. `animate-server_<version>_linux_arm64.tar.gz`
-4. `animate-server_<version>_darwin_amd64.tar.gz`
-5. `animate-server_<version>_darwin_arm64.tar.gz`
-6. `animate-server_<version>_darwin_amd64.dmg`
-7. `animate-server_<version>_darwin_arm64.dmg`
+1. `AnimateAutoTool_<version>_windows_amd64.exe`
+2. `AnimateAutoTool_<version>_linux_amd64.tar.gz`
+3. `AnimateAutoTool_<version>_linux_arm64.tar.gz`
+4. `AnimateAutoTool_<version>_darwin_amd64.tar.gz`
+5. `AnimateAutoTool_<version>_darwin_arm64.tar.gz`
+6. `AnimateAutoTool_<version>_darwin_amd64.dmg`
+7. `AnimateAutoTool_<version>_darwin_arm64.dmg`
 8. `SHA256SUMS.txt`
 
 `SHA256SUMS.txt` should include checksum lines for all updater assets above.
+
+Release assets use the `AnimateAutoTool` prefix. The updater matches platform suffixes and remains compatible with older `animate-server_*` assets. The launcher stored inside archives and macOS app bundles is named `AnimateAutoTool`; archives also carry an `animate-server` compatibility copy so v0.9.9 can upgrade in place.

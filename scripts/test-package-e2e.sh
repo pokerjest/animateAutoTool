@@ -72,7 +72,7 @@ if [ -z "$ARTIFACT" ]; then
         PACKAGE_INCLUDE_DMG=0 \
         bash ./scripts/package.sh "$VERSION"
     )
-    ARTIFACT="$ARTIFACT_DIR/animate-server_${VERSION}_${OS}_${ARCH}.tar.gz"
+    ARTIFACT="$ARTIFACT_DIR/AnimateAutoTool_${VERSION}_${OS}_${ARCH}.tar.gz"
 elif [[ "$ARTIFACT" != /* ]]; then
     ARTIFACT="$ROOT_DIR/$ARTIFACT"
 fi
@@ -91,18 +91,26 @@ case "$ARTIFACT" in
         ;;
 esac
 
-PACKAGE_DIR=$(find "$UNPACK_DIR" -mindepth 1 -maxdepth 1 -type d -name 'animate-server_*' -print -quit)
+PACKAGE_DIR=$(find "$UNPACK_DIR" -mindepth 1 -maxdepth 1 -type d -name 'AnimateAutoTool_*' -print -quit)
 if [ -z "$PACKAGE_DIR" ]; then
     echo "The archive does not contain the expected release directory." >&2
     exit 1
 fi
 
-BINARY="$PACKAGE_DIR/bin/animate-server"
+BINARY="$PACKAGE_DIR/bin/AnimateAutoTool"
 if [ ! -f "$BINARY" ]; then
-    BINARY="$PACKAGE_DIR/bin/animate-server.exe"
+    BINARY="$PACKAGE_DIR/bin/AnimateAutoTool.exe"
 fi
 if [ ! -f "$BINARY" ]; then
     echo "The archive does not contain the server binary." >&2
+    exit 1
+fi
+LEGACY_BINARY="$PACKAGE_DIR/bin/animate-server"
+if [[ "$BINARY" == *.exe ]]; then
+    LEGACY_BINARY="${LEGACY_BINARY}.exe"
+fi
+if [ ! -f "$LEGACY_BINARY" ]; then
+    echo "The archive does not contain the legacy updater compatibility binary." >&2
     exit 1
 fi
 chmod +x "$BINARY"

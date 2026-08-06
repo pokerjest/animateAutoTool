@@ -72,7 +72,7 @@ jobs:
         run: govulncheck ./...
 
   package-e2e:
-    name: Packaged Binary E2E
+    name: Packaged Binary E2E (Linux)
     needs: test
     runs-on: ubuntu-latest
     steps:
@@ -102,11 +102,19 @@ jobs:
 
       - name: Build Linux release archive
         env:
-          PACKAGE_TARGETS: linux/amd64
+          PACKAGE_TARGETS: linux/amd64,windows/amd64
           PACKAGE_INCLUDE_ARCHIVES: "1"
           PACKAGE_INCLUDE_WINDOWS_STANDALONE: "0"
           PACKAGE_INCLUDE_DMG: "0"
         run: bash ./scripts/package.sh "$APP_VERSION"
+
+      - name: Upload Windows package for E2E
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-e2e-windows
+          path: dist/AnimateAutoTool_${{ env.APP_VERSION }}_windows_amd64.zip
+          if-no-files-found: error
+          retention-days: 1
 
       - name: Install headless Chromium
         run: npm --prefix web/frontend exec -- playwright install --with-deps chromium
@@ -114,7 +122,7 @@ jobs:
       - name: Test packaged binary
         env:
           PACKAGE_E2E_INSTALL_BROWSER: "0"
-          PACKAGE_E2E_ARTIFACT: dist/animate-server_${{ env.APP_VERSION }}_linux_amd64.tar.gz
+          PACKAGE_E2E_ARTIFACT: dist/AnimateAutoTool_${{ env.APP_VERSION }}_linux_amd64.tar.gz
           PACKAGE_E2E_VERSION: ${{ env.APP_VERSION }}
         run: bash ./scripts/test-package-e2e.sh
 
@@ -129,9 +137,64 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  package-e2e-windows:
+    name: Packaged Binary E2E (Windows)
+    needs: package-e2e
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/frontend/package-lock.json
+
+      - name: Read package version
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF_TYPE -eq "tag") {
+            $version = $env:GITHUB_REF_NAME
+          } else {
+            $version = (Get-Content -LiteralPath VERSION -Raw).Trim()
+          }
+          "APP_VERSION=$version" >> $env:GITHUB_ENV
+
+      - name: Download Windows package
+        uses: actions/download-artifact@v4
+        with:
+          name: package-e2e-windows
+          path: dist
+
+      - name: Install frontend dependencies
+        run: npm.cmd --prefix web/frontend ci
+
+      - name: Install Chromium
+        run: npm.cmd --prefix web/frontend exec -- playwright install chromium
+
+      - name: Test packaged Windows binary
+        env:
+          PACKAGE_E2E_ARTIFACT: dist/AnimateAutoTool_${{ env.APP_VERSION }}_windows_amd64.zip
+          PACKAGE_E2E_VERSION: ${{ env.APP_VERSION }}
+          PACKAGE_E2E_INSTALL_BROWSER: "0"
+        run: ./scripts/test-package-e2e-windows.ps1
+
+      - name: Upload Windows E2E diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-e2e-windows-diagnostics-${{ env.APP_VERSION }}
+          path: |
+            web/frontend/playwright-report/
+            web/frontend/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
   package:
     name: Package Archives
-    needs: [test, package-e2e]
+    needs: [test, package-e2e, package-e2e-windows]
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
     runs-on: ubuntu-latest
     steps:
@@ -175,7 +238,7 @@ jobs:
 
   package-dmg:
     name: Package macOS DMG
-    needs: [test, package-e2e]
+    needs: [test, package-e2e, package-e2e-windows]
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
     runs-on: macos-latest
     steps:

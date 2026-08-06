@@ -2,6 +2,7 @@ package logging
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -10,6 +11,24 @@ import (
 	"sync"
 	"time"
 )
+
+// RedactingWriter removes common credential forms before a log line reaches a
+// persistent sink. It reports the original byte count so standard loggers do
+// not treat shorter "[REDACTED]" output as a partial write.
+type RedactingWriter struct {
+	Writer io.Writer
+}
+
+func (w RedactingWriter) Write(p []byte) (int, error) {
+	if w.Writer == nil {
+		return 0, os.ErrInvalid
+	}
+	_, err := io.WriteString(w.Writer, RedactHealthLogLine(string(p)))
+	if err != nil {
+		return 0, err
+	}
+	return len(p), nil
+}
 
 var (
 	healthSeverityPattern      = regexp.MustCompile(`(?i)(^|[\s\[:])(error|fatal|panic|warning|warn)([\s:\]]|$)`)
@@ -109,6 +128,7 @@ func (w *HealthWriter) writeIssueLineLocked(line []byte) {
 		return
 	}
 	_, _ = file.WriteString(RedactHealthLogLine(string(line)))
+	_ = file.Sync()
 	_ = file.Close()
 	w.pruneLocked()
 }

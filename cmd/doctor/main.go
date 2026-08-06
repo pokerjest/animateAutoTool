@@ -13,6 +13,7 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/store"
+	"gorm.io/gorm"
 )
 
 type doctorReport struct {
@@ -54,16 +55,30 @@ func main() {
 	jsonMode := flag.Bool("json", false, "以 JSON 输出诊断结果")
 	flag.Parse()
 
-	if err := config.LoadConfig(""); err != nil {
-		log.Fatalf("加载配置失败: %v", err)
+	if err := run(*jsonMode); err != nil {
+		log.Printf("doctor failed: %v", err)
+		os.Exit(1)
+	}
+}
+
+func run(jsonMode bool) error {
+	if err := config.LoadConfigReadOnly(""); err != nil {
+		return fmt.Errorf("加载只读配置失败: %w", err)
 	}
 
-	db.InitDB(config.AppConfig.Database.Path)
+	readDB, sqlDB, err := db.OpenReadOnly(config.AppConfig.Database.Path)
+	if err != nil {
+		return fmt.Errorf("打开只读数据库失败: %w", err)
+	}
+	defer func() { _ = sqlDB.Close() }()
+	if err := validateReadOnlyDatabase(readDB); err != nil {
+		return fmt.Errorf("数据库不满足只读诊断要求: %w", err)
+	}
 
-	cfgStore := store.NewConfigStore(db.DB)
+	cfgStore := store.NewConfigStore(readDB)
 	cfgMap, err := cfgStore.ListMap()
 	if err != nil {
-		log.Fatalf("读取全局配置失败: %v", err)
+		return fmt.Errorf("读取全局配置失败: %w", err)
 	}
 
 	var (
@@ -84,34 +99,48 @@ func main() {
 		pendingSyncSubs      int64
 	)
 
-	db.DB.Model(&model.Subscription{}).Count(&subscriptionCount)
-	db.DB.Model(&model.Subscription{}).Where("is_active = ?", true).Count(&activeSubscription)
-	db.DB.Model(&model.Subscription{}).Where("is_active = ? AND auto_disable_on_done = ? AND expected_episodes > 0 AND last_ep >= expected_episodes", false, true).Count(&autoDisabledFinished)
-	db.DB.Model(&model.DownloadLog{}).Where("status = ?", "downloading").Count(&downloadingLogs)
-	db.DB.Model(&model.DownloadLog{}).Where("status = ?", "failed").Count(&failedLogs)
-	db.DB.Model(&model.DownloadLog{}).Where("status = ?", "archived").Count(&archivedLogs)
-	db.DB.Model(&model.DownloadLog{}).Where("status = ?", "completed").Count(&completedLogs)
-	db.DB.Model(&model.LocalAnime{}).Count(&localAnimeCount)
-	db.DB.Model(&model.LocalEpisode{}).Count(&localEpisodeCount)
-	db.DB.Model(&model.LibraryIssue{}).Where("status = ?", "open").Count(&openLibraryIssues)
-	db.DB.Model(&model.LocalAnime{}).Where("jellyfin_series_id <> ''").Count(&jellyfinSeriesCount)
-	db.DB.Model(&model.LocalEpisode{}).Where("jellyfin_item_id <> ''").Count(&jellyfinEpisodeCount)
-	db.DB.Model(&model.Subscription{}).
-		Where("is_active = ? AND stale_after_hours > 0 AND last_success_at IS NOT NULL AND last_success_at < ?",
-			true, time.Now().Add(-72*time.Hour)).
-		Count(&staleSubscriptions)
-	db.DB.Raw(`
+	queries := []struct {
+		name  string
+		query *gorm.DB
+	}{
+		{"订阅总数", readDB.Model(&model.Subscription{}).Count(&subscriptionCount)},
+		{"激活订阅数", readDB.Model(&model.Subscription{}).Where("is_active = ?", true).Count(&activeSubscription)},
+		{"已完结自动停用订阅数", readDB.Model(&model.Subscription{}).Where("is_active = ? AND auto_disable_on_done = ? AND expected_episodes > 0 AND last_ep >= expected_episodes", false, true).Count(&autoDisabledFinished)},
+		{"下载中日志数", readDB.Model(&model.DownloadLog{}).Where("status = ?", "downloading").Count(&downloadingLogs)},
+		{"失败日志数", readDB.Model(&model.DownloadLog{}).Where("status = ?", "failed").Count(&failedLogs)},
+		{"归档日志数", readDB.Model(&model.DownloadLog{}).Where("status = ?", "archived").Count(&archivedLogs)},
+		{"已完成日志数", readDB.Model(&model.DownloadLog{}).Where("status = ?", "completed").Count(&completedLogs)},
+		{"本地番剧数", readDB.Model(&model.LocalAnime{}).Count(&localAnimeCount)},
+		{"本地单集数", readDB.Model(&model.LocalEpisode{}).Count(&localEpisodeCount)},
+		{"打开的媒体问题数", readDB.Model(&model.LibraryIssue{}).Where("status = ?", "open").Count(&openLibraryIssues)},
+		{"已关联 Jellyfin 番剧数", readDB.Model(&model.LocalAnime{}).Where("jellyfin_series_id <> ''").Count(&jellyfinSeriesCount)},
+		{"已关联 Jellyfin 单集数", readDB.Model(&model.LocalEpisode{}).Where("jellyfin_item_id <> ''").Count(&jellyfinEpisodeCount)},
+		{"72 小时无进展订阅数", readDB.Model(&model.Subscription{}).Where("is_active = ? AND stale_after_hours > 0 AND last_success_at IS NOT NULL AND last_success_at < ?", true, time.Now().Add(-72*time.Hour)).Count(&staleSubscriptions)},
+	}
+	for _, item := range queries {
+		if err := item.query.Error; err != nil {
+			return fmt.Errorf("查询%s失败: %w", item.name, err)
+		}
+	}
+
+	playableQuery := readDB.Raw(`
 		SELECT COUNT(DISTINCT subscriptions.id)
 		FROM subscriptions
 		JOIN local_animes ON (local_animes.metadata_id = subscriptions.metadata_id OR local_animes.title = subscriptions.title)
 		WHERE local_animes.jellyfin_series_id <> ''
 	`).Scan(&playableSubs)
-	db.DB.Raw(`
+	if err := playableQuery.Error; err != nil {
+		return fmt.Errorf("查询可播放订阅数失败: %w", err)
+	}
+	pendingQuery := readDB.Raw(`
 		SELECT COUNT(DISTINCT subscriptions.id)
 		FROM subscriptions
 		JOIN local_animes ON (local_animes.metadata_id = subscriptions.metadata_id OR local_animes.title = subscriptions.title)
 		WHERE (local_animes.jellyfin_series_id = '' OR local_animes.jellyfin_series_id IS NULL)
 	`).Scan(&pendingSyncSubs)
+	if err := pendingQuery.Error; err != nil {
+		return fmt.Errorf("查询待同步订阅数失败: %w", err)
+	}
 
 	recommendations := buildRecommendations(cfgMap, downloadingLogs, failedLogs, staleSubscriptions, pendingSyncSubs)
 	report := doctorReport{
@@ -151,13 +180,13 @@ func main() {
 		Recommendations: recommendations,
 	}
 
-	if *jsonMode {
+	if jsonMode {
 		encoder := json.NewEncoder(os.Stdout)
 		encoder.SetIndent("", "  ")
 		if err := encoder.Encode(report); err != nil {
-			log.Fatalf("输出 JSON 失败: %v", err)
+			return fmt.Errorf("输出 JSON 失败: %w", err)
 		}
-		return
+		return nil
 	}
 
 	fmt.Println("== AnimateAutoTool Doctor ==")
@@ -190,6 +219,37 @@ func main() {
 	} else {
 		fmt.Println("状态良好：当前没有明显的下载阻塞或长期停滞订阅。")
 	}
+	return nil
+}
+func validateReadOnlyDatabase(readDB *gorm.DB) error {
+	if readDB == nil {
+		return gorm.ErrInvalidDB
+	}
+	if err := db.CheckIntegrity(readDB); err != nil {
+		return fmt.Errorf("完整性检查失败: %w", err)
+	}
+	version := strings.TrimSpace(db.CurrentSchemaVersion(readDB))
+	expectedVersion := strings.TrimSpace(db.LatestSchemaVersion())
+	if version == "" {
+		return fmt.Errorf("未找到有效 schema 版本")
+	}
+	if expectedVersion == "" || version != expectedVersion {
+		return fmt.Errorf("schema 版本过旧或不受支持：当前 %q，要求 %q", version, expectedVersion)
+	}
+	for _, table := range []any{
+		&db.SchemaMigration{},
+		&model.GlobalConfig{},
+		&model.Subscription{},
+		&model.DownloadLog{},
+		&model.LocalAnime{},
+		&model.LocalEpisode{},
+		&model.LibraryIssue{},
+	} {
+		if !readDB.Migrator().HasTable(table) {
+			return fmt.Errorf("缺少诊断所需的数据表 %T", table)
+		}
+	}
+	return nil
 }
 
 func printConfigCheck(label, value string) {

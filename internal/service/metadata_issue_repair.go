@@ -13,6 +13,7 @@ import (
 )
 
 type MetadataIssueRepairProgress struct {
+	Phase   string
 	Message string
 	Current int64
 	Total   int64
@@ -51,6 +52,13 @@ func (s *AgentService) RepairDatabaseMetadataIssues(
 
 	result := MetadataIssueRepairResult{Scanned: len(recoverable)}
 	total := int64(len(recoverable))
+	if report != nil && total > 0 {
+		report(MetadataIssueRepairProgress{
+			Phase:   "repair",
+			Message: fmt.Sprintf("正在准备修复 %d 条历史数据库冲突", len(recoverable)),
+			Total:   total,
+		})
+	}
 	laStore := localAnimeStore()
 	if laStore == nil {
 		return result, gorm.ErrInvalidDB
@@ -63,6 +71,7 @@ func (s *AgentService) RepairDatabaseMetadataIssues(
 		current := int64(index + 1)
 		if report != nil {
 			report(MetadataIssueRepairProgress{
+				Phase:   "repair",
 				Message: fmt.Sprintf("正在修复历史数据库冲突 %d/%d：%s", index+1, len(recoverable), issue.Title),
 				Current: current,
 				Total:   total,
@@ -104,6 +113,7 @@ func (s *AgentService) RepairDatabaseMetadataIssues(
 
 	if report != nil && total > 0 {
 		report(MetadataIssueRepairProgress{
+			Phase:   "repair",
 			Message: fmt.Sprintf("历史数据库冲突修复完成：成功 %d，仍需处理 %d", result.Repaired, result.Failed),
 			Current: total,
 			Total:   total,

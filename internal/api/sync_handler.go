@@ -13,6 +13,7 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/config"
 	"github.com/pokerjest/animateAutoTool/internal/downloader"
 	"github.com/pokerjest/animateAutoTool/internal/qbutil"
+	"github.com/pokerjest/animateAutoTool/internal/runtimejournal"
 	"github.com/pokerjest/animateAutoTool/internal/scheduler"
 	"github.com/pokerjest/animateAutoTool/internal/service"
 )
@@ -31,7 +32,7 @@ var runDashboardSyncNow = func(ctx context.Context) error {
 	}
 
 	scanner := service.NewScannerService()
-	if err := scanner.ScanAll(); err != nil {
+	if err := scanner.ScanAllWithProgressContext(ctx, nil); err != nil {
 		errs = append(errs, fmt.Sprintf("本地扫描失败: %v", err))
 	} else {
 		steps = append(steps, "本地扫描")
@@ -87,11 +88,19 @@ var runDashboardSyncNow = func(ctx context.Context) error {
 }
 
 func DashboardSyncHandler(c *gin.Context) {
-	go func() {
-		if err := runDashboardSyncNow(context.Background()); err != nil {
+	if runtimejournal.RecoveryBlocked() {
+		htmlServerError(c, "立即同步", runtimejournal.ErrRecoveryBlocked)
+		return
+	}
+	if runtimejournal.RecoveryInProgress() {
+		htmlServerError(c, "立即同步", runtimejournal.ErrRecoveryInProgress)
+		return
+	}
+	GoBackground(func(ctx context.Context) {
+		if err := runDashboardSyncNow(ctx); err != nil {
 			log.Printf("Dashboard sync failed: %v", err)
 		}
-	}()
+	})
 
 	message := "已在后台启动订阅检查、本地扫描和下载状态同步"
 	triggerAppToast(c, message, "success")

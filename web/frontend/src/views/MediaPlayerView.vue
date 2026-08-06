@@ -48,8 +48,8 @@ function goTo(itemIDValue: string) {
 <template>
   <div class="page-grid">
     <div class="flex flex-wrap items-center justify-between gap-3"><button class="btn btn-quiet" type="button" @click="router.back()"><ArrowLeft :size="17" />返回详情</button><span v-if="item" class="badge">当前线路由系统设置决定</span></div>
-    <StateBlock v-if="itemQuery.isLoading.value" state="loading" title="正在准备播放" />
-    <StateBlock v-else-if="itemQuery.isError.value" state="error" title="播放项目读取失败" :retrying="itemQuery.isFetching.value" @retry="itemQuery.refetch()" />
+    <StateBlock v-if="itemQuery.isLoading.value" state="loading" scene="diagnosing" title="正在准备播放" />
+    <StateBlock v-else-if="itemQuery.isError.value" state="error" scene="error" title="播放项目读取失败" :retrying="itemQuery.isFetching.value" @retry="itemQuery.refetch()" />
     <template v-else-if="item">
       <section class="panel p-5">
         <div class="flex flex-wrap items-start justify-between gap-3"><div><p class="eyebrow">NOW PLAYING</p><h1 class="mt-2 text-2xl font-black">{{ item.series_name || item.name }}</h1><p class="muted mt-1">{{ item.series_name ? `第 ${item.season || '?'} 季 · 第 ${item.episode || '?'} 集 · ${item.name}` : item.name }}</p></div><div class="flex items-center gap-2"><span v-if="item.played" class="badge badge-success"><CheckCircle2 :size="13" />已看</span><span v-if="item.runtime_ticks" class="badge"><Clock3 :size="13" />{{ Math.round(item.runtime_ticks / 600000000) }} 分钟</span></div></div>

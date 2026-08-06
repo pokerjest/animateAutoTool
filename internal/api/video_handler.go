@@ -2,6 +2,7 @@ package api
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -38,12 +39,12 @@ func GetMikanEpisodesHandler(c *gin.Context) {
 	if len(episodes) == 0 {
 		title := c.Query("title")
 		if title != "" {
-			fmt.Printf("GetMikanEpisodesHandler: Bangumi ID %s yielded no results. Searching for title: %s\n", bangumiID, title)
+			log.Printf("MikanAPI: bangumi lookup empty bangumi_id=%s fallback=title_search title=%q", bangumiID, title)
 			searchResults, err := p.Search(title)
 			if err == nil && len(searchResults) > 0 {
 				newID := searchResults[0].MikanID
 				activeMikanID = newID
-				fmt.Printf("GetMikanEpisodesHandler: Found Mikan ID %s for title %s. Retrying...\n", newID, title)
+				log.Printf("MikanAPI: title fallback matched bangumi_id=%s resolved_mikan_id=%s title=%q", bangumiID, newID, title)
 
 				newRSSURL := fmt.Sprintf("https://mikanani.me/RSS/Bangumi?bangumiId=%s", newID)
 				if subgroupID != "" {

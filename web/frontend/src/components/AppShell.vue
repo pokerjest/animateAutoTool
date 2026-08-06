@@ -13,6 +13,7 @@ import AppBackground from './AppBackground.vue'
 import TaskCenter from './TaskCenter.vue'
 import PlaybackHost from './PlaybackHost.vue'
 import AssistantWidget from './AssistantWidget.vue'
+import MascotArt from './MascotArt.vue'
 
 const route = useRoute(); const router = useRouter(); const ui = useUIStore(); const tasks = useTaskStore(); const session = useSessionStore(); const playback = usePlaybackStore(); const workspace = useWorkspaceStore(); const actions = useAsyncActions()
 const manageGroups = [
@@ -66,7 +67,7 @@ onMounted(() => {
     <AppBackground />
     <aside :class="['glass desktop-sidebar fixed inset-y-4 left-4 z-40 hidden flex-col rounded-[1.7rem] lg:flex', ui.desktopSidebarCollapsed ? 'w-[72px] p-3' : 'w-[248px] p-4']">
       <RouterLink to="/" class="mb-6 flex items-center gap-3 rounded-2xl p-2" :class="ui.desktopSidebarCollapsed ? 'justify-center px-0' : ''" aria-label="返回今日概览">
-        <span class="grid h-11 w-11 place-items-center rounded-2xl bg-gradient-to-br from-pink-400 to-rose-600 text-white shadow-lg"><Sparkles :size="22" /></span>
+        <span :class="ui.skin === 'mascot' ? 'mascot-brand-mark h-11 w-11 shrink-0 rounded-2xl' : 'grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-gradient-to-br from-pink-400 to-rose-600 text-white shadow-lg'"><MascotArt v-if="ui.skin === 'mascot'" scene="brand" decorative /><Sparkles v-else :size="22" /></span>
         <span v-if="!ui.desktopSidebarCollapsed"><strong class="block text-[1.05rem] tracking-tight">AnimateTool</strong><small class="muted">你的追番中枢</small></span>
       </RouterLink>
       <nav aria-label="主导航" class="min-h-0 flex-1 overflow-y-auto pr-1">
@@ -99,8 +100,8 @@ onMounted(() => {
 
     <header :class="['glass fixed inset-x-3 top-3 z-40 flex h-16 items-center justify-between rounded-2xl px-3', ui.desktopSidebarCollapsed ? 'lg:left-[104px]' : 'lg:left-[280px]', 'lg:right-6']">
       <div class="flex min-w-0 items-center gap-3">
-        <button class="btn btn-quiet h-11 min-h-11 w-11 p-0 lg:hidden" type="button" @click="ui.mobileMore = true" aria-label="打开更多导航"><Menu :size="21" /></button>
-        <button class="btn btn-quiet hidden h-11 min-h-11 w-11 p-0 lg:inline-flex" type="button" :aria-expanded="!ui.desktopSidebarCollapsed" :aria-label="ui.desktopSidebarCollapsed ? '展开侧边栏' : '收起侧边栏'" :title="ui.desktopSidebarCollapsed ? '展开侧边栏' : '收起侧边栏'" @click="toggleDesktopSidebar"><Menu :size="21" /></button>
+        <button class="btn btn-quiet app-header-mobile-menu h-11 min-h-11 w-11 p-0" type="button" @click="ui.mobileMore = true" aria-label="打开更多导航"><Menu :size="21" /></button>
+        <button class="btn btn-quiet app-header-sidebar-toggle h-11 min-h-11 w-11 p-0" type="button" :aria-expanded="!ui.desktopSidebarCollapsed" :aria-label="ui.desktopSidebarCollapsed ? '展开侧边栏' : '收起侧边栏'" :title="ui.desktopSidebarCollapsed ? '展开侧边栏' : '收起侧边栏'" @click="toggleDesktopSidebar"><Menu :size="21" /></button>
         <div class="min-w-0"><p class="eyebrow">Animate Auto Tool</p><h1 class="truncate text-lg font-extrabold">{{ route.meta.title }}</h1></div>
       </div>
       <div class="flex items-center gap-2">
@@ -124,7 +125,7 @@ onMounted(() => {
     <div v-if="ui.mobileMore" class="fixed inset-0 z-50 lg:hidden" @keydown.escape="ui.mobileMore=false">
       <button class="absolute inset-0 bg-black/45" type="button" aria-label="关闭导航" @click="ui.mobileMore=false"></button>
       <aside class="glass absolute inset-y-0 right-0 w-[min(88vw,360px)] overflow-y-auto rounded-l-[2rem] p-5">
-        <div class="mb-5 flex items-center justify-between"><div><p class="eyebrow">导航</p><h2 class="text-xl font-black">所有功能</h2></div><button class="btn btn-quiet h-11 w-11 p-0" @click="ui.mobileMore=false" aria-label="关闭"><X /></button></div>
+        <div class="mb-5 flex items-center justify-between gap-3"><div class="flex min-w-0 items-center gap-3"><span :class="ui.skin === 'mascot' ? 'mascot-brand-mark grid h-11 w-11 shrink-0 rounded-2xl' : 'grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-[var(--brand-soft)] text-[var(--brand)]'"><MascotArt v-if="ui.skin === 'mascot'" scene="brand" decorative /><Sparkles v-else :size="19" /></span><div class="min-w-0"><p class="eyebrow">导航</p><h2 class="truncate text-xl font-black">所有功能</h2></div></div><button class="btn btn-quiet h-11 w-11 shrink-0 p-0" @click="ui.mobileMore=false" aria-label="关闭"><X /></button></div>
         <div class="mb-4 flex items-center gap-2 rounded-xl border border-[var(--line)] bg-[var(--surface-solid)] p-1"><button class="min-h-10 flex-1 rounded-lg text-xs font-black" :class="workspace.isManage?'bg-[var(--brand-soft)] text-[var(--brand-strong)]':'muted'" @click="switchWorkspace('manage');ui.mobileMore=false">管理模式</button><button class="min-h-10 flex-1 rounded-lg text-xs font-black disabled:cursor-not-allowed disabled:opacity-50" :class="workspace.isMedia?'bg-[var(--brand-soft)] text-[var(--brand-strong)]':'muted'" :disabled="workspace.mediaConfigured === false" @click="switchWorkspace('media');ui.mobileMore=false">媒体模式</button></div>
         <div v-for="group in groups" :key="group.label" class="mb-5"><h3 class="mb-2 px-2 text-xs font-extrabold muted">{{ group.label }}</h3><RouterLink v-for="link in group.links" :key="link.to" :to="link.to" class="mb-1 flex min-h-12 items-center gap-3 rounded-xl px-3 font-bold" :class="isActive(link.to) ? 'bg-[var(--brand-soft)] text-[var(--brand-strong)]' : ''" @click="ui.mobileMore=false"><component :is="link.icon" :size="19" />{{ link.label }}</RouterLink></div>
         <div class="panel-muted mt-6 grid gap-2 p-3">

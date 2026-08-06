@@ -43,6 +43,7 @@ type ReleaseInfo struct {
 	MinReadableSchema string     `json:"min_readable_schema,omitempty"`
 	MaxReadableSchema string     `json:"max_readable_schema,omitempty"`
 	RollbackSupported bool       `json:"rollback_supported"`
+	RollbackScope     string     `json:"rollback_scope,omitempty"`
 }
 
 type ReleaseCatalog struct {
@@ -150,7 +151,9 @@ func buildReleaseCatalog(releases []githubRelease, channel ReleaseChannel, curre
 		if release.Draft || strings.TrimSpace(release.TagName) == "" || !ValidReleaseVersion(release.TagName) {
 			continue
 		}
-		if channel == ReleaseChannelStable && releaseIsPrerelease(release) {
+		isPrerelease := releaseIsPrerelease(release)
+		if (channel == ReleaseChannelStable && isPrerelease) ||
+			(channel == ReleaseChannelBeta && !isPrerelease) {
 			continue
 		}
 		filtered = append(filtered, release)
@@ -209,6 +212,7 @@ func enrichReleaseCatalog(catalog ReleaseCatalog, releases []githubRelease) Rele
 			item.MinReadableSchema = manifest.MinReadableSchema
 			item.MaxReadableSchema = manifest.MaxReadableSchema
 			item.RollbackSupported = manifest.RollbackSupported
+			item.RollbackScope = manifest.RollbackScope
 		}
 		item.Switchable = item.AssetAvailable && allowed && !item.NewerThanCurrent
 		item.Installable = item.AssetAvailable && allowed

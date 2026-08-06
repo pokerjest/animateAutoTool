@@ -16,6 +16,7 @@ const (
 	AuditActionLoginFailure         = "login.failure"
 	AuditActionLogout               = "logout"
 	AuditActionPasswordChange       = "password.change"
+	AuditActionUsernameChange       = "username.change"
 	AuditActionPasswordRecoveryLoc  = "password.recovery.local"
 	AuditActionBootstrapComplete    = "bootstrap.complete"
 	AuditActionSubscriptionDelete   = "subscription.delete"

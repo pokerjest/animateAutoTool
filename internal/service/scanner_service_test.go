@@ -52,10 +52,14 @@ func TestScanAllReportsEstimatedFolderProgress(t *testing.T) {
 	}
 	require.True(t, sawPlanning)
 	last := updates[len(updates)-1]
-	require.Equal(t, "finalizing", last.Phase)
+	require.Equal(t, "complete", last.Phase)
 	require.EqualValues(t, 4, last.Total)
 	require.Equal(t, last.Total, last.Current)
-	require.Contains(t, last.Message, "1/1 个扫描根目录")
+	require.Contains(t, last.Message, "文件扫描完成")
+	require.GreaterOrEqual(t, len(updates), 2)
+	finalizing := updates[len(updates)-2]
+	require.Equal(t, "finalizing", finalizing.Phase)
+	require.Contains(t, finalizing.Message, "1/1 个扫描根目录")
 }
 
 func TestScannerGroupsLooseFilesAndNestedSeasonDirectories(t *testing.T) {
@@ -81,10 +85,69 @@ func TestScannerGroupsLooseFilesAndNestedSeasonDirectories(t *testing.T) {
 		byTitle[anime.Title] = anime
 	}
 	require.Len(t, byTitle["Loose Show"].Episodes, 2)
+	require.Equal(t, root, byTitle["Loose Show"].Path)
 	require.Len(t, byTitle["Nested Show"].Episodes, 2)
 	for _, episode := range byTitle["Nested Show"].Episodes {
 		require.Equal(t, 2, episode.SeasonNum)
 		require.Greater(t, episode.EpisodeNum, 0)
+	}
+}
+
+func TestScannerKeepsLooseSeriesMetadataSeparatedAcrossRescans(t *testing.T) {
+	withServiceTestDB(t)
+	root := t.TempDir()
+	writeScannerFixture(t, filepath.Join(root, "[ANi] Loose Alpha - 01 [1080p].mkv"))
+	writeScannerFixture(t, filepath.Join(root, "[ANi] Loose Beta - 01 [1080p].mkv"))
+	directory := createScannerDirectory(t, root)
+	scanner := NewScannerService()
+
+	_, err := scanner.ScanDirectory(&directory)
+	require.NoError(t, err)
+
+	var animes []model.LocalAnime
+	require.NoError(t, db.DB.Order("title").Find(&animes).Error)
+	require.Len(t, animes, 2)
+	for i := range animes {
+		require.Equal(t, root, animes[i].Path)
+		metadata := model.AnimeMetadata{Title: animes[i].Title}
+		require.NoError(t, db.DB.Create(&metadata).Error)
+		require.NoError(t, db.DB.Model(&animes[i]).Update("metadata_id", metadata.ID).Error)
+	}
+
+	_, err = scanner.ScanDirectory(&directory)
+	require.NoError(t, err)
+
+	var rescanned []model.LocalAnime
+	require.NoError(t, db.DB.Preload("Metadata").Order("title").Find(&rescanned).Error)
+	require.Len(t, rescanned, 2)
+	require.Equal(t, "Loose Alpha", rescanned[0].Title)
+	require.NotNil(t, rescanned[0].Metadata)
+	require.Equal(t, "Loose Alpha", rescanned[0].Metadata.Title)
+	require.Equal(t, "Loose Beta", rescanned[1].Title)
+	require.NotNil(t, rescanned[1].Metadata)
+	require.Equal(t, "Loose Beta", rescanned[1].Metadata.Title)
+}
+
+func TestScannerPersistsFolderIdentityAndLeavesLooseIdentityNullable(t *testing.T) {
+	withServiceTestDB(t)
+	root := t.TempDir()
+	writeScannerFixture(t, filepath.Join(root, "Folder Show", "Season 01", "Folder Show - 01.mkv"))
+	writeScannerFixture(t, filepath.Join(root, "[ANi] Loose Show - 01.mkv"))
+	directory := createScannerDirectory(t, root)
+
+	_, err := NewScannerService().ScanDirectory(&directory)
+	require.NoError(t, err)
+
+	var animes []model.LocalAnime
+	require.NoError(t, db.DB.Order("title").Find(&animes).Error)
+	require.Len(t, animes, 2)
+	for _, anime := range animes {
+		if anime.Title == "Folder Show" {
+			require.NotNil(t, anime.ScanKey)
+			require.Contains(t, *anime.ScanKey, "folder:")
+		} else {
+			require.Nil(t, anime.ScanKey)
+		}
 	}
 }
 
@@ -209,6 +272,42 @@ func TestScannerRestoresEpisodeWhenAFileReturns(t *testing.T) {
 	require.NoError(t, db.DB.Model(&model.LocalEpisode{}).Count(&episodeCount).Error)
 	require.EqualValues(t, 1, animeCount)
 	require.EqualValues(t, 1, episodeCount)
+}
+
+func TestScannerTargetScanRemovesEmptyDuplicateAtPopulatedPath(t *testing.T) {
+	withServiceTestDB(t)
+	root := t.TempDir()
+	showPath := filepath.Join(root, "Concurrent Download Show")
+	firstEpisode := filepath.Join(showPath, "Concurrent Download Show - 01.mkv")
+	secondEpisode := filepath.Join(showPath, "Concurrent Download Show - 02.mkv")
+	writeScannerFixture(t, firstEpisode)
+	writeScannerFixture(t, secondEpisode)
+	directory := createScannerDirectory(t, root)
+	scanner := NewScannerService()
+
+	_, err := scanner.ScanDirectory(&directory)
+	require.NoError(t, err)
+	var populated model.LocalAnime
+	require.NoError(t, db.DB.Preload("Episodes").Where("path = ?", showPath).First(&populated).Error)
+	require.Len(t, populated.Episodes, 2)
+
+	ghost := model.LocalAnime{
+		DirectoryID: directory.ID,
+		Title:       populated.Title,
+		Path:        showPath,
+		FileCount:   0,
+	}
+	require.NoError(t, db.DB.Create(&ghost).Error)
+
+	result, err := scanner.ScanTargets(&directory, []string{firstEpisode, secondEpisode})
+	require.NoError(t, err)
+	require.Len(t, result.ScannedScopes, 1)
+	require.GreaterOrEqual(t, result.ScanResult.Deleted, 1)
+
+	var animes []model.LocalAnime
+	require.NoError(t, db.DB.Where("directory_id = ?", directory.ID).Find(&animes).Error)
+	require.Len(t, animes, 1)
+	require.Equal(t, populated.ID, animes[0].ID)
 }
 
 func TestScannerKeepsExistingRecordWhenSeasonFolderIsRenamed(t *testing.T) {

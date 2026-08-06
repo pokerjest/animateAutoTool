@@ -25,6 +25,14 @@ func DistAssetsFS() (http.FileSystem, error) {
 	return http.FS(sub), nil
 }
 
+func MascotAssetsFS() (http.FileSystem, error) {
+	sub, err := fs.Sub(Assets, "dist/mascot")
+	if err != nil {
+		return nil, err
+	}
+	return http.FS(sub), nil
+}
+
 func SPAIndex() ([]byte, error) {
 	return Assets.ReadFile("dist/index.html")
 }

@@ -2,7 +2,10 @@ package scheduler
 
 import (
 	"context"
+	"fmt"
 	"log"
+	"runtime/debug"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -11,14 +14,18 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/downloader"
 	"github.com/pokerjest/animateAutoTool/internal/event"
 	"github.com/pokerjest/animateAutoTool/internal/qbutil"
+	"github.com/pokerjest/animateAutoTool/internal/runtimejournal"
 	"github.com/pokerjest/animateAutoTool/internal/service"
 	"github.com/pokerjest/animateAutoTool/internal/store"
 )
 
 type Manager struct {
-	ticker *time.Ticker
-	quit   chan struct{}
-	ctx    context.Context
+	ticker    *time.Ticker
+	quit      chan struct{}
+	ctx       context.Context
+	stopOnce  sync.Once
+	startOnce sync.Once
+	wg        sync.WaitGroup
 }
 
 var schedulerRunInProgress atomic.Bool
@@ -29,6 +36,9 @@ func NewManager() *Manager {
 
 func NewManagerWithContext(ctx context.Context) *Manager {
 	// 每15分钟检查一次
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	return &Manager{
 		ticker: time.NewTicker(15 * time.Minute),
 		quit:   make(chan struct{}),
@@ -37,42 +47,106 @@ func NewManagerWithContext(ctx context.Context) *Manager {
 }
 
 func (m *Manager) Start() {
-	log.Println("Scheduler started...")
-	go func() {
-		for {
-			select {
-			case <-m.ticker.C:
-				m.CheckUpdatesContext(m.ctx)
-			case <-m.ctx.Done():
-				m.ticker.Stop()
-				return
-			case <-m.quit:
-				m.ticker.Stop()
-				return
+	m.startOnce.Do(func() {
+		log.Println("Scheduler: started interval=15m")
+		m.wg.Add(2)
+		go func() {
+			defer m.wg.Done()
+			defer m.ticker.Stop()
+			for {
+				select {
+				case <-m.ticker.C:
+					m.runCheckSafely(m.ctx, "periodic")
+				case <-m.ctx.Done():
+					log.Printf("Scheduler: loop stopped reason=%v", m.ctx.Err())
+					return
+				case <-m.quit:
+					log.Printf("Scheduler: loop stopped reason=stop_requested")
+					return
+				}
 			}
-		}
-	}()
-	// 立即执行一次
-	go m.CheckUpdatesContext(m.ctx)
+		}()
+		// 立即执行一次
+		go func() {
+			defer m.wg.Done()
+			m.runCheckSafely(m.ctx, "startup")
+		}()
+	})
 }
 
 func (m *Manager) Stop() {
-	close(m.quit)
-	log.Println("Scheduler stopped.")
+	m.stopOnce.Do(func() {
+		close(m.quit)
+		log.Println("Scheduler: stop requested")
+	})
+}
+
+func (m *Manager) Wait() {
+	m.wg.Wait()
 }
 
 func (m *Manager) CheckUpdates() {
-	m.CheckUpdatesContext(m.ctx)
+	m.runCheckSafely(m.ctx, "manual")
+}
+
+func (m *Manager) runCheckSafely(ctx context.Context, trigger string) {
+	runSchedulerSafely(trigger, func() {
+		m.CheckUpdatesContext(ctx)
+	})
+}
+
+func runSchedulerSafely(trigger string, run func()) {
+	startedAt := time.Now()
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err := fmt.Errorf("scheduler panic: %v", recovered)
+			status := GlobalRunStatus.Skip(trigger, "调度器异常中止，将在下一轮自动重试")
+			status.LastError = err.Error()
+			publishSchedulerStatus(status)
+			log.Printf(
+				"ERROR: Scheduler: run panic trigger=%s duration=%s recovery_action=continue_next_schedule panic=%v\n%s",
+				trigger,
+				time.Since(startedAt).Round(time.Millisecond),
+				recovered,
+				debug.Stack(),
+			)
+			return
+		}
+		log.Printf("Scheduler: run returned trigger=%s duration=%s", trigger, time.Since(startedAt).Round(time.Millisecond))
+	}()
+	if run != nil {
+		run()
+	}
 }
 
 func (m *Manager) CheckUpdatesContext(ctx context.Context) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		log.Printf("Scheduler: update check skipped reason=context_canceled error=%v", err)
+		return
+	}
+	if runtimejournal.RecoveryBlocked() {
+		log.Println("Scheduler: Skipping update check because database recovery is blocked.")
+		status := GlobalRunStatus.Skip("auto", "数据库完整性检查失败，自动任务已停用")
+		publishSchedulerStatus(status)
+		return
+	}
+	if runtimejournal.RecoveryInProgress() {
+		log.Println("Scheduler: Skipping update check while crash recovery is in progress.")
+		status := GlobalRunStatus.Skip("auto", "异常退出恢复正在运行")
+		publishSchedulerStatus(status)
+		return
+	}
 	if !schedulerRunInProgress.CompareAndSwap(false, true) {
 		log.Println("Scheduler: Check already running, skipping duplicate trigger.")
 		return
 	}
 	defer schedulerRunInProgress.Store(false)
 
-	log.Println("Scheduler: Checking updates...")
+	startedAt := time.Now()
+	log.Println("Scheduler: update check starting")
 	subStore := store.NewSubscriptionStore(db.DB)
 	subs, err := subStore.ListActive()
 	if err != nil {
@@ -110,13 +184,21 @@ func (m *Manager) CheckUpdatesContext(ctx context.Context) {
 	}
 
 	mgr := service.NewSubscriptionManager(qbt)
+	if err := runtimejournal.BeginOperation(runtimejournal.OperationSubscriptionSync); err != nil {
+		log.Printf("WARN: failed to persist scheduler subscription marker: %v", err)
+	}
+	defer func() {
+		if err := runtimejournal.EndOperation(runtimejournal.OperationSubscriptionSync); err != nil {
+			log.Printf("WARN: failed to clear scheduler subscription marker: %v", err)
+		}
+	}()
 	successCount := 0
 	warningCount := 0
 	errorCount := 0
 	lastErr := ""
 
 	for _, sub := range subs {
-		log.Printf("Scheduler: Checking sub %s (%s)", sub.Title, sub.RSSUrl)
+		log.Printf("Scheduler: checking subscription subscription_id=%d title=%q", sub.ID, sub.Title)
 		mgr.ProcessSubscriptionWithSourceContext(ctx, &sub, "auto")
 		switch sub.LastRunStatus {
 		case "success", "idle":
@@ -138,6 +220,14 @@ func (m *Manager) CheckUpdatesContext(ctx context.Context) {
 
 	status := GlobalRunStatus.Finish(successCount, warningCount, errorCount, len(subs), "auto", lastErr)
 	publishSchedulerStatus(status)
+	log.Printf(
+		"Scheduler: update check completed subscriptions=%d success=%d warnings=%d errors=%d duration=%s",
+		len(subs),
+		successCount,
+		warningCount,
+		errorCount,
+		time.Since(startedAt).Round(time.Millisecond),
+	)
 }
 
 func IsRunInProgress() bool {

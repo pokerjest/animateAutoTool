@@ -4,6 +4,7 @@ import { mount } from '@vue/test-utils'
 import { createPinia } from 'pinia'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import AppShell from './AppShell.vue'
+import { useUIStore } from '../stores/ui'
 
 const Page = defineComponent({ template: '<div>页面</div>' })
 
@@ -65,6 +66,11 @@ describe('management workspace navigation', () => {
       .findAll('a')
       .map(link => link.attributes('href'))
     expect(mobilePrimaryLinks).toEqual(['/', '/calendar', '/subscriptions', '/library'])
+    expect(wrapper.findAll('header .app-header-mobile-menu')).toHaveLength(1)
+    expect(wrapper.findAll('header .app-header-sidebar-toggle')).toHaveLength(1)
+
+    await wrapper.get('header .app-header-mobile-menu').trigger('click')
+    expect(wrapper.findAll('h2').some(heading => heading.text() === '所有功能')).toBe(true)
 
     wrapper.unmount()
   })
@@ -101,6 +107,32 @@ describe('management workspace navigation', () => {
     expect(ui.desktopSidebarCollapsed).toBe(false)
     expect(localStorage.getItem('animate-desktop-sidebar-collapsed')).toBe('false')
 
+    wrapper.unmount()
+  })
+
+  it('uses only the current mascot asset when the mascot skin is selected', async () => {
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: '/', component: Page }],
+    })
+    await router.push('/')
+    await router.isReady()
+
+    const pinia = createPinia()
+    useUIStore(pinia).setSkin('mascot')
+    const wrapper = mount(AppShell, {
+      global: {
+        plugins: [pinia, router],
+        stubs: {
+          AppBackground: true,
+          PlaybackHost: true,
+          AssistantWidget: true,
+          TaskCenter: true,
+        },
+      },
+    })
+
+    expect(wrapper.get('.desktop-sidebar img').attributes('src')).toBe('/mascot/current/expressions/wink.png')
     wrapper.unmount()
   })
 })

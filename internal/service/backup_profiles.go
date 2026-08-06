@@ -5,7 +5,9 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"log"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -56,6 +58,8 @@ type BackupDescriptor struct {
 	HasLocalEpisodes         bool
 	HasPlaybackHistory       bool
 	FormatVersion            int
+	DatabaseFormat           int
+	SchemaFormat             int
 	AppVersion               string
 	SchemaVersion            string
 	ContainsSecrets          bool
@@ -65,6 +69,8 @@ type BackupDescriptor struct {
 type backupManifest struct {
 	ID              uint `gorm:"primaryKey"`
 	FormatVersion   int
+	DatabaseFormat  int
+	SchemaFormat    int
 	Mode            string
 	Label           string
 	Description     string
@@ -133,8 +139,36 @@ func R2BackupObjectKey(mode string, t time.Time) string {
 	}
 }
 
-func CreateBackupFile(destPath string, mode string) error {
+func CreateBackupFile(destPath string, mode string) (retErr error) {
 	mode = NormalizeBackupMode(mode)
+	startedAt := time.Now()
+	destination := filepath.Base(filepath.Clean(destPath))
+	log.Printf("BackupService: backup starting mode=%s destination=%s schema=%s", mode, destination, db.CurrentSchemaVersion(db.DB))
+	defer func() {
+		if retErr != nil {
+			_ = os.Remove(filepath.Clean(destPath))
+			log.Printf(
+				"ERROR: BackupService: backup failed mode=%s destination=%s duration=%s partial_removed=true error=%v",
+				mode,
+				destination,
+				time.Since(startedAt).Round(time.Millisecond),
+				retErr,
+			)
+			return
+		}
+		var size int64
+		if info, err := os.Stat(filepath.Clean(destPath)); err == nil {
+			size = info.Size()
+		}
+		log.Printf(
+			"BackupService: backup completed mode=%s destination=%s bytes=%d sha256=%s duration=%s",
+			mode,
+			destination,
+			size,
+			sha256File(destPath),
+			time.Since(startedAt).Round(time.Millisecond),
+		)
+	}()
 	if mode == BackupModeFull {
 		if err := createFullBackupFile(destPath); err != nil {
 			return err
@@ -227,6 +261,8 @@ func InspectBackup(path string) (BackupDescriptor, error) {
 			desc.Description = manifest.Description
 			desc.ConfigStrategy = manifest.ConfigStrategy
 			desc.FormatVersion = manifest.FormatVersion
+			desc.DatabaseFormat = manifest.DatabaseFormat
+			desc.SchemaFormat = manifest.SchemaFormat
 			desc.AppVersion = manifest.AppVersion
 			desc.SchemaVersion = manifest.SchemaVersion
 			desc.ContainsSecrets = manifest.ContainsSecrets
@@ -246,6 +282,10 @@ func InspectBackup(path string) (BackupDescriptor, error) {
 	desc.Description = BackupModeDescription(desc.Mode)
 	desc.ConfigStrategy = backupConfigStrategyForMode(desc.Mode)
 	desc.ContainsSecrets = backupContainsSensitiveConfigs(path)
+	// A hash stored inside the SQLite file cannot describe the final bytes of
+	// that same file without becoming self-referential. Always report the
+	// checksum calculated from the completed artifact instead.
+	desc.DatabaseSHA256 = sha256File(path)
 	return desc, nil
 }
 
@@ -321,6 +361,8 @@ func annotateBackupFile(destPath string, mode string) error {
 	}
 	return destDB.Create(&backupManifest{
 		FormatVersion:   1,
+		DatabaseFormat:  db.DatabaseFormat,
+		SchemaFormat:    db.SchemaFormat,
 		Mode:            mode,
 		Label:           BackupModeLabel(mode),
 		Description:     BackupModeDescription(mode),
@@ -328,7 +370,7 @@ func annotateBackupFile(destPath string, mode string) error {
 		AppVersion:      appversion.AppVersion,
 		SchemaVersion:   db.CurrentSchemaVersion(db.DB),
 		ContainsSecrets: mode == BackupModeFull,
-		DatabaseSHA256:  sha256File(destPath),
+		DatabaseSHA256:  "",
 		CreatedAt:       time.Now().UTC(),
 	}).Error
 }
@@ -356,6 +398,8 @@ func createSelectiveBackupFile(destPath string, mode string) error {
 
 	return destDB.Create(&backupManifest{
 		FormatVersion:   1,
+		DatabaseFormat:  db.DatabaseFormat,
+		SchemaFormat:    db.SchemaFormat,
 		Mode:            mode,
 		Label:           BackupModeLabel(mode),
 		Description:     BackupModeDescription(mode),
@@ -363,7 +407,7 @@ func createSelectiveBackupFile(destPath string, mode string) error {
 		AppVersion:      appversion.AppVersion,
 		SchemaVersion:   db.CurrentSchemaVersion(db.DB),
 		ContainsSecrets: false,
-		DatabaseSHA256:  sha256File(destPath),
+		DatabaseSHA256:  "",
 		CreatedAt:       time.Now().UTC(),
 	}).Error
 }
@@ -487,6 +531,6 @@ func BackupContainsConfigsOnly(mode string) bool {
 	return mode == BackupModeSettings || mode == BackupModeCloudflare
 }
 
-func CleanBackupPath(path string) string {
-	return filepath.Clean(path)
+func CleanBackupPath(value string) string {
+	return path.Clean(strings.ReplaceAll(value, "\\", "/"))
 }

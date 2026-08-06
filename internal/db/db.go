@@ -1,13 +1,17 @@
 package db
 
 import (
+	"database/sql"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 
 	"github.com/glebarez/sqlite"
+	"github.com/pokerjest/animateAutoTool/internal/authsession"
 	"github.com/pokerjest/animateAutoTool/internal/config"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"gorm.io/gorm"
@@ -22,57 +26,160 @@ var DB *gorm.DB
 var CurrentDBPath string
 var currentDBGOOS = func() string { return runtime.GOOS }
 
-func InitDB(storagePath string) {
-	CurrentDBPath = storagePath
-	var err error
+const AuthSessionGenerationConfigKey = "system.auth_session_generation"
 
-	// 确保存储目录存在
+func InitDB(storagePath string) {
+	if err := InitDBWithError(storagePath); err != nil {
+		log.Fatalf("failed to initialize database: %v", err)
+	}
+}
+
+// InitDBWithError initializes the writable application database and returns
+// failures to callers that must unwind other resources before process exit.
+func InitDBWithError(storagePath string) error {
 	if !isInMemoryDB(storagePath) {
 		dir := filepath.Dir(storagePath)
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			log.Fatalf("failed to create storage directory: %v", err)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return fmt.Errorf("create storage directory: %w", err)
 		}
 	}
 
-	var driverPath string
-	if isInMemoryDB(storagePath) {
-		// SQLite keeps plain :memory: databases per connection, which causes tables to
-		// disappear when GORM opens additional pooled connections during tests.
-		driverPath = sqliteSharedMemoryPath
-	} else {
+	driverPath := sqliteSharedMemoryPath
+	if !isInMemoryDB(storagePath) {
 		driverPath = sqliteDriverPath(storagePath)
 	}
 
-	DB, err = gorm.Open(sqlite.Open(driverPath), &gorm.Config{})
+	target, err := gorm.Open(sqlite.Open(driverPath), &gorm.Config{})
 	if err != nil {
-		log.Fatalf("failed to connect database: %v", err)
+		return fmt.Errorf("connect database: %w", err)
 	}
+	sqlDB, err := target.DB()
+	if err != nil {
+		return fmt.Errorf("access sql database handle: %w", err)
+	}
+	closeOnError := true
+	defer func() {
+		if closeOnError {
+			_ = sqlDB.Close()
+		}
+	}()
 
-	sqlDB, err := DB.DB()
-	if err != nil {
-		log.Fatalf("failed to access sql database handle: %v", err)
-	}
 	// SQLite has a single writer. Keeping one application connection prevents
 	// concurrent background metadata jobs from racing for the write lock while
 	// still allowing the driver-level busy timeout to cover external locks.
 	sqlDB.SetMaxOpenConns(1)
 	sqlDB.SetMaxIdleConns(1)
 
-	err = RunMigrations(DB)
-	if err != nil {
-		log.Fatalf("failed to migrate database: %v", err)
+	if !isInMemoryDB(storagePath) {
+		if err := CheckIntegrity(target); err != nil {
+			return fmt.Errorf("database integrity check failed: %w", err)
+		}
 	}
-	if version := CurrentSchemaVersion(DB); version != "" {
+	// Migration locking and snapshot/report paths are resolved from
+	// CurrentDBPath. Set it before RunMigrations so file-backed startups get
+	// the same protection as direct migration callers. Restore the previous
+	// package state if initialization fails, because the new handle is closed
+	// in that case and must not leave a stale path behind.
+	previousDBPath := CurrentDBPath
+	CurrentDBPath = storagePath
+	defer func() {
+		if closeOnError {
+			CurrentDBPath = previousDBPath
+		}
+	}()
+	if err := RunMigrations(target); err != nil {
+		return fmt.Errorf("migrate database: %w", err)
+	}
+	restoreAuthSessionGeneration(target)
+
+	DB = target
+	closeOnError = false
+	if version := CurrentSchemaVersion(target); version != "" {
 		log.Printf("database schema is now at %s", version)
 	}
+	return nil
+}
+
+func restoreAuthSessionGeneration(target *gorm.DB) {
+	authsession.Set(1, false)
+	if target == nil || !target.Migrator().HasTable(&model.GlobalConfig{}) {
+		return
+	}
+	var row model.GlobalConfig
+	if err := target.First(&row, "key = ?", AuthSessionGenerationConfigKey).Error; err != nil {
+		return
+	}
+	value, err := strconv.ParseUint(strings.TrimSpace(row.Value), 10, 64)
+	if err != nil || value <= 1 {
+		return
+	}
+	authsession.Set(value, true)
+}
+
+// OpenReadOnly opens an existing SQLite database without creating directories,
+// running migrations, or changing the package-level DB handle.
+func OpenReadOnly(storagePath string) (*gorm.DB, *sql.DB, error) {
+	if isInMemoryDB(storagePath) {
+		return nil, nil, fmt.Errorf("read-only database requires a file path")
+	}
+	info, err := os.Stat(storagePath)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, nil, fmt.Errorf("database path is not a regular file: %s", storagePath)
+	}
+	readDB, err := gorm.Open(sqlite.Open(sqliteReadOnlyPath(storagePath)), &gorm.Config{})
+	if err != nil {
+		return nil, nil, err
+	}
+	sqlDB, err := readDB.DB()
+	if err != nil {
+		return nil, nil, err
+	}
+	sqlDB.SetMaxOpenConns(1)
+	sqlDB.SetMaxIdleConns(1)
+	if err := readDB.Exec("PRAGMA query_only = ON").Error; err != nil {
+		_ = sqlDB.Close()
+		return nil, nil, err
+	}
+	return readDB, sqlDB, nil
 }
 
 func CloseDB() error {
+	if DB == nil {
+		return nil
+	}
+	if !isInMemoryDB(CurrentDBPath) {
+		var journalMode string
+		if err := DB.Raw("PRAGMA journal_mode").Scan(&journalMode).Error; err == nil &&
+			strings.EqualFold(strings.TrimSpace(journalMode), "wal") {
+			if err := DB.Exec("PRAGMA wal_checkpoint(TRUNCATE)").Error; err != nil {
+				log.Printf("WARN: database WAL checkpoint during shutdown failed: %v", err)
+			}
+		}
+	}
 	sqlDB, err := DB.DB()
 	if err != nil {
 		return err
 	}
-	return sqlDB.Close()
+	err = sqlDB.Close()
+	DB = nil
+	return err
+}
+
+func CheckIntegrity(target *gorm.DB) error {
+	if target == nil {
+		return gorm.ErrInvalidDB
+	}
+	var result string
+	if err := target.Raw("PRAGMA quick_check").Scan(&result).Error; err != nil {
+		return err
+	}
+	if !strings.EqualFold(strings.TrimSpace(result), "ok") {
+		return fmt.Errorf("sqlite quick_check returned %q", result)
+	}
+	return nil
 }
 
 // SaveGlobalConfig helper to upsert config
@@ -136,7 +243,8 @@ func sqliteDriverPath(storagePath string) string {
 	if strings.Contains(storagePath, "?") {
 		separator = "&"
 	}
-	driverPath := storagePath + separator + "_pragma=busy_timeout(5000)"
+	driverPath := storagePath + separator +
+		"_pragma=busy_timeout(5000)&_pragma=synchronous(FULL)&_pragma=foreign_keys(ON)"
 	if currentDBGOOS() != "windows" {
 		return driverPath
 	}
@@ -146,4 +254,12 @@ func sqliteDriverPath(storagePath string) string {
 	// durability characteristics closer to the default mode while avoiding the
 	// most fragile rollback-journal path.
 	return driverPath + "&_pragma=journal_mode(WAL)"
+}
+
+func sqliteReadOnlyPath(storagePath string) string {
+	separator := "?"
+	if strings.Contains(storagePath, "?") {
+		separator = "&"
+	}
+	return "file:" + storagePath + separator + "mode=ro"
 }

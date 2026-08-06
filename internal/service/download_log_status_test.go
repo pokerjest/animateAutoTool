@@ -306,7 +306,7 @@ func TestSyncDownloadLogStatusesUsesSeasonDirectoryWhenTaskNameOmitsSeason(t *te
 		t.Fatalf("create download log: %v", err)
 	}
 
-	target := `/downloads/Seasoned Show/Season 02/Seasoned Show - 03.mkv`
+	target := filepath.Clean(`/downloads/Seasoned Show/Season 02/Seasoned Show - 03.mkv`)
 	result, err := SyncDownloadLogStatuses(fakeTorrentStatusSource{torrents: []downloader.TorrentInfo{{
 		Hash:        "season-directory",
 		Name:        "Seasoned Show - 03.mkv",
@@ -346,7 +346,7 @@ func TestSyncDownloadLogStatusesMatchesEpisodeInsideMultiEpisodeTorrent(t *testi
 		t.Fatalf("create download log: %v", err)
 	}
 
-	target := `/downloads/Multi Show/Season 01/Multi Show S01E03-E05.mkv`
+	target := filepath.Clean(`/downloads/Multi Show/Season 01/Multi Show S01E03-E05.mkv`)
 	result, err := SyncDownloadLogStatuses(fakeTorrentStatusSource{torrents: []downloader.TorrentInfo{{
 		Hash:        "multi-episode",
 		Name:        "Multi Show S01E03-E05.mkv",

@@ -236,7 +236,7 @@ func V1MediaItemsHandler(c *gin.Context) {
 		page, listErr := client.ListItems(c.Request.Context(), mediaprovider.Query{
 			ParentID: libraryIDs[0], SearchTerm: search, IncludeItemTypes: types,
 			SortBy: sortBy, SortOrder: sortOrder, Recursive: parentID == "",
-			StartIndex: (pageNumber - 1) * pageSize, Limit: pageSize,
+			StartIndex: paginationOffset(pageNumber, pageSize), Limit: pageSize,
 		})
 		if listErr != nil {
 			v1Error(c, http.StatusBadGateway, "media_items_failed", "读取媒体项目失败")
@@ -265,7 +265,7 @@ func V1MediaItemsHandler(c *gin.Context) {
 		all = append(all, page.Items...)
 		total += page.Total
 	}
-	start := min((pageNumber-1)*pageSize, len(all))
+	start := min(paginationOffset(pageNumber, pageSize), len(all))
 	end := min(start+pageSize, len(all))
 	respondMediaPage(c, provider, all[start:end], total, pageNumber, pageSize)
 }

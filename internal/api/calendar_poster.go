@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -25,6 +26,7 @@ const maxCalendarPosterBytes = 12 << 20
 const (
 	maxCalendarPosterCacheBytes   = 64 << 20
 	maxCalendarPosterCacheEntries = 192
+	calendarPosterHedgeDelay      = 150 * time.Millisecond
 )
 
 type calendarPosterImageCache struct {
@@ -67,6 +69,7 @@ var (
 	calendarPosterSources   = calendarPosterSourceCache{sources: make(map[int][]string)}
 	calendarPosterOriginals = calendarPosterImageCache{entries: make(map[string][]byte)}
 	calendarPosterFetches   singleflight.Group
+	calendarPosterSlots     = make(chan struct{}, 6)
 	loadCalendarPosterImage = fetchCalendarPosterImage
 )
 
@@ -110,19 +113,83 @@ func V1CalendarPosterHandler(c *gin.Context) {
 		return
 	}
 
-	var lastErr error
-	for _, source := range calendarPosterSourcesFor(subjectID) {
-		data, fetchErr := loadCalendarPosterImage(c.Request.Context(), source)
-		if fetchErr == nil && len(data) > 0 {
-			servePosterImage(c, data)
-			return
+	sources := calendarPosterSourcesFor(subjectID)
+	if len(sources) == 0 {
+		c.Status(http.StatusNotFound)
+		return
+	}
+	select {
+	case calendarPosterSlots <- struct{}{}:
+		defer func() { <-calendarPosterSlots }()
+	case <-c.Request.Context().Done():
+		c.Status(http.StatusRequestTimeout)
+		return
+	}
+
+	data, fetchErr := raceCalendarPosterSources(c.Request.Context(), sources, loadCalendarPosterImage)
+	if fetchErr != nil {
+		log.Printf("calendar poster %d unavailable: %v", subjectID, fetchErr)
+		c.Status(http.StatusNotFound)
+		return
+	}
+	servePosterImage(c, data)
+}
+
+type calendarPosterRaceResult struct {
+	data   []byte
+	source string
+	err    error
+}
+
+// raceCalendarPosterSources hedges lower-resolution Bangumi fallbacks behind
+// the preferred image, then cancels the slower requests after one succeeds.
+func raceCalendarPosterSources(
+	ctx context.Context,
+	sources []string,
+	fetch func(context.Context, string) ([]byte, error),
+) ([]byte, error) {
+	if len(sources) == 0 {
+		return nil, fmt.Errorf("no calendar poster sources configured")
+	}
+
+	raceCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	results := make(chan calendarPosterRaceResult, len(sources))
+	for i, source := range sources {
+		delay := time.Duration(i) * calendarPosterHedgeDelay
+		go func() {
+			if delay > 0 {
+				timer := time.NewTimer(delay)
+				defer timer.Stop()
+				select {
+				case <-raceCtx.Done():
+					results <- calendarPosterRaceResult{source: source, err: raceCtx.Err()}
+					return
+				case <-timer.C:
+				}
+			}
+			data, err := fetch(raceCtx, source)
+			results <- calendarPosterRaceResult{data: data, source: source, err: err}
+		}()
+	}
+
+	failures := make([]error, 0, len(sources))
+	for range sources {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case result := <-results:
+			if result.err == nil && len(result.data) > 0 {
+				cancel()
+				return result.data, nil
+			}
+			if result.err == nil {
+				result.err = fmt.Errorf("empty image response")
+			}
+			failures = append(failures, fmt.Errorf("%s: %w", result.source, result.err))
 		}
-		lastErr = fetchErr
 	}
-	if lastErr != nil {
-		log.Printf("calendar poster %d unavailable: %v", subjectID, lastErr)
-	}
-	c.Status(http.StatusNotFound)
+	return nil, fmt.Errorf("all calendar poster sources failed: %w", errors.Join(failures...))
 }
 
 func fetchCalendarPosterImage(ctx context.Context, rawURL string) ([]byte, error) {

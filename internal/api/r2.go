@@ -251,77 +251,81 @@ func startR2UploadTask(ctx context.Context, password string) (string, error) {
 	progressMap.Store(taskID, &DownloadProgress{TaskID: taskID, Status: "pending", UpdatedAt: time.Now()})
 	taskstate.Global.Start(taskID, "backup", "R2 云备份", "正在准备完整备份")
 
-	go func(tID, b, archivePassword string, cli *s3.Client) {
+	GoBackground(func(appCtx context.Context) {
 		defer func() {
 			if recovered := recover(); recovered != nil {
-				updateProgress(tID, "error", fmt.Sprintf("上传任务异常: %v", recovered), 0, 0, nil)
+				updateProgress(taskID, "error", fmt.Sprintf("上传任务异常: %v", recovered), 0, 0, nil)
 			}
 		}()
 
-		updateProgress(tID, "preparing", "", 0, 0, nil)
+		updateProgress(taskID, "preparing", "", 0, 0, nil)
 		tempFile, err := os.CreateTemp("", "backup_r2_*.db")
 		if err != nil {
-			updateProgress(tID, "error", "创建临时备份文件失败: "+err.Error(), 0, 0, nil)
+			updateProgress(taskID, "error", "创建临时备份文件失败: "+err.Error(), 0, 0, nil)
 			return
 		}
 		databasePath := tempFile.Name()
 		if err := tempFile.Close(); err != nil {
 			safeio.Remove(databasePath)
-			updateProgress(tID, "error", "完成临时备份文件写入失败: "+err.Error(), 0, 0, nil)
+			updateProgress(taskID, "error", "完成临时备份文件写入失败: "+err.Error(), 0, 0, nil)
 			return
 		}
 		defer safeio.Remove(databasePath)
 
+		if err := appCtx.Err(); err != nil {
+			updateProgress(taskID, "error", err.Error(), 0, 0, nil)
+			return
+		}
 		if err := service.CreateBackupFile(databasePath, service.BackupModeFull); err != nil {
-			updateProgress(tID, "error", "创建备份文件失败: "+err.Error(), 0, 0, nil)
+			updateProgress(taskID, "error", "创建备份文件失败: "+err.Error(), 0, 0, nil)
 			return
 		}
 
-		updateProgress(tID, "compressing", "", 0, 0, nil)
+		updateProgress(taskID, "compressing", "", 0, 0, nil)
 		archiveFile, err := os.CreateTemp("", "backup_r2_*.zip")
 		if err != nil {
-			updateProgress(tID, "error", "创建加密压缩包失败: "+err.Error(), 0, 0, nil)
+			updateProgress(taskID, "error", "创建加密压缩包失败: "+err.Error(), 0, 0, nil)
 			return
 		}
 		archivePath := archiveFile.Name()
 		if err := archiveFile.Close(); err != nil {
 			safeio.Remove(archivePath)
-			updateProgress(tID, "error", "完成加密压缩包写入失败: "+err.Error(), 0, 0, nil)
+			updateProgress(taskID, "error", "完成加密压缩包写入失败: "+err.Error(), 0, 0, nil)
 			return
 		}
 		defer safeio.Remove(archivePath)
-		if err := service.CreateEncryptedBackupArchive(databasePath, archivePath, service.BackupModeFull, archivePassword); err != nil {
-			updateProgress(tID, "error", "压缩并加密备份失败: "+err.Error(), 0, 0, nil)
+		if err := service.CreateEncryptedBackupArchive(databasePath, archivePath, service.BackupModeFull, password); err != nil {
+			updateProgress(taskID, "error", "压缩并加密备份失败: "+err.Error(), 0, 0, nil)
 			return
 		}
 		safeio.Remove(databasePath)
 
 		file, err := os.Open(filepath.Clean(archivePath)) //nolint:gosec // archivePath is created by this task.
 		if err != nil {
-			updateProgress(tID, "error", "打开加密备份压缩包失败: "+err.Error(), 0, 0, nil)
+			updateProgress(taskID, "error", "打开加密备份压缩包失败: "+err.Error(), 0, 0, nil)
 			return
 		}
 		defer safeio.Close(file)
 		info, err := file.Stat()
 		if err != nil {
-			updateProgress(tID, "error", "读取加密备份压缩包信息失败: "+err.Error(), 0, 0, nil)
+			updateProgress(taskID, "error", "读取加密备份压缩包信息失败: "+err.Error(), 0, 0, nil)
 			return
 		}
 
 		total := info.Size()
-		updateProgress(tID, "uploading", "", total, 0, nil)
+		updateProgress(taskID, "uploading", "", total, 0, nil)
 		key := service.R2BackupObjectKey(service.BackupModeFull, time.Now())
-		reader := &CountingReader{Reader: file, Total: total, TaskID: tID}
-		bgCtx, cancel := context.WithTimeout(context.Background(), r2UploadTimeout)
+		reader := &CountingReader{Reader: file, Total: total, TaskID: taskID}
+		bgCtx, cancel := context.WithTimeout(appCtx, r2UploadTimeout)
 		defer cancel()
-		if _, err := cli.PutObject(bgCtx, &s3.PutObjectInput{
-			Bucket:        aws.String(b),
+		if _, err := client.PutObject(bgCtx, &s3.PutObjectInput{
+			Bucket:        aws.String(bucket),
 			Key:           aws.String(key),
 			Body:          reader,
 			ContentLength: aws.Int64(total),
 			ContentType:   aws.String("application/zip"),
 		}); err != nil {
-			updateProgress(tID, "error", "上传备份到 R2 失败: "+err.Error(), total, 0, nil)
+			updateProgress(taskID, "error", "上传备份到 R2 失败: "+err.Error(), total, 0, nil)
 			return
 		}
 
@@ -329,22 +333,25 @@ func startR2UploadTask(ctx context.Context, password string) (string, error) {
 		r2BackupCache = nil
 		r2BackupCacheTime = time.Time{}
 		r2BackupCacheLock.Unlock()
-		updateProgress(tID, r2ProgressStatusCompleted, "", total, total, gin.H{"key": key})
-	}(taskID, bucket, password, client)
+		updateProgress(taskID, r2ProgressStatusCompleted, "", total, total, gin.H{"key": key})
+	})
 
 	return taskID, nil
 }
 
 // InitR2Cache starts a background goroutine to pre-fetch R2 backup list.
 func InitR2Cache() {
-	go func() {
-		// Wait for DB or Network stability if needed, but usually safe to start immediately
-		// since getR2Client handles its own localized config reading.
-		// Reduce sleep to 100ms for faster startup availability
-		time.Sleep(100 * time.Millisecond)
+	GoBackground(func(appCtx context.Context) {
+		timer := time.NewTimer(100 * time.Millisecond)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+		case <-appCtx.Done():
+			return
+		}
 		debugLog("DEBUG: InitR2Cache - Starting pre-fetch...")
 
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(appCtx, 30*time.Second)
 		defer cancel()
 
 		client, bucket, err := getR2Client(ctx)
@@ -370,7 +377,6 @@ func InitR2Cache() {
 				LastModified: obj.LastModified.Format("2006-01-02 15:04:05"),
 			})
 		}
-
 		sort.Slice(backups, func(i, j int) bool {
 			return backups[i].LastModified > backups[j].LastModified
 		})
@@ -379,9 +385,8 @@ func InitR2Cache() {
 		r2BackupCache = backups
 		r2BackupCacheTime = time.Now()
 		r2BackupCacheLock.Unlock()
-
 		debugLog("DEBUG: InitR2Cache - Pre-fetch complete. Cached %d files.", len(backups))
-	}()
+	})
 }
 
 type R2BackupFile struct {
@@ -390,15 +395,13 @@ type R2BackupFile struct {
 	LastModified string `json:"last_modified"`
 }
 
-// ... existing globals ...
 var r2FetchLock sync.Mutex
 
 const r2BackupCacheTTL = 5 * time.Minute
 
 // listR2Backups returns a coherent list for both the dedicated R2 endpoint
 // and the backup overview endpoint. Mutations invalidate the cache, so the
-// next overview request must repopulate it instead of displaying an empty
-// list until the next process restart.
+// next overview request repopulates it instead of displaying an empty list.
 func listR2Backups(ctx context.Context, forceRefresh bool) ([]R2BackupFile, error) {
 	r2BackupCacheLock.RLock()
 	if !forceRefresh && time.Since(r2BackupCacheTime) < r2BackupCacheTTL {
@@ -459,7 +462,6 @@ func listR2Backups(ctx context.Context, forceRefresh bool) ([]R2BackupFile, erro
 	r2BackupCacheLock.Unlock()
 	return backups, nil
 }
-
 func ListR2BackupsHandler(c *gin.Context) {
 	backups, err := listR2Backups(c.Request.Context(), c.Query("force") == ValueTrue)
 	if err != nil {
@@ -497,19 +499,15 @@ func StageR2BackupHandler(c *gin.Context) {
 		return
 	}
 
-	// Create Task ID
 	taskID := uuid.New().String()
 	ensureR2ProgressJanitor()
-
-	// Initialize Progress
-	progress := &DownloadProgress{
+	progressMap.Store(taskID, &DownloadProgress{
 		TaskID:     taskID,
 		Status:     "pending",
 		TotalBytes: 0,
 		Downloaded: 0,
 		UpdatedAt:  time.Now(),
-	}
-	progressMap.Store(taskID, progress)
+	})
 	taskstate.Global.Start(taskID, "backup", "云备份恢复", "正在准备下载云备份")
 	passwordRequest := backupPasswordRequestFromForm(c)
 	password := passwordRequest.Password
@@ -517,88 +515,88 @@ func StageR2BackupHandler(c *gin.Context) {
 		password = passwordRequest.AdminPassword
 	}
 
-	// Launch Background Task
-	go func(tID, k, b, archivePassword string, cli *s3.Client) {
-		// Recovery
+	GoBackground(func(appCtx context.Context) {
 		defer func() {
-			if r := recover(); r != nil {
-				updateProgress(tID, "error", fmt.Sprintf("Panic: %v", r), 0, 0, nil)
+			if recovered := recover(); recovered != nil {
+				updateProgress(taskID, "error", fmt.Sprintf("Panic: %v", recovered), 0, 0, nil)
 			}
 		}()
 
-		updateProgress(tID, "downloading", "", 0, 0, nil)
-
-		// 1. Get Object Info (Head/Get)
-		// We use GetObject directly.
-		// Note: We need a specialized Context for background task, don't use c.Request.Context()
-		bgCtx, cancel := context.WithTimeout(context.Background(), r2StageDownloadTimeout)
+		updateProgress(taskID, "downloading", "", 0, 0, nil)
+		bgCtx, cancel := context.WithTimeout(appCtx, r2StageDownloadTimeout)
 		defer cancel()
 
-		resp, err := cli.GetObject(bgCtx, &s3.GetObjectInput{
-			Bucket: aws.String(b),
-			Key:    aws.String(k),
+		resp, err := client.GetObject(bgCtx, &s3.GetObjectInput{
+			Bucket: aws.String(bucket),
+			Key:    aws.String(key),
 		})
 		if err != nil {
-			updateProgress(tID, "error", "Download init failed: "+err.Error(), 0, 0, nil)
+			updateProgress(taskID, "error", "Download init failed: "+err.Error(), 0, 0, nil)
 			return
 		}
 		defer safeio.Close(resp.Body)
 
 		total := int64(0)
-		if resp.ContentLength != nil {
+		if resp.ContentLength != nil && *resp.ContentLength > 0 {
 			total = *resp.ContentLength
 		}
-		updateProgress(tID, "downloading", "", total, 0, nil)
-
-		// 2. Create Temp File
-		tempFile, err := os.CreateTemp("", "restore_r2_stage_*")
-		if err != nil {
-			updateProgress(tID, "error", "Create temp file failed", total, 0, nil)
+		if total > maxBackupFileBytes {
+			updateProgress(taskID, "error", errBackupFileTooLarge.Error(), total, 0, nil)
 			return
 		}
-		// Note: No defer remove, kept for restore execution.
+		updateProgress(taskID, "downloading", "", total, 0, nil)
 
-		// 3. Download with Progress
-		reader := &CountingReader{
-			Reader: resp.Body,
-			Total:  total,
-			TaskID: tID,
+		tempFile, err := os.CreateTemp("", "restore_r2_stage_*")
+		if err != nil {
+			updateProgress(taskID, "error", "Create temp file failed", total, 0, nil)
+			return
 		}
+		tempPath := tempFile.Name()
+		preserveTemp := false
+		defer func() {
+			if !preserveTemp {
+				safeio.Remove(tempPath)
+			}
+		}()
 
-		if _, err := io.Copy(tempFile, reader); err != nil {
+		reader := &CountingReader{Reader: io.LimitReader(resp.Body, maxBackupFileBytes+1), Total: total, TaskID: taskID}
+		written, copyErr := io.Copy(tempFile, reader)
+		if copyErr != nil {
 			safeio.Close(tempFile)
 			safeio.Remove(tempFile.Name())
-			updateProgress(tID, "error", "Download stream failed: "+err.Error(), total, 0, nil)
+			updateProgress(taskID, "error", "Download stream failed: "+copyErr.Error(), total, 0, nil)
+			return
+		}
+		if written > maxBackupFileBytes {
+			safeio.Close(tempFile)
+			safeio.Remove(tempFile.Name())
+			updateProgress(taskID, "error", errBackupFileTooLarge.Error(), total, written, nil)
 			return
 		}
 		if err := tempFile.Close(); err != nil {
 			safeio.Remove(tempFile.Name())
-			updateProgress(tID, "error", "Finalize temp file failed: "+err.Error(), total, total, nil)
+			updateProgress(taskID, "error", "Finalize temp file failed: "+err.Error(), total, total, nil)
 			return
 		}
 
-		// 4. Decrypt (when needed) and analyze. Legacy raw SQLite objects stay
-		// compatible and do not require a password.
 		if service.IsBackupArchive(tempFile.Name()) {
-			updateProgress(tID, "decrypting", "", total, total, nil)
+			updateProgress(taskID, "decrypting", "", total, total, nil)
 		} else {
-			updateProgress(tID, "analyzing", "", total, total, nil)
+			updateProgress(taskID, "analyzing", "", total, total, nil)
 		}
-		stats, databasePath, err := inspectBackupForRestore(tempFile.Name(), archivePassword)
+		stats, databasePath, err := inspectBackupForRestore(tempPath, password)
 		if err != nil {
-			updateProgress(tID, "error", backupArchiveErrorMessage(err), total, total, nil)
+			updateProgress(taskID, "error", backupArchiveErrorMessage(err), total, total, nil)
 			return
 		}
 
-		// 5. Register the staged file and return structured restore data.
+		preserveTemp = databasePath == tempPath
 		restoreToken := registerRestoreArtifact(databasePath)
-		updateProgress(tID, r2ProgressStatusCompleted, "", total, total, gin.H{"stats": stats, "restore_token": restoreToken})
-
-	}(taskID, key, bucket, password, client)
+		updateProgress(taskID, r2ProgressStatusCompleted, "", total, total, gin.H{"stats": stats, "restore_token": restoreToken})
+	})
 
 	c.JSON(http.StatusAccepted, gin.H{"task_id": taskID, "status": "running"})
 }
-
 func updateProgress(taskID, status, errStr string, total, downloaded int64, result any) {
 	p := &DownloadProgress{
 		TaskID:     taskID,
@@ -648,13 +646,18 @@ func updateProgress(taskID, status, errStr string, total, downloaded int64, resu
 
 func ensureR2ProgressJanitor() {
 	r2ProgressJanitorOnce.Do(func() {
-		go func() {
+		GoBackground(func(ctx context.Context) {
 			ticker := time.NewTicker(r2ProgressCleanupInterval)
 			defer ticker.Stop()
-			for now := range ticker.C {
-				cleanupStaleR2Progress(now)
+			for {
+				select {
+				case now := <-ticker.C:
+					cleanupStaleR2Progress(now)
+				case <-ctx.Done():
+					return
+				}
 			}
-		}()
+		})
 	})
 }
 
@@ -742,6 +745,10 @@ func debugLog(format string, v ...interface{}) {
 	log.Printf(format, v...)
 }
 
+func r2ConnectionTestKey() string {
+	return ".animate-auto-tool/connection-tests/" + uuid.NewString() + ".txt"
+}
+
 func TestR2ConnectionHandler(c *gin.Context) {
 	debugLog("DEBUG: TestR2ConnectionHandler called")
 	var req R2Config
@@ -808,8 +815,8 @@ func TestR2ConnectionHandler(c *gin.Context) {
 		return
 	}
 
-	// Try PutObject (Write Check)
-	testKey := "connection_test_check.txt"
+	// Use an isolated random key so the connection check can never overwrite a user object.
+	testKey := r2ConnectionTestKey()
 	testContent := "ok"
 	_, err = client.PutObject(c.Request.Context(), &s3.PutObjectInput{
 		Bucket: aws.String(req.Bucket),
@@ -828,12 +835,9 @@ func TestR2ConnectionHandler(c *gin.Context) {
 		Key:    aws.String(testKey),
 	})
 	if err != nil {
-		debugLog("DEBUG: DeleteObject error: %v (Non-fatal but indicative)", err)
-		// We successfully wrote, so technically "connected", but delete failed.
-		// Let's warn or just consider it success but log it?
-		// For a backup tool, inability to delete might accumulate old backups.
-		// Let's count it as success but maybe append a warning?
-		// For simplicity, let's just say "ok" but log it.
+		debugLog("DEBUG: DeleteObject error: %v", err)
+		jsonBadRequest(c, "删除校验失败: "+err.Error())
+		return
 	}
 
 	debugLog("DEBUG: Connection successful (Read/Write/Delete verified)")

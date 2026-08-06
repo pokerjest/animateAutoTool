@@ -35,6 +35,8 @@ type SafetySnapshot struct {
 	OperationType     string    `json:"operation_type,omitempty"`
 	AppVersion        string    `json:"app_version"`
 	SchemaVersion     string    `json:"schema_version"`
+	DatabaseFormat    int       `json:"database_format"`
+	SchemaFormat      int       `json:"schema_format"`
 	DatabasePath      string    `json:"database_path"`
 	ConfigPath        string    `json:"config_path,omitempty"`
 	DatabaseSHA256    string    `json:"database_sha256"`
@@ -42,6 +44,7 @@ type SafetySnapshot struct {
 	CreatedAt         time.Time `json:"created_at"`
 	FormatVersion     int       `json:"format_version"`
 	RollbackSupported bool      `json:"rollback_supported"`
+	RollbackScope     string    `json:"rollback_scope"`
 }
 
 func snapshotRoot() string {
@@ -75,10 +78,16 @@ func CreateSafetySnapshot(reason string) (SafetySnapshot, error) {
 		OperationType:     strings.TrimSpace(reason),
 		AppVersion:        appversion.AppVersion,
 		SchemaVersion:     db.CurrentSchemaVersion(db.DB),
+		DatabaseFormat:    db.DatabaseFormat,
+		SchemaFormat:      db.SchemaFormat,
 		DatabasePath:      databasePath,
 		CreatedAt:         now,
 		FormatVersion:     safetySnapshotFormatVersion,
-		RollbackSupported: strings.TrimSpace(reason) != "",
+		RollbackSupported: strings.TrimSpace(reason) == "self-update",
+		RollbackScope:     "database_config",
+	}
+	if strings.TrimSpace(reason) == "self-update" {
+		snapshot.RollbackScope = "bundle_snapshot"
 	}
 
 	configPath := config.ConfigFilePath()

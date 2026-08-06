@@ -1,6 +1,11 @@
 package scheduler
 
-import "testing"
+import (
+	"bytes"
+	"log"
+	"strings"
+	"testing"
+)
 
 func TestStatusTrackerBeginAndFinish(t *testing.T) {
 	tracker := &statusTracker{}
@@ -48,5 +53,34 @@ func TestSchedulerRunGuard(t *testing.T) {
 	schedulerRunInProgress.Store(false)
 	if !schedulerRunInProgress.CompareAndSwap(false, true) {
 		t.Fatal("expected scheduler run guard to be acquirable again after release")
+	}
+}
+
+func TestRunSchedulerSafelyRecoversPanicAndLogsStack(t *testing.T) {
+	var output bytes.Buffer
+	previousWriter := log.Writer()
+	previousFlags := log.Flags()
+	log.SetOutput(&output)
+	log.SetFlags(0)
+	t.Cleanup(func() {
+		log.SetOutput(previousWriter)
+		log.SetFlags(previousFlags)
+	})
+
+	runSchedulerSafely("fault-injection", func() {
+		panic("scheduler-boom")
+	})
+
+	logged := output.String()
+	for _, expected := range []string{
+		"Scheduler: run panic",
+		"trigger=fault-injection",
+		"scheduler-boom",
+		"status_test.go",
+		"recovery_action=continue_next_schedule",
+	} {
+		if !strings.Contains(logged, expected) {
+			t.Fatalf("scheduler panic log missing %q: %s", expected, logged)
+		}
 	}
 }

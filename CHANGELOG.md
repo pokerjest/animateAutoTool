@@ -8,6 +8,120 @@
 
 ## [Unreleased]
 
+## [1.0.0-beta.12] - 2026-08-03
+
+### Fixed
+- 发行包浏览器 E2E 会等待订阅接口完成，并按请求 URL 与状态码区分真实故障和可选更新源失败，避免 Windows 构建被正常导航取消或外部更新源波动误判为失败。
+
+## [1.0.0-beta.11] - 2026-08-03
+
+### Changed
+- Windows 直接运行带版本号的发行二进制时会迁移并切换到固定启动文件，完成启动后清理旧版和历史命名启动器。
+
+### Fixed
+- 订阅与本地番剧的来源冲突只在存在独立身份关联时上报，并自动关闭历史误报，避免无关番剧阻止播放入口识别。
+- 元数据补全会先解除多个无关本地番剧错误共享的元数据记录，再依据各自 NFO 或网络来源重建关联，避免跨番剧污染。
+- 更新器只选择版本号与目标 Release 一致的安装资源，并优先使用当前 `AnimateAutoTool` 命名，避免误装遗留旧版二进制。
+
+## [1.0.0-beta.10] - 2026-08-01
+
+### Added
+- Mikan 番剧发现结果会显示“已订阅”和“本地已有”状态，并复用来源 ID 与强标题匹配判断本地媒体。
+- 发布流水线新增 Windows 打包二进制 E2E，验证 ZIP 内容、启动脚本、Playwright 页面流程与优雅停止。
+
+### Changed
+- Windows ZIP 打包兼容 zip 和 PowerShell Compress-Archive，Linux CI 可同时生成 Windows E2E 包。
+
+### Fixed
+- Mikan 海报代理会在多个可信镜像间并发取最快有效图片，并统一缓存同一路径，改善部分网络下封面加载失败的问题。
+- 前端海报回退会记录已尝试的代理和原始地址，避免重复请求或回退循环。
+
+## [1.0.0-beta.9] - 2026-08-01
+
+### Added
+- 新增 Windows 平台的应用退出控制和托管子进程控制，停止、重启、更新与回滚可以等待服务正常收尾。
+
+### Changed
+- Windows 默认数据目录优先使用 LOCALAPPDATA，更新与回滚辅助程序改用隐藏运行的 PowerShell 脚本。
+
+### Fixed
+- 订阅与本地番剧支持通过 Bangumi、TMDB 和 AniList 的命名空间来源 ID 匹配，修复中文译名不同导致播放按钮缺失的问题。
+- 来源 ID 或季度冲突会阻止自动关联；重复身份可通过已完成下载路径消歧，否则生成可重复追踪的库问题。
+- Windows 文件路径比较改为大小写不敏感，并提高 stop.bat 与 restart.bat 对过期 PID 和退出失败的处理安全性。
+
+## [1.0.0-beta.8] - 2026-08-01
+
+### Changed
+- ???????????????????????????????????????????????????
+- ???????????????????????????????????????????????
+
+### Security
+- ?????????????TMDB ???????? API ???????????????????????
+
+### Fixed
+- ???????????????????????????????????????
+
+## [1.0.0-beta.7] - 2026-07-31
+
+### Changed
+- 订阅列表会先完成 Jellyfin 与本地媒体库对账再计算入库状态，手动检查订阅后也会立即补做映射。
+
+### Fixed
+- 修复本地已有可播放剧集、但 Jellyfin 尚未完成关联时，订阅卡片和历史弹窗错误隐藏播放入口的问题。
+
+## [1.0.0-beta.6] - 2026-07-31
+
+### Changed
+- 本地媒体扫描现在会明确切换文件扫描与元数据整理阶段，进度在阶段真正完成前最多显示 99%。
+- 下载完成后的 Jellyfin 映射按本批受影响番剧执行，并持续轮询直到整批待映射番剧均已处理。
+
+### Fixed
+- 清理增量扫描遗留的同路径空白重复番剧记录，避免并发下载后生成幽灵条目。
+- 修复文件扫描完成时任务中心短暂显示 100% 或仍停留在第一阶段的问题。
+
+## [1.0.0-beta.5] - 2026-07-31
+
+### Added
+- 在系统设置的安全区域支持修改管理员用户名；修改需要当前密码，当前会话保持有效，侧边栏账号名会即时刷新。
+
+### Fixed
+- 为用户名修改补充唯一性校验、控制字符校验、审计记录和旧 `/api/*` 兼容接口。
+
+## [1.0.0-beta.4] - 2026-07-31
+
+### Added
+- 新增持久化运行会话与数据操作日志；进程崩溃、强制终止或主机断电后，会自动识别并恢复被中断的媒体扫描、元数据链接和订阅对账。
+- 为 RSS 主源、备用源和全部源不可用场景补充明确日志，并记录 AList、qBittorrent、Jellyfin 等托管服务的意外退出。
+
+### Changed
+- SQLite 启用完整同步与外键约束，启动时执行完整性检查，正常关闭时截断 WAL；数据库损坏时停止后台写任务并给出恢复提示。
+- 元数据与订阅链接写入改为事务化处理，恢复期间暂停并发扫描、同步和定时任务，避免重复写入。
+
+### Fixed
+- 修复媒体目录只读状态误报、错误文件路径提示，以及共享媒体根目录下不同番剧可能错误关联的问题。
+- 修复 RSS 主源宕机后未正确使用备用源、主源错误被 qBittorrent 错误覆盖，以及服务中断信息不足的问题。
+
+## [1.0.0-beta.3] - 2026-07-31
+
+### Fixed
+- 修复测试版更新频道错误混入稳定版和“可回切”选项的问题；稳定版与测试版列表现在严格分离。
+
+## [1.0.0-beta.2] - 2026-07-31
+
+### Fixed
+- 修复发行包和 Windows 独立可执行文件仍使用 `animate-server_*` 文件名前缀的问题；新资产统一使用 `AnimateAutoTool_*`，同时保留旧资产更新兼容。
+
+## [1.0.0-beta.1] - 2026-07-31
+
+### Changed
+- 本地启动器统一更名为 `AnimateAutoTool`（Windows 为 `AnimateAutoTool.exe`），同时保留 `animate-server_*` Release 资产命名以兼容旧版更新器。
+- 更新器、回滚流程、启动脚本和发行包统一使用新启动器名称，并支持从 v0.9.9 自动迁移旧文件和脚本。
+
+### Fixed
+- 修复本地媒体扫描遇到失效关联记录时可能崩溃的问题，并增加定向扫描回归覆盖。
+- 修复移动端顶部同时显示两个菜单按钮的问题。
+- 修复发行包中的启动脚本在无源码环境下仍尝试重新构建程序的问题。
+
 ## [0.9.9] - 2026-07-31
 
 ### Added
@@ -494,7 +608,19 @@
 
 ---
 
-[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v0.9.9...HEAD
+[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.12...HEAD
+[1.0.0-beta.12]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.11...v1.0.0-beta.12
+[1.0.0-beta.11]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.10...v1.0.0-beta.11
+[1.0.0-beta.10]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.9...v1.0.0-beta.10
+[1.0.0-beta.9]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.8...v1.0.0-beta.9
+[1.0.0-beta.8]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.7...v1.0.0-beta.8
+[1.0.0-beta.7]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.6...v1.0.0-beta.7
+[1.0.0-beta.6]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.5...v1.0.0-beta.6
+[1.0.0-beta.5]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.4...v1.0.0-beta.5
+[1.0.0-beta.4]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.3...v1.0.0-beta.4
+[1.0.0-beta.3]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.2...v1.0.0-beta.3
+[1.0.0-beta.2]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.1...v1.0.0-beta.2
+[1.0.0-beta.1]: https://github.com/pokerjest/animateAutoTool/compare/v0.9.9...v1.0.0-beta.1
 [0.9.9]: https://github.com/pokerjest/animateAutoTool/compare/v0.9.8...v0.9.9
 [0.9.4]: https://github.com/pokerjest/animateAutoTool/compare/v0.9.3...v0.9.4
 [0.9.2.1]: https://github.com/pokerjest/animateAutoTool/compare/v0.9.2...v0.9.2.1

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { buildMikanSelection, mikanEpisodeMatchesFilters, switchToMikanAggregate } from './mikanSubscription'
 
-const anime = { mikan_id: '3141', bangumi_subject_id: '', title: '测试番剧', image: 'poster.jpg', season: '2026 夏季番组' }
+const anime = { mikan_id: '3141', bangumi_subject_id: '', title: '测试番剧', image: 'poster.jpg', is_subscribed: false, is_local: false, season: '2026 夏季番组' }
 
 describe('Mikan subscription strategy', () => {
   it('builds a subgroup feed without a redundant subgroup filter', () => {

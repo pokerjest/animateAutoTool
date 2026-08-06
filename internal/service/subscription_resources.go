@@ -246,7 +246,7 @@ func (m *SubscriptionManager) DiscoverSubscriptionResourcesContext(
 	if m == nil || sub == nil {
 		return SubscriptionResourceDiscoveryResult{}, fmt.Errorf("subscription is nil")
 	}
-	episodes, activeRSS, _, err := m.parseRSSWithFallback(ctx, sub)
+	episodes, activeRSS, _, _, err := m.parseRSSWithFallback(ctx, sub)
 	if err != nil {
 		return SubscriptionResourceDiscoveryResult{}, err
 	}

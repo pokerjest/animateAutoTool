@@ -20,11 +20,14 @@ type ReleaseManifest struct {
 	Version                  string `json:"version"`
 	Channel                  string `json:"channel"`
 	SchemaVersion            string `json:"schema_version"`
+	DatabaseFormat           int    `json:"database_format,omitempty"`
+	SchemaFormat             int    `json:"schema_format,omitempty"`
 	MinUpgradeFrom           string `json:"min_upgrade_from"`
 	MinReadableSchema        string `json:"min_readable_schema"`
 	MaxReadableSchema        string `json:"max_readable_schema"`
 	SwitchableFromPrerelease bool   `json:"switchable_from_prerelease"`
 	RollbackSupported        bool   `json:"rollback_supported"`
+	RollbackScope            string `json:"rollback_scope,omitempty"`
 }
 
 func (m ReleaseManifest) validForRelease(version string) error {
@@ -44,6 +47,18 @@ func (m ReleaseManifest) validForRelease(version string) error {
 	if !validSchemaVersion(m.SchemaVersion) {
 		return errors.New("release manifest schema version is missing")
 	}
+	if m.DatabaseFormat <= 0 || m.SchemaFormat <= 0 {
+		return errors.New("release manifest database/schema format is missing")
+	}
+	if m.DatabaseFormat != db.DatabaseFormat || m.SchemaFormat != db.SchemaFormat {
+		return errors.New("release manifest database/schema format is unsupported")
+	}
+	if m.RollbackSupported && strings.TrimSpace(m.RollbackScope) != "bundle_snapshot" {
+		return errors.New("rollback-supported releases must declare bundle_snapshot scope")
+	}
+	if scope := strings.TrimSpace(m.RollbackScope); scope != "" && scope != "bundle_snapshot" && scope != "database_only" {
+		return errors.New("release manifest rollback scope is invalid")
+	}
 	if !validSchemaVersion(m.MinReadableSchema) || !validSchemaVersion(m.MaxReadableSchema) {
 		return errors.New("release manifest readable schema range is invalid")
 	}
@@ -59,6 +74,9 @@ func (m ReleaseManifest) validForRelease(version string) error {
 func (m ReleaseManifest) allows(currentVersion, currentSchema string, targetVersion string) (bool, string) {
 	currentVersion = normalizeVersion(currentVersion)
 	targetVersion = normalizeVersion(targetVersion)
+	if m.DatabaseFormat != db.DatabaseFormat || m.SchemaFormat != db.SchemaFormat {
+		return false, "目标版本 database/schema format 与当前程序不兼容"
+	}
 	if !schemaInRange(currentSchema, m.MinReadableSchema, m.MaxReadableSchema) {
 		return false, "当前数据库 schema 不在目标版本可读取范围内"
 	}
@@ -168,10 +186,7 @@ func fetchReleaseManifest(release *githubRelease) (ReleaseManifest, error) {
 func compatibilityForRelease(release githubRelease, current string) (ReleaseManifest, bool, string) {
 	manifest, err := fetchReleaseManifest(&release)
 	if err != nil {
-		if compareVersions(current, release.TagName) < 0 {
-			return ReleaseManifest{}, true, ""
-		}
-		return ReleaseManifest{}, false, "缺少有效的版本兼容清单"
+		return ReleaseManifest{}, false, "缺少有效的版本兼容清单，禁止自动更新"
 	}
 	allowed, reason := manifest.allows(current, currentSchemaVersion(), release.TagName)
 	return manifest, allowed, reason

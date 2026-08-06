@@ -14,6 +14,7 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/downloader"
 	"github.com/pokerjest/animateAutoTool/internal/qbutil"
 	"github.com/pokerjest/animateAutoTool/internal/service"
+	"gorm.io/gorm"
 )
 
 type repairReport struct {
@@ -41,14 +42,30 @@ func main() {
 	dryRun := flag.Bool("dry-run", false, "仅检查 qBittorrent 连通性并列出将执行的修复，不写库不触发重试")
 	flag.Parse()
 
-	if err := config.LoadConfig(""); err != nil {
-		log.Fatalf("加载配置失败: %v", err)
+	var database *gorm.DB
+	if *dryRun {
+		if err := config.LoadConfigReadOnly(""); err != nil {
+			log.Fatalf("load config: %v", err)
+		}
+		readDB, sqlDB, err := db.OpenReadOnly(config.AppConfig.Database.Path)
+		if err != nil {
+			log.Fatalf("open read-only database: %v", err)
+		}
+		defer func() { _ = sqlDB.Close() }()
+		if err := db.CheckIntegrity(readDB); err != nil {
+			log.Fatalf("read-only database integrity check: %v", err)
+		}
+		database = readDB
+	} else {
+		if err := config.LoadConfig(""); err != nil {
+			log.Fatalf("load config: %v", err)
+		}
+		db.InitDB(config.AppConfig.Database.Path)
+		database = db.DB
 	}
 
-	db.InitDB(config.AppConfig.Database.Path)
-
 	report := repairReport{DryRun: *dryRun}
-	qbCfg := qbutil.LoadConfig()
+	qbCfg := qbutil.LoadConfigFromDB(database)
 	if qbutil.ManagedBinaryMissing(qbCfg, config.BinDir()) || qbutil.MissingExternalURL(qbCfg) {
 		report.Recommendations = append(report.Recommendations, "qBittorrent 当前不可用，请先检查下载器配置。")
 		output(report, *jsonMode)

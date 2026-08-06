@@ -1,6 +1,7 @@
 package jellyfin
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -31,53 +32,50 @@ func shouldRetryStartupUser(err error) bool {
 // AttemptZeroConfig tries to perform a zero-config setup if Jellyfin is brand new.
 // It returns the generated API key if successful, empty string if skipped or failed.
 func AttemptZeroConfig(url, username, password string) (string, error) {
+	return AttemptZeroConfigContext(context.Background(), url, username, password)
+}
+
+func AttemptZeroConfigContext(ctx context.Context, url, username, password string) (string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	client := NewClient(url, "")
 	var publicInfo *PublicSystemInfo
 
-	// 1. Wait for Server to be Up
 	log.Println("Jellyfin: Waiting for server to be ready...")
 	up := false
 	for i := 0; i < serverReadyAttempts; i++ {
-		if info, err := client.GetPublicInfo(); err == nil {
+		if info, err := client.GetPublicInfoContext(ctx); err == nil {
 			publicInfo = info
 			up = true
 			break
 		}
-		time.Sleep(serverReadyPollDelay)
+		if !waitForSetupRetry(ctx, serverReadyPollDelay) {
+			return "", ctx.Err()
+		}
 	}
 	if !up {
 		return "", fmt.Errorf("timeout waiting for jellyfin to start")
 	}
 
-	// 2. Check if Startup Wizard is needed
-	// The API endpoint /Startup/Configuration returns the state
-	// NOTE: This endpoint might not be perfectly documented or version-dependent.
-	// A simpler check: Try to create a user via startup wizard API. If it works, we were in wizard mode.
-	// Or check /System/Info/Public -> If "StartupWizardCompleted" is false?
-	// Actually, best bet is try to perform the first step of wizard.
-
 	log.Println("Jellyfin: Checking status...")
-	// Try to authenticate with retries. If it works, we are already set up.
-	// We retry because sometimes the server is "Publicly" up but User Manager is still loading.
 	for i := 0; i < authRetryAttempts; i++ {
-		if authResp, err := client.Authenticate(username, password); err == nil {
+		if authResp, err := client.AuthenticateContext(ctx, username, password); err == nil {
 			log.Println("Jellyfin: Already configured (Auth successful). Using session token as API Key.")
 			return authResp.AccessToken, nil
 		}
-		time.Sleep(authRetryDelay)
+		if !waitForSetupRetry(ctx, authRetryDelay) {
+			return "", ctx.Err()
+		}
 	}
 	if startupWizardCompleted(publicInfo) {
 		return "", fmt.Errorf("%w: stored bootstrap credentials were rejected", ErrAlreadyConfigured)
 	}
 
-	// 3. Perform Startup Wizard Steps
 	log.Println("Jellyfin: Attempting Zero-Config Setup...")
-
-	// Step 1: Update Startup User
-	// Keep trying in case DB migrations aren't done (which causes 500 error "Sequence contains no elements")
 	var err error
 	for i := 0; i < startupUserRetryAttempts; i++ {
-		err = client.UpdateStartupUser(username, password)
+		err = client.UpdateStartupUserContext(ctx, username, password)
 		if err == nil {
 			break
 		}
@@ -85,46 +83,55 @@ func AttemptZeroConfig(url, username, password string) (string, error) {
 			return "", fmt.Errorf("%w: startup wizard is unavailable for the current server", ErrAlreadyConfigured)
 		}
 		log.Printf("Jellyfin: UpdateStartupUser failed (attempt %d/%d): %v. Retrying...", i+1, startupUserRetryAttempts, err)
-		time.Sleep(startupUserRetryDelay)
+		if !waitForSetupRetry(ctx, startupUserRetryDelay) {
+			return "", ctx.Err()
+		}
 	}
-
 	if err != nil {
-		// If this fails, maybe it's already set up or not in wizard mode
-		// We assume failure here means "Not Fresh Install" or "Already Done"
 		return "", fmt.Errorf("failed to set startup user (maybe already set up?): %v", err)
 	}
 
-	// Step 2: Complete Wizard
-	// POST /Startup/Complete
-	if err := client.CompleteStartupWizard(); err != nil {
+	if err := client.CompleteStartupWizardContext(ctx); err != nil {
 		return "", fmt.Errorf("failed to complete wizard: %v", err)
 	}
-
-	// 4. Authenticate to get Token
-	authResp, err := client.Authenticate(username, password)
+	authResp, err := client.AuthenticateContext(ctx, username, password)
 	if err != nil {
 		return "", fmt.Errorf("failed to authenticate after setup: %v", err)
 	}
 
-	// Use the session AccessToken as the API Key.
-	// This is more reliable than /Auth/Keys which seems to create inactive keys in some versions.
-	apiKey := authResp.AccessToken
-
 	log.Printf("Jellyfin: Zero-Config successful; session API key generated.")
-	return apiKey, nil
+	return authResp.AccessToken, nil
 }
 
+func waitForSetupRetry(ctx context.Context, delay time.Duration) bool {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
 func (c *Client) UpdateStartupUser(username, password string) error {
+	return c.UpdateStartupUserContext(context.Background(), username, password)
+}
+
+func (c *Client) UpdateStartupUserContext(ctx context.Context, username, password string) error {
 	req := map[string]string{
 		"Name":     username,
 		"Password": password,
 	}
-	_, err := c.do("POST", "/Startup/User", req)
+	_, err := c.doContext(ctx, "POST", "/Startup/User", req)
 	return err
 }
 
 func (c *Client) CompleteStartupWizard() error {
-	_, err := c.do("POST", "/Startup/Complete", nil)
+	return c.CompleteStartupWizardContext(context.Background())
+}
+
+func (c *Client) CompleteStartupWizardContext(ctx context.Context) error {
+	_, err := c.doContext(ctx, "POST", "/Startup/Complete", nil)
 	return err
 }
 

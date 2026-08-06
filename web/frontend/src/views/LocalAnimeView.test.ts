@@ -87,6 +87,32 @@ describe('LocalAnimeView pagination', () => {
     expect(wrapper.find('[data-testid="load-more"]').exists()).toBe(false)
   })
 
+  it('keeps loaded cards visible and retries a failed next page', async () => {
+    let pageTwoAttempts = 0
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
+      const requestURL = new URL(String(input), 'http://localhost')
+      const page = Number(requestURL.searchParams.get('page'))
+      if (page === 1) return response([anime(1, '已经加载的番剧')], 1, 1, 2)
+      if (page === 2 && ++pageTwoAttempts === 1) {
+        return Promise.resolve(new Response(JSON.stringify({ error: { code: 'temporary_failure', message: '数据库繁忙' } }), { status: 503, headers: { 'Content-Type': 'application/json' } }))
+      }
+      if (page === 2) return response([anime(2, '重试加载的番剧')], 2, 1, 2)
+      throw new Error(`unexpected request: ${requestURL}`)
+    }))
+
+    const { wrapper } = mountView()
+    await vi.waitFor(() => expect(wrapper.text()).toContain('已经加载的番剧'))
+    await wrapper.get('[data-testid="load-more"]').trigger('click')
+
+    await vi.waitFor(() => expect(wrapper.text()).toContain('下一页加载失败'))
+    expect(wrapper.text()).toContain('已经加载的番剧')
+    expect(wrapper.text()).not.toContain('本地媒体加载失败')
+
+    await wrapper.findAll('button').find(button => button.text().includes('重试加载'))!.trigger('click')
+    await vi.waitFor(() => expect(wrapper.text()).toContain('重试加载的番剧'))
+    expect(wrapper.text()).not.toContain('下一页加载失败')
+  })
+
   it('searches on the server and starts again from page one', async () => {
     const fetchMock = vi.fn((input: RequestInfo | URL) => {
       const requestURL = new URL(String(input), 'http://localhost')

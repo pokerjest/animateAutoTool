@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { CircleAlert, FilePenLine, Pause, Play, PlayCircle, RefreshCw, Sparkles, Trash2 } from '@lucide/vue'
-import { handlePosterError, posterURL } from '../../api/client'
+import { handlePosterError, posterURL, subscriptionPosterURL } from '../../api/client'
 import type { Subscription } from '../../api/types'
 import AsyncButton from '../AsyncButton.vue'
 
@@ -47,7 +47,11 @@ const releaseFilterLabel = computed(() => {
   return parts.join(' · ')
 })
 
-const canPlay = computed(() => Boolean(props.item.playable && props.item.local_anime_id))
+// Local playback uses the local episode table; Jellyfin association is
+// optional and must not hide a playable local series from the subscription UI.
+const canPlay = computed(() => Boolean(
+  props.item.local_anime_id && (props.item.library_episode_count || 0) > 0,
+))
 const usesResourceLedger = computed(() => props.item.rss_count !== undefined)
 const showIssueBadge = computed(() => usesResourceLedger.value
   ? Boolean(props.item.needs_attention)
@@ -91,7 +95,7 @@ function isRepairBusy(name: string) {
       decoding="async"
       fetchpriority="low"
       class="pointer-events-none relative z-10 h-24 w-16 rounded-xl object-cover md:h-20 md:w-14"
-      @error="handlePosterError($event, item.image)"
+      @error="handlePosterError($event, subscriptionPosterURL(item.ID, 'mikan', 160), subscriptionPosterURL(item.ID, 'local', 160))"
     />
 
     <div class="pointer-events-none relative z-10 min-w-0">

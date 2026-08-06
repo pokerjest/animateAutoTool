@@ -50,7 +50,16 @@ const totalItems=computed(()=>pages.value[0]?.meta?.total??items.value.length)
 const remainingItems=computed(()=>Math.max(0,totalItems.value-items.value.length))
 const selectedCount=computed(()=>allMatching.value?Math.max(0,totalItems.value-excludedIDs.value.size):selectedIDs.value.size)
 const scanTask=computed(()=>tasks.taskByID('local-scan'))
-const scanPercent=computed(()=>scanTask.value?.total?Math.min(100,Math.round((scanTask.value.current||0)/scanTask.value.total*100)):0)
+const scanPercent=computed(()=>{
+  const current=scanTask.value?.current||0
+  const total=scanTask.value?.total||0
+  if(!total)return 0
+  if(current>=total)return 100
+  return Math.min(99,Math.floor(current/total*100))
+})
+const scanPhaseLabel=computed(()=>['metadata','repair'].includes(scanTask.value?.phase||'')?'第 2/2 阶段 · 元数据整理':'第 1/2 阶段 · 文件扫描')
+const scanProgressUnit=computed(()=>scanTask.value?.phase==='repair'?'条修复任务':['metadata','repair'].includes(scanTask.value?.phase||'')?'部本地番剧':'个扫描步骤')
+const scanPendingLabel=computed(()=>['metadata','repair'].includes(scanTask.value?.phase||'')?'处理中':'正在统计')
 const scanStatus=computed(()=>firstPage.value?.scan_status)
 async function loadMore(){if(query.hasNextPage.value&&!query.isFetchingNextPage.value)await query.fetchNextPage()}
 async function scan(){try{await actions.runTask('scan',()=>api<TaskAccepted>('/local-anime/scan',{method:'POST'}),'本地扫描','scan','正在扫描本地媒体目录');ui.toast('本地扫描已经启动')}catch(e){ui.toast(e instanceof Error?e.message:'扫描失败','error')}}
@@ -73,7 +82,7 @@ function openBatchOrganize(){
   organizeOpen.value=true
 }
 function onOrganizeApplied(){clearBatchSelection();void qc.invalidateQueries({queryKey:['local-anime']})}
-watch(()=>tasks.lastTransition,transition=>{if(transition?.task.kind==='organize'&&transition.task.tone!=='running')void qc.invalidateQueries({queryKey:['local-anime']})})
+watch(()=>tasks.lastTransition,transition=>{if(transition?.previousTone==='running'&&transition.task.kind==='organize'&&transition.task.tone!=='running')void qc.invalidateQueries({queryKey:['local-anime']})})
 async function refreshMetadata(item:LocalAnime){try{await actions.runTask(`refresh-${item.ID}`,()=>api<TaskAccepted>(`/local-anime/${item.ID}/refresh-metadata`,{method:'POST'}),'刷新本地番剧元数据','metadata',`正在刷新 ${item.title}`);ui.toast('元数据刷新已经启动')}catch(e){ui.toast(e instanceof Error?e.message:'刷新失败','error')}}
 async function switchSource(source:string){if(!selected.value)return;try{await actions.run(`source-${source}`,async()=>{await api(`/local-anime/${selected.value!.ID}/source?source=${source}`,{method:'POST'});ui.toast('显示数据源已切换');qc.invalidateQueries({queryKey:['local-anime']})})}catch(e){ui.toast(e instanceof Error?e.message:'切换失败','error')}}
 function selectedSourceID(){const metadata=selected.value?.metadata;if(!metadata)return 0;return matchSource.value==='bangumi'?metadata.bangumi_id:matchSource.value==='tmdb'?metadata.tmdb_id:metadata.anilist_id}
@@ -89,9 +98,9 @@ const sourceLabel=(source:string)=>source==='bangumi'?'Bangumi':source==='tmdb'?
   <div class="page-grid">
     <PageHeader eyebrow="ON DEVICE" title="本地番剧" description="扫描本地媒体，检查元数据，并从同一工作区进入播放。"><button class="btn btn-secondary" :class="batchMode?'border-[var(--brand)] text-[var(--brand)]':''" @click="toggleBatchMode"><ListChecks :size="17"/>{{ batchMode?'退出批量':'批量整理' }}</button><button class="btn btn-secondary" @click="adding=true"><FolderPlus :size="17"/>添加目录</button><AsyncButton class="btn btn-primary" :loading="actions.isBusy('scan','local-scan')" loading-label="扫描中…" @click="scan"><RefreshCw :size="17"/>重新扫描</AsyncButton></PageHeader>
     <section v-if="scanTask?.tone==='running'" class="panel p-4" role="status" aria-live="polite" aria-busy="true">
-      <div class="flex flex-wrap items-center justify-between gap-3"><div><p class="eyebrow">LOCAL SCAN</p><strong class="mt-1 block">{{ scanTask.detail }}</strong></div><span class="badge">{{ scanTask.total ? `${scanPercent}%` : '正在统计' }}</span></div>
+      <div class="flex flex-wrap items-center justify-between gap-3"><div><p class="eyebrow">{{ scanPhaseLabel }}</p><strong class="mt-1 block">{{ scanTask.detail }}</strong></div><span class="badge">{{ scanTask.total ? `${scanPercent}%` : scanPendingLabel }}</span></div>
       <div class="mt-3 h-2 overflow-hidden rounded-full bg-[var(--surface-muted)]"><div v-if="scanTask.total" class="h-full rounded-full bg-[var(--brand)] transition-[width]" :style="{width:`${scanPercent}%`}"></div><div v-else class="h-full w-1/3 animate-pulse rounded-full bg-[var(--brand)]"></div></div>
-      <p v-if="scanTask.total" class="muted mt-2 text-xs">{{ scanTask.current||0 }} / {{ scanTask.total }} 个扫描步骤</p>
+      <p v-if="scanTask.total" class="muted mt-2 text-xs">{{ scanTask.current||0 }} / {{ scanTask.total }} {{ scanProgressUnit }}</p>
     </section>
     <section v-else-if="scanStatus?.LastSummary" class="panel-muted flex flex-wrap items-center gap-3 p-4 text-sm">
       <div class="min-w-0 flex-1"><strong>最近扫描</strong><p class="muted mt-1">{{ scanStatus.LastSummary }}</p></div>
@@ -103,9 +112,12 @@ const sourceLabel=(source:string)=>source==='bangumi'?'Bangumi':source==='tmdb'?
     <AIProposalPanel v-if="healthAIProposalID" :proposal-id="healthAIProposalID" @applied="healthAIProposalID=''" @dismissed="healthAIProposalID=''"/>
     <section class="panel p-4"><div class="grid gap-3 lg:grid-cols-[1fr_auto]"><label class="search-field"><Search :size="18" aria-hidden="true"/><input v-model="search" class="field field-leading-icon" placeholder="搜索本地番剧" aria-label="搜索本地番剧"/></label><span class="badge self-center">{{ totalItems }} 部本地番剧</span></div><div v-if="firstPage?.directories.length" class="mt-4 grid gap-2 lg:grid-cols-2"><article v-for="dir in firstPage.directories" :key="dir.ID" class="panel-muted flex min-w-0 items-center gap-3 p-3"><FolderCog class="shrink-0 text-[var(--sky)]" :size="19"/><div class="min-w-0 flex-1"><p class="truncate text-sm font-bold">{{ dir.path }}</p><p class="muted text-xs">扫描根目录</p></div><button class="btn btn-danger h-11 w-11 p-0" aria-label="移除目录" @click="deleteDir=dir"><Trash2 :size="16"/></button></article></div></section>
     <section v-if="batchMode" class="sticky top-3 z-20 rounded-2xl border border-[var(--brand)] bg-[var(--surface-solid)] p-3 shadow-lg"><div class="flex flex-wrap items-center gap-2"><span class="badge badge-success">已选择 {{ selectedCount }} 部</span><button v-if="!allMatching" class="btn btn-secondary" @click="selectAllResults"><CheckSquare2 :size="16"/>全选当前搜索结果（{{ totalItems }}）</button><button v-else class="btn btn-secondary" @click="clearBatchSelection(false)"><X :size="16"/>取消全选</button><span v-if="allMatching" class="muted text-xs">已包含尚未滚动加载的结果，可逐项排除。</span><span class="flex-1"></span><AsyncButton class="btn btn-primary" :disabled="!selectedCount" @click="openBatchOrganize"><WandSparkles :size="16"/>预览并整理</AsyncButton></div></section>
-    <StateBlock v-if="query.isLoading.value" state="loading"/><StateBlock v-else-if="query.isError.value" state="error" title="本地媒体加载失败" :retrying="query.isFetching.value" @retry="query.refetch()"/><StateBlock v-else-if="!items.length" state="empty" title="还没有扫描到本地番剧" description="先添加包含番剧文件夹的根目录，然后运行一次扫描。"/>
+    <StateBlock v-if="query.isLoading.value" state="loading"/><StateBlock v-else-if="query.isError.value&&!items.length" state="error" title="本地媒体加载失败" :retrying="query.isFetching.value" @retry="query.refetch()"/><StateBlock v-else-if="!items.length" state="empty" title="还没有扫描到本地番剧" description="先添加包含番剧文件夹的根目录，然后运行一次扫描。"/>
     <section v-else class="poster-grid"><PosterCard v-for="item in items" :key="item.ID" openable :open-label="batchMode?(isItemSelected(item.ID)?'点击取消选择':'点击选择'):'点击卡片播放'" :title="item.metadata?.title_cn||item.metadata?.title||item.title" :image="posterURL(item.metadata||{image:item.image},{width:360})" :meta="`${item.file_count} 集 · 第 ${item.season||1} 季`" :badges="[...(item.has_repair_actions?['待完善']:[]),...(batchMode&&isItemSelected(item.ID)?['已选择']:[])]" @open="openAnimeCard(item)"><template v-if="!batchMode" #actions><details class="poster-card-menu"><summary aria-label="更多操作" title="更多操作"><MoreHorizontal :size="17"/></summary><div class="poster-card-menu-content"><button aria-label="整理文件" @click="openSingleOrganize(item)"><WandSparkles :size="14"/>整理文件</button><button aria-label="元数据与匹配" @click="selected=item;matchQuery=item.title"><Sparkles :size="14"/>元数据与匹配</button></div></details></template></PosterCard></section>
-    <AutoLoadSentinel v-if="query.hasNextPage.value" :remaining="remainingItems" :loading="query.isFetchingNextPage.value" :paused="query.isError.value" @load="loadMore"/>
+    <section v-if="query.isFetchNextPageError.value&&items.length" class="panel-muted flex flex-wrap items-center justify-center gap-3 p-4 text-sm" role="alert">
+      <CircleAlert :size="18"/><span>下一页加载失败，已加载的番剧不会丢失。</span><AsyncButton class="btn btn-secondary" :loading="query.isFetchingNextPage.value" loading-label="重试中…" @click="loadMore">重试加载</AsyncButton>
+    </section>
+    <AutoLoadSentinel v-if="query.hasNextPage.value" :remaining="remainingItems" :loading="query.isFetchingNextPage.value" :paused="query.isFetchNextPageError.value" @load="loadMore"/>
     <p v-if="query.isFetchingNextPage.value" class="muted py-3 text-center text-sm" role="status" aria-live="polite">正在加载更多本地番剧…</p>
 
     <AppDialog :open="adding" title="添加媒体目录" description="目录会在后台扫描，不会移动已有文件。" @update:open="adding=$event"><form @submit.prevent="add"><label class="label">绝对路径<div class="flex gap-2"><input v-model="dirPath" class="field" placeholder="/Volumes/Anime" required/><AsyncButton class="btn btn-secondary shrink-0" :loading="actions.isBusy('choose-dir')" loading-label="选择中…" @click="chooseDir">选择</AsyncButton></div></label><div class="mt-6 flex justify-end"><AsyncButton type="submit" class="btn btn-primary" :loading="actions.isBusy('add-dir','local-scan')" loading-label="扫描中…">添加并扫描</AsyncButton></div></form></AppDialog>

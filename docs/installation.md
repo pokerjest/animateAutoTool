@@ -6,12 +6,14 @@
 
 | 系统 | 推荐资产 |
 | --- | --- |
-| Windows x64 | `animate-server_*_windows_amd64.zip` 或独立 `.exe` |
+| Windows x64 | `AnimateAutoTool_*_windows_amd64.zip` 或独立 `.exe` |
 | macOS Apple Silicon | `*_darwin_arm64.dmg` 或对应压缩包 |
 | macOS Intel | `*_darwin_amd64.dmg` |
 | Linux x64 | `*_linux_amd64.tar.gz` |
 
 下载后固定目录、复制配置模板，再按[快速开始](getting-started.md)启动。
+
+压缩包与 GitHub Release 资产使用 `AnimateAutoTool_*` 前缀；包内本地主程序名为 `AnimateAutoTool`（Windows 为 `AnimateAutoTool.exe`）。更新器仍兼容旧版 `animate-server_*` 资产。
 
 ## Docker Compose
 

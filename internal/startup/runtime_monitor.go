@@ -1,29 +1,31 @@
 package startup
 
 import (
+	"context"
 	"log"
 	"runtime"
-	"sync"
 	"time"
 )
 
 const runtimeMonitorInterval = 30 * time.Minute
 
-var runtimeMonitorOnce sync.Once
+func runRuntimeMonitor(ctx context.Context) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	logRuntimeSnapshot("startup")
 
-func startRuntimeMonitor() {
-	runtimeMonitorOnce.Do(func() {
-		go func() {
-			logRuntimeSnapshot("startup")
+	ticker := time.NewTicker(runtimeMonitorInterval)
+	defer ticker.Stop()
 
-			ticker := time.NewTicker(runtimeMonitorInterval)
-			defer ticker.Stop()
-
-			for range ticker.C {
-				logRuntimeSnapshot("periodic")
-			}
-		}()
-	})
+	for {
+		select {
+		case <-ticker.C:
+			logRuntimeSnapshot("periodic")
+		case <-ctx.Done():
+			return
+		}
+	}
 }
 
 func logRuntimeSnapshot(stage string) {

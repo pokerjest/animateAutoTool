@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { ArrowUpCircle, Clock3, PlayCircle, RotateCw } from '@lucide/vue'
-import { handlePosterError, posterURL } from '../../api/client'
+import { handlePosterError, posterURL, subscriptionPosterURL } from '../../api/client'
 import type { Subscription, SubscriptionResource } from '../../api/types'
 import AppDialog from '../AppDialog.vue'
 import AsyncButton from '../AsyncButton.vue'
@@ -153,7 +153,7 @@ function formatSpeed(value: number) {
           :alt="`${title} 海报`"
           decoding="async"
           class="h-28 w-20 rounded-xl object-cover"
-          @error="handlePosterError($event, item.image)"
+          @error="handlePosterError($event, subscriptionPosterURL(item.ID, 'mikan', 160), subscriptionPosterURL(item.ID, 'local', 160))"
         />
         <div class="min-w-0">
           <div class="flex flex-wrap items-center gap-2">
@@ -163,7 +163,7 @@ function formatSpeed(value: number) {
           <p class="muted mt-1 text-sm">{{ item.subtitle_group || '未指定字幕组' }} · 已加入下载 {{ item.downloaded_count }} 集</p>
           <p v-if="item.library_hint" class="muted mt-2 text-xs">{{ item.library_hint }}</p>
         </div>
-        <button v-if="item.playable && item.local_anime_id" class="btn btn-primary" @click="emit('play', item)">
+        <button v-if="item.local_anime_id && (item.library_episode_count || 0) > 0" class="btn btn-primary" @click="emit('play', item)">
           <PlayCircle :size="17" />查看与播放
         </button>
       </section>

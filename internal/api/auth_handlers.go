@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
+	"github.com/pokerjest/animateAutoTool/internal/authsession"
 	"github.com/pokerjest/animateAutoTool/internal/bootstrap"
 	"github.com/pokerjest/animateAutoTool/internal/config"
 	"github.com/pokerjest/animateAutoTool/internal/service"
@@ -88,6 +89,7 @@ func LoginPostHandler(c *gin.Context) {
 
 	session := sessions.Default(c)
 	session.Set("user_id", user.ID)
+	session.Set("auth_generation", authsession.Current())
 
 	maxAge := 0
 	if req.RememberMe {
@@ -140,6 +142,11 @@ type ChangePasswordRequest struct {
 	NewPassword string `json:"new_password" binding:"required"`
 }
 
+type ChangeUsernameRequest struct {
+	CurrentPassword string `json:"current_password" binding:"required"`
+	NewUsername     string `json:"new_username" binding:"required"`
+}
+
 func ChangePasswordHandler(c *gin.Context) {
 	var req ChangePasswordRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -176,4 +183,41 @@ func ChangePasswordHandler(c *gin.Context) {
 		Outcome: service.AuditOutcomeSuccess,
 	})
 	c.JSON(http.StatusOK, gin.H{"message": "密码修改成功"})
+}
+
+func ChangeUsernameHandler(c *gin.Context) {
+	var req ChangeUsernameRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		jsonBadRequest(c, "修改用户名请求格式不正确")
+		return
+	}
+
+	uid, err := currentSessionUserID(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "当前登录状态已失效，请重新登录"})
+		return
+	}
+
+	auditCtx := buildAuditContext(c)
+	newUsername := strings.TrimSpace(req.NewUsername)
+	if err := service.NewAuthService().ChangeUsername(uid, req.CurrentPassword, newUsername); err != nil {
+		service.RecordAudit(auditCtx, service.AuditEntry{
+			Action:     service.AuditActionUsernameChange,
+			Outcome:    service.AuditOutcomeFailure,
+			TargetType: "user",
+			TargetID:   strconv.FormatUint(uint64(uid), 10),
+			Details:    map[string]string{"new_username": newUsername, "error": err.Error()},
+		})
+		jsonBadRequest(c, err.Error())
+		return
+	}
+
+	service.RecordAudit(auditCtx, service.AuditEntry{
+		Action:     service.AuditActionUsernameChange,
+		Outcome:    service.AuditOutcomeSuccess,
+		TargetType: "user",
+		TargetID:   strconv.FormatUint(uint64(uid), 10),
+		Details:    map[string]string{"old_username": auditCtx.Username, "new_username": newUsername},
+	})
+	c.JSON(http.StatusOK, gin.H{"message": "管理员用户名修改成功", "username": newUsername})
 }

@@ -51,12 +51,19 @@ type v1MikanDiscoveryItem struct {
 	BangumiSubjectID string `json:"bangumi_subject_id"`
 	Title            string `json:"title"`
 	Image            string `json:"image"`
+	IsSubscribed     bool   `json:"is_subscribed"`
+	IsLocal          bool   `json:"is_local"`
 }
 
 type v1MikanSubgroup struct {
 	ID    string `json:"id"`
 	Name  string `json:"name"`
 	IsAll bool   `json:"is_all"`
+}
+
+type mikanDiscoveryStatusIndex struct {
+	subscriptionsByMikanID map[string][]*model.Subscription
+	library                *subscriptionLibraryIndex
 }
 
 var newV1MikanClient = func() v1MikanClient {
@@ -67,15 +74,88 @@ var enrichV1LocalAnime = func(anime *model.LocalAnime) error {
 	return service.NewMetadataService().EnrichAnime(anime)
 }
 
-func mikanDiscoveryItems(items []parser.SearchResult) []v1MikanDiscoveryItem {
+func loadMikanDiscoveryStatusIndex() (*mikanDiscoveryStatusIndex, error) {
+	subscriptions, err := listSubscriptionsWithMetadata()
+	if err != nil {
+		return nil, err
+	}
+	library, err := loadSubscriptionLocalMatchIndex()
+	if err != nil {
+		return nil, err
+	}
+
+	index := &mikanDiscoveryStatusIndex{
+		subscriptionsByMikanID: make(map[string][]*model.Subscription),
+		library:                library,
+	}
+	for i := range subscriptions {
+		mikanID := strings.TrimSpace(subscriptions[i].MikanID)
+		if mikanID == "" {
+			if parsed, ok := parser.MikanIDFromRSSURL(subscriptions[i].RSSUrl); ok {
+				mikanID = parsed
+			}
+		}
+		if mikanID == "" {
+			continue
+		}
+		index.subscriptionsByMikanID[mikanID] = append(index.subscriptionsByMikanID[mikanID], &subscriptions[i])
+	}
+	return index, nil
+}
+
+func mikanDiscoveryLocalMatch(sub *model.Subscription, library *subscriptionLibraryIndex) bool {
+	if sub == nil || library == nil {
+		return false
+	}
+	candidates := subscriptionProviderAnimeCandidates(sub, library)
+	for i := range candidates {
+		if service.LocalAnimeMatchesSubscription(sub, &candidates[i]) {
+			return true
+		}
+	}
+	candidates = subscriptionLocalAnimeCandidates(sub, library)
+	for i := range candidates {
+		if service.LocalAnimeMatchesSubscription(sub, &candidates[i]) {
+			return true
+		}
+	}
+	return false
+}
+
+func (index *mikanDiscoveryStatusIndex) populate(item *v1MikanDiscoveryItem) {
+	if index == nil || item == nil {
+		return
+	}
+	subscriptions := index.subscriptionsByMikanID[item.MikanID]
+	item.IsSubscribed = len(subscriptions) > 0
+	for _, subscription := range subscriptions {
+		if mikanDiscoveryLocalMatch(subscription, index.library) {
+			item.IsLocal = true
+			return
+		}
+	}
+	if len(subscriptions) > 0 {
+		return
+	}
+
+	candidate := &model.Subscription{Title: item.Title}
+	if bangumiID, err := strconv.Atoi(item.BangumiSubjectID); err == nil && bangumiID > 0 {
+		candidate.Metadata = &model.AnimeMetadata{BangumiID: bangumiID}
+	}
+	item.IsLocal = mikanDiscoveryLocalMatch(candidate, index.library)
+}
+
+func mikanDiscoveryItems(items []parser.SearchResult, statusIndex *mikanDiscoveryStatusIndex) []v1MikanDiscoveryItem {
 	result := make([]v1MikanDiscoveryItem, 0, len(items))
 	for _, item := range items {
-		result = append(result, v1MikanDiscoveryItem{
+		discoveryItem := v1MikanDiscoveryItem{
 			MikanID:          strings.TrimSpace(item.MikanID),
 			BangumiSubjectID: strings.TrimSpace(item.BangumiSubjectID),
 			Title:            strings.TrimSpace(item.Title),
 			Image:            strings.TrimSpace(item.Image),
-		})
+		}
+		statusIndex.populate(&discoveryItem)
+		result = append(result, discoveryItem)
 	}
 	return result
 }
@@ -108,7 +188,12 @@ func V1MikanSearchHandler(c *gin.Context) {
 		v1Error(c, http.StatusBadGateway, "mikan_search_failed", humanizeOperationError(err.Error()))
 		return
 	}
-	v1Data(c, http.StatusOK, gin.H{"items": mikanDiscoveryItems(results)})
+	statusIndex, err := loadMikanDiscoveryStatusIndex()
+	if err != nil {
+		v1Error(c, http.StatusInternalServerError, "mikan_discovery_status_failed", "读取订阅和本地媒体状态失败")
+		return
+	}
+	v1Data(c, http.StatusOK, gin.H{"items": mikanDiscoveryItems(results, statusIndex)})
 }
 
 func V1MikanResolveHandler(c *gin.Context) {
@@ -128,7 +213,12 @@ func V1MikanResolveHandler(c *gin.Context) {
 		v1Error(c, http.StatusBadGateway, "mikan_resolve_failed", humanizeOperationError(err.Error()))
 		return
 	}
-	v1Data(c, http.StatusOK, gin.H{"items": mikanDiscoveryItems(results)})
+	statusIndex, err := loadMikanDiscoveryStatusIndex()
+	if err != nil {
+		v1Error(c, http.StatusInternalServerError, "mikan_discovery_status_failed", "读取订阅和本地媒体状态失败")
+		return
+	}
+	v1Data(c, http.StatusOK, gin.H{"items": mikanDiscoveryItems(results, statusIndex)})
 }
 
 func V1RSSPreviewHandler(c *gin.Context) {
@@ -173,9 +263,14 @@ func V1MikanDashboardHandler(c *gin.Context) {
 		v1Error(c, http.StatusBadGateway, "mikan_dashboard_failed", humanizeOperationError(err.Error()))
 		return
 	}
+	statusIndex, err := loadMikanDiscoveryStatusIndex()
+	if err != nil {
+		v1Error(c, http.StatusInternalServerError, "mikan_discovery_status_failed", "读取订阅和本地媒体状态失败")
+		return
+	}
 	days := make(map[string][]v1MikanDiscoveryItem, len(dashboard.Days))
 	for day, items := range dashboard.Days {
-		days[day] = mikanDiscoveryItems(items)
+		days[day] = mikanDiscoveryItems(items, statusIndex)
 	}
 	v1Data(c, http.StatusOK, gin.H{"season": strings.TrimSpace(dashboard.Season), "days": days})
 }
@@ -303,54 +398,53 @@ func V1SubscriptionRepairHandler(c *gin.Context) {
 	}
 	taskID := fmt.Sprintf("subscription-%d-%s", sub.ID, action)
 	taskstate.Global.Start(taskID, "subscription-repair", "订阅修复", "正在修复 "+sub.Title)
-	go func(target *model.Subscription, requested string) {
+	GoBackground(func(appCtx context.Context) {
 		var runErr error
-		switch requested {
+		switch action {
 		case "use-base-rss":
-			baseRSS, ok := deriveBaseRSSURL(target.RSSUrl)
+			baseRSS, ok := deriveBaseRSSURL(sub.RSSUrl)
 			if !ok {
 				runErr = fmt.Errorf("当前订阅已经是主 RSS")
 			} else {
-				runErr = useBaseRSSAndRecheck(target, baseRSS)
+				runErr = useBaseRSSAndRecheck(sub, baseRSS)
 			}
 		case "clear-filter":
-			runErr = clearFilterAndRecheck(target)
+			runErr = clearFilterAndRecheck(sub)
 		case "reset-logs":
-			runErr = resetStaleLogsAndRecheck(target, staleLogResetAge)
+			runErr = resetStaleLogsAndRecheck(sub, staleLogResetAge)
 		case "refresh-library":
-			refreshContext, cancel := context.WithTimeout(context.Background(), 50*time.Second)
+			refreshContext, cancel := context.WithTimeout(appCtx, 50*time.Second)
 			runErr = service.RequestJellyfinLibraryRefresh(refreshContext)
 			if runErr == nil {
 				taskstate.Global.Progress(taskID, "Jellyfin 已接收扫描请求，正在等待识别该番剧", 1, 2)
-				runErr = waitForSubscriptionJellyfinMatch(refreshContext, target.ID)
+				runErr = waitForSubscriptionJellyfinMatch(refreshContext, sub.ID)
 			}
 			cancel()
 		default:
-			target.LastRunSummary = "修复检查已启动"
-			target.LastError = ""
-			if saveErr := saveSubscription(target); saveErr != nil {
+			sub.LastRunSummary = "修复检查已启动"
+			sub.LastError = ""
+			if saveErr := saveSubscription(sub); saveErr != nil {
 				runErr = saveErr
 			} else {
-				runErr = runSubscriptionCheck(target, "manual")
+				runErr = runSubscriptionCheck(sub, "manual")
 			}
 		}
 		if runErr != nil {
-			log.Printf("subscription repair %s failed for %d: %v", requested, target.ID, runErr)
-			target.LastError = runErr.Error()
-			target.LastRunSummary = "修复操作未完成"
-			_ = saveSubscription(target)
+			log.Printf("subscription repair %s failed for %d: %v", action, sub.ID, runErr)
+			sub.LastError = runErr.Error()
+			sub.LastRunSummary = "修复操作未完成"
+			_ = saveSubscription(sub)
 			taskstate.Global.Fail(taskID, runErr)
 			return
 		}
-		if requested == "refresh-library" {
+		if action == "refresh-library" {
 			taskstate.Global.Complete(taskID, "Jellyfin 已识别该番剧，现在可以直接播放")
 		} else {
 			taskstate.Global.Complete(taskID, "订阅修复完成")
 		}
-	}(sub, action)
+	})
 	v1Message(c, http.StatusAccepted, "修复任务已经启动", gin.H{"task_id": taskID, "status": "running"})
 }
-
 func V1RefreshSubscriptionMetadataHandler(c *gin.Context) {
 	sub, err := subscriptionByID(c.Param("id"))
 	if err != nil {
@@ -359,15 +453,15 @@ func V1RefreshSubscriptionMetadataHandler(c *gin.Context) {
 	}
 	taskID := "subscription-metadata-" + c.Param("id")
 	taskstate.Global.Start(taskID, "metadata", "刷新订阅元数据", "正在刷新 "+sub.Title)
-	go func(target *model.Subscription) {
-		service.NewMetadataService().EnrichMetadata(target.Metadata, target.Title)
-		if err := saveSubscription(target); err != nil {
-			log.Printf("subscription metadata refresh failed for %d: %v", target.ID, err)
+	GoBackground(func(context.Context) {
+		service.NewMetadataService().EnrichMetadata(sub.Metadata, sub.Title)
+		if err := saveSubscription(sub); err != nil {
+			log.Printf("subscription metadata refresh failed for %d: %v", sub.ID, err)
 			taskstate.Global.Fail(taskID, err)
 			return
 		}
 		taskstate.Global.Complete(taskID, "订阅元数据刷新完成")
-	}(sub)
+	})
 	v1Message(c, http.StatusAccepted, "元数据刷新已经启动", gin.H{"task_id": taskID, "status": "running"})
 }
 
@@ -427,14 +521,14 @@ func V1RefreshMetadataItemHandler(c *gin.Context) {
 	}
 	taskID := "metadata-" + c.Param("id")
 	taskstate.Global.Start(taskID, "metadata", "刷新元数据", "正在刷新单条元数据")
-	go func() {
+	GoBackground(func(context.Context) {
 		if err := service.NewMetadataService().RefreshSingleMetadata(uint(id)); err != nil {
 			log.Printf("metadata refresh failed for %d: %v", id, err)
 			taskstate.Global.Fail(taskID, err)
 			return
 		}
 		taskstate.Global.Complete(taskID, "元数据刷新完成")
-	}()
+	})
 	v1Message(c, http.StatusAccepted, "元数据刷新已经启动", gin.H{"task_id": taskID, "status": "running"})
 }
 
@@ -467,19 +561,18 @@ func V1RefreshLocalMetadataHandler(c *gin.Context) {
 	}
 	taskID := "local-metadata-" + c.Param("id")
 	taskstate.Global.Start(taskID, "metadata", "刷新本地番剧元数据", "正在刷新 "+anime.Title)
-	go func(target *model.LocalAnime) {
-		if err := enrichV1LocalAnime(target); err != nil {
-			log.Printf("local metadata refresh failed for %d: %v", target.ID, err)
-			updateLocalMetadataIssue(target, err)
+	GoBackground(func(context.Context) {
+		if err := enrichV1LocalAnime(anime); err != nil {
+			log.Printf("local metadata refresh failed for %d: %v", anime.ID, err)
+			updateLocalMetadataIssue(anime, err)
 			taskstate.Global.Fail(taskID, err)
 			return
 		}
-		updateLocalMetadataIssue(target, nil)
+		updateLocalMetadataIssue(anime, nil)
 		taskstate.Global.Complete(taskID, "本地番剧元数据刷新完成")
-	}(anime)
+	})
 	v1Message(c, http.StatusAccepted, "本地番剧元数据刷新已经启动", gin.H{"task_id": taskID, "status": "running"})
 }
-
 func updateLocalMetadataIssue(anime *model.LocalAnime, refreshErr error) {
 	if anime == nil || anime.ID == 0 {
 		return
@@ -522,18 +615,8 @@ func V1BangumiCollectionHandler(c *gin.Context) { v1RunJSONHandler(c, UpdateBang
 func V1BangumiProgressHandler(c *gin.Context)   { v1RunJSONHandler(c, UpdateBangumiProgressHandler) }
 
 func V1AuditLogsHandler(c *gin.Context) {
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "25"))
-	if page < 1 {
-		page = 1
-	}
-	if pageSize < 1 {
-		pageSize = 25
-	}
-	if pageSize > 100 {
-		pageSize = 100
-	}
-	query := store.AuditLogQuery{Limit: pageSize, Offset: (page - 1) * pageSize, Action: c.Query("action"), Username: c.Query("username"), Outcome: c.Query("outcome")}
+	page, pageSize := boundedPagination(c, 25, 100)
+	query := store.AuditLogQuery{Limit: pageSize, Offset: paginationOffset(page, pageSize), Action: c.Query("action"), Username: c.Query("username"), Outcome: c.Query("outcome")}
 	auditStore := store.NewAuditLogStore(db.DB)
 	rows, err := auditStore.ListRecent(query)
 	if err != nil {
@@ -650,8 +733,11 @@ func V1UpdaterSnapshotsHandler(c *gin.Context) {
 			"operation_type":     snapshot.OperationType,
 			"app_version":        snapshot.AppVersion,
 			"schema_version":     snapshot.SchemaVersion,
+			"database_format":    snapshot.DatabaseFormat,
+			"schema_format":      snapshot.SchemaFormat,
 			"created_at":         snapshot.CreatedAt,
 			"rollback_supported": snapshot.RollbackSupported,
+			"rollback_scope":     snapshot.RollbackScope,
 		})
 	}
 	v1Data(c, http.StatusOK, gin.H{"items": items})
@@ -723,7 +809,7 @@ func V1UpdaterActionHandler(c *gin.Context) {
 		return
 	}
 	taskstate.Global.Start(taskID, "updater", title, title+"进行中")
-	go func() {
+	GoBackground(func(context.Context) {
 		var status updater.Status
 		if action == "check" {
 			status = updater.CheckNow("api-v1")
@@ -737,7 +823,7 @@ func V1UpdaterActionHandler(c *gin.Context) {
 			return
 		}
 		taskstate.Global.Complete(taskID, status.LastMessage)
-	}()
+	})
 	v1Message(c, http.StatusAccepted, "更新任务已经启动", gin.H{"task_id": taskID, "status": "running", "version": version})
 }
 

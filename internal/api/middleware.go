@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
+	"github.com/pokerjest/animateAutoTool/internal/authsession"
 	"github.com/pokerjest/animateAutoTool/internal/bootstrap"
 )
 
@@ -143,6 +144,11 @@ func AuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		session := sessions.Default(c)
 		userID := session.Get("user_id")
+		if userID != nil && authsession.Required() && !authsession.Valid(session.Get("auth_generation")) {
+			session.Clear()
+			_ = session.Save()
+			userID = nil
+		}
 		path := c.Request.URL.Path
 
 		if userID == nil {

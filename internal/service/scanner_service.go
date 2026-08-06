@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -20,6 +21,8 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/event"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/parser"
+	"github.com/pokerjest/animateAutoTool/internal/runtimejournal"
+	"github.com/pokerjest/animateAutoTool/internal/store"
 	"gorm.io/gorm"
 )
 
@@ -135,14 +138,35 @@ type scanCandidate struct {
 // first and claim their physical files so overlapping library roots do not
 // create duplicate series.
 func (s *ScannerService) ScanAll() error {
-	return s.ScanAllWithProgress(nil)
+	return s.ScanAllWithProgressContext(context.Background(), nil)
 }
 
 // ScanAllWithProgress first estimates the number of readable folders, then
 // reports monotonic progress while the real scan processes those folders.
 func (s *ScannerService) ScanAllWithProgress(report ScanProgressFunc) error {
+	return s.ScanAllWithProgressContext(context.Background(), report)
+}
+
+func (s *ScannerService) ScanAllWithProgressContext(ctx context.Context, report ScanProgressFunc) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if runtimejournal.RecoveryBlocked() {
+		return runtimejournal.ErrRecoveryBlocked
+	}
 	scanRunMu.Lock()
 	defer scanRunMu.Unlock()
+	if err := runtimejournal.BeginOperation(runtimejournal.OperationLocalLibraryScan); err != nil {
+		log.Printf("WARN: failed to persist local scan operation marker: %v", err)
+	}
+	defer func() {
+		if err := runtimejournal.EndOperation(runtimejournal.OperationLocalLibraryScan); err != nil {
+			log.Printf("WARN: failed to clear local scan operation marker: %v", err)
+		}
+	}()
 
 	st := localAnimeStore()
 	if st == nil {
@@ -166,7 +190,7 @@ func (s *ScannerService) ScanAllWithProgress(report ScanProgressFunc) error {
 	var folderEstimate int64
 	for i := range dirs {
 		baseCount := folderEstimate
-		count, countErr := countScanDirectories(dirs[i].Path, func(current int64, _ string) {
+		count, countErr := countScanDirectories(ctx, dirs[i].Path, func(current int64, _ string) {
 			emitScanProgress(report, ScanProgress{
 				Phase:        "planning",
 				Message:      fmt.Sprintf("正在统计扫描范围，已发现约 %d 个文件夹", baseCount+current),
@@ -193,9 +217,12 @@ func (s *ScannerService) ScanAllWithProgress(report ScanProgressFunc) error {
 	reportStride := max(int64(1), folderEstimate/100)
 
 	for i := range dirs {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		d := &dirs[i]
 		root := filepath.Clean(d.Path)
-		res, scanErr := s.scanDirectory(d, claimedFiles, func(path string) {
+		res, scanErr := s.scanDirectoryContext(ctx, d, claimedFiles, func(path string) {
 			scannedFolders++
 			if scannedFolders != 1 && scannedFolders != folderEstimate && scannedFolders-lastReportedFolders < reportStride {
 				return
@@ -234,6 +261,13 @@ func (s *ScannerService) ScanAllWithProgress(report ScanProgressFunc) error {
 		"scope":   "run",
 		"summary": GlobalScanStatus.Snapshot().LastSummary,
 	})
+	emitScanProgress(report, ScanProgress{
+		Phase:        "complete",
+		Message:      "文件扫描完成，正在准备元数据整理",
+		Current:      totalWork,
+		Total:        totalWork,
+		FoldersFound: folderEstimate,
+	})
 	return nil
 }
 
@@ -242,14 +276,14 @@ func (s *ScannerService) ScanAllWithProgress(report ScanProgressFunc) error {
 func (s *ScannerService) ScanDirectory(dir *model.LocalAnimeDirectory) (*ScanResult, error) {
 	scanRunMu.Lock()
 	defer scanRunMu.Unlock()
-	return s.scanDirectory(dir, nil, nil)
+	return s.scanDirectoryContext(context.Background(), dir, nil, nil)
 }
 
-func (s *ScannerService) scanDirectory(dir *model.LocalAnimeDirectory, claimedFiles map[string]struct{}, onDirectory func(string)) (*ScanResult, error) {
+func (s *ScannerService) scanDirectoryContext(ctx context.Context, dir *model.LocalAnimeDirectory, claimedFiles map[string]struct{}, onDirectory func(string)) (*ScanResult, error) {
 	if dir == nil {
 		return nil, errors.New("scan directory path is empty")
 	}
-	result, _, err := s.scanScope(dir, filepath.Clean(dir.Path), claimedFiles, onDirectory, true)
+	result, _, err := s.scanScopeContext(ctx, dir, filepath.Clean(dir.Path), claimedFiles, onDirectory, true)
 	return result, err
 }
 
@@ -318,7 +352,6 @@ func (s *ScannerService) ScanTargets(dir *model.LocalAnimeDirectory, targets []s
 	return result, nil
 }
 
-//nolint:gocyclo // Scan scope preserves the existing safe scan/update/cleanup phases.
 func (s *ScannerService) scanScope(
 	dir *model.LocalAnimeDirectory,
 	scanRoot string,
@@ -326,6 +359,24 @@ func (s *ScannerService) scanScope(
 	onDirectory func(string),
 	cleanupWholeDirectory bool,
 ) (*ScanResult, []uint, error) {
+	return s.scanScopeContext(context.Background(), dir, scanRoot, claimedFiles, onDirectory, cleanupWholeDirectory)
+}
+
+//nolint:gocyclo // Scan scope preserves the existing safe scan/update/cleanup phases.
+func (s *ScannerService) scanScopeContext(
+	ctx context.Context,
+	dir *model.LocalAnimeDirectory,
+	scanRoot string,
+	claimedFiles map[string]struct{},
+	onDirectory func(string),
+	cleanupWholeDirectory bool,
+) (*ScanResult, []uint, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
 	if dir == nil || strings.TrimSpace(dir.Path) == "" {
 		return nil, nil, errors.New("scan directory path is empty")
 	}
@@ -339,7 +390,7 @@ func (s *ScannerService) scanScope(
 	log.Printf("ScannerService: Starting scan for %s", root)
 	event.GlobalBus.Publish(event.EventScanProgress, map[string]interface{}{"type": "start", "dir": root})
 
-	mediaFiles, walkErrors, fatalErr := discoverMediaFiles(root, claimedFiles, onDirectory)
+	mediaFiles, walkErrors, fatalErr := discoverMediaFiles(ctx, root, claimedFiles, onDirectory)
 	if fatalErr != nil {
 		_ = reportScanIssue(issueKey, root, fatalErr)
 		return nil, nil, fatalErr
@@ -390,6 +441,9 @@ func (s *ScannerService) scanScope(
 	usedAnimeIDs = make(map[uint]struct{})
 	affectedAnimeIDs := make([]uint, 0, len(candidates))
 	for i := range candidates {
+		if err := ctx.Err(); err != nil {
+			return res, affectedAnimeIDs, err
+		}
 		candidate := &candidates[i]
 		event.GlobalBus.Publish(event.EventScanProgress, map[string]interface{}{
 			"type": "progress", "current": i + 1, "total": len(candidates), "dir": root,
@@ -402,6 +456,7 @@ func (s *ScannerService) scanScope(
 				DirectoryID: dir.ID,
 				Title:       candidate.Title,
 				Path:        candidate.Path,
+				ScanKey:     localAnimeScanKey(candidate.Path, candidate.AllLoose),
 				Season:      candidateSeason(candidate),
 			}
 			if err := st.CreateAnime(anime); err != nil {
@@ -442,8 +497,14 @@ func (s *ScannerService) scanScope(
 		}
 	}
 
+	if err := ctx.Err(); err != nil {
+		return res, affectedAnimeIDs, err
+	}
 	if complete && cleanupWholeDirectory {
 		for i := range existing {
+			if err := ctx.Err(); err != nil {
+				return res, affectedAnimeIDs, err
+			}
 			if _, used := usedAnimeIDs[existing[i].ID]; used {
 				continue
 			}
@@ -456,6 +517,12 @@ func (s *ScannerService) scanScope(
 		if err := st.CleanupOrphansByDirectory(dir.ID); err != nil {
 			log.Printf("Scanner: cleanup empty anime rows failed for %s: %v", root, err)
 		}
+	}
+	if removed, cleanupErr := cleanupEmptyDuplicateAnimes(st, dir.ID, root); cleanupErr != nil {
+		log.Printf("Scanner: cleanup empty duplicate anime rows failed for %s: %v", root, cleanupErr)
+	} else if removed > 0 {
+		res.Deleted += int(removed)
+		log.Printf("Scanner: removed %d empty duplicate anime rows for %s", removed, root)
 	}
 
 	log.Printf(
@@ -476,6 +543,52 @@ func (s *ScannerService) scanScope(
 		return res, affectedAnimeIDs, errors.Join(walkErrors...)
 	}
 	return res, affectedAnimeIDs, nil
+}
+
+// cleanupEmptyDuplicateAnimes removes ghost rows left by an earlier
+// incremental scan. A path can legitimately be shared by multiple loose-file
+// series, so only an empty row is removed when another row at that exact path
+// already owns live episodes.
+func cleanupEmptyDuplicateAnimes(st *store.LocalAnimeStore, directoryID uint, scope string) (int64, error) {
+	if st == nil {
+		return 0, gorm.ErrInvalidDB
+	}
+	animes, err := st.ListAnimesByDirectoryWithEpisodes(directoryID)
+	if err != nil {
+		return 0, err
+	}
+
+	groups := make(map[string][]model.LocalAnime)
+	for _, anime := range animes {
+		if !pathWithinRoot(scope, anime.Path) {
+			continue
+		}
+		key := canonicalComparisonPath(anime.Path)
+		if key == "" {
+			continue
+		}
+		groups[key] = append(groups[key], anime)
+	}
+
+	duplicateIDs := make([]uint, 0)
+	for _, group := range groups {
+		hasPopulatedRow := false
+		for _, anime := range group {
+			if len(anime.Episodes) > 0 {
+				hasPopulatedRow = true
+				break
+			}
+		}
+		if !hasPopulatedRow {
+			continue
+		}
+		for _, anime := range group {
+			if len(anime.Episodes) == 0 {
+				duplicateIDs = append(duplicateIDs, anime.ID)
+			}
+		}
+	}
+	return st.DeleteAnimesByIDs(duplicateIDs)
 }
 
 func inferTargetScanScopes(root string, targets []string) ([]string, error) {
@@ -637,7 +750,7 @@ func reportScanIssue(issueKey, root string, scanErr error) error {
 	})
 }
 
-func discoverMediaFiles(root string, claimed map[string]struct{}, onDirectory func(string)) ([]scannedMediaFile, []error, error) {
+func discoverMediaFiles(ctx context.Context, root string, claimed map[string]struct{}, onDirectory func(string)) ([]scannedMediaFile, []error, error) {
 	rootInfo, err := os.Stat(root)
 	if err != nil {
 		return nil, nil, err
@@ -653,6 +766,9 @@ func discoverMediaFiles(root string, claimed map[string]struct{}, onDirectory fu
 	walkErrors := make([]error, 0)
 	var walk func(string)
 	walk = func(path string) {
+		if ctx.Err() != nil {
+			return
+		}
 		info, statErr := os.Stat(path)
 		if statErr != nil {
 			walkErrors = append(walkErrors, fmt.Errorf("read %s: %w", path, statErr))
@@ -673,6 +789,9 @@ func discoverMediaFiles(root string, claimed map[string]struct{}, onDirectory fu
 				onDirectory(path)
 			}
 			for _, entry := range entries {
+				if ctx.Err() != nil {
+					return
+				}
 				if shouldSkipScanEntry(entry.Name(), entry.IsDir()) {
 					continue
 				}
@@ -694,6 +813,9 @@ func discoverMediaFiles(root string, claimed map[string]struct{}, onDirectory fu
 		media = append(media, inspectMediaFile(root, filepath.Clean(path), info.Size()))
 	}
 	walk(root)
+	if err := ctx.Err(); err != nil {
+		return nil, walkErrors, err
+	}
 	sort.Slice(media, func(i, j int) bool { return media[i].Path < media[j].Path })
 	return media, walkErrors, nil
 }
@@ -707,7 +829,7 @@ func emitScanProgress(report ScanProgressFunc, progress ScanProgress) {
 // countScanDirectories mirrors the real walk without parsing media files. It
 // deliberately returns an estimate: directories may change between the two
 // passes, and the real scan adjusts its total upward if it discovers more.
-func countScanDirectories(root string, onCount func(int64, string)) (int64, error) {
+func countScanDirectories(ctx context.Context, root string, onCount func(int64, string)) (int64, error) {
 	root = filepath.Clean(root)
 	rootInfo, err := os.Stat(root)
 	if err != nil {
@@ -724,6 +846,9 @@ func countScanDirectories(root string, onCount func(int64, string)) (int64, erro
 	var count int64
 	var walk func(string)
 	walk = func(path string) {
+		if ctx.Err() != nil {
+			return
+		}
 		info, statErr := os.Stat(path)
 		if statErr != nil || !info.IsDir() {
 			return
@@ -742,6 +867,9 @@ func countScanDirectories(root string, onCount func(int64, string)) (int64, erro
 			onCount(count, path)
 		}
 		for _, entry := range entries {
+			if ctx.Err() != nil {
+				return
+			}
 			isDirectory := entry.IsDir()
 			if !isDirectory && entry.Type()&os.ModeSymlink != 0 {
 				targetInfo, statErr := os.Stat(filepath.Join(path, entry.Name()))
@@ -754,6 +882,9 @@ func countScanDirectories(root string, onCount func(int64, string)) (int64, erro
 		}
 	}
 	walk(root)
+	if err := ctx.Err(); err != nil {
+		return count, err
+	}
 	if onCount != nil && count > 1 && count%25 != 0 {
 		onCount(count, root)
 	}
@@ -1039,7 +1170,7 @@ func buildScanCandidates(root string, files []scannedMediaFile) []scanCandidate 
 
 	candidates := make([]scanCandidate, 0, len(byKey))
 	for _, candidate := range byKey {
-		if candidate.AllLoose && len(byKey) == 1 {
+		if candidate.AllLoose {
 			candidate.Path = root
 		}
 		sort.Slice(candidate.Files, func(i, j int) bool { return candidate.Files[i].Path < candidate.Files[j].Path })
@@ -1100,7 +1231,10 @@ func selectExistingAnime(candidate *scanCandidate, existing []model.LocalAnime, 
 			continue
 		}
 		relationScore := 0
-		if sameComparisonPath(anime.Path, candidate.Path) {
+		// Multiple loose series can legitimately share the same library root.
+		// Reusing a row from that shared path alone can attach another show's
+		// metadata after an interrupted or partial scan.
+		if !candidate.AllLoose && sameComparisonPath(anime.Path, candidate.Path) {
 			relationScore = 4000
 		}
 		for _, episode := range anime.Episodes {
@@ -1142,6 +1276,11 @@ func updateAnimeFromCandidate(anime *model.LocalAnime, directoryID uint, candida
 		anime.Path = candidate.Path
 		changed = true
 	}
+	nextScanKey := localAnimeScanKey(candidate.Path, candidate.AllLoose)
+	if !sameOptionalString(anime.ScanKey, nextScanKey) {
+		anime.ScanKey = nextScanKey
+		changed = true
+	}
 	if anime.MetadataID == nil && anime.Title != candidate.Title {
 		anime.Title = candidate.Title
 		changed = true
@@ -1160,6 +1299,25 @@ func updateAnimeFromCandidate(anime *model.LocalAnime, directoryID uint, candida
 		changed = true
 	}
 	return changed
+}
+
+func localAnimeScanKey(path string, loose bool) *string {
+	if loose || strings.TrimSpace(path) == "" {
+		return nil
+	}
+	pathKey := canonicalComparisonPath(path)
+	if pathKey == "" {
+		return nil
+	}
+	key := "folder:" + pathKey
+	return &key
+}
+
+func sameOptionalString(left, right *string) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return *left == *right
 }
 
 func (s *ScannerService) syncCandidateEpisodes(st interface {

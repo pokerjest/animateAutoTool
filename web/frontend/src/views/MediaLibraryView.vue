@@ -87,9 +87,9 @@ async function loadMore() {
       </select>
       <button class="btn btn-primary w-full justify-center lg:w-auto" type="button" @click="submitSearch"><SlidersHorizontal :size="16" />筛选</button>
     </section>
-    <StateBlock v-if="query.isLoading.value" state="loading" title="正在读取媒体库" />
-    <StateBlock v-else-if="query.isError.value" state="error" title="媒体库读取失败" :retrying="query.isFetching.value" @retry="query.refetch()" />
-    <StateBlock v-else-if="!items.length" state="empty" title="没有找到媒体" description="检查 Jellyfin 媒体库扫描状态，或换一个搜索词。" />
+    <StateBlock v-if="query.isLoading.value" state="loading" scene="diagnosing" title="正在读取媒体库" />
+    <StateBlock v-else-if="query.isError.value" state="error" scene="diagnosing" title="媒体库读取失败" :retrying="query.isFetching.value" @retry="query.refetch()" />
+    <StateBlock v-else-if="!items.length" state="empty" scene="empty-search" title="没有找到媒体" description="检查 Jellyfin 媒体库扫描状态，或换一个搜索词。" />
     <section v-else class="poster-grid">
       <PosterCard v-for="item in items" :key="`${item.provider}:${item.id}`" openable :title="item.name" :image="item.poster_url" :meta="item.production_year ? String(item.production_year) : item.type" :badges="[item.favorite ? '收藏' : '', item.played ? '已看' : ''].filter(Boolean)" @open="router.push(`/media/item/${item.provider}/${encodeURIComponent(item.id)}`)" />
     </section>

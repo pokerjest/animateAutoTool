@@ -22,10 +22,11 @@ func TestRegistryTracksProgressCompletionAndPublishesTypedEvents(t *testing.T) {
 	t.Cleanup(func() { event.GlobalBus.Unsubscribe(event.EventTaskUpdate, subscriptionID) })
 
 	registry.Start("scan-1", "scan", "本地扫描", "准备扫描")
-	registry.Progress("scan-1", "正在扫描", 3, 7)
+	registry.ProgressPhase("scan-1", "scan", "正在扫描", 3, 7)
 	completed := registry.Complete("scan-1", "扫描完成")
 
 	assert.Equal(t, StatusCompleted, completed.Status)
+	assert.Equal(t, "scan", completed.Phase)
 	assert.Equal(t, int64(7), completed.Current)
 	assert.Equal(t, int64(7), completed.Total)
 	require.Len(t, registry.List(), 1)

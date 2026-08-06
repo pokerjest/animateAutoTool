@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -32,7 +34,6 @@ const (
 
 	httpTimeout      = 60 * time.Second
 	downloadTimeout  = 20 * time.Minute
-	restartDelay     = 1200 * time.Millisecond
 	maxVersionParts  = 4
 	maxBackoffDelay  = 30 * time.Minute
 	defaultUserAgent = "AnimateAutoTool-Updater/1.0"
@@ -91,6 +92,10 @@ type Manager struct {
 	mu                  sync.RWMutex
 	status              Status
 	quit                chan struct{}
+	stopOnce            sync.Once
+	taskMu              sync.Mutex
+	stopping            bool
+	wg                  sync.WaitGroup
 	etag                string
 	cachedRelease       *githubRelease
 	cachedRepoOwner     string
@@ -126,10 +131,44 @@ func Start() {
 	startOnce.Do(func() {
 		manager = &Manager{quit: make(chan struct{})}
 		manager.setDisabledHintIfNeeded()
-		go manager.loop()
+		cfg := loadSettings()
+		log.Printf(
+			"Updater: started enabled=%t auto_apply=%t interval=%dmin checksum_required=%t repository=%s/%s",
+			cfg.Enabled,
+			cfg.AutoApplyEnable,
+			cfg.IntervalMinutes,
+			cfg.RequireChecksum,
+			cfg.RepoOwner,
+			cfg.RepoName,
+		)
+		manager.wg.Add(1)
+		go func() {
+			defer manager.wg.Done()
+			manager.loop()
+		}()
 	})
 }
 
+// Stop prevents new periodic work from starting and signals the updater loop.
+func Stop() {
+	if manager == nil {
+		return
+	}
+	manager.taskMu.Lock()
+	manager.stopping = true
+	manager.stopOnce.Do(func() {
+		close(manager.quit)
+		log.Printf("Updater: stop requested")
+	})
+	manager.taskMu.Unlock()
+}
+
+// Wait blocks until the updater loop and tracked asynchronous checks exit.
+func Wait() {
+	if manager != nil {
+		manager.wg.Wait()
+	}
+}
 func Snapshot() Status {
 	if manager == nil {
 		return Status{LastResult: "not_started", LastMessage: "更新服务尚未启动"}
@@ -180,6 +219,7 @@ func (m *Manager) setDisabledHintIfNeeded() {
 }
 
 func (m *Manager) loop() {
+	log.Printf("Updater: loop started")
 	m.runPeriodicCheck("startup")
 
 	ticker := time.NewTicker(checkLoopInterval)
@@ -190,6 +230,7 @@ func (m *Manager) loop() {
 		case <-ticker.C:
 			m.runPeriodicCheck("auto")
 		case <-m.quit:
+			log.Printf("Updater: loop stopped")
 			return
 		}
 	}
@@ -212,13 +253,25 @@ func (m *Manager) runPeriodicCheck(source string) {
 			m.status.LastResult = "disabled"
 			m.status.LastMessage = "自动检查未启用，可手动点击“立即检查”"
 		}
+		if source == "startup" {
+			log.Printf("Updater: periodic check skipped source=%s reason=disabled", source)
+		}
 		m.mu.Unlock()
 		return
 	}
 
 	if !m.backoffUntil.IsZero() && now.Before(m.backoffUntil) {
+		alreadyReported := m.status.LastResult == "backoff"
 		m.status.LastResult = "backoff"
 		m.status.LastMessage = fmt.Sprintf("自动检查退避中，将在 %s 后恢复", m.backoffUntil.Local().Format("2006-01-02 15:04:05"))
+		if !alreadyReported {
+			log.Printf(
+				"Updater: periodic check skipped source=%s reason=backoff until=%s failures=%d",
+				source,
+				m.backoffUntil.Format(time.RFC3339),
+				m.consecutiveFailures,
+			)
+		}
 		m.mu.Unlock()
 		return
 	}
@@ -242,12 +295,23 @@ func (m *Manager) runCheckVersion(source, version string) Status {
 }
 
 func (m *Manager) runCheckAsync(source string, applyWhenBehind bool) Status {
+	m.taskMu.Lock()
+	if m.stopping {
+		m.taskMu.Unlock()
+		return Snapshot()
+	}
 	cfg := loadSettings()
 	snapshot, started := m.beginRun(cfg, source, applyWhenBehind)
 	if !started {
+		m.taskMu.Unlock()
 		return snapshot
 	}
-	go m.runCheckInternal(source, applyWhenBehind, true, "")
+	m.wg.Add(1)
+	m.taskMu.Unlock()
+	go func() {
+		defer m.wg.Done()
+		m.runCheckInternal(source, applyWhenBehind, true, "")
+	}()
 	return snapshot
 }
 
@@ -276,6 +340,12 @@ func (m *Manager) beginRun(cfg settings, source string, applyWhenBehind bool) (S
 		m.status.LastResult = "running"
 		m.status.LastMessage = "正在检查最新版本..."
 	}
+	log.Printf(
+		"Updater: check started source=%s current=%s apply=%t",
+		source,
+		m.status.CurrentVersion,
+		applyWhenBehind,
+	)
 	return m.status, true
 }
 
@@ -340,9 +410,11 @@ func (m *Manager) fetchReleaseForCheck(cfg settings, current, targetVersion stri
 	return release, retryAfter, nil
 }
 
-func (m *Manager) runCheckInternal(source string, applyWhenBehind, alreadyStarted bool, targetVersion string) Status {
+//nolint:gocyclo // The updater is a single auditable state machine; splitting compatibility, checksum, snapshot, and apply transitions would obscure failure ordering.
+func (m *Manager) runCheckInternal(source string, applyWhenBehind, alreadyStarted bool, targetVersion string) (returned Status) {
 	cfg := loadSettings()
 	now := time.Now()
+	startedAt := now
 
 	if !alreadyStarted {
 		snapshot, started := m.beginRun(cfg, source, applyWhenBehind)
@@ -352,6 +424,32 @@ func (m *Manager) runCheckInternal(source string, applyWhenBehind, alreadyStarte
 	}
 
 	current := normalizeVersion(currentVersion())
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			m.mu.Lock()
+			m.status.CurrentVersion = current
+			m.status.LastResult = resultError
+			m.status.LastMessage = "更新检查异常中止"
+			m.status.LastError = fmt.Sprintf("updater panic: %v", recovered)
+			m.status.LastCheckAt = now
+			m.status.ProgressPhase = ""
+			m.status.ProgressPercent = 0
+			m.status.ProgressCurrentBytes = 0
+			m.status.ProgressTotalBytes = 0
+			m.status.Running = false
+			returned = m.status
+			m.mu.Unlock()
+			log.Printf(
+				"ERROR: Updater: check panic source=%s current=%s target=%s duration=%s recovery_action=retry_later panic=%v\n%s",
+				source,
+				current,
+				targetVersion,
+				time.Since(startedAt).Round(time.Millisecond),
+				recovered,
+				debug.Stack(),
+			)
+		}
+	}()
 	result := resultError
 	message := "检查失败"
 	errText := ""
@@ -392,13 +490,49 @@ func (m *Manager) runCheckInternal(source string, applyWhenBehind, alreadyStarte
 		m.status.ProgressCurrentBytes = 0
 		m.status.ProgressTotalBytes = 0
 		m.status.Running = false
+		if result == resultError || result == "refused" || result == "unsupported" {
+			log.Printf(
+				"WARN: Updater: check finished source=%s current=%s latest=%s result=%s duration=%s error=%s",
+				source,
+				current,
+				latest,
+				result,
+				time.Since(startedAt).Round(time.Millisecond),
+				strings.TrimSpace(errText),
+			)
+		} else {
+			log.Printf(
+				"Updater: check finished source=%s current=%s latest=%s result=%s update=%t duration=%s",
+				source,
+				current,
+				latest,
+				result,
+				hasUpdate,
+				time.Since(startedAt).Round(time.Millisecond),
+			)
+		}
 		return m.status
 	}
 
+	log.Printf(
+		"Updater: release check starting source=%s current=%s target=%s",
+		source,
+		current,
+		targetVersion,
+	)
 	m.updateProgress("连接 GitHub", "正在获取最新 Release 信息...", 0, 0)
 	release, retryAfter, err := m.fetchReleaseForCheck(cfg, current, targetVersion)
 	if err != nil {
 		backoffUntil = m.recordFailure(now, retryAfter)
+		log.Printf(
+			"ERROR: Updater: release check failed source=%s current=%s target=%s retry_after=%s backoff_until=%s error=%v",
+			source,
+			current,
+			targetVersion,
+			retryAfter.Format(time.RFC3339),
+			backoffUntil.Format(time.RFC3339),
+			err,
+		)
 		result = resultError
 		message = "获取最新 Release 失败"
 		if targetVersion != "" {
@@ -420,6 +554,7 @@ func (m *Manager) runCheckInternal(source string, applyWhenBehind, alreadyStarte
 
 	asset, assetErr := pickAssetForCurrentPlatform(release)
 	if assetErr != nil {
+		log.Printf("ERROR: Updater: platform asset unavailable source=%s version=%s error=%v", source, latest, assetErr)
 		result = "unsupported"
 		message = "找不到当前平台可用的安装包"
 		errText = assetErr.Error()
@@ -437,6 +572,13 @@ func (m *Manager) runCheckInternal(source string, applyWhenBehind, alreadyStarte
 		_, compatible, compatibilityReason = compatibilityForRelease(*release, current)
 	}
 	if !compatible {
+		log.Printf(
+			"WARN: Updater: compatibility rejected source=%s current=%s target=%s reason=%s",
+			source,
+			current,
+			latest,
+			compatibilityReason,
+		)
 		result = "refused"
 		message = fmt.Sprintf("版本 %s 不满足当前数据库兼容条件", latest)
 		if targetVersion != "" && cmp > 0 {
@@ -471,6 +613,7 @@ func (m *Manager) runCheckInternal(source string, applyWhenBehind, alreadyStarte
 	}
 
 	if !applyWhenBehind {
+		log.Printf("Updater: update available source=%s current=%s latest=%s action=report_only", source, current, latest)
 		return finish()
 	}
 
@@ -479,6 +622,7 @@ func (m *Manager) runCheckInternal(source string, applyWhenBehind, alreadyStarte
 		m.updateProgress("校验更新包", "正在获取更新包校验信息...", 0, 0)
 		expectedChecksum, err = fetchExpectedChecksum(release, assetName)
 		if err != nil {
+			log.Printf("ERROR: Updater: checksum metadata unavailable version=%s asset=%s error=%v", latest, assetName, err)
 			result = resultError
 			message = "未通过完整性校验前置检查"
 			errText = err.Error()
@@ -489,6 +633,7 @@ func (m *Manager) runCheckInternal(source string, applyWhenBehind, alreadyStarte
 	m.updateProgress("下载更新包", "正在下载更新包...", 0, 0)
 	artifactPath, err := m.downloadAsset(assetURL, assetName)
 	if err != nil {
+		log.Printf("ERROR: Updater: asset download failed version=%s asset=%s error=%v", latest, assetName, err)
 		result = resultError
 		message = "下载更新包失败"
 		errText = err.Error()
@@ -498,23 +643,30 @@ func (m *Manager) runCheckInternal(source string, applyWhenBehind, alreadyStarte
 	if expectedChecksum != "" {
 		m.updateProgress("校验更新包", "正在校验下载内容完整性...", 0, 0)
 		if err := verifyFileSHA256(artifactPath, expectedChecksum); err != nil {
+			log.Printf("ERROR: Updater: asset checksum mismatch version=%s asset=%s recovery_action=discard_download error=%v", latest, assetName, err)
 			result = resultError
 			message = "更新包完整性校验失败"
 			errText = err.Error()
 			return finish()
 		}
 		checksumVerified = true
+		log.Printf("Updater: asset checksum verified version=%s asset=%s", latest, assetName)
 	}
 
+	log.Printf("Updater: safety snapshot starting reason=self-update version=%s", latest)
 	snapshot, err := service.CreateSafetySnapshot("self-update")
 	if err != nil {
+		log.Printf("ERROR: Updater: safety snapshot failed version=%s recovery_action=abort_update error=%v", latest, err)
 		result = resultError
 		message = "更新前安全快照创建失败"
 		errText = err.Error()
 		return finish()
 	}
+	log.Printf("Updater: safety snapshot completed version=%s snapshot_id=%s", latest, snapshot.ID)
 	m.updateProgress("应用更新", "正在应用更新包并准备重启...", 0, 0)
+	log.Printf("Updater: apply starting version=%s asset=%s snapshot_id=%s", latest, assetName, snapshot.ID)
 	if err := applyUpdateForPlatform(artifactPath, snapshot.ID, readinessURL(), db.CurrentDBPath, config.ConfigFilePath()); err != nil {
+		log.Printf("ERROR: Updater: apply failed version=%s asset=%s snapshot_id=%s recovery_action=restore_bundle_snapshot error=%v", latest, assetName, snapshot.ID, err)
 		result = resultError
 		message = "应用更新失败"
 		errText = err.Error()
@@ -523,6 +675,7 @@ func (m *Manager) runCheckInternal(source string, applyWhenBehind, alreadyStarte
 
 	result = "restarting"
 	message = "更新包已应用，正在重启到新版本"
+	log.Printf("Updater: apply completed version=%s action=restarting", latest)
 	lastUpdate = now
 	return finish()
 }

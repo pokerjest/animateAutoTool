@@ -61,7 +61,7 @@ func TestPickAssetForCurrentPlatform(t *testing.T) {
 		TagName: "v0.4.4",
 		Assets: []releaseAsset{
 			{Name: "unrelated_asset.zip", BrowserDownloadURL: "https://example.com/unrelated"},
-			{Name: "animate-server_v0.4.4" + candidates[0], BrowserDownloadURL: "https://example.com/matched"},
+			{Name: "AnimateAutoTool_v0.4.4" + candidates[0], BrowserDownloadURL: "https://example.com/matched"},
 		},
 	}
 
@@ -71,6 +71,82 @@ func TestPickAssetForCurrentPlatform(t *testing.T) {
 	}
 	if asset == nil || asset.BrowserDownloadURL != "https://example.com/matched" {
 		t.Fatalf("unexpected selected asset: %#v", asset)
+	}
+}
+
+func TestPickAssetForCurrentPlatformSupportsLegacyPrefix(t *testing.T) {
+	t.Parallel()
+
+	candidates := platformAssetCandidates(runtime.GOOS, runtime.GOARCH, false)
+	if len(candidates) == 0 {
+		t.Skip("current platform not supported by updater")
+	}
+
+	release := &githubRelease{
+		TagName: "v0.4.4",
+		Assets: []releaseAsset{{
+			Name:               "animate-server_v0.4.4" + candidates[0],
+			BrowserDownloadURL: "https://example.com/legacy",
+		}},
+	}
+
+	asset, err := pickAssetForCurrentPlatform(release)
+	if err != nil {
+		t.Fatalf("expected legacy asset to remain supported, got %v", err)
+	}
+	if asset == nil || asset.BrowserDownloadURL != "https://example.com/legacy" {
+		t.Fatalf("unexpected selected legacy asset: %#v", asset)
+	}
+}
+
+func TestPickAssetForCurrentPlatformRejectsStaleVersionAsset(t *testing.T) {
+	t.Parallel()
+
+	candidates := platformAssetCandidates(runtime.GOOS, runtime.GOARCH, false)
+	if len(candidates) == 0 {
+		t.Skip("current platform not supported by updater")
+	}
+
+	release := &githubRelease{
+		TagName: "v1.0.0-beta.10",
+		Assets: []releaseAsset{
+			{
+				Name:               "animate-server_v0.7.0" + candidates[0],
+				BrowserDownloadURL: "https://example.com/stale",
+			},
+			{
+				Name:               "AnimateAutoTool_v1.0.0-beta.10" + candidates[0],
+				BrowserDownloadURL: "https://example.com/current",
+			},
+		},
+	}
+
+	asset, err := pickAssetForCurrentPlatform(release)
+	if err != nil {
+		t.Fatalf("pickAssetForCurrentPlatform: %v", err)
+	}
+	if asset == nil || asset.BrowserDownloadURL != "https://example.com/current" {
+		t.Fatalf("stale release asset was selected: %#v", asset)
+	}
+}
+
+func TestPickAssetForCurrentPlatformRequiresReleaseVersionInAssetName(t *testing.T) {
+	t.Parallel()
+
+	candidates := platformAssetCandidates(runtime.GOOS, runtime.GOARCH, false)
+	if len(candidates) == 0 {
+		t.Skip("current platform not supported by updater")
+	}
+
+	release := &githubRelease{
+		TagName: "v1.0.0-beta.10",
+		Assets: []releaseAsset{{
+			Name:               "animate-server_v0.7.0" + candidates[0],
+			BrowserDownloadURL: "https://example.com/stale",
+		}},
+	}
+	if _, err := pickAssetForCurrentPlatform(release); err == nil {
+		t.Fatal("expected stale-version asset to be rejected")
 	}
 }
 
@@ -133,13 +209,69 @@ func TestCurrentVersionWantsPrerelease(t *testing.T) {
 	}
 }
 
-func TestExtractBinaryFromTarGz(t *testing.T) {
+func TestExtractBinaryFromTarGzPrefersCanonicalName(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
 	archivePath := filepath.Join(dir, "artifact.tar.gz")
-	destPath := filepath.Join(dir, "animate-server")
-	payload := []byte("binary-content")
+	destPath := filepath.Join(dir, "AnimateAutoTool")
+
+	file, err := os.Create(filepath.Clean(archivePath)) //nolint:gosec // archivePath is created under t.TempDir().
+	if err != nil {
+		t.Fatalf("create archive: %v", err)
+	}
+	gz := gzip.NewWriter(file)
+	tw := tar.NewWriter(gz)
+	entries := []struct {
+		name    string
+		payload []byte
+	}{
+		{name: "animate-server_v0.5.2_linux_amd64/bin/animate-server", payload: []byte("legacy-content")},
+		{name: "animate-server_v0.5.2_linux_amd64/bin/AnimateAutoTool", payload: []byte("canonical-content")},
+	}
+	for _, entry := range entries {
+		header := &tar.Header{
+			Name: entry.name,
+			Mode: 0o755,
+			Size: int64(len(entry.payload)),
+		}
+		if err := tw.WriteHeader(header); err != nil {
+			t.Fatalf("write header: %v", err)
+		}
+		if _, err := tw.Write(entry.payload); err != nil {
+			t.Fatalf("write payload: %v", err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatalf("close tar writer: %v", err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatalf("close gzip writer: %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("close archive: %v", err)
+	}
+
+	if err := extractBinaryFromTarGzCandidates(archivePath, []string{"AnimateAutoTool", "animate-server"}, destPath); err != nil {
+		t.Fatalf("extractBinaryFromTarGz: %v", err)
+	}
+
+	got, err := os.ReadFile(filepath.Clean(destPath)) //nolint:gosec // destPath is extracted under t.TempDir().
+	if err != nil {
+		t.Fatalf("read extracted binary: %v", err)
+	}
+	if string(got) != "canonical-content" {
+		t.Fatalf("unexpected extracted content: %q", string(got))
+	}
+}
+
+func TestExtractBinaryFromTarGzAcceptsLegacyName(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	archivePath := filepath.Join(dir, "artifact.tar.gz")
+	destPath := filepath.Join(dir, "AnimateAutoTool")
+	payload := []byte("legacy-content")
 
 	file, err := os.Create(filepath.Clean(archivePath)) //nolint:gosec // archivePath is created under t.TempDir().
 	if err != nil {
@@ -168,16 +300,54 @@ func TestExtractBinaryFromTarGz(t *testing.T) {
 		t.Fatalf("close archive: %v", err)
 	}
 
-	if err := extractBinaryFromTarGz(archivePath, "animate-server", destPath); err != nil {
+	if err := extractBinaryFromTarGzCandidates(archivePath, []string{"AnimateAutoTool", "animate-server"}, destPath); err != nil {
 		t.Fatalf("extractBinaryFromTarGz: %v", err)
 	}
-
 	got, err := os.ReadFile(filepath.Clean(destPath)) //nolint:gosec // destPath is extracted under t.TempDir().
 	if err != nil {
 		t.Fatalf("read extracted binary: %v", err)
 	}
 	if string(got) != string(payload) {
 		t.Fatalf("unexpected extracted content: %q", string(got))
+	}
+}
+
+func TestExtractBinaryFromTarGzSingleNameCompatibility(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	archivePath := filepath.Join(dir, "artifact.tar.gz")
+	destPath := filepath.Join(dir, "animate-server")
+	payload := []byte("binary-content")
+
+	file, err := os.Create(filepath.Clean(archivePath)) //nolint:gosec // archivePath is created under t.TempDir().
+	if err != nil {
+		t.Fatalf("create archive: %v", err)
+	}
+	gz := gzip.NewWriter(file)
+	tw := tar.NewWriter(gz)
+	if err := tw.WriteHeader(&tar.Header{
+		Name: "animate-server_v0.5.2_linux_amd64/bin/animate-server",
+		Mode: 0o755,
+		Size: int64(len(payload)),
+	}); err != nil {
+		t.Fatalf("write header: %v", err)
+	}
+	if _, err := tw.Write(payload); err != nil {
+		t.Fatalf("write payload: %v", err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatalf("close tar writer: %v", err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatalf("close gzip writer: %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("close archive: %v", err)
+	}
+
+	if err := extractBinaryFromTarGz(archivePath, "animate-server", destPath); err != nil {
+		t.Fatalf("extractBinaryFromTarGz: %v", err)
 	}
 }
 

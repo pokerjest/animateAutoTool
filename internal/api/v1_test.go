@@ -308,6 +308,36 @@ func TestV1TaskSnapshotEndpointsRequireAuthAndReturnTypedState(t *testing.T) {
 	assert.Contains(t, missing.Body.String(), `"code":"task_not_found"`)
 }
 
+func TestLocalScanTaskSwitchesFromScanToMetadataPhase(t *testing.T) {
+	taskstate.Global.Reset()
+	t.Cleanup(taskstate.Global.Reset)
+	taskstate.Global.Start("local-scan", "scan", "本地扫描", "准备扫描")
+
+	reportLocalScanProgress("local-scan", service.ScanProgress{
+		Message: "正在扫描文件夹 5/5",
+		Current: 5,
+		Total:   5,
+	})
+	scanTask, ok := taskstate.Global.Get("local-scan")
+	require.True(t, ok)
+	assert.Equal(t, "scan", scanTask.Phase)
+	assert.Equal(t, int64(5), scanTask.Current)
+	assert.Equal(t, "正在扫描文件夹 5/5", scanTask.Message)
+
+	reportLocalScanProgress("local-scan", service.ScanProgress{
+		Phase:   "complete",
+		Message: "文件扫描完成",
+		Current: 5,
+		Total:   5,
+	})
+	metadataTask, ok := taskstate.Global.Get("local-scan")
+	require.True(t, ok)
+	assert.Equal(t, "metadata", metadataTask.Phase)
+	assert.Zero(t, metadataTask.Current)
+	assert.Zero(t, metadataTask.Total)
+	assert.Equal(t, "文件扫描完成，正在整理元数据", metadataTask.Message)
+}
+
 func TestV1SettingsNeverReturnSecretValues(t *testing.T) {
 	resetAuthFixtures(t)
 	require.NoError(t, db.DB.Create(&model.GlobalConfig{Key: model.ConfigKeyAIApiKey, Value: "top-secret"}).Error)
@@ -688,6 +718,8 @@ func TestV1MikanDiscoveryEndpointsUseTypedContracts(t *testing.T) {
 	require.Equal(t, http.StatusOK, search.Code, search.Body.String())
 	assert.Contains(t, search.Body.String(), `"mikan_id":"3141"`)
 	assert.NotContains(t, search.Body.String(), `"MikanID"`)
+	assert.Contains(t, search.Body.String(), `"is_subscribed"`)
+	assert.Contains(t, search.Body.String(), `"is_local"`)
 	assert.Equal(t, "测试", fake.lastSearch)
 
 	resolved := request("/api/v1/subscriptions/mikan/resolve?bangumi_subject_id=598058&q=%E6%B5%8B%E8%AF%95")
@@ -735,6 +767,93 @@ func TestV1MikanDiscoveryEndpointsUseTypedContracts(t *testing.T) {
 	assert.Contains(t, invalidSubject.Body.String(), `"code":"invalid_bangumi_subject_id"`)
 }
 
+func TestV1MikanDiscoveryReportsSubscriptionAndLocalStatus(t *testing.T) {
+	resetAuthFixtures(t)
+
+	matchedMetadata := createSubscriptionMatchMetadata(t, "Aurora791001", 791001, 0, 0)
+	createPlayableSubscriptionMatchAnime(
+		t,
+		matchedMetadata,
+		"Aurora791001 (2026)",
+		"/library/discovery-provider-match-791001",
+		"discovery-provider-match-791001",
+	)
+	createPlayableSubscriptionMatchAnime(
+		t,
+		nil,
+		"Nebula791002 Season 2",
+		"/library/shared-discovery-show-791002",
+		"shared-discovery-show-791002",
+	)
+	conflictMetadata := createSubscriptionMatchMetadata(t, "Quartz791004", 791004, 0, 0)
+	createPlayableSubscriptionMatchAnime(
+		t,
+		conflictMetadata,
+		"Quartz791004",
+		"/library/conflicting-discovery-show-791004",
+		"conflicting-discovery-show-791004",
+	)
+
+	subscriptions := []model.Subscription{
+		{
+			Title:      "ProviderAlias791001",
+			RSSUrl:     "https://mikanani.me/RSS/Bangumi?bangumiId=79101&subgroupid=1",
+			MetadataID: &matchedMetadata.ID,
+		},
+		{
+			MikanID: "79103",
+			Title:   "Cobalt791003",
+			RSSUrl:  "https://mikanani.me/RSS/Bangumi?bangumiId=79103&subgroupid=1",
+		},
+	}
+	for i := range subscriptions {
+		require.NoError(t, db.DB.Create(&subscriptions[i]).Error)
+	}
+	t.Cleanup(func() {
+		for i := range subscriptions {
+			_ = db.DB.Unscoped().Delete(&subscriptions[i]).Error
+		}
+	})
+
+	fake := &fakeV1MikanClient{searchItems: []parser.SearchResult{
+		{MikanID: "79101", BangumiSubjectID: "791001", Title: "MikanAlias791001"},
+		{MikanID: "79102", Title: "Nebula791002"},
+		{MikanID: "79103", Title: "Cobalt791003"},
+		{MikanID: "79104", BangumiSubjectID: "791005", Title: "Quartz791004"},
+	}}
+	previousFactory := newV1MikanClient
+	newV1MikanClient = func() v1MikanClient { return fake }
+	t.Cleanup(func() { newV1MikanClient = previousFactory })
+
+	r := setupRouter()
+	cookie, _ := loginCookie(t, r, "admin")
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/subscriptions/search?q=discovery", nil)
+	req.Header.Set("Cookie", cookie)
+	markLocalRequest(req)
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	var payload struct {
+		Data struct {
+			Items []v1MikanDiscoveryItem `json:"items"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &payload))
+	require.Len(t, payload.Data.Items, 4)
+	itemsByID := make(map[string]v1MikanDiscoveryItem, len(payload.Data.Items))
+	for _, item := range payload.Data.Items {
+		itemsByID[item.MikanID] = item
+	}
+	assert.True(t, itemsByID["79101"].IsSubscribed, "RSS URL fallback should identify existing Mikan subscriptions")
+	assert.True(t, itemsByID["79101"].IsLocal, "existing subscription metadata should match a local title with a year suffix")
+	assert.False(t, itemsByID["79102"].IsSubscribed)
+	assert.True(t, itemsByID["79102"].IsLocal, "discovery title should use the shared non-exact local media index")
+	assert.True(t, itemsByID["79103"].IsSubscribed)
+	assert.False(t, itemsByID["79103"].IsLocal)
+	assert.False(t, itemsByID["79104"].IsSubscribed)
+	assert.False(t, itemsByID["79104"].IsLocal, "conflicting Bangumi IDs must override a title-only match")
+}
 func TestV1SubscriptionPersistsMikanAssociationWithoutUsingBangumiSubjectID(t *testing.T) {
 	resetAuthFixtures(t)
 	require.NoError(t, db.DB.Exec("DELETE FROM subscriptions").Error)

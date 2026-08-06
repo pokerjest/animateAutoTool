@@ -24,6 +24,7 @@ type Task struct {
 	Kind      string    `json:"kind"`
 	Title     string    `json:"title"`
 	Status    Status    `json:"status"`
+	Phase     string    `json:"phase,omitempty"`
 	Message   string    `json:"message"`
 	Current   int64     `json:"current,omitempty"`
 	Total     int64     `json:"total,omitempty"`
@@ -52,8 +53,14 @@ func (r *Registry) Start(taskID, kind, title, message string) Task {
 
 func (r *Registry) Progress(taskID, message string, current, total int64) Task {
 	previous, _ := r.Get(taskID)
+	return r.ProgressPhase(taskID, previous.Phase, message, current, total)
+}
+
+func (r *Registry) ProgressPhase(taskID, phase, message string, current, total int64) Task {
+	previous, _ := r.Get(taskID)
 	previous.TaskID = taskID
 	previous.Status = StatusRunning
+	previous.Phase = strings.TrimSpace(phase)
 	previous.Message = message
 	previous.Current = current
 	previous.Total = total

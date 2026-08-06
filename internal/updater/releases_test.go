@@ -10,7 +10,7 @@ func releaseWithCurrentPlatformAsset(version string, prerelease bool) githubRele
 	assets := []releaseAsset{}
 	if len(candidates) > 0 {
 		assets = append(assets, releaseAsset{
-			Name:               "animate-server_" + normalizeVersion(version) + candidates[0],
+			Name:               "AnimateAutoTool_" + normalizeVersion(version) + candidates[0],
 			BrowserDownloadURL: "https://example.test/" + version,
 		})
 	}
@@ -73,11 +73,11 @@ func TestBuildReleaseCatalogFiltersAndSortsChannels(t *testing.T) {
 	}
 
 	beta := buildReleaseCatalog(releases, ReleaseChannelBeta, "v0.9.7")
-	if len(beta.Items) != 3 {
+	if len(beta.Items) != 1 {
 		t.Fatalf("beta items = %#v", beta.Items)
 	}
-	if beta.Items[0].Version != "v0.9.9" || beta.Items[1].Version != "v0.9.8-beta.1" {
-		t.Fatalf("unexpected beta order: %#v", beta.Items)
+	if beta.Items[0].Version != "v0.9.8-beta.1" || !beta.Items[0].Prerelease {
+		t.Fatalf("unexpected beta catalog: %#v", beta.Items)
 	}
 }
 

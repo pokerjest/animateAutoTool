@@ -12,8 +12,9 @@ import (
 )
 
 const (
-	BaseURL      = "https://api.themoviedb.org/3"
-	ImageBaseURL = "https://image.tmdb.org/t/p/w500" // Use w500 for posters
+	BaseURL            = "https://api.themoviedb.org/3"
+	ImageBaseURL       = "https://image.tmdb.org/t/p/w500" // Use w500 for posters
+	MaxProxyImageBytes = 10 * 1024 * 1024
 )
 
 type Client struct {
@@ -185,11 +186,29 @@ func (c *Client) ProxyImage(path string) (*resty.Response, error) {
 	return c.ProxyImageContext(context.Background(), path)
 }
 
-func (c *Client) ProxyImageContext(ctx context.Context, path string) (*resty.Response, error) {
-	// If path contains the base URL, strip it or just use the suffix
-	cleanPath := strings.TrimPrefix(path, ImageBaseURL)
-	cleanPath = strings.TrimPrefix(cleanPath, "/")
-
+func (c *Client) ProxyImageContext(ctx context.Context, imagePath string) (*resty.Response, error) {
+	cleanPath, err := cleanProxyImagePath(imagePath)
+	if err != nil {
+		return nil, err
+	}
 	return httpx.NewRequest(ctx, c.client).
+		SetResponseBodyLimit(MaxProxyImageBytes).
 		Get("https://image.tmdb.org/t/p/original/" + cleanPath)
+}
+
+func cleanProxyImagePath(raw string) (string, error) {
+	value := strings.TrimSpace(raw)
+	for _, prefix := range []string{ImageBaseURL, "https://image.tmdb.org/t/p/original"} {
+		value = strings.TrimPrefix(value, prefix)
+	}
+	value = strings.TrimPrefix(value, "/")
+	if value == "" || strings.Contains(value, "\\") || strings.Contains(value, "://") {
+		return "", fmt.Errorf("invalid TMDB image path")
+	}
+	for _, segment := range strings.Split(value, "/") {
+		if segment == "" || segment == "." || segment == ".." {
+			return "", fmt.Errorf("invalid TMDB image path")
+		}
+	}
+	return value, nil
 }

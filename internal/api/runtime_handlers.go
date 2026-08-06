@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/pokerjest/animateAutoTool/internal/db"
+	"github.com/pokerjest/animateAutoTool/internal/runtimejournal"
 )
 
 var runtimeStatsStartedAt = time.Now()
@@ -85,13 +86,22 @@ func RuntimeStatsHandler(c *gin.Context) {
 // self-updater can verify a freshly started process before committing a binary
 // switch. It does not expose diagnostics or configuration values.
 func ReadinessHandler(c *gin.Context) {
-	if db.DB == nil || db.CurrentSchemaVersion(db.DB) == "" {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"ready": false})
+	if db.DB == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"ready": false, "reason": "database_unavailable"})
+		return
+	}
+	currentSchema := db.CurrentSchemaVersion(db.DB)
+	if currentSchema == "" || currentSchema != db.LatestSchemaVersion() {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"ready": false, "reason": "schema_not_current"})
+		return
+	}
+	if runtimejournal.RecoveryBlocked() {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"ready": false, "reason": "recovery_blocked"})
 		return
 	}
 	sqlDB, err := db.DB.DB()
 	if err != nil || sqlDB.Ping() != nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"ready": false})
+		c.JSON(http.StatusServiceUnavailable, gin.H{"ready": false, "reason": "database_ping_failed"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ready": true})

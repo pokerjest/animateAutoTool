@@ -47,6 +47,7 @@ func initLegacyAPICompat(r *gin.Engine) {
 	authorized.Use(deprecated, AuthMiddleware(), SameOriginMiddleware())
 	{
 		authorized.POST("/api/change-password", ChangePasswordHandler)
+		authorized.POST("/api/change-username", ChangeUsernameHandler)
 		authorized.GET("/api/events", SSEHandler)
 		api := authorized.Group("/api")
 		{

@@ -94,3 +94,17 @@ func TestV1LocalAnimeHandlerPaginatesAndSearchesWholeLibrary(t *testing.T) {
 	require.Len(t, literalWildcard.Data.Items, 1)
 	assert.Equal(t, "100% Hero", literalWildcard.Data.Items[0].Title)
 }
+
+func TestV1LocalAnimeHandlerReturnsErrorWhenDatabaseUnavailable(t *testing.T) {
+	originalDB := db.DB
+	db.DB = nil
+	t.Cleanup(func() { db.DB = originalDB })
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/local-anime", nil)
+	V1LocalAnimeHandler(c)
+
+	require.Equal(t, http.StatusInternalServerError, w.Code)
+	assert.Contains(t, w.Body.String(), "local_anime_unavailable")
+}

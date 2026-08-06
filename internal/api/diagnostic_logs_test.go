@@ -129,9 +129,10 @@ func TestExportHealthDiagnosticsIncludesIssueLogsAndSnapshots(t *testing.T) {
 	for _, file := range reader.File {
 		names = append(names, file.Name)
 	}
-	for _, name := range []string{"README.txt", "current-problems.txt", "manifest.json", "health-report.json", "runtime.json", "database.json", "open-library-issues.json", "failed-tasks.json", "failed-subscription-runs.json", "failed-downloads.json", "health-20260727-12.log"} {
+	for _, name := range []string{"README.txt", "current-problems.txt", "goroutines.txt", "manifest.json", "health-report.json", "runtime.json", "database.json", "open-library-issues.json", "failed-tasks.json", "failed-subscription-runs.json", "failed-downloads.json", "health-20260727-12.log"} {
 		assert.True(t, slices.Contains(names, name), "missing %s in %#v", name, names)
 	}
+	assert.Contains(t, zipFileContent(t, reader, "goroutines.txt"), "goroutine ")
 	assert.Contains(t, zipFileContent(t, reader, "current-problems.txt"), "测试番剧")
 	issueSnapshot := zipFileContent(t, reader, "open-library-issues.json")
 	assert.True(t, json.Valid([]byte(issueSnapshot)), "issue snapshot must remain valid JSON")

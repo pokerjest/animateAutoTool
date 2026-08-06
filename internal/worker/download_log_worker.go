@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/url"
 	"path/filepath"
+	"runtime/debug"
 	"sort"
 	"strconv"
 	"strings"
@@ -28,50 +29,109 @@ import (
 const downloadLogSyncInterval = 15 * time.Second
 
 func StartDownloadLogSyncWorker(ctx context.Context) {
+	go RunDownloadLogSyncWorker(ctx)
+}
+
+// RunDownloadLogSyncWorker runs the periodic worker until ctx is canceled.
+// Startup uses the synchronous form so shutdown can wait before closing SQLite.
+func RunDownloadLogSyncWorker(ctx context.Context) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	go func() {
-		syncDownloadLogStatuses(ctx)
+	log.Printf("DownloadLogWorker: started interval=%s", downloadLogSyncInterval)
+	defer func() {
+		log.Printf("DownloadLogWorker: stopped reason=%v", ctx.Err())
+	}()
 
-		ticker := time.NewTicker(downloadLogSyncInterval)
-		defer ticker.Stop()
+	runDownloadLogSyncCycle(ctx, "startup")
 
-		for {
-			select {
-			case <-ticker.C:
-				syncDownloadLogStatuses(ctx)
-			case <-ctx.Done():
-				return
-			}
+	ticker := time.NewTicker(downloadLogSyncInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			runDownloadLogSyncCycle(ctx, "periodic")
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+func runDownloadLogSyncCycle(ctx context.Context, trigger string) {
+	runDownloadLogSyncCycleWith(ctx, trigger, syncDownloadLogStatuses)
+}
+
+func runDownloadLogSyncCycleWith(ctx context.Context, trigger string, run func(context.Context)) {
+	start := time.Now()
+	log.Printf("DownloadLogWorker: cycle starting trigger=%s", trigger)
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			log.Printf(
+				"ERROR: DownloadLogWorker: cycle panic trigger=%s duration=%s recovery_action=continue_next_cycle panic=%v\n%s",
+				trigger,
+				time.Since(start).Round(time.Millisecond),
+				recovered,
+				debug.Stack(),
+			)
 		}
 	}()
+	if run != nil {
+		run(ctx)
+	}
+	log.Printf("DownloadLogWorker: cycle completed trigger=%s duration=%s", trigger, time.Since(start).Round(time.Millisecond))
 }
 
 func syncDownloadLogStatuses(ctx context.Context) {
+	if err := ctx.Err(); err != nil {
+		log.Printf("DownloadLogWorker: cycle skipped reason=context_canceled error=%v", err)
+		return
+	}
 	qbCfg := qbutil.LoadConfig()
-	if qbutil.ManagedBinaryMissing(qbCfg, config.BinDir()) || qbutil.MissingExternalURL(qbCfg) {
+	if qbutil.ManagedBinaryMissing(qbCfg, config.BinDir()) {
+		log.Printf("DownloadLogWorker: cycle skipped reason=managed_qbittorrent_missing")
+		return
+	}
+	if qbutil.MissingExternalURL(qbCfg) {
+		log.Printf("DownloadLogWorker: cycle skipped reason=external_qbittorrent_url_missing")
 		return
 	}
 
 	client := downloader.NewQBittorrentClient(qbCfg.URL)
-	if err := client.Login(qbCfg.Username, qbCfg.Password); err != nil {
-		log.Printf("Worker: qB download log sync login failed: %v", err)
+	if err := client.LoginContext(ctx, qbCfg.Username, qbCfg.Password); err != nil {
+		log.Printf("ERROR: DownloadLogWorker: qBittorrent login failed recovery_action=retry_next_cycle error=%v", err)
 		return
 	}
+	log.Printf("DownloadLogWorker: qBittorrent login succeeded")
 
 	result, err := service.SyncDownloadLogStatusesWithQBClient(client)
 	if err != nil {
+		log.Printf(
+			"ERROR: DownloadLogWorker: status sync failed updated=%d completed=%d failed=%d active=%d unmatched=%d recovery_action=retry_next_cycle error=%v",
+			result.Updated,
+			result.Completed,
+			result.Failed,
+			result.Active,
+			result.Unmatched,
+			err,
+		)
 		return
 	}
+	log.Printf(
+		"DownloadLogWorker: status sync completed updated=%d completed=%d failed=%d active=%d unmatched=%d targets=%d",
+		result.Updated,
+		result.Completed,
+		result.Failed,
+		result.Active,
+		result.Unmatched,
+		len(result.CompletedTargets),
+	)
 	if renameResult, renameErr := service.AutoRenameCompletedDownloads(client); renameErr != nil {
-		log.Printf("Worker: automatic download rename failed: %v", renameErr)
+		log.Printf("ERROR: DownloadLogWorker: automatic rename failed recovery_action=continue_without_rename error=%v", renameErr)
 	} else {
 		result.CompletedTargets = service.MergeCompletedTargets(result.CompletedTargets, renameResult)
-		if renameResult.Renamed > 0 || renameResult.Failed > 0 {
-			log.Printf("Worker: automatic download rename finished (renamed=%d skipped=%d failed=%d)",
-				renameResult.Renamed, renameResult.Skipped, renameResult.Failed)
-		}
+		log.Printf("DownloadLogWorker: automatic rename completed renamed=%d skipped=%d failed=%d targets=%d",
+			renameResult.Renamed, renameResult.Skipped, renameResult.Failed, len(result.CompletedTargets))
 	}
 
 	// Scan as soon as qBittorrent reports completion. The target may still be
@@ -80,15 +140,15 @@ func syncDownloadLogStatuses(ctx context.Context) {
 	initialIDs := autoScanCompletedDownloads(result.CompletedTargets)
 
 	if repairResult, err := service.RepairDownloadLogsFromLocalLibrary(6 * time.Hour); err != nil {
-		log.Printf("Worker: download log library repair failed: %v", err)
-	} else if repairResult.Repaired > 0 {
-		log.Printf("Worker: repaired %d stale download logs from local library matches (scanned=%d matched=%d)",
-			repairResult.Repaired, repairResult.Scanned, repairResult.Matched)
+		log.Printf("ERROR: DownloadLogWorker: library repair failed recovery_action=continue_to_reconciliation error=%v", err)
+	} else {
+		log.Printf("DownloadLogWorker: library repair completed repaired=%d invalidated=%d scanned=%d matched=%d",
+			repairResult.Repaired, repairResult.Invalidated, repairResult.Scanned, repairResult.Matched)
 	}
 	if updated, err := service.ReconcileSubscriptionResourcesFromDownloadLogs(); err != nil {
-		log.Printf("Worker: subscription resource reconciliation failed: %v", err)
-	} else if updated > 0 {
-		log.Printf("Worker: reconciled %d subscription resource records", updated)
+		log.Printf("ERROR: DownloadLogWorker: resource reconciliation failed recovery_action=retry_next_cycle error=%v", err)
+	} else {
+		log.Printf("DownloadLogWorker: resource reconciliation completed updated=%d", updated)
 	}
 
 	scheduleCompletedDownloadRescan(ctx, result.CompletedTargets, initialIDs)
@@ -98,6 +158,8 @@ func scheduleCompletedDownloadRescan(ctx context.Context, targets []string, init
 	if len(targets) == 0 {
 		return
 	}
+	log.Printf("DownloadLogWorker: delayed rescan scheduled targets=%d anime_ids=%d delay=%s",
+		len(targets), len(initialIDs), completedDownloadRescan.delay)
 	completedDownloadRescan.schedule(ctx, targets, initialIDs)
 }
 
@@ -175,14 +237,30 @@ func (c *completedDownloadRescanCoordinator) flush() {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if run != nil {
-		run(ctx, targets, animeIDs)
+	if ctx.Err() == nil && run != nil {
+		func() {
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					log.Printf(
+						"ERROR: DownloadLogWorker: rescan coordinator panic targets=%d anime_ids=%d recovery_action=continue_future_batches panic=%v\n%s",
+						len(targets),
+						len(animeIDs),
+						recovered,
+						debug.Stack(),
+					)
+				}
+			}()
+			run(ctx, targets, animeIDs)
+		}()
 	}
 
 	c.mu.Lock()
 	c.running = false
-	if len(c.pendingTarget) > 0 && c.timer == nil {
+	if ctx.Err() == nil && len(c.pendingTarget) > 0 && c.timer == nil {
 		c.timer = time.AfterFunc(c.delay, c.flush)
+	} else if ctx.Err() != nil {
+		c.pendingTarget = make(map[string]struct{})
+		c.pendingAnime = make(map[uint]struct{})
 	}
 	c.mu.Unlock()
 }
@@ -190,10 +268,25 @@ func (c *completedDownloadRescanCoordinator) flush() {
 var completedDownloadRescan = newCompletedDownloadRescanCoordinator(downloadLogSyncInterval, runCompletedDownloadPostProcessing)
 
 func runCompletedDownloadPostProcessing(ctx context.Context, targets []string, initialIDs []uint) {
+	start := time.Now()
+	log.Printf("DownloadLogWorker: delayed rescan starting targets=%d anime_ids=%d", len(targets), len(initialIDs))
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			log.Printf(
+				"ERROR: DownloadLogWorker: delayed post-processing panic targets=%d anime_ids=%d recovery_action=retry_future_batch panic=%v\n%s",
+				len(targets),
+				len(initialIDs),
+				recovered,
+				debug.Stack(),
+			)
+		}
+		log.Printf("DownloadLogWorker: delayed rescan finished targets=%d anime_ids=%d duration=%s",
+			len(targets), len(initialIDs), time.Since(start).Round(time.Millisecond))
+	}()
 	delayedIDs := autoScanCompletedDownloads(targets)
 	affected := mergeAnimeIDs(initialIDs, delayedIDs)
 	if _, err := service.ReconcileSubscriptionResourcesFromDownloadLogs(); err != nil {
-		log.Printf("Worker: resource reconciliation after delayed scan failed: %v", err)
+		log.Printf("ERROR: DownloadLogWorker: resource reconciliation after delayed scan failed recovery_action=continue_to_jellyfin error=%v", err)
 	}
 	// Enrich only series touched by this batch. This also avoids the global
 	// historical repair pass, which remains available from the health tools.
@@ -202,7 +295,7 @@ func runCompletedDownloadPostProcessing(ctx context.Context, targets []string, i
 	}
 	// A single serialized post-processing run refreshes Jellyfin once for the
 	// whole debounce window, even when several torrents finish together.
-	syncCompletedDownloadsToJellyfin(ctx)
+	syncCompletedDownloadsToJellyfin(ctx, affected)
 }
 
 func mergeAnimeIDs(groups ...[]uint) []uint {
@@ -226,7 +319,7 @@ func sortedUintIDs(values map[uint]struct{}) []uint {
 	return result
 }
 
-func syncCompletedDownloadsToJellyfin(ctx context.Context) {
+func syncCompletedDownloadsToJellyfin(ctx context.Context, animeIDs []uint) {
 	if err := service.RequestJellyfinLibraryRefresh(ctx); err != nil {
 		if !errors.Is(err, service.ErrJellyfinNotConfigured) {
 			log.Printf("Worker: Jellyfin library refresh after download failed: %v", err)
@@ -249,7 +342,15 @@ func syncCompletedDownloadsToJellyfin(ctx context.Context) {
 			return
 		}
 
-		result, err := service.SyncJellyfinLibraryMappings(ctx)
+		var (
+			result service.JellyfinLibrarySyncResult
+			err    error
+		)
+		if len(animeIDs) > 0 {
+			result, err = service.SyncJellyfinLibraryMappingsForAnimeIDs(ctx, animeIDs)
+		} else {
+			result, err = service.SyncJellyfinLibraryMappings(ctx)
+		}
 		if err != nil {
 			log.Printf("Worker: Jellyfin library reconciliation after download failed: %v", err)
 			return
@@ -259,17 +360,28 @@ func syncCompletedDownloadsToJellyfin(ctx context.Context) {
 			event.GlobalBus.Publish(event.EventMetadataUpdated, map[string]interface{}{
 				"type": "jellyfin_library_sync", "status": "completed", "matched_series": result.MatchedSeries,
 			})
-			return
 		}
-		if result.PendingSeries == 0 {
+		if completedDownloadJellyfinBatchSettled(result) {
 			return
 		}
 	}
 	log.Printf("Worker: Jellyfin accepted the scan request but pending series were not visible after 30 seconds")
 }
 
+func completedDownloadJellyfinBatchSettled(result service.JellyfinLibrarySyncResult) bool {
+	return result.PendingSeries == 0 || result.MatchedSeries >= result.PendingSeries
+}
+
 func autoScanCompletedDownloads(targets []string) []uint {
-	if len(targets) == 0 || db.DB == nil || !service.IncrementalScanEnabled() {
+	if len(targets) == 0 {
+		return nil
+	}
+	if db.DB == nil {
+		log.Printf("ERROR: DownloadLogWorker: auto scan skipped reason=database_unavailable targets=%d", len(targets))
+		return nil
+	}
+	if !service.IncrementalScanEnabled() {
+		log.Printf("DownloadLogWorker: auto scan skipped reason=incremental_scan_disabled targets=%d", len(targets))
 		return nil
 	}
 
@@ -280,6 +392,7 @@ func autoScanCompletedDownloads(targets []string) []uint {
 	}
 
 	if len(dirs) == 0 {
+		log.Printf("DownloadLogWorker: auto scan skipped reason=no_local_directories targets=%d", len(targets))
 		return nil
 	}
 
@@ -304,6 +417,7 @@ func autoScanCompletedDownloads(targets []string) []uint {
 	}
 
 	if len(scanTargets) == 0 {
+		log.Printf("DownloadLogWorker: auto scan skipped reason=targets_outside_local_directories targets=%d", len(targets))
 		return nil
 	}
 
@@ -316,7 +430,8 @@ func autoScanCompletedDownloads(targets []string) []uint {
 		}
 		result, err := scanner.ScanTargets(&dir, targetsForDir)
 		if err != nil {
-			log.Printf("Worker: auto scan failed for %s: %v", dir.Path, err)
+			log.Printf("ERROR: DownloadLogWorker: auto scan failed directory_id=%d target_count=%d path=%s error=%v",
+				dir.ID, len(targetsForDir), filepath.Base(filepath.Clean(dir.Path)), err)
 		}
 		if result != nil {
 			for _, id := range result.AffectedAnimeIDs {
@@ -325,6 +440,8 @@ func autoScanCompletedDownloads(targets []string) []uint {
 		}
 	}
 
+	log.Printf("DownloadLogWorker: auto scan completed directories=%d targets=%d affected_animes=%d",
+		len(scanTargets), len(targets), len(affected))
 	publishCompletedDownloadEvents(targets)
 	return sortedUintIDs(affected)
 }

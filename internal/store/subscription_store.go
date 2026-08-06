@@ -49,6 +49,23 @@ func (s *SubscriptionStore) ListWithMetadata() ([]model.Subscription, error) {
 	return subs, nil
 }
 
+func (s *SubscriptionStore) ListWithMetadataPage(offset, limit int) ([]model.Subscription, error) {
+	if s == nil || s.db == nil {
+		return nil, gorm.ErrInvalidDB
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	if limit <= 0 {
+		return []model.Subscription{}, nil
+	}
+	var subs []model.Subscription
+	if err := s.db.Preload("Metadata").Order("id ASC").Offset(offset).Limit(limit).Find(&subs).Error; err != nil {
+		return nil, err
+	}
+	return subs, nil
+}
+
 func (s *SubscriptionStore) GetByID(id any) (*model.Subscription, error) {
 	if s == nil || s.db == nil {
 		return nil, gorm.ErrInvalidDB

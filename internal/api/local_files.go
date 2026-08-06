@@ -17,6 +17,7 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/downloader"
 	"github.com/pokerjest/animateAutoTool/internal/model"
 	"github.com/pokerjest/animateAutoTool/internal/parser"
+	"github.com/pokerjest/animateAutoTool/internal/pathutil"
 
 	"github.com/pokerjest/animateAutoTool/internal/event"
 	"github.com/pokerjest/animateAutoTool/internal/service"
@@ -428,13 +429,13 @@ func ApplyDirectoryRenameHandler(c *gin.Context) {
 				// Ensure parent directory exists (for Season folders)
 				newDir := filepath.Dir(newPath)
 				if err := os.MkdirAll(newDir, 0755); err != nil {
-					fmt.Printf("Failed to create directory %s: %v\n", newDir, err)
+					log.Printf("ERROR: LocalFileOrganizer: directory create failed directory=%s recovery_action=skip_rename error=%v", newDir, err)
 					failCount++
 					continue
 				}
 
 				if err := os.Rename(oldPath, newPath); err != nil {
-					fmt.Printf("Rename failed: %s -> %s (%v)\n", oldPath, newPath, err)
+					log.Printf("ERROR: LocalFileOrganizer: rename failed old_path=%s new_path=%s recovery_action=skip_item error=%v", oldPath, newPath, err)
 					failCount++
 					continue
 				}
@@ -574,9 +575,9 @@ func renameManagedQBFile(oldPath, newPath string) (bool, error) {
 }
 
 func sameFilesystemPath(a, b string) bool {
-	cleanA := filepath.Clean(strings.TrimSpace(a))
-	cleanB := filepath.Clean(strings.TrimSpace(b))
-	return cleanA != "" && cleanA == cleanB
+	a = strings.TrimSpace(a)
+	b = strings.TrimSpace(b)
+	return a != "" && b != "" && pathutil.Equal(a, b)
 }
 
 func torrentRelativePath(torrent downloader.TorrentInfo, fullPath string) (string, error) {
