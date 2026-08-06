@@ -8,6 +8,12 @@
 
 ## [Unreleased]
 
+## [1.0.1-beta.2] - 2026-08-06
+
+### Fixed
+
+- 健康诊断导出前核对并清理历史遗留的订阅 provider 冲突，避免已停止产生的季度误报告警持续显示。
+
 ## [1.0.1-beta.1] - 2026-08-06
 
 ### Changed
@@ -685,7 +691,8 @@
 
 ---
 
-[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.1-beta.1...HEAD
+[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.1-beta.2...HEAD
+[1.0.1-beta.2]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.1-beta.1...v1.0.1-beta.2
 [1.0.1-beta.1]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0...v1.0.1-beta.1
 [1.0.0]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.18...v1.0.0
 [1.0.0-beta.18]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.17...v1.0.0-beta.18
