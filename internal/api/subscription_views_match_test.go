@@ -680,6 +680,50 @@ func TestFindSubscriptionLocalAnimesRejectsExplicitSeasonConflict(t *testing.T) 
 	}
 }
 
+func TestFindSubscriptionLocalAnimesIgnoresUnrelatedPathLinkedSeasonConflict(t *testing.T) {
+	metadata := createSubscriptionMatchMetadata(t, "无职转生 第三季元数据", 277554, 94664, 0)
+	localMetadata := createSubscriptionMatchMetadata(t, "落第贤者元数据", 630163, 314554, 0)
+	sub := &model.Subscription{
+		Title:      "目标订阅 第三季",
+		Season:     "Season 3",
+		RSSUrl:     "https://example.test/unrelated-path-season-conflict",
+		MetadataID: &metadata.ID,
+		Metadata:   metadata,
+	}
+	if err := db.DB.Create(sub).Error; err != nil {
+		t.Fatalf("create subscription: %v", err)
+	}
+	t.Cleanup(func() { _ = db.DB.Unscoped().Delete(sub).Error })
+	anime := createPlayableSubscriptionMatchAnime(t, localMetadata, "From Overshadowed to Overpowered Season 1", "/library/unrelated-path-season-conflict", "unrelated-path-season-conflict-series")
+	if err := db.DB.Exec("UPDATE local_animes SET season = ?, metadata_id = NULL WHERE id = ?", 1, anime.ID).Error; err != nil {
+		t.Fatalf("make local anime unrelated: %v", err)
+	}
+	logEntry := &model.DownloadLog{
+		SubscriptionID: sub.ID,
+		Status:         "completed",
+		TargetFile:     anime.Path + "/S01E01.mkv",
+	}
+	if err := db.DB.Create(logEntry).Error; err != nil {
+		t.Fatalf("create path link: %v", err)
+	}
+	t.Cleanup(func() { _ = db.DB.Unscoped().Delete(logEntry).Error })
+
+	matches, err := findSubscriptionLocalAnimes(sub)
+	if err != nil {
+		t.Fatalf("find unrelated path-linked season conflict: %v", err)
+	}
+	if len(matches) != 0 {
+		t.Fatalf("unrelated path-linked candidate must not match: %+v", matches)
+	}
+	var issues []model.LibraryIssue
+	if err := db.DB.Where("title = ?", sub.Title).Find(&issues).Error; err != nil {
+		t.Fatalf("load path-linked issues: %v", err)
+	}
+	if len(issues) != 0 {
+		t.Fatalf("unrelated path-linked candidate produced false conflicts: %+v", issues)
+	}
+}
+
 func TestFindSubscriptionLocalAnimesDisambiguatesDuplicateProviderIDByPath(t *testing.T) {
 	metadata := createSubscriptionMatchMetadata(t, "重复身份元数据", 0, 68001, 0)
 	sub := &model.Subscription{

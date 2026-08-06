@@ -624,7 +624,11 @@ func filterSubscriptionPathLinkedLocalAnimes(sub *model.Subscription, candidates
 	for i := range candidates {
 		identity := service.EvaluateSubscriptionLocalIdentity(sub, &candidates[i])
 		if identity.Conflict {
-			reportSubscriptionLocalIdentityConflict(sub, &candidates[i], identity)
+			// Path links can be stale or point at an unrelated local row. Only
+			// report conflicts when the candidate has independent identity evidence.
+			if shouldReportSubscriptionLocalIdentityConflict(sub, &candidates[i], identity) {
+				reportSubscriptionLocalIdentityConflict(sub, &candidates[i], identity)
+			}
 			continue
 		}
 		matched = append(matched, candidates[i])
