@@ -8,6 +8,12 @@
 
 ## [Unreleased]
 
+## [1.0.1-beta.1] - 2026-08-06
+
+### Changed
+
+- 开启 1.0.1 测试发布通道。
+
 ## [1.0.0] - 2026-08-06
 
 ### Changed
@@ -679,7 +685,8 @@
 
 ---
 
-[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.1-beta.1...HEAD
+[1.0.1-beta.1]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0...v1.0.1-beta.1
 [1.0.0]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.18...v1.0.0
 [1.0.0-beta.18]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.17...v1.0.0-beta.18
 [1.0.0-beta.17]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.16...v1.0.0-beta.17
