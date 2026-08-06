@@ -571,6 +571,10 @@ func TestFindSubscriptionLocalAnimesDoesNotReportUnrelatedProviderConflicts(t *t
 func TestHealthLibraryIssuesResolvesHistoricalFalseProviderConflict(t *testing.T) {
 	subMetadata := createSubscriptionMatchMetadata(t, "无职转生 第三季元数据", 277554, 94664, 0)
 	localMetadata := createSubscriptionMatchMetadata(t, "落第贤者元数据", 630163, 314554, 0)
+	// Reproduce historical metadata contamination: the subscription metadata
+	// contains a local title alias even though provider IDs and metadata differ.
+	subMetadata.TitleEN = "From Overshadowed to Overpowered"
+	subMetadata.TMDBTitle = "From Overshadowed to Overpowered"
 	sub := &model.Subscription{
 		Title:      "无职转生 第三季 ～到了异世界就拿出真本事～",
 		Season:     "Season 3",

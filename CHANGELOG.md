@@ -8,6 +8,12 @@
 
 ## [Unreleased]
 
+## [1.0.1-beta.3] - 2026-08-06
+
+### Fixed
+
+- 仅使用直接标题、外部 ID 或相同 metadata 证据清理季度 provider 冲突，避免污染别名让历史误报告警持续存在。
+
 ## [1.0.1-beta.2] - 2026-08-06
 
 ### Fixed
@@ -691,7 +697,8 @@
 
 ---
 
-[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.1-beta.2...HEAD
+[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.1-beta.3...HEAD
+[1.0.1-beta.3]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.1-beta.2...v1.0.1-beta.3
 [1.0.1-beta.2]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.1-beta.1...v1.0.1-beta.2
 [1.0.1-beta.1]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0...v1.0.1-beta.1
 [1.0.0]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.18...v1.0.0

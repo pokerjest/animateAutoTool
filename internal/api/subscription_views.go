@@ -1018,8 +1018,14 @@ func shouldReportSubscriptionLocalIdentityConflict(
 		return false
 	}
 	metadataLinked := sub.MetadataID != nil && anime.MetadataID != nil && *anime.MetadataID == *sub.MetadataID
-	return identity.TitleMatch || identity.ExternalMatch ||
-		(identity.Provider == subscriptionProviderSeason && metadataLinked)
+	if identity.Provider == subscriptionProviderSeason {
+		// Alias titles from subscription metadata are not independent evidence:
+		// a stale or contaminated alias can otherwise keep an unrelated season
+		// conflict open. Require a direct title, provider, or metadata link.
+		return identity.ExternalMatch || metadataLinked ||
+			service.SubscriptionLocalTitleMatchScore(sub, anime) == 100
+	}
+	return identity.TitleMatch || identity.ExternalMatch
 }
 
 func resolveStaleSubscriptionProviderConflicts(index *subscriptionLibraryIndex) (int, error) {
