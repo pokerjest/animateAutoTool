@@ -46,6 +46,21 @@ AnimateTool 适合已经使用或愿意使用 qBittorrent、希望长期维护�
 
 它不是 BT 客户端本身，也不是 Jellyfin 的完整替代品；当前本地扫描与整理重点面向番剧和电视剧。AI 不会仅凭聊天中的一句“处理一下”直接改数据库或移动文件。
 
+## 1.0 发布与升级边界
+
+当前仓库代码基线为 `v1.0.0` stable；以下升级边界和门禁是 1.0 版本必须满足的契约。
+
+1.0 稳定版的官方直接升级来源是：
+
+- `v0.9.9`
+- `v1.0.0-beta.*`
+
+`v0.6`～`v0.8` 的数据库只保留为非契约回归 fixture，不承诺直接升级。升级前请先创建加密 ZIP 备份，并把副本保存到应用数据目录之外。
+
+数据库迁移是追加式协议：已发布 migration 的 ID、描述和 checksum 不得修改；遇到未知或更高 schema，旧程序会拒绝启动。回切不是数据库降级，只有 Release manifest 明确允许时，才会恢复“旧程序 + 数据库 + 配置”成套快照。
+
+详细规则见[1.0 数据库与升级契约](https://pokerjest.github.io/animateAutoTool/release-1.0-migration-contract/)和[版本通道、更新与回切](https://pokerjest.github.io/animateAutoTool/usage/updater/)。
+
 ## 快速启动
 
 1. 从 [最新 Release](https://github.com/pokerjest/animateAutoTool/releases/latest) 下载对应系统的发行包。
@@ -55,6 +70,12 @@ AnimateTool 适合已经使用或愿意使用 qBittorrent、希望长期维护�
 5. 在设置页配置 qBittorrent，再添加第一条订阅。需要媒体模式时，再配置 Jellyfin 地址和 API Key。
 
 Docker、源码构建、目录权限和升级方式请查看[安装与部署文档](https://pokerjest.github.io/animateAutoTool/installation/)。
+
+## 长期运行与故障定位
+
+服务按小时写入 `logs/server-YYYYMMDD-HH.log`，异常事件单独写入 `logs/health-YYYYMMDD-HH.log`。遇到启动失败、数据库迁移异常、任务卡住或服务持续 5xx 时，优先导出“健康诊断包”；其中包含脱敏快照和 `goroutines.txt`，便于定位阻塞与泄漏。
+
+不要把 `config.yaml`、数据库、备份文件、归档密码或未检查的诊断包发到公开 Issue。完整的日志字段、保留策略和排障顺序见[运行稳定性与故障定位](https://pokerjest.github.io/animateAutoTool/stability-observability/)。
 
 ## 文档
 

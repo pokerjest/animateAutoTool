@@ -82,7 +82,7 @@ Animate Auto Tool 是个人维护的开源项目,**仅最新一个发布版本**
 - `golangci-lint` 启用 `gosec`,覆盖 G1xx/G2xx/G3xx/G4xx/G5xx/G6xx 多项规则,详见 [.golangci.yml](.golangci.yml)。
 - 每个 PR 跑 `govulncheck`,检测已知 CVE。
 - 密码以 bcrypt 哈希保存。
-- 外部服务凭据在设置页脱敏显示;选择性备份会清空 password / secret / token / key 等敏感配置值。
+- 外部服务凭据在设置页脱敏显示；选择性备份文件不携带 password / secret / token / key 等敏感配置值，选择性恢复也不会用缺失字段清空当前设备凭据。
 - 发布产物附带 `SHA256SUMS.txt`,应用内自更新校验完整性。
 - `/recover` 仅接受 localhost 直连。
 

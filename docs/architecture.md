@@ -178,7 +178,9 @@ var migrations = []migration{
 - **改列名 / 改类型 / 收紧约束 / 数据搬迁** → 必须**新写一条 migration**，不要修改老的
 - 启动时 `schema_migrations` 表记录 ID、数值序号、描述和应用时间，`CurrentSchemaVersion` 按数值序号确定当前版本；
 - 文件数据库迁移使用跨进程锁，阻止两个服务同时修改 schema；
-- migration 前创建安全快照；历史数据库 fixture 覆盖 v0.6、v0.7、v0.8、v0.9 到当前 schema；
+- migration 前创建带 SHA256 的安全快照；官方升级矩阵固定覆盖 `v0.9.9`、`v1.0.0-beta.1`、`v1.0.0-beta.7`、`v1.0.0-beta.14` 到当前 schema；`v0.6`～`v0.8` 仅作为非契约回归数据（若 fixture 存在）；
+- `schema_migrations` 保存稳定 fingerprint/checksum；历史 migration 被改写、数据库声明未来 schema 或存在未知 migration 时，应用拒绝启动；
+- 每次迁移运行写入 `data/updates/migration-runs/current.json`，009/015 破坏性修复写入带映射和统计的审计报告；
 - 数据修复脚本也**走 migration**，不要散落进业务启动代码
 
 ## HTTP 路由与中间件
@@ -207,6 +209,9 @@ var migrations = []migration{
 ## 日志
 
 - 主进程 `cmd/server/main.go` 的 `configureLogging` 把 stderr / stdout 写到按本地时间分时的 `logs/server-YYYYMMDD-HH.log`
+- `RequestLoggingMiddleware` 记录 request ID、method、route、status、耗时和错误数量，不记录 query、body、cookie 或 authorization；慢请求和 HTTP 5xx 同时进入 health 日志
+- 后台任务、调度器、事件总线、更新器、备份恢复和托管服务在失败时记录阶段、对象 ID、恢复动作和 panic 堆栈
+- 健康诊断导出包含 `goroutines.txt`、失败任务、数据库/schema 快照和脱敏异常日志
 - 运行跨过整点后，首条新日志自动切换到新的小时文件；最多保留最近 168 个小时文件（7 天）
 - 旧版本留下的 `logs/server.log` 不会被自动删除，升级后可按需手动归档
 - 不引入 lumberjack 等第三方依赖
@@ -222,6 +227,12 @@ var migrations = []migration{
 - 新版本启动后必须通过仅本机 readiness 检查；失败时辅助进程恢复旧程序、数据库和配置
 - 快照默认保留最近 5 份或 30 天内的有效项，取更严格的清理结果
 - macOS DMG mount point 由 Go 侧 `os.MkdirTemp` 创建并传给辅助脚本，不在 shell 中生成不受控路径
+
+## 稳定性运行边界
+
+- HTTP 服务使用读取头超时、空闲超时和请求头大小上限；单个请求 panic 返回 500 并记录堆栈，不结束进程
+- 单个后台任务 panic 后会结束当前任务并保留重试/排障状态；关闭阶段若等待任务异常或超时，会优先保留 SQLite 进程状态，避免在未知写入状态下继续关闭数据库
+- 迁移失败只回滚当前 migration，已完成的前序 migration 不自动回滚；业务服务不会在 schema 未就绪或恢复被阻断时继续启动
 
 ## Windows 部署
 

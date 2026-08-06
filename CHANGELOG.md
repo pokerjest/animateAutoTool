@@ -8,6 +8,77 @@
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-08-06
+
+### Changed
+
+- 固化追加式数据库迁移、checksum/fingerprint、未来 schema 拒绝、009/015 修复报告和真实历史升级矩阵。
+- 增强长期运行稳定性：HTTP 超时、request ID、health 日志、后台任务 panic 隔离、优雅关闭、恢复依赖校验和会话失效。
+- 1.0 stable 官方升级来源限定为 `v0.9.9` 和 `v1.0.0-beta.*`；`v0.6`～`v0.8` 仅作为非契约回归 fixture。
+- 固化 1.0 数据库与升级契约、稳定性观测文档和发布验收清单。
+
+## [1.0.0-beta.18] - 2026-08-06
+
+### Added
+- 为 Bangumi 和 Mikan 海报增加有界磁盘缓存，缓存使用原子写入、大小/数量/时效清理，减少长期运行时重复请求。
+- 健康检查预加载元数据，降低订阅媒体健康评估的数据库查询数量。
+
+### Fixed
+- 海报已经存在本地缓存时优先直接返回；远程源短暂失败时不再重复消耗网络请求。
+- 订阅、日历和本地媒体页面的海报回退继续遵守内容类型和响应大小限制。
+
+## [1.0.0-beta.17] - 2026-08-06
+
+### Changed
+- 日历海报按首选源、备用源分阶段竞速，并限制并发槽位；第一个有效图片返回后取消较慢请求。
+- 订阅与本地番剧匹配增加 provider ID 冲突的路径和标题消歧，避免共享元数据导致错误播放关联。
+
+### Fixed
+- provider identity 冲突在证据消失后会自动关闭历史库问题，不再长期阻塞健康状态。
+- 日历海报失败会聚合各来源错误，日志能够定位具体来源。
+
+## [1.0.0-beta.16] - 2026-08-05
+
+### Added
+- 增加按小时轮转的 server/health 日志、request ID、慢请求和 HTTP 5xx 诊断。
+- 增加后台任务、事件总线、scheduler、更新器、备份恢复和托管服务的阶段化日志与 panic 堆栈。
+- 健康诊断包增加运行时和 `goroutines.txt` 快照。
+
+### Changed
+- HTTP 增加读取头超时、空闲超时和请求头大小限制；优雅关闭会等待已接受的后台任务。
+- 单个后台任务失败不再直接拖垮主进程；迁移、恢复和更新失败会明确记录恢复动作。
+
+### Security
+- 持久化日志和健康诊断会遮盖常见 Token、密码、API Key、Authorization 和带密码 URL。
+
+## [1.0.0-beta.15] - 2026-08-05
+
+### Added
+- 固化 `database_format`、`schema_format`、migration checksum、未来 schema 拒绝和迁移运行 manifest。
+- 为 009/015 破坏性修复增加 preflight、survivor 映射、字段合并统计和审计报告。
+- 增加真实 `v0.9.9` / 1.0 beta 历史数据库升级矩阵。
+
+### Changed
+- restore 增加依赖一致性、schema/SQLite 校验、旧表兼容和恢复用户后的会话失效。
+- 发布清单将 1.0 官方最低升级来源收紧为 `0.9.9`，并明确整套快照回切边界。
+
+## [1.0.0-beta.14] - 2026-08-05
+
+### Added
+- 新增 `015_local_anime_identity`，为本地文件夹番剧建立稳定 scan key 和唯一索引。
+
+### Fixed
+- 迁移前合并重复本地番剧，重新绑定 episode、playback history 和 library issues，并尽量合并非空字段。
+- 旧备份恢复后会重新修复 local anime identity、索引和统计，兼容缺少新字段的历史数据库。
+
+## [1.0.0-beta.13] - 2026-08-03
+
+### Changed
+- 本地番剧诊断提示改为批量读取开放的 scrape 问题，减少分页页面的重复查询。
+
+### Fixed
+- V1 本地番剧接口补充数据库初始化、目录读取、计数和分页查询错误处理，避免异常时返回不完整数据。
+
 ## [1.0.0-beta.12] - 2026-08-03
 
 ### Fixed
@@ -52,14 +123,14 @@
 ## [1.0.0-beta.8] - 2026-08-01
 
 ### Changed
-- ???????????????????????????????????????????????????
-- ???????????????????????????????????????????????
+- 后台任务统一使用可取消的生命周期上下文，服务停止时等待已接受任务完成，减少 SQLite 关闭时的并发写入。
+- 前端构建产物固定使用 LF 行尾并改进跨平台可复现性，避免不同 CI 平台产生无意义的 hash 变化。
 
 ### Security
-- ?????????????TMDB ???????? API ???????????????????????
+- 限制备份上传大小、TMDB 图片代理响应类型和大小，并加强托管服务下载地址与压缩包校验。
 
 ### Fixed
-- ???????????????????????????????????????
+- 修复订阅与本地媒体匹配、备份/R2 恢复、元数据刷新和分页边界等异常路径，补充安全回归测试。
 
 ## [1.0.0-beta.7] - 2026-07-31
 
@@ -608,7 +679,14 @@
 
 ---
 
-[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.12...HEAD
+[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.18...v1.0.0
+[1.0.0-beta.18]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.17...v1.0.0-beta.18
+[1.0.0-beta.17]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.16...v1.0.0-beta.17
+[1.0.0-beta.16]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.15...v1.0.0-beta.16
+[1.0.0-beta.15]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.14...v1.0.0-beta.15
+[1.0.0-beta.14]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.13...v1.0.0-beta.14
+[1.0.0-beta.13]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.12...v1.0.0-beta.13
 [1.0.0-beta.12]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.11...v1.0.0-beta.12
 [1.0.0-beta.11]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.10...v1.0.0-beta.11
 [1.0.0-beta.10]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.0-beta.9...v1.0.0-beta.10

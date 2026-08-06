@@ -63,7 +63,7 @@ vi config.yaml               # 填入 qBittorrent 等信息
 - HTTP 调用统一走 `internal/httpx`,带超时和代理支持。
 - 错误信息倾向中文(项目以中文用户为主),日志保留英文键名 + 中文描述。
 - 不要为了"以防万一"加冗余的 `nil` 检查或 try-catch 风格的多层 wrap——内部代码相信内部契约。
-- 新增 SQL 字段、改字段类型或加唯一约束:**写显式 migration**,不要依赖 `AutoMigrate`,见 [README 数据库迁移约定](README.md#数据库迁移约定)。
+- 新增 SQL 字段、改字段类型或加唯一约束:**写显式 migration**,不要依赖 `AutoMigrate`,见[1.0 数据库与升级契约](docs/release-1.0-migration-contract.md)和[系统架构](docs/architecture.md)。
 
 ## 测试要求
 

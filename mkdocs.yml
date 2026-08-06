@@ -118,6 +118,8 @@ nav:
       - REST API 参考: api.md
       - OpenAPI 文件: openapi.yaml
       - 系统架构: architecture.md
+      - 1.0 数据库与升级契约: release-1.0-migration-contract.md
+      - 运行稳定性与故障定位: stability-observability.md
       - 移动端 QA 清单: mobile-qa-checklist.md
       - 发版清单: release-checklist.md
       - 贡献指南: https://github.com/pokerjest/animateAutoTool/blob/main/CONTRIBUTING.md

@@ -94,6 +94,8 @@ AnimateTool 优先使用确定性规则处理订阅、集数识别、文件路�
 5. [元数据 API 获取与验证](configuration/metadata-apis.md)
 6. [备份、恢复与版本回切](usage/backup-diagnostics.md)
 7. [公网访问方案决策树](remote-access/index.md)
+8. [1.0 数据库与升级契约](release-1.0-migration-contract.md)
+9. [运行稳定性与故障定位](stability-observability.md)
 
 ## 重要链接
 
@@ -101,6 +103,7 @@ AnimateTool 优先使用确定性规则处理订阅、集数识别、文件路�
 - [GitHub 仓库][repo]
 - [REST API 与 OpenAPI](api.md)
 - [架构说明](architecture.md)
+- [1.0 发版清单](release-checklist.md)
 - [贡献指南][contributing]
 - [安全漏洞报告][security-policy]
 

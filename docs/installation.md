@@ -13,6 +13,19 @@
 
 下载后固定目录、复制配置模板，再按[快速开始](getting-started.md)启动。
 
+## 1.0 升级前检查
+
+官方支持从 `v0.9.9` 和 `v1.0.0-beta.*` 直接向前升级。`v0.6`～`v0.8` 不属于 1.0 的直接升级契约；这类数据库应先导出备份，再在隔离副本中验证恢复。
+
+升级前必须：
+
+1. 停止同一数据目录上的其他 AnimateTool 进程；
+2. 在“备份”页创建加密 ZIP，并把副本放到应用数据目录之外；
+3. 确认当前 `data/` 和 `config.yaml` 可读写；
+4. 确认目标 Release 有当前系统和 CPU 架构的安装包、`SHA256SUMS.txt` 和 `animate-release-manifest.json`。
+
+自动更新会先保存数据库和配置快照，并在新版本启动后执行本机 readiness 检查。版本回切不是数据库 downgrade；只有目标 manifest 明确允许时才会执行整套快照恢复。迁移失败或发现未知 schema 时，应用会拒绝启动业务服务，应该先查看日志和迁移快照，不要直接删除数据库。
+
 压缩包与 GitHub Release 资产使用 `AnimateAutoTool_*` 前缀；包内本地主程序名为 `AnimateAutoTool`（Windows 为 `AnimateAutoTool.exe`）。更新器仍兼容旧版 `animate-server_*` 资产。
 
 ## Docker Compose
