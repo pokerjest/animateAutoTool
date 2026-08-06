@@ -1017,15 +1017,39 @@ func shouldReportSubscriptionLocalIdentityConflict(
 	if sub == nil || anime == nil || !identity.Conflict {
 		return false
 	}
-	metadataLinked := sub.MetadataID != nil && anime.MetadataID != nil && *anime.MetadataID == *sub.MetadataID
 	if identity.Provider == subscriptionProviderSeason {
-		// Alias titles from subscription metadata are not independent evidence:
-		// a stale or contaminated alias can otherwise keep an unrelated season
-		// conflict open. Require a direct title, provider, or metadata link.
-		return identity.ExternalMatch || metadataLinked ||
+		// A shared metadata_id is not independent evidence. Historical
+		// contamination can attach two unrelated series to one metadata row,
+		// making every provider ID appear to match and repeatedly reopening a
+		// false season conflict. Provider evidence is trustworthy here only
+		// when it comes from distinct metadata rows.
+		independentExternalMatch := identity.ExternalMatch &&
+			sub.MetadataID != nil && anime.MetadataID != nil &&
+			*sub.MetadataID != 0 && *anime.MetadataID != 0 &&
+			*sub.MetadataID != *anime.MetadataID
+		return independentExternalMatch ||
 			service.SubscriptionLocalTitleMatchScore(sub, anime) == 100
 	}
 	return identity.TitleMatch || identity.ExternalMatch
+}
+
+func reconcileStaleSubscriptionProviderConflictsIfNeeded() {
+	if db.DB == nil {
+		return
+	}
+	var openConflicts int64
+	if err := db.DB.Model(&model.LibraryIssue{}).
+		Where("status = ? AND issue_key LIKE ?", service.LibraryIssueStatusOpen, "subscription-provider-conflict:%").
+		Count(&openConflicts).Error; err != nil {
+		log.Printf("WARN: failed to count stale subscription provider conflicts: %v", err)
+		return
+	}
+	if openConflicts == 0 {
+		return
+	}
+	if _, err := loadSubscriptionLocalMatchIndex(); err != nil {
+		log.Printf("WARN: failed to reconcile stale subscription provider conflicts: %v", err)
+	}
 }
 
 func resolveStaleSubscriptionProviderConflicts(index *subscriptionLibraryIndex) (int, error) {

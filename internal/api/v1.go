@@ -748,6 +748,7 @@ func V1LocalAnimeHandler(c *gin.Context) {
 		v1Error(c, http.StatusInternalServerError, "local_anime_unavailable", "无法读取本地番剧")
 		return
 	}
+	reconcileStaleSubscriptionProviderConflictsIfNeeded()
 	if err := db.DB.Order("id ASC").Find(&dirs).Error; err != nil {
 		log.Printf("ERROR: failed to load local anime directories: %v", err)
 		v1Error(c, http.StatusInternalServerError, "local_anime_unavailable", "无法读取本地番剧目录")

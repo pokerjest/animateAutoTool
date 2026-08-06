@@ -10,6 +10,8 @@ import (
 	"github.com/pokerjest/animateAutoTool/internal/service"
 )
 
+const overshadowedTitle = "From Overshadowed to Overpowered"
+
 func TestPopulateSubscriptionLibraryStateFindsStrongNonExactTitle(t *testing.T) {
 	sub := model.Subscription{
 		Title:  "从后面来的神威先生",
@@ -573,8 +575,8 @@ func TestHealthLibraryIssuesResolvesHistoricalFalseProviderConflict(t *testing.T
 	localMetadata := createSubscriptionMatchMetadata(t, "落第贤者元数据", 630163, 314554, 0)
 	// Reproduce historical metadata contamination: the subscription metadata
 	// contains a local title alias even though provider IDs and metadata differ.
-	subMetadata.TitleEN = "From Overshadowed to Overpowered"
-	subMetadata.TMDBTitle = "From Overshadowed to Overpowered"
+	subMetadata.TitleEN = overshadowedTitle
+	subMetadata.TMDBTitle = overshadowedTitle
 	sub := &model.Subscription{
 		Title:      "无职转生 第三季 ～到了异世界就拿出真本事～",
 		Season:     "Season 3",
@@ -617,6 +619,100 @@ func TestHealthLibraryIssuesResolvesHistoricalFalseProviderConflict(t *testing.T
 	}
 	if updated.Status != "resolved" {
 		t.Fatalf("historical false conflict status = %q, want resolved", updated.Status)
+	}
+}
+
+func TestSharedContaminatedMetadataDoesNotReopenSeasonConflict(t *testing.T) {
+	metadata := createSubscriptionMatchMetadata(t, "无职转生 第三季元数据", 277554, 94664, 0)
+	metadata.TitleEN = overshadowedTitle
+	metadata.TMDBTitle = overshadowedTitle
+	if err := db.DB.Save(metadata).Error; err != nil {
+		t.Fatalf("persist contaminated metadata aliases: %v", err)
+	}
+	sub := &model.Subscription{
+		Title:      "无职转生 第三季 ～到了异世界就拿出真本事～",
+		Season:     "Season 3",
+		RSSUrl:     "https://example.test/shared-contaminated-season",
+		MetadataID: &metadata.ID,
+		Metadata:   metadata,
+	}
+	if err := db.DB.Create(sub).Error; err != nil {
+		t.Fatalf("create subscription: %v", err)
+	}
+	t.Cleanup(func() { _ = db.DB.Unscoped().Delete(sub).Error })
+	anime := createPlayableSubscriptionMatchAnime(
+		t,
+		metadata,
+		"From Overshadowed to Overpowered Season 1",
+		"/library/shared-contaminated-season",
+		"shared-contaminated-series",
+	)
+	if err := db.DB.Model(anime).Update("season", 1).Error; err != nil {
+		t.Fatalf("set local season: %v", err)
+	}
+	anime.Season = 1
+	anime.Metadata = metadata
+
+	identity := service.EvaluateSubscriptionLocalIdentity(sub, anime)
+	if !identity.Conflict || identity.Provider != subscriptionProviderSeason {
+		t.Fatalf("identity = %+v, want raw season conflict before evidence filtering", identity)
+	}
+	if shouldReportSubscriptionLocalIdentityConflict(sub, anime, identity) {
+		t.Fatal("shared contaminated metadata must not independently prove a season conflict")
+	}
+
+	matches, err := findSubscriptionLocalAnimes(sub)
+	if err != nil {
+		t.Fatalf("find local matches: %v", err)
+	}
+	if len(matches) != 0 {
+		t.Fatalf("contaminated metadata must not make unrelated local anime playable: %+v", matches)
+	}
+	var issues int64
+	if err := db.DB.Model(&model.LibraryIssue{}).
+		Where("status = ? AND issue_key = ?", service.LibraryIssueStatusOpen,
+			fmt.Sprintf("subscription-provider-conflict:%d:%d:season", sub.ID, anime.ID)).
+		Count(&issues).Error; err != nil {
+		t.Fatalf("count season conflicts: %v", err)
+	}
+	if issues != 0 {
+		t.Fatalf("shared contaminated metadata reopened %d season conflicts", issues)
+	}
+}
+
+func TestDistinctProviderMetadataStillReportsSeasonConflict(t *testing.T) {
+	subMetadata := createSubscriptionMatchMetadata(t, "同一作品订阅元数据", 0, 67101, 0)
+	localMetadata := createSubscriptionMatchMetadata(t, "同一作品本地元数据", 0, 67101, 0)
+	sub := &model.Subscription{
+		Title:      "不同语言订阅标题 第 2 季",
+		Season:     "Season 2",
+		RSSUrl:     "https://example.test/distinct-provider-season",
+		MetadataID: &subMetadata.ID,
+		Metadata:   subMetadata,
+	}
+	if err := db.DB.Create(sub).Error; err != nil {
+		t.Fatalf("create subscription: %v", err)
+	}
+	t.Cleanup(func() { _ = db.DB.Unscoped().Delete(sub).Error })
+	anime := createPlayableSubscriptionMatchAnime(
+		t,
+		localMetadata,
+		"Different Localized Title Season 3",
+		"/library/distinct-provider-season",
+		"distinct-provider-series",
+	)
+	if err := db.DB.Model(anime).Update("season", 3).Error; err != nil {
+		t.Fatalf("set local season: %v", err)
+	}
+	anime.Season = 3
+	anime.Metadata = localMetadata
+
+	identity := service.EvaluateSubscriptionLocalIdentity(sub, anime)
+	if !identity.Conflict || !identity.ExternalMatch || identity.Provider != subscriptionProviderSeason {
+		t.Fatalf("identity = %+v, want provider-backed season conflict", identity)
+	}
+	if !shouldReportSubscriptionLocalIdentityConflict(sub, anime, identity) {
+		t.Fatal("distinct metadata rows with the same provider ID must keep reporting season conflicts")
 	}
 }
 
@@ -701,7 +797,7 @@ func TestFindSubscriptionLocalAnimesRejectsCrossProviderConflict(t *testing.T) {
 func TestFindSubscriptionLocalAnimesRejectsExplicitSeasonConflict(t *testing.T) {
 	metadata := createSubscriptionMatchMetadata(t, "季度冲突元数据", 0, 67001, 0)
 	sub := &model.Subscription{
-		Title:      "季度冲突订阅标题",
+		Title:      "季度冲突番剧 Season 2",
 		Season:     "Season 2",
 		RSSUrl:     "https://example.test/season-conflict",
 		MetadataID: &metadata.ID,
@@ -711,7 +807,7 @@ func TestFindSubscriptionLocalAnimesRejectsExplicitSeasonConflict(t *testing.T) 
 		t.Fatalf("create subscription: %v", err)
 	}
 	t.Cleanup(func() { _ = db.DB.Unscoped().Delete(sub).Error })
-	anime := createPlayableSubscriptionMatchAnime(t, metadata, "季度冲突本地标题", "/library/season-conflict", "season-conflict-series")
+	anime := createPlayableSubscriptionMatchAnime(t, metadata, "季度冲突番剧 Season 3", "/library/season-conflict", "season-conflict-series")
 	if err := db.DB.Model(anime).Update("season", 3).Error; err != nil {
 		t.Fatalf("set local season: %v", err)
 	}

@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/model"
+	"github.com/pokerjest/animateAutoTool/internal/service"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -107,4 +108,79 @@ func TestV1LocalAnimeHandlerReturnsErrorWhenDatabaseUnavailable(t *testing.T) {
 
 	require.Equal(t, http.StatusInternalServerError, w.Code)
 	assert.Contains(t, w.Body.String(), "local_anime_unavailable")
+}
+
+func TestV1LocalAnimeHandlerResolvesStaleSharedMetadataSeasonConflict(t *testing.T) {
+	originalDB := db.DB
+	tx := originalDB.Begin()
+	require.NoError(t, tx.Error)
+	db.DB = tx
+	t.Cleanup(func() {
+		_ = tx.Rollback().Error
+		db.DB = originalDB
+	})
+
+	metadata := model.AnimeMetadata{
+		Title:     "无职转生 第三季元数据",
+		TitleCN:   "无职转生 第三季",
+		TitleEN:   "From Overshadowed to Overpowered",
+		TMDBTitle: "From Overshadowed to Overpowered",
+		BangumiID: 277554,
+		TMDBID:    94664,
+	}
+	require.NoError(t, db.DB.Create(&metadata).Error)
+	sub := model.Subscription{
+		Title:      "无职转生 第三季 ～到了异世界就拿出真本事～",
+		Season:     "Season 3",
+		RSSUrl:     "https://example.test/local-page-stale-season",
+		MetadataID: &metadata.ID,
+	}
+	require.NoError(t, db.DB.Create(&sub).Error)
+	anime := model.LocalAnime{
+		Title:            "From Overshadowed to Overpowered Season 1",
+		Path:             "/library/local-page-stale-season",
+		Season:           1,
+		MetadataID:       &metadata.ID,
+		JellyfinSeriesID: "local-page-stale-series",
+	}
+	require.NoError(t, db.DB.Create(&anime).Error)
+	require.NoError(t, db.DB.Create(&model.LocalEpisode{
+		LocalAnimeID:   anime.ID,
+		Title:          anime.Title + " 第 1 集",
+		EpisodeNum:     1,
+		SeasonNum:      1,
+		Path:           anime.Path + "/S01E01.mkv",
+		JellyfinItemID: "local-page-stale-episode",
+	}).Error)
+	localAnimeID := anime.ID
+	issue := model.LibraryIssue{
+		IssueKey:        fmt.Sprintf("subscription-provider-conflict:%d:%d:season", sub.ID, anime.ID),
+		IssueType:       service.LibraryIssueTypeParse,
+		Status:          service.LibraryIssueStatusOpen,
+		Title:           sub.Title,
+		LocalAnimeID:    &localAnimeID,
+		Message:         "历史季度冲突误报",
+		OccurrenceCount: 1,
+	}
+	require.NoError(t, db.DB.Create(&issue).Error)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/local-anime?page=1&page_size=20", nil)
+	V1LocalAnimeHandler(c)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	var payload struct {
+		Data struct {
+			Diagnostics []model.LibraryIssue `json:"diagnostics"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &payload))
+	for _, diagnostic := range payload.Data.Diagnostics {
+		assert.NotEqual(t, issue.IssueKey, diagnostic.IssueKey)
+	}
+
+	var resolved model.LibraryIssue
+	require.NoError(t, db.DB.First(&resolved, issue.ID).Error)
+	assert.Equal(t, service.LibraryIssueStatusResolved, resolved.Status)
 }

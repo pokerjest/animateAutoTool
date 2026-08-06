@@ -46,6 +46,7 @@ func LocalAnimePageHandler(c *gin.Context) {
 
 	var dirs []model.LocalAnimeDirectory
 	db.DB.Find(&dirs)
+	reconcileStaleSubscriptionProviderConflictsIfNeeded()
 
 	var animes []model.LocalAnime
 	page, pageSize := boundedPagination(c, 200, 1000)
@@ -117,12 +118,14 @@ func GetLocalAnimeCardHandler(c *gin.Context) {
 		htmlNotFound(c, "未找到本地番剧")
 		return
 	}
+	reconcileStaleSubscriptionProviderConflictsIfNeeded()
 	populateLocalAnimeActionHint(&anime)
 
 	c.HTML(http.StatusOK, "local_anime_card.html", anime)
 }
 
 func LocalAnimeDiagnosticsHandler(c *gin.Context) {
+	reconcileStaleSubscriptionProviderConflictsIfNeeded()
 	diagnostics, err := service.ListOpenLibraryIssues(12)
 	if err != nil {
 		c.String(http.StatusInternalServerError, "加载诊断失败")
