@@ -454,7 +454,11 @@ func V1RefreshSubscriptionMetadataHandler(c *gin.Context) {
 	taskID := "subscription-metadata-" + c.Param("id")
 	taskstate.Global.Start(taskID, "metadata", "刷新订阅元数据", "正在刷新 "+sub.Title)
 	GoBackground(func(context.Context) {
-		service.NewMetadataService().EnrichMetadata(sub.Metadata, sub.Title)
+		if err := service.NewMetadataService().EnrichSubscription(sub); err != nil {
+			log.Printf("subscription metadata refresh failed for %d: %v", sub.ID, err)
+			taskstate.Global.Fail(taskID, err)
+			return
+		}
 		if err := saveSubscription(sub); err != nil {
 			log.Printf("subscription metadata refresh failed for %d: %v", sub.ID, err)
 			taskstate.Global.Fail(taskID, err)

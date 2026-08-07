@@ -377,7 +377,7 @@ func (s *AgentService) persistLocalAssetMetadata(anime *model.LocalAnime) error 
 		return gorm.ErrInvalidDB
 	}
 
-	return db.DB.Transaction(func(tx *gorm.DB) error {
+	if err := db.DB.Transaction(func(tx *gorm.DB) error {
 		mStore := store.NewAnimeMetadataStore(tx)
 		laStore := store.NewLocalAnimeStore(tx)
 		if anime.Metadata.ID == 0 {
@@ -403,14 +403,12 @@ func (s *AgentService) persistLocalAssetMetadata(anime *model.LocalAnime) error 
 		if err := laStore.SaveAnime(anime); err != nil {
 			return err
 		}
-		updates := map[string]interface{}{"image": anime.Metadata.Image, "summary": anime.Metadata.Summary}
-		if err := mStore.PropagateToSubscriptions(anime.Metadata.ID, updates); err != nil {
-			return err
-		}
-		return mStore.PropagateToLocalAnimes(anime.Metadata.ID, map[string]interface{}{
-			"image": anime.Metadata.Image, "summary": anime.Metadata.Summary, "air_date": anime.Metadata.AirDate,
-		})
-	})
+		return nil
+	}); err != nil {
+		return err
+	}
+	NewMetadataService().SyncMetadataToModels(anime.Metadata)
+	return nil
 }
 
 func (s *AgentService) metadataService() *MetadataService {

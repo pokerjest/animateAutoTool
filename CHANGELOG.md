@@ -8,6 +8,17 @@
 
 ## [Unreleased]
 
+## [1.0.2-beta.1] - 2026-08-07
+
+### Fixed
+
+- 隔离订阅和本地番剧之间被错误共享或污染的 metadata，避免刷新时继续传播错误的 provider 身份。
+- 对 Bangumi、TMDB 和 AniList 候选执行独立标题校验，拒绝跨作品搜索结果和冲突 provider 标题建立播放关联。
+
+### Security
+
+- 将 OpenAPI 工具链使用的 `js-yaml` 固定到修复版本，消除恶意 YAML 映射可能造成的高 CPU 消耗风险。
+
 ## [1.0.1] - 2026-08-06
 
 ### Changed
@@ -703,7 +714,8 @@
 
 ---
 
-[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.1...HEAD
+[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.2-beta.1...HEAD
+[1.0.2-beta.1]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.1...v1.0.2-beta.1
 [1.0.1]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.1-beta.3...v1.0.1
 [1.0.1-beta.3]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.1-beta.2...v1.0.1-beta.3
 [1.0.1-beta.2]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.1-beta.1...v1.0.1-beta.2

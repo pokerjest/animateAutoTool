@@ -221,7 +221,10 @@ func LocalAnimeMatchesSubscription(sub *model.Subscription, anime *model.LocalAn
 	if identity.Conflict {
 		return false
 	}
-	if identity.ExternalMatch {
+	sharedMetadataRow := sub.MetadataID != nil && anime.MetadataID != nil &&
+		*sub.MetadataID != 0 && *anime.MetadataID != 0 &&
+		*sub.MetadataID == *anime.MetadataID
+	if identity.ExternalMatch && (!sharedMetadataRow || metadataCanBridgeTitles(subscriptionMetadataForMatch(sub))) {
 		return true
 	}
 	return localIdentityMatchesReferences(
@@ -330,6 +333,9 @@ func localIdentityMatchesReferences(sub *model.Subscription, references, localTi
 	}
 
 	metadata := subscriptionMetadataForMatch(sub)
+	if !metadataCanBridgeTitles(metadata) {
+		return false
+	}
 	aliases := metadataIdentityTitles(metadata)
 	if len(aliases) == 0 {
 		return false

@@ -166,3 +166,65 @@ func TestScanLocalAssetsDetachesUnrelatedSharedMetadata(t *testing.T) {
 	require.Equal(t, "Original Show", original.Title)
 	require.Equal(t, 777, original.BangumiID)
 }
+
+func TestDetachSharedMetadataCountsSubscriptionAndLocalOwners(t *testing.T) {
+	withServiceTestDB(t)
+
+	sharedMetadata := model.AnimeMetadata{
+		Title:        "无职转生 第三季",
+		BangumiID:    277554,
+		BangumiTitle: "无职转生 第三季",
+		TMDBID:       94664,
+		TMDBTitle:    "From Overshadowed to Overpowered",
+	}
+	require.NoError(t, db.DB.Create(&sharedMetadata).Error)
+	sub := model.Subscription{
+		Title:      "无职转生 第三季",
+		RSSUrl:     "https://example.test/shared-subscription-local",
+		MetadataID: &sharedMetadata.ID,
+	}
+	anime := model.LocalAnime{
+		Title:      "From Overshadowed to Overpowered",
+		Path:       t.TempDir(),
+		MetadataID: &sharedMetadata.ID,
+	}
+	require.NoError(t, db.DB.Create(&sub).Error)
+	require.NoError(t, db.DB.Create(&anime).Error)
+
+	var loaded model.LocalAnime
+	require.NoError(t, db.DB.Preload("Metadata").First(&loaded, anime.ID).Error)
+	require.True(t, detachMismatchedSharedMetadataLink(&loaded))
+	require.Nil(t, loaded.MetadataID)
+	require.Nil(t, loaded.Metadata)
+}
+
+func TestDetachSharedSubscriptionMetadataOnProviderConflict(t *testing.T) {
+	withServiceTestDB(t)
+
+	sharedMetadata := model.AnimeMetadata{
+		Title:        "无职转生 第三季",
+		BangumiID:    277554,
+		BangumiTitle: "无职转生 第三季",
+		TMDBID:       94664,
+		TMDBTitle:    "From Overshadowed to Overpowered",
+	}
+	require.NoError(t, db.DB.Create(&sharedMetadata).Error)
+	sub := model.Subscription{
+		Title:      "无职转生 第三季",
+		RSSUrl:     "https://example.test/detach-shared-subscription",
+		MetadataID: &sharedMetadata.ID,
+	}
+	anime := model.LocalAnime{
+		Title:      "From Overshadowed to Overpowered",
+		Path:       t.TempDir(),
+		MetadataID: &sharedMetadata.ID,
+	}
+	require.NoError(t, db.DB.Create(&sub).Error)
+	require.NoError(t, db.DB.Create(&anime).Error)
+
+	var loaded model.Subscription
+	require.NoError(t, db.DB.Preload("Metadata").First(&loaded, sub.ID).Error)
+	require.True(t, detachMismatchedSharedSubscriptionMetadataLink(&loaded))
+	require.Nil(t, loaded.MetadataID)
+	require.Nil(t, loaded.Metadata)
+}

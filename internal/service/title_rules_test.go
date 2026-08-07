@@ -46,3 +46,29 @@ func TestSubscriptionLocalTitleMatchScorePrefersExactLocalizedTitle(t *testing.T
 		t.Fatalf("traditional variant score = %d, must not tie the exact title", got)
 	}
 }
+
+func TestSharedConflictingMetadataCannotProveSubscriptionMatch(t *testing.T) {
+	metadataID := uint(42)
+	metadata := &model.AnimeMetadata{
+		Title:        "无职转生 第三季",
+		BangumiID:    277554,
+		BangumiTitle: "无职转生 第三季",
+		TMDBID:       94664,
+		TMDBTitle:    "From Overshadowed to Overpowered",
+	}
+	sub := &model.Subscription{
+		Title:      "无职转生 第三季",
+		MetadataID: &metadataID,
+		Metadata:   metadata,
+	}
+	anime := &model.LocalAnime{
+		Title:      "From Overshadowed to Overpowered",
+		Path:       "/library/From Overshadowed to Overpowered",
+		MetadataID: &metadataID,
+		Metadata:   metadata,
+	}
+
+	if LocalAnimeMatchesSubscription(sub, anime) {
+		t.Fatal("a shared row with conflicting provider titles must not prove that unrelated series match")
+	}
+}

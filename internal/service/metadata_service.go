@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log"
@@ -20,6 +21,12 @@ import (
 )
 
 type MetadataService struct{}
+
+type metadataProviderTrust struct {
+	bangumi bool
+	tmdb    bool
+	aniList bool
+}
 
 func NewMetadataService() *MetadataService {
 	return &MetadataService{}
@@ -69,7 +76,9 @@ func (s *MetadataService) EnrichAnime(anime *model.LocalAnime) error {
 
 		laStore := localAnimeStore()
 		existing, err := findMetadataByTitleVariants(queryTitle)
-		if err == nil && existing != nil && existing.ID != 0 {
+		if err == nil && existing != nil && existing.ID != 0 &&
+			metadataCanBridgeTitles(existing) &&
+			localAnimeMatchesMetadataIdentity(anime, existing) {
 			log.Printf("Enrich: Found existing metadata link for '%s' -> ID %d", anime.Title, existing.ID)
 			anime.Metadata = existing
 			anime.MetadataID = &existing.ID
@@ -79,6 +88,16 @@ func (s *MetadataService) EnrichAnime(anime *model.LocalAnime) error {
 				}
 			}
 		} else {
+			if err == nil && existing != nil && existing.ID != 0 {
+				log.Printf(
+					"WARN: Enrich: rejected suspicious title-only metadata reuse local_anime_id=%d title=%q metadata_id=%d metadata_title=%q source_conflict=%t",
+					anime.ID,
+					anime.Title,
+					existing.ID,
+					existing.Title,
+					metadataSourcesConflict(existing),
+				)
+			}
 			anime.Metadata = &model.AnimeMetadata{Title: queryTitle}
 		}
 	}
@@ -122,8 +141,43 @@ func (s *MetadataService) EnrichAnime(anime *model.LocalAnime) error {
 	return nil
 }
 
+// EnrichSubscription isolates a subscription from a suspicious shared
+// metadata row before any provider can mutate that row. The caller remains
+// responsible for saving the subscription after enrichment succeeds.
+func (s *MetadataService) EnrichSubscription(sub *model.Subscription) error {
+	if sub == nil {
+		return fmt.Errorf("subscription is nil")
+	}
+	if sub.Metadata == nil && sub.MetadataID != nil && *sub.MetadataID != 0 {
+		if mStore := metadataStore(); mStore != nil {
+			if metadata, err := mStore.GetByID(*sub.MetadataID); err == nil {
+				sub.Metadata = metadata
+			}
+		}
+	}
+
+	detachMismatchedSharedSubscriptionMetadataLink(sub)
+	if sub.Metadata == nil || sub.MetadataID == nil || *sub.MetadataID == 0 {
+		sub.Metadata = &model.AnimeMetadata{Title: parser.CleanTitle(sub.Title)}
+	}
+
+	s.EnrichMetadata(sub.Metadata, sub.Title)
+	if sub.Metadata == nil || sub.Metadata.ID == 0 {
+		return fmt.Errorf("metadata enrichment returned no persisted metadata for %s", sub.Title)
+	}
+
+	sub.MetadataID = &sub.Metadata.ID
+	sub.Image = sub.Metadata.Image
+	sub.Summary = sub.Metadata.Summary
+	return nil
+}
+
 // EnrichMetadata is the CORE logic for parallel scraping
 func (s *MetadataService) EnrichMetadata(m *model.AnimeMetadata, query string) {
+	s.enrichMetadata(m, query, metadataProviderTrust{})
+}
+
+func (s *MetadataService) enrichMetadata(m *model.AnimeMetadata, query string, trust metadataProviderTrust) {
 	bgmClient, tmdbClient, anilistClient := s.initClients()
 
 	queryTitle := parser.CleanTitle(query)
@@ -141,7 +195,7 @@ func (s *MetadataService) EnrichMetadata(m *model.AnimeMetadata, query string) {
 	go func() {
 		defer wg.Done()
 		runMetadataProvider("bangumi", m, func() {
-			s.enrichBangumi(m, bgmClient, queryTitle, &mu)
+			s.enrichBangumi(m, bgmClient, queryTitle, trust.bangumi, &mu)
 		})
 	}()
 
@@ -150,7 +204,7 @@ func (s *MetadataService) EnrichMetadata(m *model.AnimeMetadata, query string) {
 		defer wg.Done()
 		runMetadataProvider("anilist", m, func() {
 			if anilistClient != nil {
-				s.processAniList(m, anilistClient, candidates, &mu)
+				s.processAniList(m, anilistClient, candidates, queryTitle, trust.aniList, &mu)
 			}
 		})
 	}()
@@ -160,7 +214,7 @@ func (s *MetadataService) EnrichMetadata(m *model.AnimeMetadata, query string) {
 		defer wg.Done()
 		runMetadataProvider("tmdb", m, func() {
 			if tmdbClient != nil {
-				s.processTMDB(m, tmdbClient, candidates, &mu)
+				s.processTMDB(m, tmdbClient, candidates, queryTitle, trust.tmdb, &mu)
 			}
 		})
 	}()
@@ -177,17 +231,17 @@ func (s *MetadataService) EnrichMetadata(m *model.AnimeMetadata, query string) {
 	mu.Unlock()
 	if m.BangumiID == 0 {
 		runMetadataProvider("bangumi-cross-reference", m, func() {
-			s.enrichBangumi(m, bgmClient, queryTitle, &mu)
+			s.enrichBangumi(m, bgmClient, queryTitle, false, &mu)
 		})
 	}
 	if m.TMDBID == 0 && tmdbClient != nil {
 		runMetadataProvider("tmdb-cross-reference", m, func() {
-			s.processTMDB(m, tmdbClient, crossReferenceTitles, &mu)
+			s.processTMDB(m, tmdbClient, crossReferenceTitles, queryTitle, false, &mu)
 		})
 	}
 	if m.AniListID == 0 && anilistClient != nil {
 		runMetadataProvider("anilist-cross-reference", m, func() {
-			s.processAniList(m, anilistClient, crossReferenceTitles, &mu)
+			s.processAniList(m, anilistClient, crossReferenceTitles, queryTitle, false, &mu)
 		})
 	}
 
@@ -254,7 +308,13 @@ func (s *MetadataService) initClients() (*bangumi.Client, *tmdb.Client, *anilist
 	return bgmClient, tmdbClient, anilistClient
 }
 
-func (s *MetadataService) enrichBangumi(m *model.AnimeMetadata, bgmClient *bangumi.Client, queryTitle string, mu *sync.Mutex) {
+func (s *MetadataService) enrichBangumi(
+	m *model.AnimeMetadata,
+	bgmClient *bangumi.Client,
+	queryTitle string,
+	trustCurrentID bool,
+	mu *sync.Mutex,
+) {
 	var bgmSubject *bangumi.Subject
 	mu.Lock()
 	references := bangumiMatchReferences(m, queryTitle)
@@ -299,7 +359,7 @@ func (s *MetadataService) enrichBangumi(m *model.AnimeMetadata, bgmClient *bangu
 	if bgmSubject != nil {
 		mu.Lock()
 		defer mu.Unlock()
-		if !shouldApplyBangumiSubject(m, bgmSubject, queryTitle) {
+		if !trustCurrentID && !shouldApplyBangumiSubject(m, bgmSubject, queryTitle) {
 			log.Printf("MetadataService: skipping mismatched Bangumi subject %d for query=%q (subject=%q/%q)", bgmSubject.ID, queryTitle, bgmSubject.NameCN, bgmSubject.Name)
 			s.clearMismatchedBangumiSubject(m, bgmSubject)
 			return
@@ -365,20 +425,43 @@ func (s *MetadataService) applyBangumiSubject(m *model.AnimeMetadata, bgmSubject
 	m.BangumiImageRaw = s.fetchAndCacheImage(m.BangumiImage, model.ConfigKeyProxyBangumi)
 }
 
-func (s *MetadataService) processTMDB(m *model.AnimeMetadata, client *tmdb.Client, candidates []string, mu *sync.Mutex) {
+func (s *MetadataService) processTMDB(
+	m *model.AnimeMetadata,
+	client *tmdb.Client,
+	candidates []string,
+	queryTitle string,
+	trustCurrentID bool,
+	mu *sync.Mutex,
+) {
 	var tmdbShow *tmdb.TVShow
 
 	mu.Lock()
 	currentID := m.TMDBID
+	references := providerMatchReferences(m, queryTitle, metadataSourceTMDB)
 	mu.Unlock()
 
 	if currentID != 0 {
 		tmdbShow, _ = performWithRetry(func() (*tmdb.TVShow, error) {
 			return client.GetTVDetails(currentID)
 		})
+		if tmdbShow != nil && !trustCurrentID &&
+			providerCandidateScore(references, []string{tmdbShow.Name, tmdbShow.OriginalName}) < 45 {
+			log.Printf(
+				"MetadataService: skipping mismatched TMDB show %d for query=%q (show=%q/%q)",
+				tmdbShow.ID,
+				queryTitle,
+				tmdbShow.Name,
+				tmdbShow.OriginalName,
+			)
+			mu.Lock()
+			s.clearMismatchedTMDBShow(m)
+			mu.Unlock()
+			tmdbShow = nil
+		}
 	}
 
 	if tmdbShow == nil {
+		bestScore := 0
 		for _, t := range candidates {
 			if t == "" {
 				continue
@@ -386,8 +469,15 @@ func (s *MetadataService) processTMDB(m *model.AnimeMetadata, client *tmdb.Clien
 			shows, err := performWithRetry(func() ([]tmdb.TVShow, error) {
 				return client.SearchTV(t)
 			})
-			if err == nil && len(shows) > 0 {
-				tmdbShow = &shows[0]
+			if err != nil {
+				continue
+			}
+			show, score := bestTMDBSearchResult(shows, references)
+			if show != nil && score > bestScore {
+				tmdbShow = show
+				bestScore = score
+			}
+			if bestScore == 100 {
 				break
 			}
 		}
@@ -418,29 +508,94 @@ func (s *MetadataService) processTMDB(m *model.AnimeMetadata, client *tmdb.Clien
 	}
 }
 
-func (s *MetadataService) processAniList(m *model.AnimeMetadata, client *anilist.Client, candidates []string, mu *sync.Mutex) {
+func (s *MetadataService) clearMismatchedTMDBShow(m *model.AnimeMetadata) {
+	if m == nil {
+		return
+	}
+	m.TMDBID = 0
+	m.TMDBTitle = ""
+	m.TMDBImage = ""
+	m.TMDBBackdrop = ""
+	m.TMDBSummary = ""
+	m.TMDBRating = 0
+	m.TMDBImageRaw = nil
+	m.TMDBBackdropRaw = nil
+	if m.DataSource == metadataSourceTMDB {
+		m.DataSource = ""
+	}
+}
+
+func bestTMDBSearchResult(results []tmdb.TVShow, references []string) (*tmdb.TVShow, int) {
+	bestIndex := -1
+	bestScore := 0
+	for i := range results {
+		score := providerCandidateScore(references, []string{results[i].Name, results[i].OriginalName})
+		if score > bestScore {
+			bestIndex = i
+			bestScore = score
+		}
+	}
+	if bestIndex < 0 || bestScore < 45 {
+		return nil, bestScore
+	}
+	result := results[bestIndex]
+	return &result, bestScore
+}
+
+func (s *MetadataService) processAniList(
+	m *model.AnimeMetadata,
+	client *anilist.Client,
+	candidates []string,
+	queryTitle string,
+	trustCurrentID bool,
+	mu *sync.Mutex,
+) {
 	var alMedia *anilist.Media
 
 	mu.Lock()
 	currentID := m.AniListID
+	references := providerMatchReferences(m, queryTitle, metadataSourceAniList)
 	mu.Unlock()
 
 	if currentID != 0 {
 		alMedia, _ = performWithRetry(func() (*anilist.Media, error) {
 			return client.GetAnimeDetails(currentID)
 		})
+		if alMedia != nil && !trustCurrentID &&
+			providerCandidateScore(references, aniListMediaTitles(alMedia)) < 45 {
+			log.Printf(
+				"MetadataService: skipping mismatched AniList media %d for query=%q (titles=%q/%q/%q)",
+				alMedia.ID,
+				queryTitle,
+				alMedia.Title.Romaji,
+				alMedia.Title.English,
+				alMedia.Title.Native,
+			)
+			mu.Lock()
+			s.clearMismatchedAniListMedia(m)
+			mu.Unlock()
+			alMedia = nil
+		}
 	}
 
 	if alMedia == nil {
+		bestScore := 0
 		for _, t := range candidates {
 			if t == "" {
 				continue
 			}
-			media, err := performWithRetry(func() (*anilist.Media, error) {
-				return client.SearchAnime(t)
+			results, err := performWithRetry(func() ([]anilist.Media, error) {
+				return client.SearchAnimeResultsContext(context.Background(), t, 10)
 			})
-			if err == nil && media != nil {
+			if err != nil {
+				continue
+			}
+			media, score := bestAniListSearchResult(results, references)
+			if media != nil && score > bestScore {
 				alMedia = media
+				bestScore = score
+			}
+			if bestScore == 100 {
 				break
 			}
 		}
@@ -463,6 +618,45 @@ func (s *MetadataService) processAniList(m *model.AnimeMetadata, client *anilist
 		m.AniListImageRaw = imgRaw
 		mu.Unlock()
 	}
+}
+
+func (s *MetadataService) clearMismatchedAniListMedia(m *model.AnimeMetadata) {
+	if m == nil {
+		return
+	}
+	m.AniListID = 0
+	m.AniListTitle = ""
+	m.AniListImage = ""
+	m.AniListSummary = ""
+	m.AniListRating = 0
+	m.AniListImageRaw = nil
+	if m.DataSource == metadataSourceAniList {
+		m.DataSource = ""
+	}
+}
+
+func aniListMediaTitles(media *anilist.Media) []string {
+	if media == nil {
+		return nil
+	}
+	return []string{media.Title.Romaji, media.Title.English, media.Title.Native}
+}
+
+func bestAniListSearchResult(results []anilist.Media, references []string) (*anilist.Media, int) {
+	bestIndex := -1
+	bestScore := 0
+	for i := range results {
+		score := providerCandidateScore(references, aniListMediaTitles(&results[i]))
+		if score > bestScore {
+			bestIndex = i
+			bestScore = score
+		}
+	}
+	if bestIndex < 0 || bestScore < 45 {
+		return nil, bestScore
+	}
+	result := results[bestIndex]
+	return &result, bestScore
 }
 
 func (s *MetadataService) saveAndConsolidate(m *model.AnimeMetadata) {

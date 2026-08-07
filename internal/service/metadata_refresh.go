@@ -160,6 +160,7 @@ func (s *MetadataService) MatchSeriesSources(animeID uint, bangumiID, tmdbID, an
 	if err != nil {
 		return err
 	}
+	detachMismatchedSharedMetadataLink(anime)
 
 	m := anime.Metadata
 	if m == nil {
@@ -179,7 +180,11 @@ func (s *MetadataService) MatchSeriesSources(animeID uint, bangumiID, tmdbID, an
 		return fmt.Errorf("至少需要一个有效的元数据来源 ID")
 	}
 
-	s.EnrichMetadata(m, anime.Title)
+	s.enrichMetadata(m, anime.Title, metadataProviderTrust{
+		bangumi: bangumiID > 0,
+		tmdb:    tmdbID > 0,
+		aniList: aniListID > 0,
+	})
 
 	anime.Metadata = m
 	anime.MetadataID = &m.ID
@@ -423,7 +428,11 @@ func (s *MetadataService) MatchMetadataSources(metadataID uint, bangumiID, tmdbI
 		return fmt.Errorf("至少需要一个有效的元数据来源 ID")
 	}
 
-	s.EnrichMetadata(m, m.Title)
+	s.enrichMetadata(m, m.Title, metadataProviderTrust{
+		bangumi: bangumiID > 0,
+		tmdb:    tmdbID > 0,
+		aniList: aniListID > 0,
+	})
 	if err := mStore.Save(m); err != nil {
 		log.Printf("MatchMetadata: save metadata failed: %v", err)
 	}

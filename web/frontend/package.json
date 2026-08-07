@@ -1,7 +1,7 @@
 {
   "name": "animate-auto-tool-web",
   "private": true,
-  "version": "1.0.1",
+  "version": "1.0.2-beta.1",
   "type": "module",
   "engines": {
     "node": ">=22"
@@ -40,6 +40,6 @@
   "overrides": {
     "brace-expansion": "5.0.9",
     "glob": "13.0.6",
-    "js-yaml": "4.3.0"
+    "js-yaml": "4.3.1"
   }
 }

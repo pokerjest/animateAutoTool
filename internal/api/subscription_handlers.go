@@ -842,7 +842,10 @@ func RefreshSubscriptionMetadataHandler(c *gin.Context) {
 
 	// Enrich Metadata using shared service
 	metaSvc := service.NewMetadataService()
-	metaSvc.EnrichMetadata(sub.Metadata, sub.Title)
+	if err := metaSvc.EnrichSubscription(sub); err != nil {
+		subscriptionSaveError(c, "刷新订阅元数据", err)
+		return
+	}
 
 	if err := saveSubscription(sub); err != nil {
 		subscriptionSaveError(c, "刷新订阅元数据", err)

@@ -4,9 +4,11 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/pokerjest/animateAutoTool/internal/anilist"
 	"github.com/pokerjest/animateAutoTool/internal/bangumi"
 	"github.com/pokerjest/animateAutoTool/internal/db"
 	"github.com/pokerjest/animateAutoTool/internal/model"
+	"github.com/pokerjest/animateAutoTool/internal/tmdb"
 )
 
 func TestMetadataIssueHintMatchesFailureCause(t *testing.T) {
@@ -114,18 +116,42 @@ func TestBestBangumiSearchResultRejectsUnrelatedResults(t *testing.T) {
 	}
 }
 
-func TestBangumiMatchReferencesPreferIndependentProviderTitles(t *testing.T) {
+func TestBangumiMatchReferencesUseOnlyOwnerTitleWhenProviderTitlesConflict(t *testing.T) {
 	meta := &model.AnimeMetadata{
 		Title:        "数字恶魔物语 女神转生",
 		TitleCN:      "数字恶魔物语 女神转生",
+		BangumiID:    1,
 		BangumiTitle: "数字恶魔物语 女神转生",
 		TMDBID:       123,
 		TMDBTitle:    "转生重骑士",
 	}
 
 	references := bangumiMatchReferences(meta, meta.TitleCN)
-	if len(references) != 1 || references[0] != "转生重骑士" {
-		t.Fatalf("expected only the independent TMDB title, got %#v", references)
+	if len(references) != 1 || references[0] != meta.TitleCN {
+		t.Fatalf("expected only the independent owner title, got %#v", references)
+	}
+}
+
+func TestBestTMDBSearchResultSkipsUnrelatedFirstResult(t *testing.T) {
+	results := []tmdb.TVShow{
+		{ID: 1, Name: "数字恶魔物语 女神转生", OriginalName: "Digital Devil Story"},
+		{ID: 2, Name: "转生重骑士", OriginalName: "Heavy Knight"},
+	}
+
+	result, score := bestTMDBSearchResult(results, []string{"转生重骑士"})
+	if result == nil || result.ID != 2 {
+		t.Fatalf("expected the related second result, got result=%+v score=%d", result, score)
+	}
+}
+
+func TestBestAniListSearchResultRejectsUnrelatedResults(t *testing.T) {
+	results := []anilist.Media{
+		{ID: 1, Title: anilist.MediaTitle{Romaji: "Mushoku Tensei", English: "Jobless Reincarnation"}},
+	}
+
+	result, score := bestAniListSearchResult(results, []string{"From Overshadowed to Overpowered"})
+	if result != nil {
+		t.Fatalf("expected no automatic match, got result=%+v score=%d", result, score)
 	}
 }
 
@@ -150,7 +176,7 @@ func TestClearMismatchedBangumiSubjectRemovesStaleDateAndDisplayFields(t *testin
 	}
 }
 
-func TestMetadataRefreshQueryUsesIndependentTitleForConflictingSources(t *testing.T) {
+func TestMetadataRefreshQueryUsesActiveTitleForConflictingSources(t *testing.T) {
 	meta := &model.AnimeMetadata{
 		Title:        "数字恶魔物语 女神转生",
 		TitleCN:      "数字恶魔物语 女神转生",
@@ -162,8 +188,8 @@ func TestMetadataRefreshQueryUsesIndependentTitleForConflictingSources(t *testin
 	if !metadataSourcesConflict(meta) {
 		t.Fatal("expected the unrelated provider titles to be treated as a conflict")
 	}
-	if query := metadataRefreshQuery(meta); query != "转生重骑士" {
-		t.Fatalf("expected the independent TMDB title for repair, got %q", query)
+	if query := metadataRefreshQuery(meta); query != meta.Title {
+		t.Fatalf("expected the user-selected active title for repair, got %q", query)
 	}
 }
 

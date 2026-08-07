@@ -1675,7 +1675,10 @@ func RefreshSubscriptionsHandler(c *gin.Context) {
 	metaSvc := service.NewMetadataService()
 
 	for i := range subs {
-		metaSvc.EnrichMetadata(subs[i].Metadata, subs[i].Title)
+		if err := metaSvc.EnrichSubscription(&subs[i]); err != nil {
+			log.Printf("RefreshSubscriptions: metadata refresh failed subscription_id=%d: %v", subs[i].ID, err)
+			continue
+		}
 		if err := saveSubscription(&subs[i]); err == nil {
 			updatedCount++
 		}
