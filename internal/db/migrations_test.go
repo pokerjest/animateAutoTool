@@ -688,3 +688,60 @@ func TestLocalAnimeIdentityMigrationMergesPopulatedDuplicates(t *testing.T) {
 		t.Fatalf("expected stable scan key, got %v", rows[0].ScanKey)
 	}
 }
+
+func TestRunMigrationsRepairsLocalAnimeIdentityWhenMigrationAlreadyRecorded(t *testing.T) {
+	target, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "recorded-local-anime-identity.db")), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite db: %v", err)
+	}
+	t.Cleanup(func() { closeTestDB(t, target) })
+	if err := RunMigrations(target); err != nil {
+		t.Fatalf("initialize current schema: %v", err)
+	}
+	if err := DropLocalAnimeIdentityIndex(target); err != nil {
+		t.Fatalf("drop identity index: %v", err)
+	}
+
+	dir := model.LocalAnimeDirectory{Path: `E:\Bangumi`}
+	if err := target.Create(&dir).Error; err != nil {
+		t.Fatalf("create directory: %v", err)
+	}
+	path := `E:\Bangumi\与奔驰于透明之夜的你，谈一场看不见的恋爱。`
+	first := model.LocalAnime{DirectoryID: dir.ID, Title: "与奔驰于透明之夜的你", Path: path}
+	second := model.LocalAnime{DirectoryID: dir.ID, Title: "與奔馳於透明之夜的你", Path: path}
+	if err := target.Create(&first).Error; err != nil {
+		t.Fatalf("create first duplicate: %v", err)
+	}
+	if err := target.Create(&second).Error; err != nil {
+		t.Fatalf("create second duplicate: %v", err)
+	}
+	episodes := []model.LocalEpisode{
+		{LocalAnimeID: first.ID, EpisodeNum: 1, Path: path + `\01.mkv`},
+		{LocalAnimeID: second.ID, EpisodeNum: 2, Path: path + `\02.mkv`},
+	}
+	if err := target.Create(&episodes).Error; err != nil {
+		t.Fatalf("create split episodes: %v", err)
+	}
+
+	if err := RunMigrations(target); err != nil {
+		t.Fatalf("rerun current migrations: %v", err)
+	}
+
+	var rows []model.LocalAnime
+	if err := target.Preload("Episodes").Find(&rows).Error; err != nil {
+		t.Fatalf("load repaired rows: %v", err)
+	}
+	if len(rows) != 1 || len(rows[0].Episodes) != 2 || rows[0].ScanKey == nil {
+		t.Fatalf("expected one repaired folder series with two episodes, got %+v", rows)
+	}
+	var indexCount int64
+	if err := target.Raw(
+		"SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?",
+		localAnimeIdentityIndexName,
+	).Scan(&indexCount).Error; err != nil {
+		t.Fatalf("read identity index: %v", err)
+	}
+	if indexCount != 1 {
+		t.Fatalf("expected identity index to be recreated, got %d", indexCount)
+	}
+}

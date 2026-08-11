@@ -232,6 +232,12 @@ func RepairLocalAnimeIdentity(tx *gorm.DB) error {
 			return fmt.Errorf("add local_animes.scan_key: %w", err)
 		}
 	}
+	// The unique index must be absent while duplicate rows are consolidated;
+	// otherwise backfilling the same scan key into both legacy rows fails
+	// before the repair has a chance to merge them.
+	if err := DropLocalAnimeIdentityIndex(tx); err != nil {
+		return err
+	}
 	if err := repairLocalAnimeIdentity(tx); err != nil {
 		return err
 	}
@@ -1161,6 +1167,22 @@ func RunMigrations(target *gorm.DB) error {
 			err,
 		)
 		return err
+	}
+	// Keep the local-anime identity invariant self-healing even when a
+	// database was already marked current by an older build. This repairs
+	// populated folder duplicates and recreates the partial unique index
+	// without requiring users to delete migration history.
+	if err := RepairLocalAnimeIdentity(target); err != nil {
+		run.Status = migrationRunFailed
+		run.LastError = err.Error()
+		_ = writeMigrationRunManifest(run)
+		log.Printf(
+			"ERROR: DatabaseMigration: local anime identity repair failed database=%s run_id=%s error=%v",
+			databaseLabel,
+			run.RunID,
+			err,
+		)
+		return fmt.Errorf("repair local anime identity: %w", err)
 	}
 
 	run.Status = migrationRunCompleted

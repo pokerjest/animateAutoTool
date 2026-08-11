@@ -1176,6 +1176,7 @@ func buildScanCandidates(root string, files []scannedMediaFile) []scanCandidate 
 		sort.Slice(candidate.Files, func(i, j int) bool { return candidate.Files[i].Path < candidate.Files[j].Path })
 		candidates = append(candidates, *candidate)
 	}
+	candidates = coalesceFolderScanCandidates(candidates)
 	sort.Slice(candidates, func(i, j int) bool {
 		if candidates[i].Title == candidates[j].Title {
 			return candidates[i].Path < candidates[j].Path
@@ -1183,6 +1184,59 @@ func buildScanCandidates(root string, files []scannedMediaFile) []scanCandidate 
 		return candidates[i].Title < candidates[j].Title
 	})
 	return candidates
+}
+
+// coalesceFolderScanCandidates keeps title parsing differences from splitting
+// one physical series directory into multiple local_animes rows. Loose files
+// intentionally remain keyed by title because several unrelated series may
+// share the library root.
+func coalesceFolderScanCandidates(candidates []scanCandidate) []scanCandidate {
+	byPath := make(map[string]int, len(candidates))
+	merged := make([]scanCandidate, 0, len(candidates))
+	for i := range candidates {
+		candidate := candidates[i]
+		if candidate.AllLoose {
+			merged = append(merged, candidate)
+			continue
+		}
+		pathKey := canonicalComparisonPath(candidate.Path)
+		if pathKey == "" {
+			merged = append(merged, candidate)
+			continue
+		}
+		index, ok := byPath[pathKey]
+		if !ok {
+			byPath[pathKey] = len(merged)
+			merged = append(merged, candidate)
+			continue
+		}
+		mergeScanCandidates(&merged[index], &candidate)
+	}
+	return merged
+}
+
+func mergeScanCandidates(dst, src *scanCandidate) {
+	if dst == nil || src == nil {
+		return
+	}
+	if betterSeriesPath(src.Path, dst.Path, src.AllLoose) {
+		dst.Path = src.Path
+	}
+	if betterSeriesTitle(src.Title, dst.Title) {
+		dst.Title = src.Title
+		dst.Key = src.Key
+	}
+	dst.Files = append(dst.Files, src.Files...)
+	if dst.Seasons == nil {
+		dst.Seasons = make(map[int]struct{})
+	}
+	for season := range src.Seasons {
+		dst.Seasons[season] = struct{}{}
+	}
+	dst.AllLoose = dst.AllLoose && src.AllLoose
+	dst.FileCount += src.FileCount
+	dst.TotalSize += src.TotalSize
+	sort.Slice(dst.Files, func(i, j int) bool { return dst.Files[i].Path < dst.Files[j].Path })
 }
 
 func betterSeriesPath(next, current string, nextLoose bool) bool {
@@ -1221,6 +1275,7 @@ func candidateSeason(candidate *scanCandidate) int {
 func selectExistingAnime(candidate *scanCandidate, existing []model.LocalAnime, used map[uint]struct{}) *model.LocalAnime {
 	var selected *model.LocalAnime
 	bestScore := -1
+	candidateScanKey := localAnimeScanKey(candidate.Path, candidate.AllLoose)
 	candidatePaths := make(map[string]struct{}, len(candidate.Files))
 	for _, media := range candidate.Files {
 		candidatePaths[canonicalComparisonPath(media.Path)] = struct{}{}
@@ -1230,11 +1285,16 @@ func selectExistingAnime(candidate *scanCandidate, existing []model.LocalAnime, 
 		if _, alreadyUsed := used[anime.ID]; alreadyUsed {
 			continue
 		}
+		stableIdentityMatch := candidateScanKey != nil && anime.ScanKey != nil &&
+			*candidateScanKey == *anime.ScanKey
 		relationScore := 0
+		if stableIdentityMatch {
+			relationScore = 6000
+		}
 		// Multiple loose series can legitimately share the same library root.
 		// Reusing a row from that shared path alone can attach another show's
 		// metadata after an interrupted or partial scan.
-		if !candidate.AllLoose && sameComparisonPath(anime.Path, candidate.Path) {
+		if !candidate.AllLoose && sameComparisonPath(anime.Path, candidate.Path) && relationScore < 4000 {
 			relationScore = 4000
 		}
 		for _, episode := range anime.Episodes {

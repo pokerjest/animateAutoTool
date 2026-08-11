@@ -1,6 +1,7 @@
 package service
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -149,6 +150,99 @@ func TestScannerPersistsFolderIdentityAndLeavesLooseIdentityNullable(t *testing.
 			require.Nil(t, anime.ScanKey)
 		}
 	}
+}
+
+func TestBuildScanCandidatesCoalescesTitleVariantsInOneFolder(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "Library")
+	seriesPath := filepath.Join(root, "Transparent Night")
+	files := []scannedMediaFile{
+		{
+			Path:        filepath.Join(seriesPath, "01.mkv"),
+			SeriesPath:  seriesPath,
+			SeriesTitle: "与奔驰于透明之夜的你",
+			SeriesKey:   "与奔驰于透明之夜的你",
+			Loose:       false,
+			Season:      1,
+			Size:        10,
+		},
+		{
+			Path:        filepath.Join(seriesPath, "02.mkv"),
+			SeriesPath:  seriesPath,
+			SeriesTitle: "與奔馳於透明之夜的你",
+			SeriesKey:   "與奔馳於透明之夜的你",
+			Loose:       false,
+			Season:      1,
+			Size:        20,
+		},
+	}
+
+	candidates := buildScanCandidates(root, files)
+	require.Len(t, candidates, 1)
+	require.Len(t, candidates[0].Files, 2)
+	require.Equal(t, 2, candidates[0].FileCount)
+	require.Equal(t, int64(30), candidates[0].TotalSize)
+	require.Equal(t, seriesPath, candidates[0].Path)
+}
+
+func TestScannerKeepsOneFolderRecordWhenReleaseTitlesVary(t *testing.T) {
+	withServiceTestDB(t)
+	root := t.TempDir()
+	showPath := filepath.Join(root, "与奔驰于透明之夜的你，谈一场看不见的恋爱。")
+	for episode := 1; episode <= 6; episode++ {
+		title := "与奔驰于透明之夜的你"
+		if episode > 3 {
+			title = "與奔馳於透明之夜的你"
+		}
+		writeScannerFixture(t, filepath.Join(showPath, fmt.Sprintf("[Group] %s - %02d [1080p].mkv", title, episode)))
+	}
+	directory := createScannerDirectory(t, root)
+	scanner := NewScannerService()
+
+	first, err := scanner.ScanDirectory(&directory)
+	require.NoError(t, err)
+	require.Equal(t, 1, first.CandidateSeries)
+	require.Equal(t, 1, first.Added)
+
+	second, err := scanner.ScanDirectory(&directory)
+	require.NoError(t, err)
+	require.Equal(t, 1, second.CandidateSeries)
+	require.Zero(t, second.Added)
+
+	var animes []model.LocalAnime
+	require.NoError(t, db.DB.Preload("Episodes").Where("directory_id = ?", directory.ID).Find(&animes).Error)
+	require.Len(t, animes, 1)
+	require.Len(t, animes[0].Episodes, 6)
+	require.Equal(t, showPath, animes[0].Path)
+	require.NotNil(t, animes[0].ScanKey)
+}
+
+func TestScannerRepairsPopulatedFolderDuplicatesOnRescan(t *testing.T) {
+	withServiceTestDB(t)
+	root := t.TempDir()
+	showPath := filepath.Join(root, "Recurring Duplicate Show")
+	writeScannerFixture(t, filepath.Join(showPath, "01.mkv"))
+	writeScannerFixture(t, filepath.Join(showPath, "02.mkv"))
+	directory := createScannerDirectory(t, root)
+
+	first := model.LocalAnime{DirectoryID: directory.ID, Title: "Recurring Duplicate Show", Path: showPath}
+	second := model.LocalAnime{DirectoryID: directory.ID, Title: "Recurring Duplicate Show", Path: showPath}
+	require.NoError(t, db.DB.Create(&first).Error)
+	require.NoError(t, db.DB.Create(&second).Error)
+	require.NoError(t, db.DB.Create(&model.LocalEpisode{
+		LocalAnimeID: first.ID, Path: filepath.Join(showPath, "01.mkv"), EpisodeNum: 1, SeasonNum: 1,
+	}).Error)
+	require.NoError(t, db.DB.Create(&model.LocalEpisode{
+		LocalAnimeID: second.ID, Path: filepath.Join(showPath, "02.mkv"), EpisodeNum: 2, SeasonNum: 1,
+	}).Error)
+
+	_, err := NewScannerService().ScanDirectory(&directory)
+	require.NoError(t, err)
+
+	var animes []model.LocalAnime
+	require.NoError(t, db.DB.Preload("Episodes").Where("directory_id = ?", directory.ID).Find(&animes).Error)
+	require.Len(t, animes, 1)
+	require.Len(t, animes[0].Episodes, 2)
+	require.NotNil(t, animes[0].ScanKey)
 }
 
 func TestScannerUsesSeriesAndEpisodeNFOData(t *testing.T) {

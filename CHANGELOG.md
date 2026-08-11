@@ -8,6 +8,17 @@
 
 ## [Unreleased]
 
+## [1.0.2-beta.2] - 2026-08-11
+
+### Fixed
+
+- 修复同一物理目录因简繁体或标题解析差异被拆成多个本地番剧记录的问题，扫描时合并候选并保留稳定的目录 identity。
+- 即使本地番剧 identity migration 已被记录为完成，后续启动和重扫仍会自愈历史重复记录、迁移关联 episode 并重建唯一索引。
+
+### Security
+
+- 更新 `DOMPurify` 和传递依赖 `nanoid` 到安全修复版本，消除 XSS 与自定义 ID 生成器无限循环风险。
+
 ## [1.0.2-beta.1] - 2026-08-07
 
 ### Fixed
@@ -714,7 +725,8 @@
 
 ---
 
-[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.2-beta.1...HEAD
+[Unreleased]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.2-beta.2...HEAD
+[1.0.2-beta.2]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.2-beta.1...v1.0.2-beta.2
 [1.0.2-beta.1]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.1...v1.0.2-beta.1
 [1.0.1]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.1-beta.3...v1.0.1
 [1.0.1-beta.3]: https://github.com/pokerjest/animateAutoTool/compare/v1.0.1-beta.2...v1.0.1-beta.3
